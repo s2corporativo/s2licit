@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  # Banco de dados MySQL
+  db:
+    image: mysql:8.0
+    container_name: sistema-s2-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: s2root2024
+      MYSQL_DATABASE: sistema_s2
+      MYSQL_USER: s2user
+      MYSQL_PASSWORD: s2pass2024
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ps2root2024"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Aplicação Node.js
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sistema-s2-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://s2user:s2pass2024@db:3306/sistema_s2
+      JWT_SECRET: s2_jwt_secret_change_in_production_2024
+      VITE_APP_ID: sistema-s2
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+
+volumes:
+  mysql_data:
+  uploads_data:

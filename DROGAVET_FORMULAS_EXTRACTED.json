@@ -1,0 +1,5558 @@
+[
+  {
+    "numero": "1.1",
+    "nome": "Xampu com Óleo de Melaleuca",
+    "classe": "antifungico",
+    "pagina": 128,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.2",
+    "nome": "Xampu emoliente com Nanoclimbazol e Clorexidine",
+    "classe": "outros",
+    "pagina": 128,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.3",
+    "nome": "Mousse com Nanomelaleuca e Nanohydrate",
+    "classe": "antifungico",
+    "pagina": 129,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.4",
+    "nome": "Mousse ou Lenços umedecidos com Nanoclimbazol,",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.5",
+    "nome": "Spray com Nanomelaleuca e Terbinafina",
+    "classe": "antifungico",
+    "pagina": 130,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.6",
+    "nome": "Gel antifúngico com Equinácea",
+    "classe": "antifungico",
+    "pagina": 130,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.7",
+    "nome": "Mousse com Cetoconazol",
+    "classe": "antifungico",
+    "pagina": 130,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.8",
+    "nome": "Xampu em pó antifúngico",
+    "classe": "antifungico",
+    "pagina": 130,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.9",
+    "nome": "Xampu antifúngico com Tintura de Equinácea + Clorexidine",
+    "classe": "antifungico",
+    "pagina": 131,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.10",
+    "nome": "Condicionador com Ciclopirox",
+    "classe": "antifungico",
+    "pagina": 131,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.11",
+    "nome": "Spray com Ciclopirox",
+    "classe": "antifungico",
+    "pagina": 131,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.12",
+    "nome": "Spray fitoterápico fungicida",
+    "classe": "antifungico",
+    "pagina": 131,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.13",
+    "nome": "Pomada antifúngica cicatrizante",
+    "classe": "outros",
+    "pagina": 132,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "1.14",
+    "nome": "Pomada bactericida antifúngica",
+    "classe": "outros",
+    "pagina": 132,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "1.15",
+    "nome": "Pomada de iodo e associações",
+    "classe": "outros",
+    "pagina": 132,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "1.16",
+    "nome": "Spray com Itraconazol e DMSO",
+    "classe": "antifungico",
+    "pagina": 133,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "1.17",
+    "nome": "Fórmula tópica com Itraconazol, Clindamicina e Dexametasona",
+    "classe": "antifungico",
+    "pagina": 133,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "1.18",
+    "nome": "Outros antifúngicos que podem ser",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.1",
+    "nome": "Spray fitoterápico antipulgas",
+    "classe": "ectoparasiticida",
+    "pagina": 133,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.2",
+    "nome": "Spray antipulgas com Óleo de Neem",
+    "classe": "ectoparasiticida",
+    "pagina": 134,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.3",
+    "nome": "Fórmula pour-on com Óleo de Neem",
+    "classe": "ectoparasiticida",
+    "pagina": 134,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.4",
+    "nome": "Spray ou Pour-on/Spot-on com Nanoneem",
+    "classe": "ectoparasiticida",
+    "pagina": 134,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.5",
+    "nome": "Spray antipulgas com Permetrina e Óleo de Neem",
+    "classe": "ectoparasiticida",
+    "pagina": 135,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.6",
+    "nome": "Spray com Permetrina e Óleos de Neem e Citronela",
+    "classe": "ectoparasiticida",
+    "pagina": 135,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.7",
+    "nome": "Xampu antipulgas com Nanoneem",
+    "classe": "ectoparasiticida",
+    "pagina": 135,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.8",
+    "nome": "Xampu antipulgas e carrapaticida",
+    "classe": "ectoparasiticida",
+    "pagina": 135,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.9",
+    "nome": "Spray antipulgas com Fipronil",
+    "classe": "ectoparasiticida",
+    "pagina": 136,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.10",
+    "nome": "Fórmula pour-on com Fipronil",
+    "classe": "outros",
+    "pagina": 136,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.11",
+    "nome": "Fórmula pour-on com Selamectina",
+    "classe": "outros",
+    "pagina": 136,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.12",
+    "nome": "Fórmula pour-on com Fipronil e Selamectina",
+    "classe": "outros",
+    "pagina": 137,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.13",
+    "nome": "Fórmula pour-on com Fipronil e Moxidectina",
+    "classe": "outros",
+    "pagina": 137,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.14",
+    "nome": "Antipulgas oral para cães",
+    "classe": "ectoparasiticida",
+    "pagina": 138,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.15",
+    "nome": "Antipulgas oral para gatos",
+    "classe": "ectoparasiticida",
+    "pagina": 138,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.16",
+    "nome": "Antipulgas oral com Milbemicina Oxima",
+    "classe": "ectoparasiticida",
+    "pagina": 138,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.17",
+    "nome": "Spray repelente com Óleo de Citronela",
+    "classe": "outros",
+    "pagina": 139,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.18",
+    "nome": "Spray repelente com extrato de Andiroba",
+    "classe": "outros",
+    "pagina": 139,
+    "dosagens": [],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.19",
+    "nome": "Spray repelente com IR 3535",
+    "classe": "outros",
+    "pagina": 139,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.20",
+    "nome": "Spray repelente com IR 3535, Neem e Citronela",
+    "classe": "ectoparasiticida",
+    "pagina": 139,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.21",
+    "nome": "Bastão repelente",
+    "classe": "outros",
+    "pagina": 139,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.22",
+    "nome": "Banho seco com ação repelente",
+    "classe": "outros",
+    "pagina": 140,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.23",
+    "nome": "Xampu ectoparasiticida",
+    "classe": "ectoparasiticida",
+    "pagina": 140,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.24",
+    "nome": "Xampu ectoparasiticida em pó",
+    "classe": "ectoparasiticida",
+    "pagina": 140,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.25",
+    "nome": "Xampu com Tiabendazol",
+    "classe": "outros",
+    "pagina": 141,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.26",
+    "nome": "Lenço antisséptico repelente",
+    "classe": "outros",
+    "pagina": 141,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.27",
+    "nome": "Unguento repelente e cicatrizante",
+    "classe": "outros",
+    "pagina": 141,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "2.28",
+    "nome": "Unguento repelente e cicatrizante com IR 3535",
+    "classe": "outros",
+    "pagina": 141,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "2.29",
+    "nome": "Creme antimicrobiano repelente com IR 3535",
+    "classe": "outros",
+    "pagina": 142,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.1",
+    "nome": "Fórmula para tratamento de adenite sebácea",
+    "classe": "outros",
+    "pagina": 142,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.2",
+    "nome": "Xampu para seborreia oleosa com Enxofre líquido para cães",
+    "classe": "outros",
+    "pagina": 142,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.3",
+    "nome": "Spray hidratante para tratamento de seborreia oleosa para cães",
+    "classe": "outros",
+    "pagina": 143,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.4",
+    "nome": "Spray seborregulador",
+    "classe": "outros",
+    "pagina": 143,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.5",
+    "nome": "Xampu seborregulador com vitamina",
+    "classe": "outros",
+    "pagina": 143,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.6",
+    "nome": "Xampu antisseborréico com nanopartículas",
+    "classe": "outros",
+    "pagina": 144,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.7",
+    "nome": "Xampu antisseborreico e neutralizador de odores para cães",
+    "classe": "outros",
+    "pagina": 144,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.8",
+    "nome": "Xampu antisseborreico com Sulfeto de Selênio",
+    "classe": "outros",
+    "pagina": 144,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.9",
+    "nome": "Xampu em pó antisseborreico com Sulfeto de Selênio",
+    "classe": "outros",
+    "pagina": 144,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.10",
+    "nome": "Xampu antisseborreico com Piritionato de Zinco",
+    "classe": "outros",
+    "pagina": 145,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.11",
+    "nome": "Xampu antisseborreico (sebum control) para cães",
+    "classe": "outros",
+    "pagina": 145,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.12",
+    "nome": "Xampu antisseborreico com ação prolongada para cães",
+    "classe": "outros",
+    "pagina": 145,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.13",
+    "nome": "Xampu antisseborreico com Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 146,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.14",
+    "nome": "Spot on hidratante restaurador",
+    "classe": "outros",
+    "pagina": 146,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.15",
+    "nome": "Sachês para tratamento da alopécia seborreica",
+    "classe": "outros",
+    "pagina": 146,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.16",
+    "nome": "Biscoitos para tratamento da alopécia canina",
+    "classe": "outros",
+    "pagina": 147,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.17",
+    "nome": "Mousse com Minoxidil para alopécia canina",
+    "classe": "outros",
+    "pagina": 147,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.18",
+    "nome": "Mousse com Minoxidil e Clobetasol para alopécia canina",
+    "classe": "outros",
+    "pagina": 147,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.1",
+    "nome": "Emulsão oral com Ciclosporina",
+    "classe": "outros",
+    "pagina": 148,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.2",
+    "nome": "Suspensão com Oclacitinib e Emulsão oral com Ciclosporina",
+    "classe": "outros",
+    "pagina": 148,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.3",
+    "nome": "Xarope de Ácidos Graxos e Oclacitinib",
+    "classe": "outros",
+    "pagina": 149,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.4",
+    "nome": "Biscoito de Oclacitinib, Betaglucanas e Ômega 3",
+    "classe": "outros",
+    "pagina": 149,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.5",
+    "nome": "Pasta oral de Oclacitinib",
+    "classe": "outros",
+    "pagina": 149,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.6",
+    "nome": "Filme oral de Oclacitinib",
+    "classe": "outros",
+    "pagina": 149,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.7",
+    "nome": "Pomada de Tacrolimus",
+    "classe": "outros",
+    "pagina": 150,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.8",
+    "nome": "Spray para tratamento de dermatite por lambedura",
+    "classe": "dermatologico",
+    "pagina": 150,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.9",
+    "nome": "Spray para dermatite por lambedura com Phytosphingosine®",
+    "classe": "dermatologico",
+    "pagina": 150,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.10",
+    "nome": "Spray com Oclacitinib",
+    "classe": "outros",
+    "pagina": 150,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.11",
+    "nome": "Spray com Mometasona",
+    "classe": "outros",
+    "pagina": 151,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.12",
+    "nome": "Mousse com Mometasona",
+    "classe": "outros",
+    "pagina": 151,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.13",
+    "nome": "Spray com Aceponato de Hidrocortisona",
+    "classe": "outros",
+    "pagina": 151,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.14",
+    "nome": "Mousse com Aceponato de Hidrocortisona",
+    "classe": "outros",
+    "pagina": 151,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.15",
+    "nome": "Xampu com Aceponato de Hidrocortisona e Vegelip",
+    "classe": "outros",
+    "pagina": 152,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.16",
+    "nome": "Xampu com Corticoide e Óleo de Prímula",
+    "classe": "outros",
+    "pagina": 152,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.17",
+    "nome": "Xampu com anti-histamínico e Aveia",
+    "classe": "outros",
+    "pagina": 152,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.18",
+    "nome": "Xampu em pó com Aloe Vera e Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 152,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.19",
+    "nome": "Xampu em pó com Cloreto de Benzalcônio",
+    "classe": "outros",
+    "pagina": 153,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.20",
+    "nome": "Biscoitos de Deflazacort",
+    "classe": "outros",
+    "pagina": 153,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.21",
+    "nome": "Lenço bactericida",
+    "classe": "outros",
+    "pagina": 153,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.22",
+    "nome": "Wipes para higienização",
+    "classe": "outros",
+    "pagina": 154,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.23",
+    "nome": "Lenço para higiene com Tris-EDTA",
+    "classe": "outros",
+    "pagina": 154,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.24",
+    "nome": "Solução emoliente para tratamento",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.25",
+    "nome": "Cápsulas de Pentoxifilina",
+    "classe": "outros",
+    "pagina": 154,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.26",
+    "nome": "Pour-on hidratante restaurador",
+    "classe": "outros",
+    "pagina": 154,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.27",
+    "nome": "Spray bactericida",
+    "classe": "outros",
+    "pagina": 155,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.28",
+    "nome": "Mousse bactericida",
+    "classe": "outros",
+    "pagina": 155,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.29",
+    "nome": "Mousse bactericida hidratante",
+    "classe": "outros",
+    "pagina": 155,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.30",
+    "nome": "Spray de NaClO",
+    "classe": "outros",
+    "pagina": 156,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.31",
+    "nome": "Mousse de NaClO",
+    "classe": "outros",
+    "pagina": 156,
+    "dosagens": [],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.32",
+    "nome": "Mousse protetor da barreira cutânea",
+    "classe": "outros",
+    "pagina": 156,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.33",
+    "nome": "Fórmula para dermatite solar",
+    "classe": "dermatologico",
+    "pagina": 156,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.34",
+    "nome": "Fórmula nutracêutica para problemas de pele",
+    "classe": "outros",
+    "pagina": 157,
+    "dosagens": [],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.1",
+    "nome": "Xampu antialérgico",
+    "classe": "outros",
+    "pagina": 158,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.2",
+    "nome": "Spray siliconado hidratante e anti-irritante",
+    "classe": "outros",
+    "pagina": 158,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.3",
+    "nome": "Spray aquoso siliconado com alto poder hidratante",
+    "classe": "outros",
+    "pagina": 158,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.4",
+    "nome": "Spray hidratante com Nanofitoesfingosina e Nanomegas",
+    "classe": "outros",
+    "pagina": 158,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.5",
+    "nome": "Spray aquoso siliconado dessensibilizante",
+    "classe": "outros",
+    "pagina": 159,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.6",
+    "nome": "Xampu hidratante para peles sensíveis",
+    "classe": "outros",
+    "pagina": 159,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.7",
+    "nome": "Banho seco hidratante para cães e gatos",
+    "classe": "outros",
+    "pagina": 159,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.8",
+    "nome": "Foam desodorizante para cães e gatos",
+    "classe": "outros",
+    "pagina": 159,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.9",
+    "nome": "Banho seco desodorizante abrilhantador",
+    "classe": "outros",
+    "pagina": 160,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.10",
+    "nome": "Banho seco desodorizante abrilhantador repelente",
+    "classe": "outros",
+    "pagina": 160,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.11",
+    "nome": "Stick desodorante",
+    "classe": "outros",
+    "pagina": 160,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.12",
+    "nome": "Xampu ou Condicionador antimicrobiano",
+    "classe": "outros",
+    "pagina": 161,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.13",
+    "nome": "Xampu em pó com Deoplex",
+    "classe": "outros",
+    "pagina": 161,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.14",
+    "nome": "Hidratante para pele de cães e gatos",
+    "classe": "outros",
+    "pagina": 161,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.15",
+    "nome": "Xampu hidratante com Hidroviton",
+    "classe": "outros",
+    "pagina": 162,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.16",
+    "nome": "Xampu hidratante com Óleo de Prímula",
+    "classe": "outros",
+    "pagina": 162,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.17",
+    "nome": "Xampu com nanoterapia",
+    "classe": "outros",
+    "pagina": 162,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.18",
+    "nome": "Solução dermatológica para problemas de pele seca e sensível",
+    "classe": "outros",
+    "pagina": 162,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.19",
+    "nome": "Xampu branqueador hidratante",
+    "classe": "outros",
+    "pagina": 163,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.20",
+    "nome": "Xampu clareador com Nanocamomila",
+    "classe": "outros",
+    "pagina": 163,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.21",
+    "nome": "Xampu hipoalergênico",
+    "classe": "outros",
+    "pagina": 163,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.22",
+    "nome": "Loção clareadora",
+    "classe": "outros",
+    "pagina": 163,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.23",
+    "nome": "Lenço clareador",
+    "classe": "outros",
+    "pagina": 164,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.24",
+    "nome": "Lenço clareador com nanocápsulas e Violet Flowers",
+    "classe": "outros",
+    "pagina": 164,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.25",
+    "nome": "Stick clareador impermeabilizante",
+    "classe": "outros",
+    "pagina": 164,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.26",
+    "nome": "Wipes para manchas com NaClO",
+    "classe": "outros",
+    "pagina": 164,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.27",
+    "nome": "Biscoitos de Tilosina Tartarato",
+    "classe": "outros",
+    "pagina": 165,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.28",
+    "nome": "Pó clareador para área dos olhos",
+    "classe": "outros",
+    "pagina": 165,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.29",
+    "nome": "Creme para calosidades",
+    "classe": "outros",
+    "pagina": 165,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.30",
+    "nome": "Stick para calosidades",
+    "classe": "outros",
+    "pagina": 166,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.31",
+    "nome": "Stick hidratante",
+    "classe": "outros",
+    "pagina": 166,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.32",
+    "nome": "Condicionador nutritivo suavizante",
+    "classe": "outros",
+    "pagina": 166,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.33",
+    "nome": "Condicionador doador de brilho",
+    "classe": "outros",
+    "pagina": 166,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.1",
+    "nome": "Gel fitoterápico relaxante muscular",
+    "classe": "fitoterápico",
+    "pagina": 167,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.2",
+    "nome": "Gel fitoterápico cicatrizante",
+    "classe": "fitoterápico",
+    "pagina": 167,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.3",
+    "nome": "Líquido de Dakin",
+    "classe": "outros",
+    "pagina": 167,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.4",
+    "nome": "Spray fitoterápico cicatrizante e anti-inflamatório",
+    "classe": "anti_inflamatorio",
+    "pagina": 168,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.5",
+    "nome": "Creme anti-inflamatório e cicatrizante",
+    "classe": "anti_inflamatorio",
+    "pagina": 168,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.6",
+    "nome": "Gel anti-inflamatório tópico",
+    "classe": "anti_inflamatorio",
+    "pagina": 168,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.7",
+    "nome": "Pomada de Iodo e associações",
+    "classe": "outros",
+    "pagina": 169,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.8",
+    "nome": "Pomada cicatrizante com Papaína",
+    "classe": "outros",
+    "pagina": 169,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.9",
+    "nome": "Solução anti-inflamatória para cães",
+    "classe": "outros",
+    "pagina": 169,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.10",
+    "nome": "Pomada cicatrizante e anti-inflamatória com Sulfa",
+    "classe": "outros",
+    "pagina": 170,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.11",
+    "nome": "Pomada cicatrizante, antimicrobiana e repelente",
+    "classe": "outros",
+    "pagina": 170,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.12",
+    "nome": "Pomada com Mometasona e Ácido Fusídico",
+    "classe": "outros",
+    "pagina": 170,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.13",
+    "nome": "Regenerador e cicatrizante para a pele",
+    "classe": "outros",
+    "pagina": 171,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.14",
+    "nome": "Bastão antiedematoso",
+    "classe": "outros",
+    "pagina": 171,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.15",
+    "nome": "Bastão melaleuca",
+    "classe": "antifungico",
+    "pagina": 171,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.16",
+    "nome": "Outros anti-inflamatórios que podem ser",
+    "classe": "anti_inflamatorio",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.1",
+    "nome": "Spray fitoterápico para doenças de pele e fungicida",
+    "classe": "antifungico",
+    "pagina": 172,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.2",
+    "nome": "Lenço bactericida",
+    "classe": "outros",
+    "pagina": 172,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.3",
+    "nome": "Lenço antisséptico repelente",
+    "classe": "outros",
+    "pagina": 173,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.4",
+    "nome": "Xampu glicerinado com Ácido Salicílico e NaClO",
+    "classe": "outros",
+    "pagina": 173,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.5",
+    "nome": "Xampu em pó bactericida",
+    "classe": "outros",
+    "pagina": 173,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.6",
+    "nome": "Xampu em pó com Eritromicina e Peróxido de Benzoíla",
+    "classe": "outros",
+    "pagina": 173,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.7",
+    "nome": "Xampu em pó com Cefalexina",
+    "classe": "antibiotico",
+    "pagina": 174,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.8",
+    "nome": "Creme antimicrobiano",
+    "classe": "outros",
+    "pagina": 174,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.9",
+    "nome": "Creme com Mometasona, Mupirocina e Sulfadiazina de Prata",
+    "classe": "outros",
+    "pagina": 174,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.10",
+    "nome": "Fórmula antimicrobiana e hidratante",
+    "classe": "outros",
+    "pagina": 175,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.11",
+    "nome": "Fórmula antimicrobiana e repelente",
+    "classe": "outros",
+    "pagina": 175,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.12",
+    "nome": "Fórmula para tratamento de infecções cutâneas",
+    "classe": "outros",
+    "pagina": 175,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.13",
+    "nome": "Fórmula cicatrizante e repelente",
+    "classe": "outros",
+    "pagina": 176,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.14",
+    "nome": "Pomada bactericida e cicatrizante com Bacitracina",
+    "classe": "outros",
+    "pagina": 176,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.15",
+    "nome": "Pomada cicatrizante, antimicrobiana e repelente",
+    "classe": "outros",
+    "pagina": 176,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.16",
+    "nome": "Pomada cicatrizante e antimicrobiana",
+    "classe": "outros",
+    "pagina": 177,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.17",
+    "nome": "Pomada de Iodo e associações",
+    "classe": "outros",
+    "pagina": 177,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.18",
+    "nome": "Pomada cicatrizante e anti-inflamatória com Sulfa",
+    "classe": "outros",
+    "pagina": 177,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.19",
+    "nome": "Pó cicatrizante interdigital",
+    "classe": "outros",
+    "pagina": 178,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.20",
+    "nome": "Spray tópico de Amicacina",
+    "classe": "outros",
+    "pagina": 178,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.21",
+    "nome": "Líquido de Dakin",
+    "classe": "outros",
+    "pagina": 178,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.22",
+    "nome": "Outros antibióticos que podem ser",
+    "classe": "antibiotico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.1",
+    "nome": "Filtro Solar FPS 30 com repelente",
+    "classe": "outros",
+    "pagina": 179,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.2",
+    "nome": "Filtro Solar FPS 30 com fitoterápicos",
+    "classe": "fitoterápico",
+    "pagina": 179,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.3",
+    "nome": "Filtro Solar FPS 30 com ação suavizante",
+    "classe": "outros",
+    "pagina": 179,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.4",
+    "nome": "Filtro Solar FPS 30 com Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 179,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.5",
+    "nome": "Filtro Solar FPS 30 com nanocápsulas protetoras",
+    "classe": "outros",
+    "pagina": 179,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.6",
+    "nome": "Stick fotoprotetor FPS 45",
+    "classe": "outros",
+    "pagina": 180,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.7",
+    "nome": "Bastão fotoprotetor FPS 45 com antioxidante",
+    "classe": "outros",
+    "pagina": 180,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.1",
+    "nome": "Enxaguatório bucal com Clorexidine + Tintura de Malva",
+    "classe": "outros",
+    "pagina": 180,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.2",
+    "nome": "Solução para limpeza bucal com Óleo Essencial + Triclosan",
+    "classe": "outros",
+    "pagina": 180,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.3",
+    "nome": "Biscoitos de Metronidazol + Espiramicina",
+    "classe": "outros",
+    "pagina": 181,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.4",
+    "nome": "Lenços para gengiva",
+    "classe": "outros",
+    "pagina": 181,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.5",
+    "nome": "Lenços para gengiva com barreira protetora",
+    "classe": "outros",
+    "pagina": 181,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.6",
+    "nome": "Creme dental antisséptico sem Flúor",
+    "classe": "outros",
+    "pagina": 181,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.7",
+    "nome": "Creme dental sem Flúor com sabor",
+    "classe": "outros",
+    "pagina": 182,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.8",
+    "nome": "Gel bioadesivo antibacteriano",
+    "classe": "antibiotico",
+    "pagina": 182,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.9",
+    "nome": "Orobase para tratamento de aftas",
+    "classe": "outros",
+    "pagina": 182,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.10",
+    "nome": "Solução para combate à halitose",
+    "classe": "outros",
+    "pagina": 182,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.11",
+    "nome": "Solução para combate à halitose com barreira protetora",
+    "classe": "outros",
+    "pagina": 183,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.12",
+    "nome": "Filme oral antisséptico",
+    "classe": "outros",
+    "pagina": 183,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.13",
+    "nome": "Gel dental com fitoterápicos",
+    "classe": "fitoterápico",
+    "pagina": 183,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.14",
+    "nome": "Espuma bucal com Agrião, Aloe Vera, Hamamélis e Menta",
+    "classe": "outros",
+    "pagina": 184,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.15",
+    "nome": "Espuma bucal com Camomila, Confrei, Equinácea e Sálvia",
+    "classe": "fitoterápico",
+    "pagina": 184,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.16",
+    "nome": "Espuma bucal com Alecrim, Malva e Melissa",
+    "classe": "outros",
+    "pagina": 184,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.17",
+    "nome": "Espuma bucal com Arnica, Capim Limão e Própolis",
+    "classe": "fitoterápico",
+    "pagina": 185,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.18",
+    "nome": "Espuma bucal com Phytosphingosine®, Menta, Própolis e Arnica",
+    "classe": "fitoterápico",
+    "pagina": 185,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.19",
+    "nome": "Espuma bucal com NaClO",
+    "classe": "outros",
+    "pagina": 185,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.20",
+    "nome": "Solução irrigadora com NaClO",
+    "classe": "outros",
+    "pagina": 186,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.21",
+    "nome": "Gel transdérmico de Cetoprofeno para gatos",
+    "classe": "outros",
+    "pagina": 186,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.22",
+    "nome": "Comprimidos palatáveis de Clorella para mau hálito",
+    "classe": "outros",
+    "pagina": 186,
+    "dosagens": [],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.1",
+    "nome": "Ceruminolítico Lacto-salicilado",
+    "classe": "outros",
+    "pagina": 187,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.2",
+    "nome": "Ceruminolítico com Clorexidine",
+    "classe": "outros",
+    "pagina": 187,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.3",
+    "nome": "Ceruminolítico Borato-lacto-salicilado",
+    "classe": "outros",
+    "pagina": 188,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.4",
+    "nome": "Ceruminolítico com Chitosan",
+    "classe": "outros",
+    "pagina": 188,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.5",
+    "nome": "Ceruminolítico com Extrato de Camomila",
+    "classe": "outros",
+    "pagina": 189,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.6",
+    "nome": "Ceruminolítico com Ácido Bórico",
+    "classe": "outros",
+    "pagina": 189,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.7",
+    "nome": "Ceruminolítico com Ácido Acético",
+    "classe": "outros",
+    "pagina": 190,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.8",
+    "nome": "Ceruminolítico com Acetilcisteína",
+    "classe": "outros",
+    "pagina": 190,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.9",
+    "nome": "Tris-EDTA com Clorexidine",
+    "classe": "outros",
+    "pagina": 190,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.10",
+    "nome": "Tris-EDTA com Nanocoating, Clorexidine e Camomila",
+    "classe": "outros",
+    "pagina": 191,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.11",
+    "nome": "Tris-EDTA com nanoterapia",
+    "classe": "outros",
+    "pagina": 191,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.12",
+    "nome": "Tris-EDTA com Cetoconazol",
+    "classe": "antifungico",
+    "pagina": 191,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.13",
+    "nome": "Tris-EDTA com Clorexidine e Cetoconazol",
+    "classe": "antifungico",
+    "pagina": 192,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.14",
+    "nome": "Tris-EDTA com Cetoconazol e Phytosphingosine®",
+    "classe": "antifungico",
+    "pagina": 192,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.15",
+    "nome": "Tris-EDTA com NaClO",
+    "classe": "outros",
+    "pagina": 192,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.16",
+    "nome": "Tris-EDTA com Aceponato de Hidrocortisona",
+    "classe": "outros",
+    "pagina": 193,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.17",
+    "nome": "Fórmula para tratamento de otite causada",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.18",
+    "nome": "Fórmula para tratamento de otite fúngica",
+    "classe": "dermatologico",
+    "pagina": 193,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.19",
+    "nome": "Fórmula para tratamento de otite bacteriana e fúngica",
+    "classe": "dermatologico",
+    "pagina": 193,
+    "dosagens": [],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.20",
+    "nome": "Fórmula para tratamento de otite bacteriana",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.21",
+    "nome": "Fipronil em veículo otológico",
+    "classe": "outros",
+    "pagina": 194,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.22",
+    "nome": "Fórmula para tratamento de otite externa bacteriana",
+    "classe": "dermatologico",
+    "pagina": 194,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.23",
+    "nome": "Fórmula para tratamento de otite externa bacteriana",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.24",
+    "nome": "Fórmula para tratamento de otite externa bacteriana",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.25",
+    "nome": "Solução otológica com Mometasona,",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.26",
+    "nome": "Solução otológica com Aceponato de Hidrocortisona,",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.27",
+    "nome": "Fórmula adjuvante para tratamento de otomicose e otoacaríase",
+    "classe": "outros",
+    "pagina": 196,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.28",
+    "nome": "Fórmula para tratamento de otite infecciosa e acaricida",
+    "classe": "dermatologico",
+    "pagina": 196,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.29",
+    "nome": "Fórmula para otoacaríase otodécica",
+    "classe": "outros",
+    "pagina": 196,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.30",
+    "nome": "Fórmula com Escina para tratamento de oto-hematoma",
+    "classe": "outros",
+    "pagina": 196,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.31",
+    "nome": "Fórmula com Tobramicina para tratamento de otite",
+    "classe": "dermatologico",
+    "pagina": 197,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.32",
+    "nome": "Fórmula para tratamento de otite fúngica e bacteriana",
+    "classe": "dermatologico",
+    "pagina": 197,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.33",
+    "nome": "Fórmula com Amicacina para infecções",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.34",
+    "nome": "Fórmula para tratamento de otite infecciosa",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.35",
+    "nome": "Pó otológico com Miconazol",
+    "classe": "outros",
+    "pagina": 198,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.36",
+    "nome": "Solução otológica com Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.37",
+    "nome": "Solução otológica com Aloe Vera",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.38",
+    "nome": "Fórmula tópica para tratamento de otite média",
+    "classe": "dermatologico",
+    "pagina": 199,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.39",
+    "nome": "Fórmula oral para tratamento de otite média",
+    "classe": "dermatologico",
+    "pagina": 199,
+    "dosagens": [],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "11.1",
+    "nome": "Solução nasal de Mometasona",
+    "classe": "outros",
+    "pagina": 199,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.1",
+    "nome": "Solução tópica de Podofilina + Solução oral",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.2",
+    "nome": "Vaselina salicilada + Pasta oral de Timomodulina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.3",
+    "nome": "Tintura Lático-salicilada + Xarope de Levamisol",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.4",
+    "nome": "Tintura de Thuya + Thuya occidentalis 30 CH",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.5",
+    "nome": "Thuya occidentalis 30 CH + Nitricum acidum 30 CH",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.6",
+    "nome": "Solução oral com Interferon A2 para cães",
+    "classe": "outros",
+    "pagina": 201,
+    "dosagens": [],
+    "indicacoes": []
+  },
+  {
+    "numero": "25.000",
+    "nome": "UI%           25.000 UI%",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "000 UI"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "75.000",
+    "nome": "UI/kg              75.000 UI/kg",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2 mg",
+      "000 UI"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.000",
+    "nome": "UTR%           10.000 UTR%",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5 mg",
+      "3 mg"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "100.000",
+    "nome": "UI/kg       100.000 UI/kg",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "000 UI"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "100.000",
+    "nome": "UI/g        100.000 UI/g",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1 mg",
+      "000 UI"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "500.000",
+    "nome": "UI% a         500.000 UI% a",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "000 UI"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.1",
+    "nome": "Xampu com Óleo de Melaleuca",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.2",
+    "nome": "Xampu emoliente com Nanoclimbazol e Clorexidine",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "8%",
+      "4%",
+      "200 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.3",
+    "nome": "Mousse com Nanomelaleuca e Nanohydrate",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "50 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "1.4",
+    "nome": "Mousse ou Lenços umedecidos com Nanoclimbazol,",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "1.5",
+    "nome": "Spray com Nanomelaleuca e Terbinafina",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "50 ml",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.6",
+    "nome": "Gel antifúngico com Equinácea",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "50 g",
+      "2%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.7",
+    "nome": "Mousse com Cetoconazol",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "50 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.8",
+    "nome": "Xampu em pó antifúngico",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "40 g",
+      "4%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.9",
+    "nome": "Xampu antifúngico com Tintura de Equinácea + Clorexidine",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "4%",
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.10",
+    "nome": "Condicionador com Ciclopirox",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.11",
+    "nome": "Spray com Ciclopirox",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "1.12",
+    "nome": "Spray fitoterápico fungicida",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "6 ml",
+      "0 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.13",
+    "nome": "Pomada antifúngica cicatrizante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "1.14",
+    "nome": "Pomada bactericida antifúngica",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "000 UI",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "1.15",
+    "nome": "Pomada de iodo e associações",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "1.16",
+    "nome": "Spray com Itraconazol e DMSO",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "200 ml",
+      "1%",
+      "30%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.17",
+    "nome": "Fórmula tópica com Itraconazol, Clindamicina e Dexametasona",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "1.18",
+    "nome": "Outros antifúngicos que podem ser utilizados em formulações tópicas",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "000 UI",
+      "1%"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.1",
+    "nome": "Spray fitoterápico antipulgas",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "5%"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.2",
+    "nome": "Spray antipulgas com Óleo de Neem",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "100 ml",
+      "10%"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.3",
+    "nome": "Fórmula pour-on com Óleo de Neem",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "1 ml",
+      "00 ml"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.4",
+    "nome": "Spray ou Pour-on/Spot-on com Nanoneem",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "200 ml",
+      "00 ml"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "pulga",
+      "parasita"
+    ]
+  },
+  {
+    "numero": "2.5",
+    "nome": "Spray antipulgas com Permetrina e Óleo de Neem",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "100 ml",
+      "25%"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.6",
+    "nome": "Spray com Permetrina e Óleos de Neem e Citronela",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.7",
+    "nome": "Xampu antipulgas com Nanoneem",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "25%",
+      "200 ml"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.8",
+    "nome": "Xampu antipulgas e carrapaticida",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "3%",
+      "25%"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.9",
+    "nome": "Spray antipulgas com Fipronil",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "2%",
+      "25%"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.10",
+    "nome": "Fórmula pour-on com Fipronil",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "2%",
+      "3 ml"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "dor",
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.11",
+    "nome": "Fórmula pour-on com Selamectina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "10 ml",
+      "00 ml"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "pulga",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "2.12",
+    "nome": "Fórmula pour-on com Fipronil e Selamectina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "10 ml",
+      "10%"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "dor",
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.13",
+    "nome": "Fórmula pour-on com Fipronil e Moxidectina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "3%",
+      "00 ml"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "pulga",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "2.14",
+    "nome": "Antipulgas oral para cães",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "10 mg",
+      "1 mg"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.15",
+    "nome": "Antipulgas oral para gatos",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "1 mg",
+      "30 mg",
+      "4g"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.16",
+    "nome": "Antipulgas oral com Milbemicina Oxima",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "5 mg",
+      "2 mg",
+      "1 g"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.17",
+    "nome": "Spray repelente com Óleo de Citronela",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "100 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.18",
+    "nome": "Spray repelente com extrato de Andiroba",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.19",
+    "nome": "Spray repelente com IR",
+    "classe": "outros",
+    "pagina": 3535,
+    "dosagens": [
+      "11%",
+      "60 ml",
+      "30%"
+    ],
+    "indicacoes": [
+      "carrapato"
+    ]
+  },
+  {
+    "numero": "2.20",
+    "nome": "Spray repelente com IR 3535, Neem e Citronela",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "20%",
+      "3%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.21",
+    "nome": "Bastão repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "15 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.22",
+    "nome": "Banho seco com ação repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "2.23",
+    "nome": "Xampu ectoparasiticida",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "1%"
+    ],
+    "indicacoes": [
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.24",
+    "nome": "Xampu ectoparasiticida em pó",
+    "classe": "ectoparasiticida",
+    "pagina": 0,
+    "dosagens": [
+      "40 g",
+      "5%"
+    ],
+    "indicacoes": [
+      "carrapato",
+      "dor",
+      "pulga"
+    ]
+  },
+  {
+    "numero": "2.25",
+    "nome": "Xampu com Tiabendazol",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.26",
+    "nome": "Lenço antisséptico repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "1%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.27",
+    "nome": "Unguento repelente e cicatrizante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.28",
+    "nome": "Unguento repelente e cicatrizante com IR",
+    "classe": "outros",
+    "pagina": 3535,
+    "dosagens": [
+      "10%",
+      "3%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "2.29",
+    "nome": "Creme antimicrobiano repelente com IR",
+    "classe": "outros",
+    "pagina": 3535,
+    "dosagens": [
+      "10%",
+      "5%",
+      "3%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.1",
+    "nome": "Fórmula para tratamento de adenite sebácea",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10 ml",
+      "600 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.2",
+    "nome": "Xampu para seborreia oleosa com Enxofre líquido para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.3",
+    "nome": "Spray hidratante para tratamento de seborreia oleosa para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.4",
+    "nome": "Spray seborregulador",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "4%",
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.5",
+    "nome": "Xampu seborregulador com vitamina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.6",
+    "nome": "Xampu antisseborréico com nanopartículas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "200 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.7",
+    "nome": "Xampu antisseborreico e neutralizador de odores para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.8",
+    "nome": "Xampu antisseborreico com Sulfeto de Selênio",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.9",
+    "nome": "Xampu em pó antisseborreico com Sulfeto de Selênio",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.10",
+    "nome": "Xampu antisseborreico com Piritionato de Zinco",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.11",
+    "nome": "Xampu antisseborreico (sebum control) para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "500 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "3.12",
+    "nome": "Xampu antisseborreico com ação prolongada para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.13",
+    "nome": "Xampu antisseborreico com Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.14",
+    "nome": "Spot on hidratante restaurador",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "3.15",
+    "nome": "Sachês para tratamento da alopécia seborreica",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6 ml",
+      "200 mg"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.16",
+    "nome": "Biscoitos para tratamento da alopécia canina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6 mg",
+      "50%",
+      "12 mg"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.17",
+    "nome": "Mousse com Minoxidil para alopécia canina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "50 ml",
+      "5%",
+      "50%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "3.18",
+    "nome": "Mousse com Minoxidil e Clobetasol para alopécia canina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "5%",
+      "50 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.1",
+    "nome": "Emulsão oral com Ciclosporina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "150 ml",
+      "10 mg",
+      "50 mg"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.2",
+    "nome": "Suspensão com Oclacitinib e Emulsão oral com Ciclosporina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1 mg",
+      "50 ml",
+      "6 mg"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.3",
+    "nome": "Xarope de Ácidos Graxos e Oclacitinib",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5000 UI",
+      "6 mg",
+      "500 mg"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.4",
+    "nome": "Biscoito de Oclacitinib, Betaglucanas e Ômega",
+    "classe": "outros",
+    "pagina": 3,
+    "dosagens": [
+      "5ml",
+      "30 mg",
+      "2 mg"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.5",
+    "nome": "Pasta oral de Oclacitinib",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "60 g",
+      "1mg",
+      "5 mg"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.6",
+    "nome": "Filme oral de Oclacitinib",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5mg",
+      "1mg",
+      "5g"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.7",
+    "nome": "Pomada de Tacrolimus",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "03%",
+      "30 g",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.8",
+    "nome": "Spray para tratamento de dermatite por lambedura",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%",
+      "50 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.9",
+    "nome": "Spray para dermatite por lambedura com Phytosphingosine®",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "075%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.10",
+    "nome": "Spray com Oclacitinib",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.11",
+    "nome": "Spray com Mometasona",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "06%",
+      "200 ml"
+    ],
+    "indicacoes": [
+      "dermatite",
+      "inflamação"
+    ]
+  },
+  {
+    "numero": "4.12",
+    "nome": "Mousse com Mometasona",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "06%",
+      "50 ml"
+    ],
+    "indicacoes": [
+      "dermatite",
+      "inflamação"
+    ]
+  },
+  {
+    "numero": "4.13",
+    "nome": "Spray com Aceponato de Hidrocortisona",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "06%",
+      "200 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite",
+      "inflamação"
+    ]
+  },
+  {
+    "numero": "4.14",
+    "nome": "Mousse com Aceponato de Hidrocortisona",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "50 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite",
+      "inflamação"
+    ]
+  },
+  {
+    "numero": "4.15",
+    "nome": "Xampu com Aceponato de Hidrocortisona e Vegelip",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "250 ml",
+      "08%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.16",
+    "nome": "Xampu com Corticoide e Óleo de Prímula",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "025%"
+    ],
+    "indicacoes": [
+      "pulga",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.17",
+    "nome": "Xampu com anti-histamínico e Aveia",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "pulga",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.18",
+    "nome": "Xampu em pó com Aloe Vera e Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "40 g",
+      "1%"
+    ],
+    "indicacoes": [
+      "pulga",
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.19",
+    "nome": "Xampu em pó com Cloreto de Benzalcônio",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.20",
+    "nome": "Biscoitos de Deflazacort",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "875 mg",
+      "5 mg",
+      "75 mg"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "4.21",
+    "nome": "Lenço bactericida",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "3 mg"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.22",
+    "nome": "Wipes para higienização",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "05%",
+      "2%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.23",
+    "nome": "Lenço para higiene com Tris-EDTA",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.24",
+    "nome": "Solução emoliente para tratamento e prevenção de dermatite em",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.25",
+    "nome": "Cápsulas de Pentoxifilina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20 mg",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.26",
+    "nome": "Pour-on hidratante restaurador",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.27",
+    "nome": "Spray bactericida",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.28",
+    "nome": "Mousse bactericida",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "4%",
+      "150 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.29",
+    "nome": "Mousse bactericida hidratante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "4%",
+      "150 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.30",
+    "nome": "Spray de NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "500 ml",
+      "025%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.31",
+    "nome": "Mousse de NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "2%",
+      "50 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.32",
+    "nome": "Mousse protetor da barreira cutânea",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.33",
+    "nome": "Fórmula para dermatite solar",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "8000 UI",
+      "30 mg",
+      "5 mg"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "4.34",
+    "nome": "Fórmula nutracêutica para problemas de pele",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "150 mg",
+      "100 mg",
+      "50 mg"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.1",
+    "nome": "Xampu antialérgico",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.2",
+    "nome": "Spray siliconado hidratante e anti-irritante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "4%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.3",
+    "nome": "Spray aquoso siliconado com alto poder hidratante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.4",
+    "nome": "Spray hidratante com Nanofitoesfingosina e Nanomegas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "100 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.5",
+    "nome": "Spray aquoso siliconado dessensibilizante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.6",
+    "nome": "Xampu hidratante para peles sensíveis",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "100 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.7",
+    "nome": "Banho seco hidratante para cães e gatos",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "10%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "5.8",
+    "nome": "Foam desodorizante para cães e gatos",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "150 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.9",
+    "nome": "Banho seco desodorizante abrilhantador",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.10",
+    "nome": "Banho seco desodorizante abrilhantador repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.11",
+    "nome": "Stick desodorante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "15 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.12",
+    "nome": "Xampu ou Condicionador antimicrobiano",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.13",
+    "nome": "Xampu em pó com Deoplex",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "40 g",
+      "2%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.14",
+    "nome": "Hidratante para pele de cães e gatos",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.15",
+    "nome": "Xampu hidratante com Hidroviton",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.16",
+    "nome": "Xampu hidratante com Óleo de Prímula",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.17",
+    "nome": "Xampu com nanoterapia",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.18",
+    "nome": "Solução dermatológica para problemas de pele seca e sensível",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.19",
+    "nome": "Xampu branqueador hidratante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.20",
+    "nome": "Xampu clareador com Nanocamomila",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "4%",
+      "200 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.21",
+    "nome": "Xampu hipoalergênico",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "4%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.22",
+    "nome": "Loção clareadora",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "4%",
+      "30 g"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.23",
+    "nome": "Lenço clareador",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.24",
+    "nome": "Lenço clareador com nanocápsulas e Violet Flowers",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.25",
+    "nome": "Stick clareador impermeabilizante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.26",
+    "nome": "Wipes para manchas com NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "015%",
+      "25%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.27",
+    "nome": "Biscoitos de Tilosina Tartarato",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "50 mg"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.28",
+    "nome": "Pó clareador para área dos olhos",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "30 g"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.29",
+    "nome": "Creme para calosidades",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "5%",
+      "7%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.30",
+    "nome": "Stick para calosidades",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "4%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "5.31",
+    "nome": "Stick hidratante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.32",
+    "nome": "Condicionador nutritivo suavizante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "5.33",
+    "nome": "Condicionador doador de brilho",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%",
+      "3%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.1",
+    "nome": "Gel fitoterápico relaxante muscular",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "3%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.2",
+    "nome": "Gel fitoterápico cicatrizante",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.3",
+    "nome": "Líquido de Dakin",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "4%",
+      "100 ml",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.4",
+    "nome": "Spray fitoterápico cicatrizante e anti-inflamatório",
+    "classe": "anti_inflamatorio",
+    "pagina": 0,
+    "dosagens": [
+      "6 ml",
+      "0 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.5",
+    "nome": "Creme anti-inflamatório e cicatrizante",
+    "classe": "anti_inflamatorio",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.6",
+    "nome": "Gel anti-inflamatório tópico",
+    "classe": "anti_inflamatorio",
+    "pagina": 0,
+    "dosagens": [
+      "1%",
+      "65%",
+      "30%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.7",
+    "nome": "Pomada de Iodo e associações",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.8",
+    "nome": "Pomada cicatrizante com Papaína",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.9",
+    "nome": "Solução anti-inflamatória para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "80%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.10",
+    "nome": "Pomada cicatrizante e anti-inflamatória com Sulfa",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "3%",
+      "000 UI"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.11",
+    "nome": "Pomada cicatrizante, antimicrobiana e repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "6.12",
+    "nome": "Pomada com Mometasona e Ácido Fusídico",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "50 g",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "infecção",
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "6.13",
+    "nome": "Regenerador e cicatrizante para a pele",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "6%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "6.14",
+    "nome": "Bastão antiedematoso",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "alergia"
+    ]
+  },
+  {
+    "numero": "6.15",
+    "nome": "Bastão melaleuca",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "15 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "6.16",
+    "nome": "Outros anti-inflamatórios que podem ser utilizados em formulações",
+    "classe": "anti_inflamatorio",
+    "pagina": 0,
+    "dosagens": [
+      "01%",
+      "05%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.1",
+    "nome": "Spray fitoterápico para doenças de pele e fungicida",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "6 ml",
+      "0 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.2",
+    "nome": "Lenço bactericida",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "7.3",
+    "nome": "Lenço antisséptico repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.4",
+    "nome": "Xampu glicerinado com Ácido Salicílico e NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "4%",
+      "12%"
+    ],
+    "indicacoes": [
+      "bactéria",
+      "inflamação"
+    ]
+  },
+  {
+    "numero": "7.5",
+    "nome": "Xampu em pó bactericida",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.6",
+    "nome": "Xampu em pó com Eritromicina e Peróxido de Benzoíla",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "40 g",
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "7.7",
+    "nome": "Xampu em pó com Cefalexina",
+    "classe": "antibiotico",
+    "pagina": 0,
+    "dosagens": [
+      "40 g",
+      "2%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "7.8",
+    "nome": "Creme antimicrobiano",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "7.9",
+    "nome": "Creme com Mometasona, Mupirocina e Sulfadiazina de Prata",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "03%",
+      "3%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.10",
+    "nome": "Fórmula antimicrobiana e hidratante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "7.11",
+    "nome": "Fórmula antimicrobiana e repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "5%",
+      "3%"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  },
+  {
+    "numero": "7.12",
+    "nome": "Fórmula para tratamento de infecções cutâneas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.13",
+    "nome": "Fórmula cicatrizante e repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "3%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.14",
+    "nome": "Pomada bactericida e cicatrizante com Bacitracina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "5%",
+      "000 UI"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.15",
+    "nome": "Pomada cicatrizante, antimicrobiana e repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.16",
+    "nome": "Pomada cicatrizante e antimicrobiana",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "7.17",
+    "nome": "Pomada de Iodo e associações",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1%",
+      "65%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.18",
+    "nome": "Pomada cicatrizante e anti-inflamatória com Sulfa",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "6%",
+      "3%",
+      "000 UI"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.19",
+    "nome": "Pó cicatrizante interdigital",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "000 UI"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.20",
+    "nome": "Spray tópico de Amicacina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "5%",
+      "100 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.21",
+    "nome": "Líquido de Dakin",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "4%",
+      "100 ml",
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "7.22",
+    "nome": "Outros antibióticos que podem ser utilizados em formulações tópicas",
+    "classe": "antibiotico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.1",
+    "nome": "Filtro Solar FPS 30 com repelente",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "50 g",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.2",
+    "nome": "Filtro Solar FPS 30 com fitoterápicos",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "100 g",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.3",
+    "nome": "Filtro Solar FPS 30 com ação suavizante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "30 g",
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "8.4",
+    "nome": "Filtro Solar FPS 30 com Phytosphingosine®",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "30 g"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "8.5",
+    "nome": "Filtro Solar FPS 30 com nanocápsulas protetoras",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "8.6",
+    "nome": "Stick fotoprotetor FPS",
+    "classe": "outros",
+    "pagina": 45,
+    "dosagens": [
+      "5%",
+      "15 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "8.7",
+    "nome": "Bastão fotoprotetor FPS 45 com antioxidante",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "15 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.1",
+    "nome": "Enxaguatório bucal com Clorexidine + Tintura de Malva",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "50 ml",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.2",
+    "nome": "Solução para limpeza bucal com Óleo Essencial + Triclosan",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "07%",
+      "01%",
+      "06%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.3",
+    "nome": "Biscoitos de Metronidazol + Espiramicina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "000 UI",
+      "2%",
+      "5 mg"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.4",
+    "nome": "Lenços para gengiva",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.5",
+    "nome": "Lenços para gengiva com barreira protetora",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "2%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.6",
+    "nome": "Creme dental antisséptico sem Flúor",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "30 g"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.7",
+    "nome": "Creme dental sem Flúor com sabor",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "30 g",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.8",
+    "nome": "Gel bioadesivo antibacteriano",
+    "classe": "antibiotico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "10 g"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.9",
+    "nome": "Orobase para tratamento de aftas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "03%",
+      "30 g",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.10",
+    "nome": "Solução para combate à halitose",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "250 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.11",
+    "nome": "Solução para combate à halitose com barreira protetora",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.12",
+    "nome": "Filme oral antisséptico",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "07%",
+      "5 ml",
+      "500 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.13",
+    "nome": "Gel dental com fitoterápicos",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.14",
+    "nome": "Espuma bucal com Agrião, Aloe Vera, Hamamélis e Menta",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.15",
+    "nome": "Espuma bucal com Camomila, Confrei, Equinácea e Sálvia",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.16",
+    "nome": "Espuma bucal com Alecrim, Malva e Melissa",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.17",
+    "nome": "Espuma bucal com Arnica, Capim Limão e Própolis",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "1%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.18",
+    "nome": "Espuma bucal com Phytosphingosine®, Menta, Própolis e Arnica",
+    "classe": "fitoterápico",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "2%"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.19",
+    "nome": "Espuma bucal com NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "005%",
+      "50 ml",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.20",
+    "nome": "Solução irrigadora com NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1 mg",
+      "5%",
+      "50 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "9.21",
+    "nome": "Gel transdérmico de Cetoprofeno para gatos",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1 mg",
+      "5g"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "9.22",
+    "nome": "Comprimidos palatáveis de Clorella para mau hálito",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "50 mg"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.1",
+    "nome": "Ceruminolítico Lacto-salicilado",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "100 ml",
+      "12%"
+    ],
+    "indicacoes": [
+      "infecção"
+    ]
+  },
+  {
+    "numero": "10.2",
+    "nome": "Ceruminolítico com Clorexidine",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.3",
+    "nome": "Ceruminolítico Borato-lacto-salicilado",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.4",
+    "nome": "Ceruminolítico com Chitosan",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "1%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.5",
+    "nome": "Ceruminolítico com Extrato de Camomila",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "1%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.6",
+    "nome": "Ceruminolítico com Ácido Bórico",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.7",
+    "nome": "Ceruminolítico com Ácido Acético",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.8",
+    "nome": "Ceruminolítico com Acetilcisteína",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "2%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.9",
+    "nome": "Tris-EDTA com Clorexidine",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "100 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.10",
+    "nome": "Tris-EDTA com Nanocoating, Clorexidine e Camomila",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "1%",
+      "12%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.11",
+    "nome": "Tris-EDTA com nanoterapia",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "1%"
+    ],
+    "indicacoes": [
+      "bactéria",
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.12",
+    "nome": "Tris-EDTA com Cetoconazol",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "100 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.13",
+    "nome": "Tris-EDTA com Clorexidine e Cetoconazol",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "100 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.14",
+    "nome": "Tris-EDTA com Cetoconazol e Phytosphingosine®",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "01%",
+      "100 ml",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.15",
+    "nome": "Tris-EDTA com NaClO",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "015%"
+    ],
+    "indicacoes": [
+      "bactéria"
+    ]
+  },
+  {
+    "numero": "10.16",
+    "nome": "Tris-EDTA com Aceponato de Hidrocortisona",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "05%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.17",
+    "nome": "Fórmula para tratamento de otite causada por malassezia com",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "infecção",
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.18",
+    "nome": "Fórmula para tratamento de otite fúngica",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "3 g",
+      "5%",
+      "2%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.19",
+    "nome": "Fórmula para tratamento de otite bacteriana e fúngica",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "3 g",
+      "2%",
+      "35%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.20",
+    "nome": "Fórmula para tratamento de otite bacteriana e fúngica com",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "05%",
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.21",
+    "nome": "Fipronil em veículo otológico",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3 g",
+      "5%",
+      "25%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.22",
+    "nome": "Fórmula para tratamento de otite externa bacteriana",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "05%",
+      "2%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.23",
+    "nome": "Fórmula para tratamento de otite externa bacteriana com",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "000 UI",
+      "4 g",
+      "35%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.24",
+    "nome": "Fórmula para tratamento de otite externa bacteriana com",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.25",
+    "nome": "Solução otológica com Mometasona, Clotrimazol e Gentamicina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10 g",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite",
+      "bactéria"
+    ]
+  },
+  {
+    "numero": "10.26",
+    "nome": "Solução otológica com Aceponato de Hidrocortisona, Miconazol e",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "8 g",
+      "12%"
+    ],
+    "indicacoes": [
+      "otite",
+      "bactéria"
+    ]
+  },
+  {
+    "numero": "10.27",
+    "nome": "Fórmula adjuvante para tratamento de otomicose e otoacaríase",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "100 ml",
+      "2%",
+      "5%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.28",
+    "nome": "Fórmula para tratamento de otite infecciosa e acaricida",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.29",
+    "nome": "Fórmula para otoacaríase otodécica",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "3 g",
+      "1%",
+      "15 ml"
+    ],
+    "indicacoes": [
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.30",
+    "nome": "Fórmula com Escina para tratamento de oto-hematoma",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20%",
+      "2%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "10.31",
+    "nome": "Fórmula com Tobramicina para tratamento de otite",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.32",
+    "nome": "Fórmula para tratamento de otite fúngica e bacteriana",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "1%",
+      "35%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.33",
+    "nome": "Fórmula com Amicacina para infecções resistentes à Gentamicina",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5%",
+      "10 g",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.34",
+    "nome": "Fórmula para tratamento de otite infecciosa e fúngica com Chitosan",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "5 g",
+      "35%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.35",
+    "nome": "Pó otológico com Miconazol",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20%",
+      "2%",
+      "1%"
+    ],
+    "indicacoes": [
+      "infecção",
+      "bactéria",
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.36",
+    "nome": "Solução otológica com Phytosphingosine® e Melaleuca em Óleo",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "2%",
+      "30 ml",
+      "1%"
+    ],
+    "indicacoes": [
+      "infecção",
+      "otite",
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.37",
+    "nome": "Solução otológica com Aloe Vera e Melaleuca em Óleo de Argan",
+    "classe": "antifungico",
+    "pagina": 0,
+    "dosagens": [
+      "3%",
+      "15 g",
+      "1%"
+    ],
+    "indicacoes": [
+      "otite",
+      "dor"
+    ]
+  },
+  {
+    "numero": "10.38",
+    "nome": "Fórmula tópica para tratamento de otite média",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "03%",
+      "9%",
+      "5%"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "10.39",
+    "nome": "Fórmula oral para tratamento de otite média",
+    "classe": "dermatologico",
+    "pagina": 0,
+    "dosagens": [
+      "15%",
+      "2%",
+      "5 mg"
+    ],
+    "indicacoes": [
+      "otite"
+    ]
+  },
+  {
+    "numero": "11.1",
+    "nome": "Solução nasal de Mometasona",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "50 ml",
+      "1%"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.1",
+    "nome": "Solução tópica de Podofilina + Solução oral de Interferon A2 para",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20%",
+      "10 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.2",
+    "nome": "Vaselina salicilada + Pasta oral de Timomodulina para papilomas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "20%",
+      "1 g",
+      "30 g"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.3",
+    "nome": "Tintura Lático-salicilada + Xarope de Levamisol para papilomas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10%",
+      "10 ml"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.4",
+    "nome": "Tintura de Thuya + Thuya occidentalis 30 CH para papilomas orais",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10 ml",
+      "5 g"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.5",
+    "nome": "Thuya occidentalis 30 CH + Nitricum acidum 30 CH para papilomas",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "10 ml",
+      "5 g"
+    ],
+    "indicacoes": []
+  },
+  {
+    "numero": "12.6",
+    "nome": "Solução oral com Interferon A2 para cães",
+    "classe": "outros",
+    "pagina": 0,
+    "dosagens": [
+      "5 g",
+      "1000 UI",
+      "30 ml"
+    ],
+    "indicacoes": [
+      "dermatite"
+    ]
+  }
+]
