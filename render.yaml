@@ -1,0 +1,31 @@
+services:
+- type: web
+  name: s2-licitacoes
+  runtime: docker
+  plan: starter
+  autoDeploy: true
+  healthCheckPath: /healthz
+  dockerfilePath: ./render.Dockerfile
+  envVars:
+  - key: NODE_ENV
+    value: production
+  - key: PORT
+    value: 3000
+  - key: DATABASE_URL
+    sync: false
+  - key: JWT_SECRET
+    sync: false
+  - key: ENCRYPTION_KEY
+    sync: false
+  - key: OAUTH_SERVER_URL
+    sync: false
+  - key: OWNER_OPEN_ID
+    sync: false
+  - key: BUILT_IN_FORGE_API_URL
+    sync: false
+  - key: BUILT_IN_FORGE_API_KEY
+    sync: false
+  - key: COMPANY_EMAIL
+    sync: false
+  - key: PUPPETEER_EXECUTABLE_PATH
+    value: /usr/bin/chromium
