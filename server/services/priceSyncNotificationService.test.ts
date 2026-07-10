@@ -8,7 +8,7 @@ import {
 import { SyncStats } from "./priceSyncService";
 
 // Mock the notification module
-vi.mock("../_ core/notification", () => ({
+vi.mock("../_core/notification", () => ({
   notifyOwner: vi.fn().mockResolvedValue(true),
 }));
 

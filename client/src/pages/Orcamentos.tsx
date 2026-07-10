@@ -32,7 +32,7 @@ export function Orcamentos() {
     }
   }, []);
 
-  const generatePdfMutation = (trpc.quotations as any).generatePdf?.useMutation?.() ?? { mutateAsync: async () => ({}) };
+  const generatePdfMutation = trpc.quotations.generatePdf.useMutation();
 
   const handleGeneratePdf = async (data: {
     number: string;
@@ -51,16 +51,19 @@ export function Orcamentos() {
   }) => {
     setIsLoading(true);
     try {
-      // generatePdf now accepts id + optional discount/tax/validDays
-      // Company data is loaded from company_settings in the bank
-      const quotationId = (data as any).id;
-      if (!quotationId) throw new Error("ID do orçamento não informado");
-
       const result = await generatePdfMutation.mutateAsync({
-        id: quotationId,
-        discount: (data as any).discount,
-        tax: (data as any).tax,
-        validDays: (data as any).validDays ?? 30,
+        number: data.number,
+        clientName: data.clientName,
+        clientEmail: data.clientEmail,
+        clientPhone: data.clientPhone,
+        items: data.items.map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+        discount: data.discount,
+        tax: data.tax,
+        notes: data.notes,
       });
 
       return {

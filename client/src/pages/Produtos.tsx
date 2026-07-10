@@ -222,27 +222,9 @@ function EditModal({
     setForm((f) => ({ ...f, [field]: value }));
     if (field === "imageUrl") setImgError(false);
   };
-  // Extração de atributos via IA (Motor de Equivalência)
-  const [showExtractedAttrs, setShowExtractedAttrs] = useState(false);
-  const [extractSourceText, setExtractSourceText] = useState("");
-  const [showExtractInput, setShowExtractInput] = useState(false);
-  const { data: extractedAttrsData, refetch: refetchAttrs } = (trpc.equivalencia as any).getAttributes?.useQuery?.(
-    { productId: product.id },
-    { enabled: showExtractedAttrs }
-  ) ?? { data: undefined, refetch: async () => {} };
-  const extractAttrsMutation = (trpc.equivalencia as any).extractAttributes?.useMutation?.({
-    onSuccess: (res: any) => {
-      if (res.extracted > 0) {
-        toast.success(`${res.extracted} atributos extraídos com sucesso!`);
-        setShowExtractedAttrs(true);
-        setShowExtractInput(false);
-        refetchAttrs();
-      } else {
-        toast.error(res.reason ?? "Nenhum atributo encontrado.");
-      }
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
+  // (Bloco de "extração de atributos via IA" removido: dependia de um
+  // router equivalencia.getAttributes/extractAttributes que nunca existiu
+  // no backend. O enriquecimento real de ficha técnica está logo abaixo.)
   // Estado para sugestão de ficha técnica via IA (extractFichaTecnica individual)
   const [fichaIaSugestao, setFichaIaSugestao] = useState<string | null>(null);
   const extractFichaMutation = trpc.enrichment.extractFichaTecnica.useMutation({
@@ -413,98 +395,11 @@ function EditModal({
               <div className="mb-4 p-3 bg-purple-50 border border-purple-200">
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-[10px] font-bold uppercase tracking-widest text-purple-700">Ficha Técnica</div>
-                  <button
-                    type="button"
-                    onClick={() => { setShowExtractedAttrs((v) => !v); if (!showExtractedAttrs) refetchAttrs(); }}
-                    className="flex items-center gap-1 text-[10px] font-bold text-purple-700 hover:text-purple-900 bg-purple-100 hover:bg-purple-200 px-2 py-0.5 transition-colors"
-                  >
-                    <FlaskConical size={9} /> {showExtractedAttrs ? "Ocultar Atributos" : "Ver Atributos"}
-                  </button>
                 </div>
                 <p className="text-xs text-gray-700 leading-relaxed">{ft}</p>
               </div>
             );
           })()}
-          {/* Botão de extração quando não há ficha técnica */}
-          {!(form as any).fichaTecnica && (
-            <div className="mb-4 flex items-center justify-between p-3 bg-indigo-50 border border-indigo-200">
-              <div className="flex items-center gap-2">
-                <Brain size={12} className="text-indigo-600" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-700">Atributos Técnicos (Motor de Equivalência)</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowExtractInput((v) => !v)}
-                className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-100 hover:bg-indigo-200 px-2 py-1 transition-colors"
-              >
-                <FlaskConical size={9} /> Extrair com IA
-              </button>
-            </div>
-          )}
-          {/* Painel de Atributos Extraídos via IA */}
-          {(showExtractedAttrs || showExtractInput) && (
-            <div className="mb-4 p-3 bg-indigo-50 border border-indigo-200">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Brain size={12} className="text-indigo-600" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-700">Atributos Extraídos (Motor de Equivalência)</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowExtractInput((v) => !v)}
-                    className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-100 hover:bg-indigo-200 px-2 py-0.5 transition-colors"
-                  >
-                    <FlaskConical size={9} /> {showExtractInput ? "Cancelar" : "Extrair / Re-extrair"}
-                  </button>
-                  <button type="button" onClick={() => { setShowExtractedAttrs(false); setShowExtractInput(false); }} className="text-indigo-400 hover:text-indigo-700 p-0.5"><X size={10} /></button>
-                </div>
-              </div>
-              {showExtractInput && (
-                <div className="mb-3 p-2 bg-white border border-indigo-200">
-                  <div className="text-[9px] font-bold uppercase text-indigo-500 tracking-wider mb-1">Texto adicional (bula, embalagem) — opcional</div>
-                  <textarea
-                    value={extractSourceText}
-                    onChange={(e) => setExtractSourceText(e.target.value)}
-                    placeholder="Cole aqui o texto da bula ou embalagem (opcional — se vazio, usa a ficha técnica já cadastrada)"
-                    className="w-full text-xs border border-gray-200 p-2 resize-none h-20 focus:outline-none focus:border-indigo-400"
-                  />
-                  <button
-                    type="button"
-                    disabled={extractAttrsMutation.isPending}
-                    onClick={() => extractAttrsMutation.mutate({
-                      productId: product.id,
-                      sourceType: "text",
-                      sourceText: extractSourceText || undefined,
-                      forceReextract: true,
-                    })}
-                    className="mt-1 flex items-center gap-1 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 disabled:opacity-50 transition-colors"
-                  >
-                    {extractAttrsMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <Brain size={10} />}
-                    {extractAttrsMutation.isPending ? "Extraindo..." : "Extrair Atributos com IA"}
-                  </button>
-                </div>
-              )}
-              {extractedAttrsData && (extractedAttrsData as any[]).length > 0 ? (
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  {(extractedAttrsData as any[]).map((attr: any) => (
-                    <div key={attr.id} className="flex flex-col">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[9px] font-bold uppercase text-indigo-500 tracking-wider">{attr.attribute.replace(/_/g, " ")}</span>
-                        {attr.needsReview ? <AlertCircle size={8} className="text-amber-500" /> : <CheckCircle size={8} className="text-green-500" />}
-                        <span className="text-[9px] text-gray-400">{Math.round(Number(attr.confidence) * 100)}%</span>
-                      </div>
-                      <span className="text-xs text-gray-800 font-medium">{attr.valueNormalized ?? attr.value}{attr.unit ? ` ${attr.unit}` : ""}</span>
-                      {attr.sourceExcerpt && <span className="text-[9px] text-gray-400 italic truncate" title={attr.sourceExcerpt}>{attr.sourceExcerpt}</span>}
-                    </div>
-                  ))}
-                </div>
-              ) : showExtractedAttrs && !extractAttrsMutation.isPending ? (
-                <div className="text-xs text-indigo-500 italic">Nenhum atributo extraído ainda. Clique em "Extrair / Re-extrair" para iniciar.</div>
-              ) : null}
-            </div>
-          )}
-
           <div className="grid grid-cols-2 gap-4">
             {/* Identificação — mesma ordem do mapeamento de importação */}
             <div className="col-span-2">

@@ -27,7 +27,6 @@ import ImportarEdital from "./pages/ImportarEdital";
 import Sinonimos from "./pages/Sinonimos";
 import TemplatesProposta from "./pages/TemplatesProposta";
 import PropostaAutomatica from "./pages/PropostaAutomatica";
-import MotorEquivalencia from "./pages/MotorEquivalencia";
 import { DataQualityDashboard } from "./pages/DataQualityDashboard";
 import { GestaoProducts } from "./pages/GestaoProducts";
 import { ComparadorFornecedores } from "./pages/ComparadorFornecedores";
@@ -282,12 +281,6 @@ function Router() {
         <Route path="/proposta-automatica">
           {() => <PropostaAutomatica />}
         </Route>
-        <Route path="/motor-equivalencia">
-          <RequireAuth message="Faça login para acessar o Motor de Equivalência Técnica.">
-            <MotorEquivalencia />
-          </RequireAuth>
-        </Route>
-
         <Route path="/scraper-fornecedores">
           <RequireAuth message="Faça login para acessar o agente de scraping." minRole="admin">
             <ScraperFornecedores />

@@ -1,13 +1,11 @@
 import { COOKIE_NAME } from "@shared/const";
 import { metadataRouter } from "./routers/metadata";
-import { equivalenciaRouter } from "./routers/equivalencia";
 import { duplicatesRouter } from "./routers/duplicates";
 import { drogavetRouter } from "./routers/drogavet";
 import { imagesRouter } from "./routers/images";
 import { recognitionRouter } from "./routers/recognition";
 import { enrichmentRouter } from "./routers/enrichment";
 import { reclassificationRouter } from "./routers/reclassification";
-import { consolidationRouter } from "./routers/consolidation";
 import { importConsolidatedRouter } from "./routers/importConsolidated";
 import { productMatchingRouter } from "./routers/productMatching";
 import { importMatchingRouter } from "./routers/importMatching";
@@ -3713,7 +3711,6 @@ Por favor, forneça em JSON:
   }),
   // ─── Reclassificação em Lote via IA ──────────────────────────────────────────────────────
   reclassification: reclassificationRouter,
-  consolidation: consolidationRouter,
   // ─── Importação com Consolidação Automática ──────────────────────────────────────────────────
   importConsolidated: importConsolidatedRouter,
   // ─── Reconhecimento Inteligente de Produtos ──────────────────────────────────────────────────
@@ -4890,7 +4887,6 @@ Por favor, forneça em JSON:
   metadata: metadataRouter,
 
   // ─── Motor Universal de Equivalência e duplicidades ──────────────────────────
-  equivalencia: equivalenciaRouter,
   duplicates: duplicatesRouter,
   duplicateDetection: duplicateDetectionRouter,
   executiveDecision: executiveDecisionRouter,

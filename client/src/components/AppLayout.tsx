@@ -72,7 +72,6 @@ const navGroups: NavGroup[] = [
       { href: "/categorias", icon: FolderOpen, label: "Categorias" },
       { href: "/produtos", icon: Package, label: "Produtos" },
       { href: "/equivalencias", icon: GitMerge, label: "Equivalências" },
-      { href: "/motor-equivalencia", icon: FlaskConical, label: "Motor de Equivalência" },
       { href: "/imagens", icon: Image, label: "Imagens" },
       { href: "/qualidade", icon: CheckCircle2, label: "Qualidade de Dados" },
     ],
