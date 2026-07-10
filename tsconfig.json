@@ -12,6 +12,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
+    "downlevelIteration": true,
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "types": ["node", "vite/client"],

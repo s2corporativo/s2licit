@@ -1,0 +1,32 @@
+/**
+ * Barrel de acesso a dados - Domínio: Propostas, Cotações e Órgãos.
+ */
+export {
+  listProposals,
+  getProposalWithItems,
+  createProposal,
+  updateProposal,
+  deleteProposal,
+  addProposalItem,
+  updateProposalItem,
+  removeProposalItem,
+  listProposalsAdmin,
+  advanceProposalStatus,
+  updateProposalFreight,
+  getProposalStatusHistory,
+  duplicateProposal,
+  getExpiringProposals,
+  createQuotation,
+  listQuotations,
+  getQuotationWithItems,
+  updateQuotation,
+  deleteQuotation,
+  addQuotationItem,
+  updateQuotationItem,
+  removeQuotationItem,
+  listRequestingOrgs,
+  getRequestingOrgById,
+  upsertRequestingOrg,
+  updateRequestingOrg,
+  deleteRequestingOrg,
+} from "../db";

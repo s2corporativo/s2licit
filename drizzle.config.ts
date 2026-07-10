@@ -1,16 +1,15 @@
 import { defineConfig } from "drizzle-kit";
-import path from "path";
-import fs from "fs";
 
-const dbDir = path.join(process.cwd(), "data");
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-const dbFile = path.join(dbDir, "sistema-s2.db");
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is required to run drizzle commands");
+}
 
 export default defineConfig({
   schema: "./drizzle/schema.ts",
   out: "./drizzle",
-  dialect: "turso",
+  dialect: "mysql",
   dbCredentials: {
-    url: `file:${dbFile}`,
+    url: connectionString,
   },
 });
