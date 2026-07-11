@@ -6,6 +6,7 @@ import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
+import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
 
 /**
  * Agendador central de jobs recorrentes.
@@ -89,6 +90,10 @@ export async function runDailyAlerts(): Promise<void> {
       title: "Alertas do dia — Sistema S2",
       content: linhas.join("\n"),
     });
+    if (isWhatsappConfigured()) {
+      const enviado = await enviarWhatsapp(`📋 Alertas do dia — Sistema S2\n\n${linhas.join("\n")}`);
+      if (enviado) console.log("[Scheduler] Alertas diários também enviados por WhatsApp.");
+    }
     console.log(`[Scheduler] Alertas diários: ${linhas.length} pendência(s) notificada(s).`);
   }
 }

@@ -2950,6 +2950,17 @@ export const emailQuotations = mysqlTable(
     totalItems: int("totalItems").notNull().default(0),
     matchedItems: int("matchedItems").notNull().default(0),
     errorMessage: text("errorMessage"),
+    // Resultado da disputa (análise de vitória/derrota)
+    resultado: mysqlEnum("resultado", ["pendente", "ganhou", "perdeu", "cancelada"])
+      .default("pendente")
+      .notNull(),
+    // Valor total que propusemos (para comparar com o vencedor)
+    valorProposto: decimal("valorProposto", { precision: 15, scale: 2 }),
+    // Valor do concorrente vencedor (quando perdemos)
+    valorVencedor: decimal("valorVencedor", { precision: 15, scale: 2 }),
+    categoria: varchar("categoria", { length: 128 }),   // categoria dominante (para segmentar win rate)
+    resultadoObs: text("resultadoObs"),
+    resultadoEm: timestamp("resultadoEm"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -2958,6 +2969,7 @@ export const emailQuotations = mysqlTable(
     index("idx_email_quotations_received").on(table.receivedAt),
     index("idx_email_quotations_from").on(table.fromAddress),
     index("idx_email_quotations_prazo").on(table.prazoResposta),
+    index("idx_email_quotations_resultado").on(table.resultado),
   ]
 );
 export type EmailQuotation = typeof emailQuotations.$inferSelect;

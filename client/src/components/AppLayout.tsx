@@ -35,6 +35,8 @@ import {
   Brain,
   Gavel,
   KeyRound,
+  CalendarClock,
+  Trophy,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -46,6 +48,8 @@ const navGroups: NavGroup[] = [
     label: "Geral",
     items: [
       { href: "/", icon: LayoutGrid, label: "Dashboard" },
+      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
+      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
     ],
   },
   {

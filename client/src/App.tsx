@@ -57,6 +57,8 @@ import Certidoes from "./pages/Certidoes";
 import CentralIA from "./pages/CentralIA";
 import SalaDisputa from "./pages/SalaDisputa";
 import PortaisLicitacao from "./pages/PortaisLicitacao";
+import Agenda from "./pages/Agenda";
+import Desempenho from "./pages/Desempenho";
 import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
 import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
 import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
@@ -74,6 +76,8 @@ function Router() {
             <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/dashboard"><Redirect to="/" /></Route>
+        <Route path="/agenda" component={Agenda} />
+        <Route path="/desempenho" component={Desempenho} />
         <Route path="/busca" component={BuscaRapida} />
         <Route path="/comparacao" component={Comparacao} />
         <Route path="/categorias" component={Categorias} />
