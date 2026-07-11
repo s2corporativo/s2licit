@@ -27,6 +27,7 @@ import {
   Zap,
   Globe,
   ShieldAlert,
+  ShieldCheck,
   FolderClock,
   ClipboardList,
   MailCheck,
@@ -68,6 +69,7 @@ const navGroups: NavGroup[] = [
       { href: "/contratos-pos-licitacao", icon: FileText, label: "Contratos Pós-Licitação" },
       { href: "/diligencias", icon: ShieldAlert, label: "Diligências" },
       { href: "/documentos-habilitacao", icon: FolderClock, label: "Documentos" },
+      { href: "/certidoes", icon: ShieldCheck, label: "Certidões" },
     ],
   },
   {

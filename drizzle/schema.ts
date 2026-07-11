@@ -2987,3 +2987,31 @@ export const emailQuotationItems = mysqlTable(
 );
 export type EmailQuotationItem = typeof emailQuotationItems.$inferSelect;
 export type InsertEmailQuotationItem = typeof emailQuotationItems.$inferInsert;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Certidões e documentos de habilitação da empresa (com controle de validade).
+// Perder habilitação por certidão vencida é o erro mais caro em licitação.
+// ─────────────────────────────────────────────────────────────────────────────
+export const certidoes = mysqlTable(
+  "certidoes",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    tipo: varchar("tipo", { length: 128 }).notNull(),        // ex: CND Federal, FGTS, Trabalhista
+    orgaoEmissor: varchar("orgaoEmissor", { length: 256 }),
+    numero: varchar("numero", { length: 128 }),
+    dataEmissao: date("dataEmissao"),
+    dataValidade: date("dataValidade").notNull(),
+    arquivoUrl: text("arquivoUrl"),
+    observacoes: text("observacoes"),
+    ativa: boolean("ativa").notNull().default(true),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_certidoes_validade").on(table.dataValidade),
+    index("idx_certidoes_tipo").on(table.tipo),
+    index("idx_certidoes_ativa").on(table.ativa),
+  ]
+);
+export type Certidao = typeof certidoes.$inferSelect;
+export type InsertCertidao = typeof certidoes.$inferInsert;
