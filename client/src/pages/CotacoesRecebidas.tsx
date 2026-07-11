@@ -20,6 +20,7 @@ export default function CotacoesRecebidas() {
 
   const statusQuery = trpc.emailQuotations.status.useQuery();
   const listQuery = trpc.emailQuotations.list.useQuery({});
+  const prazosQuery = trpc.emailQuotations.prazosProximos.useQuery({ diasAlerta: 3 });
   const detailQuery = trpc.emailQuotations.get.useQuery(
     { id: selectedId ?? 0 },
     { enabled: selectedId != null },
@@ -61,6 +62,21 @@ export default function CotacoesRecebidas() {
           </button>
         )}
       </div>
+
+      {prazosQuery.data && (prazosQuery.data.vencidos.length + prazosQuery.data.proximos.length) > 0 && (
+        <div className="mb-6 flex items-start gap-3 border border-red-200 bg-red-50 p-4">
+          <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-red-800">
+            <strong>Prazos de resposta:</strong>{" "}
+            {prazosQuery.data.vencidos.length > 0 && (
+              <span>{prazosQuery.data.vencidos.length} vencido(s). </span>
+            )}
+            {prazosQuery.data.proximos.length > 0 && (
+              <span>{prazosQuery.data.proximos.length} vencendo em até 3 dias.</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {imapConfigured === false && (
         <div className="mb-6 flex items-start gap-3 border border-amber-200 bg-amber-50 p-4">
@@ -135,7 +151,7 @@ export default function CotacoesRecebidas() {
 }
 
 type DetailData = {
-  quotation: { id: number; subject: string | null; orgao: string | null; status: string; bodyText: string | null };
+  quotation: { id: number; subject: string | null; orgao: string | null; status: string; bodyText: string | null; prazoResposta: string | Date | null };
   items: Array<{
     id: number;
     numeroItem: number | null;
@@ -158,6 +174,10 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
   });
   const statusMutation = trpc.emailQuotations.setStatus.useMutation({
     onSuccess: () => { toast.success("Status atualizado."); onChanged(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const prazoMutation = trpc.emailQuotations.setPrazo.useMutation({
+    onSuccess: () => { toast.success("Prazo atualizado."); onChanged(); },
     onError: (e) => toast.error(e.message),
   });
   const orcamentoMutation = trpc.emailQuotations.gerarOrcamento.useMutation({
@@ -184,6 +204,15 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
       <div className="p-4 border-b border-gray-100">
         <div className="font-semibold text-gray-900">{quotation.subject || "(sem assunto)"}</div>
         <div className="text-xs text-gray-500 mt-0.5">{quotation.orgao || "—"}</div>
+        <div className="flex items-center gap-2 mt-2">
+          <label className="text-[11px] font-semibold text-gray-500">Prazo de resposta:</label>
+          <input
+            type="date"
+            defaultValue={quotation.prazoResposta ? String(quotation.prazoResposta).slice(0, 10) : ""}
+            onChange={(e) => prazoMutation.mutate({ id: quotation.id, prazoResposta: e.target.value || null })}
+            className="border border-gray-300 px-2 py-1 text-xs"
+          />
+        </div>
         <div className="flex flex-wrap gap-2 mt-3">
           <button
             onClick={() => orcamentoMutation.mutate({ id: quotation.id })}

@@ -160,6 +160,40 @@ export const emailQuotationsRouter = router({
       return { success: true as const, to: destinatario, itemCount: response.itemCount };
     }),
 
+  /** Define o prazo de resposta de uma cotação. */
+  setPrazo: protectedProcedure
+    .input(z.object({ id: z.number().int().positive(), prazoResposta: z.string().nullable() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB indisponível." });
+      await db
+        .update(emailQuotations)
+        .set({ prazoResposta: input.prazoResposta ? new Date(input.prazoResposta) : null })
+        .where(eq(emailQuotations.id, input.id));
+      return { success: true };
+    }),
+
+  /** Cotações ainda não respondidas com prazo vencendo em até N dias. */
+  prazosProximos: protectedProcedure
+    .input(z.object({ diasAlerta: z.number().int().min(1).max(60).default(3) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { vencidos: [], proximos: [] };
+      const diasAlerta = input?.diasAlerta ?? 3;
+      const rows = await db.select().from(emailQuotations);
+      const hoje = Date.now();
+      const msPorDia = 24 * 60 * 60 * 1000;
+      const vencidos: typeof rows = [];
+      const proximos: typeof rows = [];
+      for (const q of rows) {
+        if (!q.prazoResposta || q.status === "respondida" || q.status === "descartada") continue;
+        const dias = Math.floor((new Date(q.prazoResposta).getTime() - hoje) / msPorDia);
+        if (dias < 0) vencidos.push(q);
+        else if (dias <= diasAlerta) proximos.push(q);
+      }
+      return { vencidos, proximos };
+    }),
+
   /** Atualiza o status de uma cotação (ex.: marcar como respondida/descartada). */
   setStatus: protectedProcedure
     .input(

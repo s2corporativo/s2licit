@@ -2939,6 +2939,8 @@ export const emailQuotations = mysqlTable(
     orgao: varchar("orgao", { length: 256 }),          // órgão identificado (heurística)
     bodyText: text("bodyText"),
     receivedAt: timestamp("receivedAt"),
+    // Prazo para responder a cotação (para alertas de prazo)
+    prazoResposta: date("prazoResposta"),
     // Origem da extração dos itens
     sourceType: mysqlEnum("sourceType", ["spreadsheet", "pdf", "docx", "body", "manual"]).default("body").notNull(),
     sourceFilename: varchar("sourceFilename", { length: 512 }),
@@ -2955,6 +2957,7 @@ export const emailQuotations = mysqlTable(
     index("idx_email_quotations_status").on(table.status),
     index("idx_email_quotations_received").on(table.receivedAt),
     index("idx_email_quotations_from").on(table.fromAddress),
+    index("idx_email_quotations_prazo").on(table.prazoResposta),
   ]
 );
 export type EmailQuotation = typeof emailQuotations.$inferSelect;
