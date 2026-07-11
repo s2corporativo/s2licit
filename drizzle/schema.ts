@@ -3143,3 +3143,34 @@ export const funilEventos = mysqlTable(
   (table) => [index("idx_funil_eventos_oportunidade").on(table.oportunidadeId)]
 );
 export type FunilEvento = typeof funilEventos.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Motor Tributário (Tax Engine): regras versionadas com vigência, por UF.
+// O sistema NÃO afirma enquadramento — calcula estimativas a partir das
+// regras cadastradas (validação contábil é responsabilidade do operador).
+// ─────────────────────────────────────────────────────────────────────────────
+export const taxRules = mysqlTable(
+  "tax_rules",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    descricao: varchar("descricao", { length: 256 }).notNull(),
+    tipo: mysqlEnum("tipo", ["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "outro"]).notNull(),
+    // null = vale para qualquer UF
+    ufOrigem: varchar("ufOrigem", { length: 2 }),
+    ufDestino: varchar("ufDestino", { length: 2 }),
+    percentual: decimal("percentual", { precision: 6, scale: 3 }).notNull(),
+    vigenciaInicio: date("vigenciaInicio").notNull(),
+    vigenciaFim: date("vigenciaFim"),
+    ativo: boolean("ativo").notNull().default(true),
+    observacoes: text("observacoes"),
+    criadoPor: varchar("criadoPor", { length: 128 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_tax_rules_tipo").on(table.tipo),
+    index("idx_tax_rules_uf").on(table.ufDestino),
+    index("idx_tax_rules_ativo").on(table.ativo),
+  ]
+);
+export type TaxRule = typeof taxRules.$inferSelect;

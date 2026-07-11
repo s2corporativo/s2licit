@@ -57,6 +57,7 @@ import { portalCredentialsRouter } from "./routers/portalCredentials";
 import { agendaRouter } from "./routers/agenda";
 import { desempenhoRouter } from "./routers/desempenho";
 import { funilRouter } from "./routers/funil";
+import { taxRulesRouter } from "./routers/taxRules";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
@@ -247,6 +248,7 @@ export const appRouter = router({
   agenda: agendaRouter,
   desempenho: desempenhoRouter,
   funil: funilRouter,
+  taxRules: taxRulesRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
