@@ -48,6 +48,7 @@ import { duplicateDetectionRouter } from "./routers/duplicateDetectionRouter";
 import { executiveDecisionRouter } from "./routers/executiveDecisionRouter";
 import { postAwardContractsRouter } from "./routers/postAwardContractsRouter";
 import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
+import { pncpRadarRouter } from "./routers/pncpRadar";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
@@ -226,6 +227,7 @@ export const appRouter = router({
   documents: documentGovernanceRouter,
   workflow: workflowRouter,
   operations: operationsRouter,
+  pncpRadar: pncpRadarRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
@@ -440,6 +442,8 @@ export const appRouter = router({
           priceUnit: z.string().optional().nullable(),
           stock: z.string().optional().nullable(),
           barcode: z.string().optional().nullable(),
+          catmasCode: z.string().max(32).optional().nullable(),
+          catmatCode: z.string().max(32).optional().nullable(),
           mapa: z.string().optional().nullable().refine(
             (v) => { if (!v) return true; const n = parseFloat(v.replace(',','.')); return isNaN(n) || n > 0; },
             { message: "Registro MAPA deve ser positivo" }
@@ -472,6 +476,8 @@ export const appRouter = router({
           ean: z.string().optional().nullable(),
           registroRegulatorio: z.enum(["MAPA", "ANVISA", "FORN"]).optional().nullable(),
           codigoFornecedor: z.string().optional().nullable(),
+          catmasCode: z.string().max(32).optional().nullable(),
+          catmatCode: z.string().max(32).optional().nullable(),
           informacaoTecnica: z.string().optional().nullable(),
           fichaTecnica: z.string().optional().nullable(),
           subcategoria: z.string().optional().nullable(),

@@ -123,6 +123,10 @@ export const products = mysqlTable(
   nomeNormalizado: varchar("nomeNormalizado", { length: 512 }),
   metadataExtractedAt: timestamp("metadataExtractedAt"),
     ean: varchar("ean", { length: 64 }),                             // EAN/GTIN padronizado (alias de gtin)
+    // Códigos de catálogo governamental — permitem matching determinístico
+    // por código nas cotações do Compras MG (CATMAS) e federais (CATMAT).
+    catmasCode: varchar("catmasCode", { length: 32 }),               // Catálogo de Materiais e Serviços de MG
+    catmatCode: varchar("catmatCode", { length: 32 }),               // Catálogo de Materiais federal (Compras.gov.br)
     freightValue: decimal("freightValue", { precision: 12, scale: 2 }),
     taxValue: decimal("taxValue", { precision: 12, scale: 2 }),
     imageUrl: text("imageUrl"),
@@ -143,6 +147,8 @@ export const products = mysqlTable(
     index("idx_products_is_active").on(table.isActive),
     index("idx_products_manufacturer").on(table.manufacturer),
     index("idx_products_ean").on(table.ean),
+    index("idx_products_catmas").on(table.catmasCode),
+    index("idx_products_catmat").on(table.catmatCode),
     index("idx_products_gtin").on(table.gtin),
     index("idx_products_barcode").on(table.barcode),
     index("idx_products_mapa").on(table.mapa),

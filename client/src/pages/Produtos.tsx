@@ -187,6 +187,8 @@ function EditModal({
     barcode: product.barcode ?? "",
     gtin: (product as any).gtin ?? "",
     codigoFornecedor: (product as any).codigoFornecedor ?? "",
+    catmasCode: (product as any).catmasCode ?? "",
+    catmatCode: (product as any).catmatCode ?? "",
     informacaoTecnica: (product as any).informacaoTecnica ?? "",
     fichaTecnica: (product as any).fichaTecnica ?? "",
     subcategoria: (product as any).subcategoria ?? "",
@@ -263,6 +265,8 @@ function EditModal({
       ean: (form as any).ean || (form as any).gtin || null,
       registroRegulatorio: (form as any).registroRegulatorio || null,
       codigoFornecedor: (form as any).codigoFornecedor || null,
+      catmasCode: (form as any).catmasCode || null,
+      catmatCode: (form as any).catmatCode || null,
       informacaoTecnica: (form as any).informacaoTecnica || null,
       fichaTecnica: (form as any).fichaTecnica || null,
       subcategoria: (form as any).subcategoria || null,
@@ -450,6 +454,8 @@ function EditModal({
             {/* EAN/GTIN, Código Fornecedor e Informação Técnica */}
             <Field label="EAN / GTIN / Código de Barras" field="ean" placeholder="Ex: 7891234567890" hint="Código GTIN, EAN-13 ou EAN-8" />
             <Field label="Código Fornecedor" field="codigoFornecedor" placeholder="Ex: F-00123" hint="Código interno do fornecedor para este produto" />
+            <Field label="Código CATMAS (Compras MG)" field="catmasCode" placeholder="Ex: 001234567" hint="Código do item no catálogo do Estado de MG — usado no cruzamento de cotações" />
+            <Field label="Código CATMAT (federal)" field="catmatCode" placeholder="Ex: 123456" hint="Código do item no catálogo Compras.gov.br" />
             <div>
               <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">Registro Regulatório</label>
               <select
