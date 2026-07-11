@@ -28,23 +28,16 @@ import Sinonimos from "./pages/Sinonimos";
 import TemplatesProposta from "./pages/TemplatesProposta";
 import PropostaAutomatica from "./pages/PropostaAutomatica";
 import { DataQualityDashboard } from "./pages/DataQualityDashboard";
-import { GestaoProducts } from "./pages/GestaoProducts";
-import { ComparadorFornecedores } from "./pages/ComparadorFornecedores";
-import { Orcamentos } from "./pages/Orcamentos";
 import { ImportarNfe } from "./pages/ImportarNfe";
-import ConfiguradorScraper from "./pages/ConfiguradorScraper";
 import ConfiguradorFornecedores from "./pages/ConfiguradorFornecedores";
-import ConfiguradorPrecificacao from "./pages/ConfiguradorPrecificacao";
 import AplicarPrecificacao from "./pages/AplicarPrecificacao";
 import RegrasCategoria from "./pages/RegrasCategoria";
 import { AnalisePrecosV2 } from "./pages/AnalisePrecosV2";
 import ScraperFornecedores from "./pages/ScraperFornecedores";
 import AgenteProposta from "./pages/AgenteProposta";
 import Agente from "./pages/Agente";
-import MarginOptimization from "./pages/MarginOptimization";
 import { CaptureReview } from "./pages/CaptureReview";
 import { CaptureSchedulerMonitor } from "./pages/CaptureSchedulerMonitor";
-import { AIEnrichment } from "./pages/AIEnrichment";
 import { CaptureAnalytics } from "./pages/CaptureAnalytics";
 import { NfeEnrichmentPipeline } from "./pages/NfeEnrichmentPipeline";
 import HistoricoEnriquecimento from "./pages/HistoricoEnriquecimento";
@@ -92,17 +85,6 @@ function Router() {
         <Route path="/comparacao" component={Comparacao} />
         <Route path="/categorias" component={Categorias} />
         <Route path="/produtos" component={Produtos} />
-        <Route path="/gestao-produtos">
-          <RequireAuth message="Gerencie produtos após fazer login." minRole="editor">
-            <GestaoProducts />
-          </RequireAuth>
-        </Route>
-        <Route path="/comparador-fornecedores" component={ComparadorFornecedores} />
-        <Route path="/orcamentos">
-          <RequireAuth message="Crie orçamentos após fazer login.">
-            <Orcamentos />
-          </RequireAuth>
-        </Route>
         <Route path="/equivalencias" component={Equivalencias} />
         <Route path="/qualidade">
           <RequireAuth message="Acesse o Dashboard de Qualidade após fazer login." minRole="editor">
@@ -124,19 +106,9 @@ function Router() {
             <ImportarNfe />
           </RequireAuth>
         </Route>
-        <Route path="/configurador-scraper">
-          <RequireAuth message="Configure o scraper automático após fazer login." minRole="admin">
-            <ConfiguradorScraper />
-          </RequireAuth>
-        </Route>
         <Route path="/configurador-fornecedores">
           <RequireAuth message="Configure fornecedores após fazer login." minRole="admin">
             <ConfiguradorFornecedores />
-          </RequireAuth>
-        </Route>
-        <Route path="/configurador-precificacao">
-          <RequireAuth message="Configure precificação após fazer login." minRole="admin">
-            <ConfiguradorPrecificacao />
           </RequireAuth>
         </Route>
         <Route path="/aplicar-precificacao">
@@ -154,11 +126,6 @@ function Router() {
             <AnalisePrecosV2 />
           </RequireAuth>
         </Route>
-        <Route path="/margens">
-          <RequireAuth message="Acesse o painel de margens após fazer login." minRole="editor">
-            <MarginOptimization />
-          </RequireAuth>
-        </Route>
         <Route path="/captura-revisao">
           <RequireAuth message="Revise produtos capturados após fazer login." minRole="editor">
             <CaptureReview />
@@ -167,11 +134,6 @@ function Router() {
         <Route path="/captura-scheduler">
           <RequireAuth message="Gerencie agendamentos de captura após fazer login." minRole="editor">
             <CaptureSchedulerMonitor />
-          </RequireAuth>
-        </Route>
-        <Route path="/enriquecimento-ia">
-          <RequireAuth message="Enriqueça produtos com IA após fazer login." minRole="editor">
-            <AIEnrichment />
           </RequireAuth>
         </Route>
         <Route path="/captura-analytics">

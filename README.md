@@ -126,10 +126,12 @@ Um provedor OAuth externo continua suportado (defina `OAUTH_SERVER_URL` e
 
 ## Deploy
 
-Há um `render.yaml` e um `render.Dockerfile` prontos para o [Render](https://render.com).
-Configure os segredos (`DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`,
-`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ANTHROPIC_API_KEY`) no painel do serviço.
-O health check responde em `/healthz`.
+O deploy roda em VPS (Contabo) via Docker Compose — veja **`DEPLOY-CONTABO.md`**
+para o passo a passo, ou use o workflow **Deploy VPS** (GitHub → Actions), que
+publica automaticamente a cada merge no `main`. Configure os segredos
+(`DATABASE_URL`/credenciais do banco, `JWT_SECRET`, `ENCRYPTION_KEY`,
+`ADMIN_EMAIL`, `ADMIN_PASSWORD`, chaves de IA) no `.env` da VPS. O health
+check responde em `/healthz`.
 
 ## Integração contínua
 

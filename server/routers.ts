@@ -4,7 +4,6 @@ import { duplicatesRouter } from "./routers/duplicates";
 import { drogavetRouter } from "./routers/drogavet";
 import { imagesRouter } from "./routers/images";
 import { recognitionRouter } from "./routers/recognition";
-import { enrichmentRouter } from "./routers/enrichment";
 import { reclassificationRouter } from "./routers/reclassification";
 import { importConsolidatedRouter } from "./routers/importConsolidated";
 import { productMatchingRouter } from "./routers/productMatching";
@@ -15,7 +14,6 @@ import { editalAnalyzerRouter } from "./routers/editalAnalyzer";
 import { nfeImportRouter } from "./routers/nfeImport";
 import { priceSyncRouter } from "./routers/priceSync";
 import { priceImportRouter } from "./routers/priceImport";
-import { scraperRouter } from "./routers/scraper";
 import { scraperMultiRouter } from "./routers/scraperMulti";
 import { scraperSyncRouter } from "./routers/scraperSync";
 import { priceAnalysisRouter } from "./routers/priceAnalysis";
@@ -31,7 +29,6 @@ import { priceAlertsRouter } from "./routers/priceAlerts";
 import { captureReviewRouter } from "./routers/captureReview";
 import { captureSchedulerRouter } from "./routers/captureScheduler";
 import { scraperIntegrationRouter } from "./routers/scraperIntegration";
-import { aiEnrichmentRouter } from "./routers/aiEnrichment";
 import { captureAnalyticsRouter } from "./routers/captureAnalytics";
 import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
 import { notificationWebhooksRouter } from "./routers/notificationWebhooks";
@@ -213,7 +210,6 @@ export const appRouter = router({
   nfeImport: nfeImportRouter,
   priceSync: priceSyncRouter,
   priceImport: priceImportRouter,
-  scraper: scraperRouter,
   scraperMulti: scraperMultiRouter,
   scraperSync: scraperSyncRouter,
   priceAnalysis: priceAnalysisRouter,
@@ -233,7 +229,6 @@ export const appRouter = router({
   captureReview: captureReviewRouter,
   captureScheduler: captureSchedulerRouter,
   scraperIntegration: scraperIntegrationRouter,
-  aiEnrichment: aiEnrichmentRouter,
   captureAnalytics: captureAnalyticsRouter,
   nfeEnrichmentPipeline: nfeEnrichmentPipelineRouter,
   notificationWebhooks: notificationWebhooksRouter,

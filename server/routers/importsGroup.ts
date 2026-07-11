@@ -137,7 +137,7 @@ import {
 import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc, lt, gt, gte } from "drizzle-orm";
 import { getSessionCookieOptions } from "../_core/cookies";
 import { systemRouter } from "../_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 
 export const importsRouter = router({
     list: protectedProcedure

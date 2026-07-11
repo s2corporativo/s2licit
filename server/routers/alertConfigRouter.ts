@@ -5,16 +5,17 @@ import { getDb } from "../db";
 
 export const alertConfigRouter = router({
   getConfig: protectedProcedure.query(async ({ ctx }) => {
-    const db = await getDb();
-    if (!db) throw new Error("Database connection failed");
-    
-    // Placeholder - implement when alert_configs table is available
-    return { 
-      userId: ctx.user.id, 
-      priceVariationThreshold: 10, 
-      notifyOnScraperFailure: true, 
-      notifyOnNewTenders: true, 
-      emailNotifications: true 
+    // Não há tabela de configuração de alertas no schema. Devolvemos os
+    // padrões marcados EXPLICITAMENTE como não-persistidos, para a UI não
+    // fingir que existe estado salvo (os alertas usam os defaults do
+    // scheduler: ALERT_DAYS/DEADLINE_DAYS em services/scheduledJobs.ts).
+    return {
+      userId: ctx.user.id,
+      persisted: false as const,
+      priceVariationThreshold: 10,
+      notifyOnScraperFailure: true,
+      notifyOnNewTenders: true,
+      emailNotifications: true,
     };
   }),
 
