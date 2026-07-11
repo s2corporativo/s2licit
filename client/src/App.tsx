@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -5,72 +6,90 @@ import { Route, Switch, Redirect } from "wouter";
 import AppLayout from "./components/AppLayout";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import BuscaRapida from "./pages/BuscaRapida";
-import Comparacao from "./pages/Comparacao";
-import ConfiguracaoEmpresa from "./pages/ConfiguracaoEmpresa";
-import Dashboard from "./pages/Dashboard";
-import Categorias from "./pages/Categorias";
-import Equivalencias from "./pages/Equivalencias";
-import Fornecedores from "./pages/Fornecedores";
-import ImportarPlanilha from "./pages/ImportarPlanilha";
-import PropostaEditor from "./pages/PropostaEditor";
-import Propostas from "./pages/Propostas";
-import PropostasAdmin from "./pages/PropostasAdmin";
-import ControleFinanceiro from "./pages/ControleFinanceiro";
-import Produtos from "./pages/Produtos";
-import GestaoImagens from "./pages/GestaoImagens";
 import RequireAuth from "./components/RequireAuth";
-import PropostaRapida from "./pages/PropostaRapida";
-import EnriquecimentoCatalogo from "./pages/EnriquecimentoCatalogo";
-import ReclassificacaoIA from "./pages/ReclassificacaoIA";
-import ImportarEdital from "./pages/ImportarEdital";
-import Sinonimos from "./pages/Sinonimos";
-import TemplatesProposta from "./pages/TemplatesProposta";
-import PropostaAutomatica from "./pages/PropostaAutomatica";
-import { DataQualityDashboard } from "./pages/DataQualityDashboard";
-import { ImportarNfe } from "./pages/ImportarNfe";
-import ConfiguradorFornecedores from "./pages/ConfiguradorFornecedores";
-import AplicarPrecificacao from "./pages/AplicarPrecificacao";
-import RegrasCategoria from "./pages/RegrasCategoria";
-import { AnalisePrecosV2 } from "./pages/AnalisePrecosV2";
-import ScraperFornecedores from "./pages/ScraperFornecedores";
-import AgenteProposta from "./pages/AgenteProposta";
-import Agente from "./pages/Agente";
-import { CaptureReview } from "./pages/CaptureReview";
-import { CaptureSchedulerMonitor } from "./pages/CaptureSchedulerMonitor";
-import { CaptureAnalytics } from "./pages/CaptureAnalytics";
-import { NfeEnrichmentPipeline } from "./pages/NfeEnrichmentPipeline";
-import HistoricoEnriquecimento from "./pages/HistoricoEnriquecimento";
-import DiligenciasPage from "./pages/Diligencias";
-import DocumentosHabilitacaoPage from "./pages/DocumentosHabilitacao";
-import CentralOperacional from "./pages/CentralOperacional";
-import CotacoesRecebidas from "./pages/CotacoesRecebidas";
-import RadarPncp from "./pages/RadarPncp";
-import Certidoes from "./pages/Certidoes";
-import CentralIA from "./pages/CentralIA";
-import SalaDisputa from "./pages/SalaDisputa";
-import PortaisLicitacao from "./pages/PortaisLicitacao";
-import Agenda from "./pages/Agenda";
-import Desempenho from "./pages/Desempenho";
-import Funil from "./pages/Funil";
-import MotorTributario from "./pages/MotorTributario";
-import CustoTotal from "./pages/CustoTotal";
-import PosVenda from "./pages/PosVenda";
-import BuscaGlobal from "./pages/BuscaGlobal";
-import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
-import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
-import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
-import { DatabaseIntegrityCheck } from "./pages/DatabaseIntegrityCheck";
-import Login from "./pages/Login";
+
+// Todas as telas são carregadas sob demanda (code-splitting): o navegador só
+// baixa o pedaço da tela que está sendo aberta, em vez do sistema inteiro de
+// uma vez. É o que mantém a abertura rápida mesmo com 60+ telas.
+const named = <T extends string>(p: Promise<Record<T, React.ComponentType<any>>>, key: T) =>
+  p.then((m) => ({ default: m[key] }));
+
+const BuscaRapida = lazy(() => import("./pages/BuscaRapida"));
+const Comparacao = lazy(() => import("./pages/Comparacao"));
+const ConfiguracaoEmpresa = lazy(() => import("./pages/ConfiguracaoEmpresa"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Categorias = lazy(() => import("./pages/Categorias"));
+const Equivalencias = lazy(() => import("./pages/Equivalencias"));
+const Fornecedores = lazy(() => import("./pages/Fornecedores"));
+const ImportarPlanilha = lazy(() => import("./pages/ImportarPlanilha"));
+const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
+const Propostas = lazy(() => import("./pages/Propostas"));
+const PropostasAdmin = lazy(() => import("./pages/PropostasAdmin"));
+const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
+const Produtos = lazy(() => import("./pages/Produtos"));
+const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
+const PropostaRapida = lazy(() => import("./pages/PropostaRapida"));
+const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
+const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
+const ImportarEdital = lazy(() => import("./pages/ImportarEdital"));
+const Sinonimos = lazy(() => import("./pages/Sinonimos"));
+const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
+const PropostaAutomatica = lazy(() => import("./pages/PropostaAutomatica"));
+const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
+const ImportarNfe = lazy(() => named(import("./pages/ImportarNfe"), "ImportarNfe"));
+const ConfiguradorFornecedores = lazy(() => import("./pages/ConfiguradorFornecedores"));
+const AplicarPrecificacao = lazy(() => import("./pages/AplicarPrecificacao"));
+const RegrasCategoria = lazy(() => import("./pages/RegrasCategoria"));
+const AnalisePrecosV2 = lazy(() => named(import("./pages/AnalisePrecosV2"), "AnalisePrecosV2"));
+const ScraperFornecedores = lazy(() => import("./pages/ScraperFornecedores"));
+const AgenteProposta = lazy(() => import("./pages/AgenteProposta"));
+const Agente = lazy(() => import("./pages/Agente"));
+const CaptureReview = lazy(() => named(import("./pages/CaptureReview"), "CaptureReview"));
+const CaptureSchedulerMonitor = lazy(() => named(import("./pages/CaptureSchedulerMonitor"), "CaptureSchedulerMonitor"));
+const CaptureAnalytics = lazy(() => named(import("./pages/CaptureAnalytics"), "CaptureAnalytics"));
+const NfeEnrichmentPipeline = lazy(() => named(import("./pages/NfeEnrichmentPipeline"), "NfeEnrichmentPipeline"));
+const HistoricoEnriquecimento = lazy(() => import("./pages/HistoricoEnriquecimento"));
+const DiligenciasPage = lazy(() => import("./pages/Diligencias"));
+const DocumentosHabilitacaoPage = lazy(() => import("./pages/DocumentosHabilitacao"));
+const CentralOperacional = lazy(() => import("./pages/CentralOperacional"));
+const CotacoesRecebidas = lazy(() => import("./pages/CotacoesRecebidas"));
+const RadarPncp = lazy(() => import("./pages/RadarPncp"));
+const Certidoes = lazy(() => import("./pages/Certidoes"));
+const CentralIA = lazy(() => import("./pages/CentralIA"));
+const SalaDisputa = lazy(() => import("./pages/SalaDisputa"));
+const PortaisLicitacao = lazy(() => import("./pages/PortaisLicitacao"));
+const Agenda = lazy(() => import("./pages/Agenda"));
+const Desempenho = lazy(() => import("./pages/Desempenho"));
+const Funil = lazy(() => import("./pages/Funil"));
+const MotorTributario = lazy(() => import("./pages/MotorTributario"));
+const CustoTotal = lazy(() => import("./pages/CustoTotal"));
+const PosVenda = lazy(() => import("./pages/PosVenda"));
+const BuscaGlobal = lazy(() => import("./pages/BuscaGlobal"));
+const ExecutiveDecisionCenter = lazy(() => import("./pages/ExecutiveDecisionCenter"));
+const PostAwardContractsCenter = lazy(() => import("./pages/PostAwardContractsCenter"));
+const IntelligentCaptureCenter = lazy(() => import("./pages/IntelligentCaptureCenter"));
+const DatabaseIntegrityCheck = lazy(() => named(import("./pages/DatabaseIntegrityCheck"), "DatabaseIntegrityCheck"));
+const Login = lazy(() => import("./pages/Login"));
+
+function PageLoading() {
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="w-8 h-1 bg-blue-800 animate-pulse rounded" />
+    </div>
+  );
+}
 
 function Router() {
   return (
     <Switch>
       {/* Login fica fora do layout e da exigência de autenticação */}
-      <Route path="/login" component={Login} />
+      <Route path="/login">
+        <Suspense fallback={<PageLoading />}><Login /></Suspense>
+      </Route>
       <Route>
         <AppLayout>
           <RequireAuth message="Faça login para acessar o sistema.">
+            <Suspense fallback={<PageLoading />}>
             <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/dashboard"><Redirect to="/" /></Route>
@@ -299,6 +318,7 @@ function Router() {
             <Route path="/404" component={NotFound} />
             <Route component={NotFound} />
             </Switch>
+            </Suspense>
           </RequireAuth>
         </AppLayout>
       </Route>

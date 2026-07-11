@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import compression from "compression";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -44,6 +45,9 @@ async function startServer() {
   // Atrás de proxy reverso (Render, nginx), confiar no primeiro salto para
   // que req.ip reflita o cliente real (necessário para o rate limiter).
   app.set("trust proxy", 1);
+  // Compressão gzip de todas as respostas (HTML/JS/CSS/JSON) — corta o
+  // tamanho na rede em ~3x e é o principal ganho de velocidade de abertura.
+  app.use(compression());
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

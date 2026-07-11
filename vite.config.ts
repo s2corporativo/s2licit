@@ -18,6 +18,16 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Separa as libs grandes em chunks próprios: mudam pouco, ficam em cache
+    // do navegador entre deploys e não voltam a ser baixadas a cada visita.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "react-vendor": ["react", "react-dom", "wouter"],
+          "query-vendor": ["@tanstack/react-query", "@trpc/client", "@trpc/react-query"],
+        },
+      },
+    },
   },
   server: {
     host: true,
