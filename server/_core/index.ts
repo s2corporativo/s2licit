@@ -50,6 +50,10 @@ async function startServer() {
   app.use("/api", apiRateLimiter);
   app.use("/api/auth", authRateLimiter);
   app.use("/api/oauth", authRateLimiter);
+  // Health check (usado pelo Render e por monitoramento externo)
+  app.get("/healthz", (_req, res) => {
+    res.json({ status: "ok", uptime: process.uptime() });
+  });
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // Login local (email/senha) — modo padrão fora da plataforma Manus

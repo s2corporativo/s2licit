@@ -16,10 +16,10 @@ echo.
 echo =============================================
 echo.
 
-REM Abre navegador com login automatico apos 5 segundos
-start /b cmd /c "timeout /t 5 /nobreak >/dev/null && start http://localhost:5000/api/local-login"
+REM Abre o navegador na tela de login apos 5 segundos
+start /b cmd /c "timeout /t 5 /nobreak >nul && start http://localhost:3000/login"
 
 REM Inicia o servidor
-call pnpm dev 2>/dev/null || call npx tsx server/_core/index.ts
+call pnpm dev 2>nul || call npx tsx server/_core/index.ts
 
 pause
