@@ -51,6 +51,8 @@ import HistoricoEnriquecimento from "./pages/HistoricoEnriquecimento";
 import DiligenciasPage from "./pages/Diligencias";
 import DocumentosHabilitacaoPage from "./pages/DocumentosHabilitacao";
 import CentralOperacional from "./pages/CentralOperacional";
+import CotacoesRecebidas from "./pages/CotacoesRecebidas";
+import RadarPncp from "./pages/RadarPncp";
 import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
 import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
 import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
@@ -162,6 +164,16 @@ function Router() {
         <Route path="/central-operacional">
           <RequireAuth message="Acesse a central operacional após fazer login." minRole="editor">
             <CentralOperacional />
+          </RequireAuth>
+        </Route>
+        <Route path="/cotacoes-recebidas">
+          <RequireAuth message="Acesse as cotações recebidas após fazer login." minRole="editor">
+            <CotacoesRecebidas />
+          </RequireAuth>
+        </Route>
+        <Route path="/radar-pncp">
+          <RequireAuth message="Acesse o radar de oportunidades após fazer login." minRole="editor">
+            <RadarPncp />
           </RequireAuth>
         </Route>
         <Route path="/documentos-habilitacao">

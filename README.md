@@ -85,9 +85,16 @@ Um provedor OAuth externo continua suportado (defina `OAUTH_SERVER_URL` e
 
 ## Integrações de compras públicas
 
-- **PNCP** (Portal Nacional de Contratações Públicas): consulta pública de
-  oportunidades por palavra-chave e UF, via o router `pncpRadar`. Não exige
-  chave.
+- **Cotações por e-mail** (tela "Cotações Recebidas"): um conector IMAP busca
+  os pedidos de cotação recebidos (Compras MG/COTEP, FUNARB, COPASA, Cemig,
+  etc.), extrai os itens dos anexos (planilha de forma estruturada; PDF/DOCX
+  com auxílio de IA) e cruza cada item com o catálogo — por código CATMAS/
+  CATMAT (exato) ou por similaridade de nome. O operador revisa e confirma os
+  matches. Configure `IMAP_HOST`/`IMAP_USER`/`IMAP_PASSWORD` para habilitar a
+  sincronização.
+- **PNCP** (Portal Nacional de Contratações Públicas): tela "Radar de
+  Oportunidades" — consulta pública de licitações por palavra-chave e UF. Não
+  exige chave.
 - **Compras MG / CATMAS**: produtos têm os campos `catmasCode` (catálogo
   estadual) e `catmatCode` (catálogo federal), base para o cruzamento
   determinístico de cotações por código. A API de dados de Compras MG

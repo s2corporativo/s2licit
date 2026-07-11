@@ -2306,6 +2306,42 @@ export async function searchProductsByName(nameTerm: string, limit = 50) {
   return rows;
 }
 
+/** Busca um produto ativo pelo código CATMAS (Compras MG). */
+export async function findProductByCatmas(code: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ id: products.id, name: products.name, price: products.price })
+    .from(products)
+    .where(eq(products.catmasCode, code))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Busca um produto ativo pelo código CATMAT (federal). */
+export async function findProductByCatmat(code: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({ id: products.id, name: products.name, price: products.price })
+    .from(products)
+    .where(eq(products.catmatCode, code))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Retorna id/nome/preço de todos os produtos ativos (para matching por nome). */
+export async function listProductsForMatching(limit = 20000) {
+  const db = await getDb();
+  if (!db) return [] as Array<{ id: number; name: string; price: string | null }>;
+  const rows = await db
+    .select({ id: products.id, name: products.name, price: products.price })
+    .from(products)
+    .where(eq(products.isActive, "yes"))
+    .limit(limit);
+  return rows;
+}
+
 /** Apply an imageUrl to all products whose name contains nameTerm */
 export async function applyImageByName(nameTerm: string, imageUrl: string) {
   const db = await getDb();

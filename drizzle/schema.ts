@@ -2921,3 +2921,69 @@ export const capturedProductSourceLogs = mysqlTable(
 );
 export type CapturedProductSourceLog = typeof capturedProductSourceLogs.$inferSelect;
 export type InsertCapturedProductSourceLog = typeof capturedProductSourceLogs.$inferInsert;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cotações recebidas por e-mail (Compras MG/COTEP, FUNARB, COPASA, Cemig, etc.)
+// Um e-mail de pedido de cotação vira um registro com N itens; cada item é
+// cruzado com o catálogo de produtos (matching por código CATMAS/CATMAT ou nome).
+// ─────────────────────────────────────────────────────────────────────────────
+export const emailQuotations = mysqlTable(
+  "email_quotations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Identificador único da mensagem (Message-ID) para deduplicação
+    messageId: varchar("messageId", { length: 512 }).notNull().unique(),
+    fromAddress: varchar("fromAddress", { length: 320 }),
+    fromName: varchar("fromName", { length: 256 }),
+    subject: varchar("subject", { length: 512 }),
+    orgao: varchar("orgao", { length: 256 }),          // órgão identificado (heurística)
+    bodyText: text("bodyText"),
+    receivedAt: timestamp("receivedAt"),
+    // Origem da extração dos itens
+    sourceType: mysqlEnum("sourceType", ["spreadsheet", "pdf", "docx", "body", "manual"]).default("body").notNull(),
+    sourceFilename: varchar("sourceFilename", { length: 512 }),
+    status: mysqlEnum("status", ["nova", "processando", "revisao", "respondida", "descartada", "erro"])
+      .default("nova")
+      .notNull(),
+    totalItems: int("totalItems").notNull().default(0),
+    matchedItems: int("matchedItems").notNull().default(0),
+    errorMessage: text("errorMessage"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_email_quotations_status").on(table.status),
+    index("idx_email_quotations_received").on(table.receivedAt),
+    index("idx_email_quotations_from").on(table.fromAddress),
+  ]
+);
+export type EmailQuotation = typeof emailQuotations.$inferSelect;
+export type InsertEmailQuotation = typeof emailQuotations.$inferInsert;
+
+export const emailQuotationItems = mysqlTable(
+  "email_quotation_items",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    quotationId: int("quotationId").notNull().references(() => emailQuotations.id, { onDelete: "cascade" }),
+    numeroItem: int("numeroItem"),
+    descricao: text("descricao").notNull(),
+    quantidade: decimal("quantidade", { precision: 15, scale: 4 }),
+    unidade: varchar("unidade", { length: 64 }),
+    codigoCatalogo: varchar("codigoCatalogo", { length: 64 }),   // CATMAS/CATMAT informado no pedido
+    // Resultado do matching contra o catálogo
+    produtoMatchId: int("produtoMatchId"),
+    matchScore: decimal("matchScore", { precision: 5, scale: 4 }), // 0.0000 a 1.0000
+    matchMethod: mysqlEnum("matchMethod", ["catmas", "catmat", "nome", "manual", "nenhum"]).default("nenhum").notNull(),
+    matchConfirmado: boolean("matchConfirmado").notNull().default(false),
+    precoSugerido: decimal("precoSugerido", { precision: 15, scale: 4 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_email_quotation_items_quotation").on(table.quotationId),
+    index("idx_email_quotation_items_produto").on(table.produtoMatchId),
+    index("idx_email_quotation_items_catalogo").on(table.codigoCatalogo),
+  ]
+);
+export type EmailQuotationItem = typeof emailQuotationItems.$inferSelect;
+export type InsertEmailQuotationItem = typeof emailQuotationItems.$inferInsert;

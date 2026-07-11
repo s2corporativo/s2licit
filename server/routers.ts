@@ -49,6 +49,7 @@ import { executiveDecisionRouter } from "./routers/executiveDecisionRouter";
 import { postAwardContractsRouter } from "./routers/postAwardContractsRouter";
 import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
 import { pncpRadarRouter } from "./routers/pncpRadar";
+import { emailQuotationsRouter } from "./routers/emailQuotations";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
@@ -228,6 +229,7 @@ export const appRouter = router({
   workflow: workflowRouter,
   operations: operationsRouter,
   pncpRadar: pncpRadarRouter,
+  emailQuotations: emailQuotationsRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
