@@ -1,5 +1,5 @@
 import { getDb } from "../db";
-import { products, suppliers } from "../../drizzle/schema";
+import { products, suppliers, priceHistory } from "../../drizzle/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 
 export interface PriceVariation {
@@ -302,32 +302,60 @@ export async function getTopPriceVariations(
     throw new Error("Database connection failed");
   }
 
+  // Variação real calculada a partir do histórico de preços (price_history)
+  const history = await db
+    .select({ productId: priceHistory.productId, price: priceHistory.price })
+    .from(priceHistory);
+
+  // Agrupar min/max de preço por produto
+  const ranges = new Map<number, { min: number; max: number; count: number }>();
+  for (const entry of history) {
+    const price = parseFloat(String(entry.price ?? 0));
+    if (!price || isNaN(price)) continue;
+    const current = ranges.get(entry.productId);
+    if (!current) {
+      ranges.set(entry.productId, { min: price, max: price, count: 1 });
+    } else {
+      current.min = Math.min(current.min, price);
+      current.max = Math.max(current.max, price);
+      current.count += 1;
+    }
+  }
+
   const allProducts = await db.select().from(products);
 
-  // Calcular variação de cada produto (simplificado)
   const variations = [];
-
   for (const product of allProducts) {
-    const supplier = await db
-      .select()
-      .from(suppliers)
-      .where(eq(suppliers.id, product.supplierId))
-      .limit(1);
-
-    const supplierName = supplier?.[0]?.name || "Unknown";
-    const price = parseFloat(String(product.price || 0));
+    const range = ranges.get(product.id);
+    // Sem histórico suficiente (menos de 2 registros), a variação é 0 — nunca dado aleatório
+    const variation =
+      range && range.count >= 2 && range.min > 0
+        ? ((range.max - range.min) / range.min) * 100
+        : 0;
 
     variations.push({
       productId: product.id,
       productName: product.name,
       supplierId: product.supplierId,
-      supplierName,
-      price,
-      variation: Math.random() * 50, // Simplificado - em produção seria histórico
+      price: parseFloat(String(product.price || 0)),
+      variation: Math.round(variation * 100) / 100,
     });
   }
 
-  return variations
+  const top = variations
     .sort((a, b) => b.variation - a.variation)
     .slice(0, limit);
+
+  // Buscar nome do fornecedor apenas para os itens retornados
+  const result = [];
+  for (const item of top) {
+    const supplier = await db
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.id, item.supplierId))
+      .limit(1);
+    result.push({ ...item, supplierName: supplier?.[0]?.name || "Unknown" });
+  }
+
+  return result;
 }

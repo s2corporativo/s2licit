@@ -1,6 +1,7 @@
 import { invokeLLM } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
 import { validateEquivalenceForMultipleItems } from "../services/equivalenceValidationService";
+import { parsePrecoBR } from "../utils/number";
 
 
 import { TRPCError } from "@trpc/server";
@@ -180,11 +181,11 @@ export const importsRouter = router({
       )
       .mutation(async ({ input }) => {
         // ── 1. Sanitise rows: accept ALL rows that have any non-empty field ──────
+        // Parse pt-BR/US via parsePrecoBR (trata milhar "1.234,56" corretamente)
         const sanitisePrice = (v?: string) => {
           if (!v) return null;
-          const cleaned = v.replace(/[^0-9.,]/g, "").replace(",", ".");
-          const num = parseFloat(cleaned);
-          return isNaN(num) ? null : cleaned;
+          const num = parsePrecoBR(v);
+          return num === null ? null : num.toFixed(2);
         };
 
         const sanitiseText = (v?: string, maxLen = 512) => {
@@ -436,11 +437,11 @@ export const importsRouter = router({
           const t = v.trim();
           return t.length > maxLen ? t.slice(0, maxLen) : t || null;
         };
+        // Parse pt-BR/US via parsePrecoBR (trata milhar "1.234,56" corretamente)
         const sanitisePrice = (v?: string) => {
           if (!v) return null;
-          const cleaned = v.replace(/[^0-9.,]/g, "").replace(",", ".");
-          const num = parseFloat(cleaned);
-          return isNaN(num) ? null : cleaned;
+          const num = parsePrecoBR(v);
+          return num === null ? null : num.toFixed(2);
         };
 
         const validRows = input.rows.filter(r => r.nome?.trim());

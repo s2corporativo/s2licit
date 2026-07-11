@@ -1,44 +1,36 @@
 # Migrações do banco
 
-Por razões históricas (o projeto foi gerado por IA sem controle), existem
-**três conjuntos** de arquivos SQL nesta pasta. Este documento explica o
-papel de cada um e o procedimento canônico daqui para frente.
+**Fonte de verdade do schema:** `drizzle/schema.ts`.
 
-## Os três conjuntos
+## Como funciona (fluxo atual)
 
-1. **`drizzle/*.sql` (0000–0020) + `drizzle/meta/_journal.json`**
-   Migrações geradas pelo `drizzle-kit`. O `_journal.json` é a fonte de
-   verdade para o que o `drizzle-kit migrate` aplica. Corresponde ao schema
-   base do projeto.
+- **`drizzle/0000_consolidado_producao.sql` + `drizzle/meta/`**
+  Migração consolidada gerada do `schema.ts` (todas as ~109 tabelas).
+  É o que o `pnpm db:push` (= `drizzle-kit migrate`) aplica. Num banco novo,
+  cria tudo de uma vez; o drizzle registra o que já foi aplicado na tabela
+  `__drizzle_migrations` e nunca reaplica.
 
-2. **`drizzle/migrations/*.sql`**
-   Migrações **escritas à mão** para tabelas/colunas adicionadas depois
-   (numeração 0001–0002 e a partir de 0049). Todas as migrações **novas**
-   deste projeto ficam aqui (0054+ em diante: senha local, códigos de
-   catálogo, cotações por e-mail, certidões, prazo de resposta).
+- **Ao mudar o schema:** edite `drizzle/schema.ts`, rode `pnpm db:generate`
+  (gera a próxima migração numerada em `drizzle/`) e **commite** o SQL e a
+  pasta `meta/` juntos. Em produção, o boot do container roda
+  `pnpm db:push` e aplica só o que falta.
 
-3. **`drizzle/0_scraper_tables.sql`**
-   Script avulso das tabelas do scraper, fora do journal. Aplicado uma vez
-   na configuração inicial do scraper.
+- **Nunca** rode `drizzle-kit generate` em produção/container — geração é
+  passo de desenvolvimento; produção só aplica migrações commitadas.
 
-## Procedimento canônico
+## Pastas históricas (não são aplicadas automaticamente)
 
-- **Banco novo (zero):** rode `pnpm db:push`. O `drizzle-kit` gera/aplica o
-  schema a partir de `drizzle/schema.ts` (fonte de verdade do schema atual,
-  que já inclui todas as tabelas). As migrações à mão em `drizzle/migrations/`
-  são idempotentes (usam `IF NOT EXISTS` / `ADD COLUMN`) e podem ser
-  aplicadas por cima sem quebrar.
+- **`drizzle/legacy/`** — as migrações antigas (0000–0020 geradas +
+  journal antigo + `0_scraper_tables.sql`). Mantidas só como histórico;
+  o consolidado 0000 atual já cobre todo o schema.
+- **`drizzle/migrations/`** — migrações escritas à mão (0001–0061) da fase
+  em que o journal estava desatualizado. Também cobertas pelo consolidado.
+  Úteis apenas para atualizar manualmente um banco antigo pré-consolidação.
 
-- **Banco existente:** aplique apenas as migrações à mão novas
-  (`drizzle/migrations/00NN_*.sql`) na ordem numérica. Elas são escritas de
-  forma defensiva para não falhar se o objeto já existir.
+## Banco existente de antes da consolidação
 
-- **Ao adicionar uma tabela/coluna:** edite `drizzle/schema.ts` e crie um
-  arquivo `drizzle/migrations/00NN_descricao.sql` com o `ALTER`/`CREATE`
-  correspondente (idempotente). Não é necessário mexer no `_journal.json`.
-
-## Observação
-
-Não removemos os arquivos SQL legados porque bancos de produção já podem
-tê-los aplicado; apagá-los não desfaz nada no banco e só perde rastreabilidade.
-A fonte de verdade do schema é sempre `drizzle/schema.ts`.
+Um banco criado pelo fluxo antigo já tem as tabelas, mas não tem o registro
+do consolidado no `__drizzle_migrations`. Nesse caso (só uma vez):
+aplique manualmente as diferenças que faltarem e insira o registro do
+consolidado, ou (mais simples, se os dados forem descartáveis) recrie o
+banco e deixe o `pnpm db:push` criar tudo.

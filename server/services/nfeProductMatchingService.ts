@@ -1,6 +1,6 @@
 import { getDb } from "../db";
 import { products, suppliers } from "../../drizzle/schema";
-import { eq, like, and } from "drizzle-orm";
+import { eq, like, and, or } from "drizzle-orm";
 import type { NfeProduct } from "./nfeParserService";
 
 export interface MatchResult {
@@ -72,10 +72,11 @@ async function matchByEan(db: any, nfeProd: NfeProduct): Promise<MatchResult | n
   if (!nfeProd.ean) return null;
 
   try {
+    // A importação grava em products.ean; dados legados podem estar em barcode
     const existing = await db
       .select({ id: products.id, name: products.name })
       .from(products)
-      .where(eq(products.barcode, nfeProd.ean))
+      .where(or(eq(products.ean, nfeProd.ean), eq(products.barcode, nfeProd.ean)))
       .limit(1);
 
     if (existing.length > 0) {

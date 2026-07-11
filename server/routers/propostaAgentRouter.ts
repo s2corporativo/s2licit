@@ -18,7 +18,7 @@ import {
 } from "../services/propostaAgent";
 
 const portalTypeSchema = z.enum([
-  "comprasnet", "comprasmg", "fundep", "agrega", "generico"
+  "comprasnet", "comprasmg", "fundep", "funarbe", "copasa", "agrega", "generico"
 ]);
 
 export const propostaAgentRouter = router({
@@ -44,35 +44,49 @@ export const propostaAgentRouter = router({
     .input(z.object({
       propostaId: z.number(),
       portalType: portalTypeSchema,
+      // Use uma credencial salva no cofre (credencialId) OU informe inline.
+      credencialId: z.number().int().positive().optional(),
       credencial: z.object({
         email: z.string(),
         password: z.string().min(4),
         cpf: z.string().optional(),
         cnpj: z.string().optional(),
         loginUrl: z.string().optional(),
-      }),
+      }).optional(),
       urlLicitacao: z.string().url().optional(),
       modoAprovacao: z.enum(["salvar_rascunho", "enviar_direto"]).default("salvar_rascunho"),
       validadeDias: z.number().min(1).max(365).default(60),
     }))
-    .mutation(async ({ input }: { input: { propostaId: number; portalType: PortalType; credencial: { email: string; password: string; cpf?: string; cnpj?: string; loginUrl?: string }; urlLicitacao?: string; modoAprovacao: "salvar_rascunho" | "enviar_direto"; validadeDias: number } }) => {
+    .mutation(async ({ input }) => {
       const jobId = randomUUID();
 
+      // Resolve a credencial: do cofre (credencialId) ou inline.
+      let cred = input.credencial;
+      let portalType = input.portalType as PortalType;
+      if (input.credencialId) {
+        const { getPortalCredentialDecrypted } = await import("./portalCredentials");
+        const v = await getPortalCredentialDecrypted(input.credencialId);
+        if (!v) throw new Error("Credencial do portal não encontrada no cofre.");
+        cred = { email: v.usuario, password: v.senha, cnpj: v.cnpj, loginUrl: v.loginUrl };
+        portalType = v.portal;
+      }
+      if (!cred) throw new Error("Informe uma credencial (inline) ou um credencialId do cofre.");
+
       // Criptografar senha antes de passar ao job background
-      const passwordEncrypted = encryptPassword(input.credencial.password);
+      const passwordEncrypted = encryptPassword(cred.password);
 
       propostaJobs.set(jobId, { status: "running", criadoEm: new Date() });
 
       // Disparar em background
       executarAgenteProposta({
         propostaId: input.propostaId,
-        portalType: input.portalType as PortalType,
+        portalType,
         credencial: {
-          email: input.credencial.email,
+          email: cred.email,
           passwordEncrypted,
-          cpf: input.credencial.cpf,
-          cnpj: input.credencial.cnpj,
-          loginUrl: input.credencial.loginUrl,
+          cpf: cred.cpf,
+          cnpj: cred.cnpj,
+          loginUrl: cred.loginUrl,
         },
         urlLicitacao: input.urlLicitacao,
         modoAprovacao: input.modoAprovacao,

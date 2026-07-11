@@ -1,8 +1,8 @@
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
-import { products } from "../../drizzle/schema";
-import { eq, isNull, or, inArray } from "drizzle-orm";
+import { products, categories } from "../../drizzle/schema";
+import { eq, isNull, or, inArray, count } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 
 const CATEGORIES = [
@@ -44,7 +44,7 @@ export const reclassificationRouter = router({
         .offset(input.offset);
 
       const total = await db
-        .select({ count: products.id })
+        .select({ count: count() })
         .from(products)
         .where(
           or(
@@ -155,21 +155,42 @@ Responda apenas com o nome da categoria, sem explicações.`;
         }
       }
 
+      // Resolver o id de cada categoria pelo nome (case-insensitive, com trim)
+      const allCategories = await db.select().from(categories);
+      const categoryIdByName = new Map<string, number>(
+        allCategories.map((c) => [c.name.trim().toLowerCase(), c.id])
+      );
+
       let applied = 0;
+      const failures: Array<{ id: number; error: string }> = [];
       for (const update of updates) {
+        const categoryId = categoryIdByName.get(update.category.trim().toLowerCase());
+        if (categoryId === undefined) {
+          failures.push({
+            id: update.id,
+            error: `Categoria "${update.category}" não encontrada na tabela de categorias`,
+          });
+          continue;
+        }
         try {
           await db
             .update(products)
-            .set({ categoryId: parseInt(update.category, 10) })
+            .set({ categoryId })
             .where(eq(products.id, update.id));
           applied++;
         } catch (error) {
           console.error(`Erro ao atualizar produto ${update.id}:`, error);
+          failures.push({
+            id: update.id,
+            error: error instanceof Error ? error.message : "Erro desconhecido",
+          });
         }
       }
 
       return {
         applied,
+        failed: failures.length,
+        failures,
         total: updates.length,
       };
     }),
@@ -185,7 +206,7 @@ Responda apenas com o nome da categoria, sem explicações.`;
       };
     }
     const needsReclassification = await db
-      .select({ count: products.id })
+      .select({ count: count() })
       .from(products)
       .where(
         or(

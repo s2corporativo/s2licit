@@ -33,6 +33,10 @@ import {
   MailCheck,
   Radar,
   Brain,
+  Gavel,
+  KeyRound,
+  CalendarClock,
+  Trophy,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -44,6 +48,8 @@ const navGroups: NavGroup[] = [
     label: "Geral",
     items: [
       { href: "/", icon: LayoutGrid, label: "Dashboard" },
+      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
+      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
     ],
   },
   {
@@ -59,6 +65,7 @@ const navGroups: NavGroup[] = [
       { href: "/central-operacional", icon: ClipboardList, label: "Central Operacional" },
       { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações Recebidas" },
       { href: "/radar-pncp", icon: Radar, label: "Radar de Oportunidades" },
+      { href: "/sala-disputa", icon: Gavel, label: "Sala de Disputa" },
       { href: "/edital", icon: FileScan, label: "Importar Edital" },
       { href: "/proposta-rapida", icon: Sparkles, label: "Proposta Rápida" },
       { href: "/propostas", icon: FileText, label: "Propostas Comerciais" },
@@ -95,6 +102,7 @@ const navGroups: NavGroup[] = [
       { href: "/fornecedores", icon: Building2, label: "Fornecedores" },
       { href: "/agente", icon: Bot, label: "Assistente IA" },
       { href: "/agente-proposta", icon: Zap, label: "Agente de Propostas" },
+      { href: "/portais-licitacao", icon: KeyRound, label: "Portais de Licitação" },
       { href: "/captura-inteligente", icon: Globe, label: "Captura Inteligente" },
       { href: "/scraper-fornecedores", icon: Globe, label: "Agente de Preços" },
       { href: "/central-ia", icon: Brain, label: "Central de IA" },

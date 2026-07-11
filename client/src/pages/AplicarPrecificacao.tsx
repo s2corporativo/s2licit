@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,9 +19,24 @@ interface Product {
 export default function AplicarPrecificacao() {
   const [products, setProducts] = useState<Product[]>([]);
   const [marginPercentage, setMarginPercentage] = useState<string>("30");
-  const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [appliedCount, setAppliedCount] = useState(0);
+
+  const productsQuery = trpc.products.list.useQuery({ limit: 500 });
+  const isLoading = productsQuery.isLoading;
+
+  useEffect(() => {
+    if (productsQuery.data) {
+      setProducts(
+        productsQuery.data.items.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price ? parseFloat(String(p.price)) : 0,
+          selected: false,
+        }))
+      );
+    }
+  }, [productsQuery.data]);
 
   const selectedProducts = products.filter((p) => p.selected);
   const totalSelected = selectedProducts.length;
@@ -111,7 +126,7 @@ export default function AplicarPrecificacao() {
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Economia Média</CardTitle>
+              <CardTitle className="text-sm">Acréscimo Médio</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-600">
@@ -201,7 +216,12 @@ export default function AplicarPrecificacao() {
                 <CardDescription>Selecione os produtos para aplicar precificação</CardDescription>
               </CardHeader>
               <CardContent>
-                {products.length === 0 ? (
+                {isLoading ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Loader2 className="w-6 h-6 mx-auto animate-spin" />
+                    <p className="mt-2">Carregando produtos...</p>
+                  </div>
+                ) : products.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <p>Nenhum produto disponível</p>
                     <p className="text-sm mt-1">Importe produtos para começar</p>

@@ -20,7 +20,7 @@ import { decryptPassword } from "../utils/encryption";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "agrega" | "generico";
+export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "agrega" | "generico";
 
 export interface PortalConfig {
   nome: string;
@@ -198,6 +198,57 @@ export const PORTAL_CONFIGS: Record<PortalType, PortalConfig> = {
     },
   },
 
+  // ── FUNARBE (Fundação Arthur Bernardes / UFV Viçosa-MG) ───────────────────
+  // Portal: compras.funarbe.org.br — cotações, pregões e dispensas.
+  // Login do fornecedor + senha cadastrada na Funarbe.
+  funarbe: {
+    nome: "FUNARBE / Compras Funarbe (UFV)",
+    loginUrl: "https://compras.funarbe.org.br/",
+    notasImportantes:
+      "Portal de compras da Fundação Arthur Bernardes (UFV, Viçosa-MG). " +
+      "Acesse 'Portal do Fornecedor', faça login e localize a cotação/pregão em andamento. " +
+      "Confira os seletores na primeira execução — o robô loga e pré-preenche; você revisa e envia.",
+    estrategia: "form_padrao",
+    seletores: {
+      loginCpfCnpj: 'input[name*="login"], input[name*="cnpj"], input[name="email"], input[id*="login"], input[placeholder*="CNPJ"], input[placeholder*="usu"]',
+      loginSenha: 'input[type="password"], input[name*="senha"], input[name="password"]',
+      loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"], input[value="Acessar"]',
+      loginSucesso: "fornecedor",
+      tabelaItens: 'table tbody tr, .item-cotacao, tr[class*="item"], [class*="linha-item"]',
+      inputPreco: 'input[name*="preco"], input[name*="valor"], input[id*="preco"], input[type="number"]',
+      inputMarca: 'input[name*="marca"], input[id*="marca"], input[name*="fabricante"]',
+      inputValidade: 'input[name*="validade"], input[id*="validade"], input[name*="prazo"]',
+      botaoSalvar: 'button[id*="salvar"], input[value*="Salvar"], button[type="submit"]',
+      botaoEnviar: 'button[id*="enviar"], input[value*="Enviar"]',
+      confirmacaoEnvio: 'button[id*="confirmar"], input[value="Confirmar"], input[value="OK"]',
+    },
+  },
+
+  // ── COPASA (Cia. de Saneamento de MG) — Agência Virtual ───────────────────
+  // Portal: copasaportalprd.azurewebsites.net (ASP.NET). Login do fornecedor.
+  copasa: {
+    nome: "COPASA / Agência Virtual",
+    loginUrl: "https://copasaportalprd.azurewebsites.net/Copasa.Portal/Login/index",
+    notasImportantes:
+      "Agência Virtual da COPASA (fornecedores). Faça login e acesse a área de " +
+      "abastecimento/cotações. Portal ASP.NET — confira os seletores na 1ª execução. " +
+      "O robô loga e pré-preenche; você revisa e envia.",
+    estrategia: "form_padrao",
+    seletores: {
+      loginCpfCnpj: 'input[name*="Login"], input[name*="User"], input[name*="cnpj"], input[name*="cpf"], input[id*="Login"], input[id*="User"]',
+      loginSenha: 'input[type="password"], input[name*="Password"], input[name*="Senha"], input[id*="Password"]',
+      loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"], input[value="Acessar"], #btnLogin',
+      loginSucesso: "home",
+      tabelaItens: 'table tbody tr, .grid-row, tr[class*="row"], [class*="item"]',
+      inputPreco: 'input[name*="Preco"], input[name*="Valor"], input[id*="Preco"], input[type="number"]',
+      inputMarca: 'input[name*="Marca"], input[id*="Marca"], input[name*="Fabricante"]',
+      inputValidade: 'input[name*="Validade"], input[id*="Validade"], input[name*="Prazo"]',
+      botaoSalvar: 'button[id*="Salvar"], input[value*="Salvar"], button[type="submit"]',
+      botaoEnviar: 'button[id*="Enviar"], input[value*="Enviar"]',
+      confirmacaoEnvio: 'button[id*="Confirmar"], input[value="Confirmar"], input[value="OK"]',
+    },
+  },
+
   // ── Agrega (sistema de cotações eletrônicas) ──────────────────────────────
   // Plataforma usada por múltiplos órgãos públicos para cotações via web
   // Login: CNPJ + senha da empresa cadastrada
@@ -304,10 +355,16 @@ export class PropostaAgente {
   }
 
   async fechar(): Promise<void> {
+    // try/catch separados: se o page.close() falhar, o browser ainda é
+    // encerrado (senão o processo do Chromium vaza a cada erro).
     try {
-      if (this.page) { await this.page.close(); this.page = null; }
-      if (this.browser) { await this.browser.close(); this.browser = null; }
+      if (this.page) { await this.page.close(); }
     } catch {}
+    this.page = null;
+    try {
+      if (this.browser) { await this.browser.close(); }
+    } catch {}
+    this.browser = null;
   }
 
   private async esperarElemento(seletores: string, timeout = 10000): Promise<boolean> {
@@ -423,6 +480,19 @@ export class PropostaAgente {
       throw new Error(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
     }
 
+    // Confirmação positiva: indicador de sucesso na página OU URL mudou.
+    // Sem isso, CAPTCHA/manutenção/layout novo passavam como "login ok".
+    const indicador = cfg.seletores.loginSucesso?.toLowerCase();
+    const sucessoIndicado = indicador ? textoPage.toLowerCase().includes(indicador) : false;
+    const urlMudou = urlAtual !== url;
+    if (!sucessoIndicado && !urlMudou) {
+      await this.capturarTela("Login não confirmado");
+      throw new Error(
+        `Não foi possível confirmar o login no portal ${cfg.nome} — ` +
+          `indicador de sucesso ausente e a URL não mudou (CAPTCHA? layout novo? credenciais?).`,
+      );
+    }
+
     this.addLog(`✅ Login realizado. URL: ${urlAtual}`);
     await this.capturarTela("Após login");
   }
@@ -468,12 +538,12 @@ export class PropostaAgente {
     }
 
     const linhasSel = cfg.seletores.tabelaItens || "table tbody tr";
-    const linhas = await this.page.$$(linhasSel.split(",")[0].trim()).catch(() => []);
+    const linhas = await this.page.$$(linhasSel).catch(() => []);
     this.addLog(`📊 ${linhas.length} linhas detectadas`);
 
     // Buscar todos os inputs de preço da página de uma vez
     const todosInputsPreco = cfg.seletores.inputPreco
-      ? await this.page.$$(cfg.seletores.inputPreco.split(",")[0].trim()).catch(() => [])
+      ? await this.page.$$(cfg.seletores.inputPreco).catch(() => [])
       : [];
 
     for (const item of itens) {
@@ -486,7 +556,7 @@ export class PropostaAgente {
         // Estratégia 1: input na linha correspondente
         const linhaAtual = linhas[item.numero - 1];
         if (linhaAtual && cfg.seletores.inputPreco) {
-          const inputsNaLinha = await linhaAtual.$$(cfg.seletores.inputPreco.split(",")[0].trim()).catch(() => []);
+          const inputsNaLinha = await linhaAtual.$$(cfg.seletores.inputPreco).catch(() => []);
           if (inputsNaLinha.length > 0) {
             await inputsNaLinha[0].click({ clickCount: 3 });
             await inputsNaLinha[0].type(valorBR, { delay: 60 });
@@ -494,7 +564,7 @@ export class PropostaAgente {
 
             // Marca
             if (cfg.seletores.inputMarca && item.marca) {
-              const marcaInps = await linhaAtual.$$(cfg.seletores.inputMarca.split(",")[0].trim()).catch(() => []);
+              const marcaInps = await linhaAtual.$$(cfg.seletores.inputMarca).catch(() => []);
               if (marcaInps[0]) {
                 await marcaInps[0].click({ clickCount: 3 });
                 await marcaInps[0].type(item.marca, { delay: 50 });

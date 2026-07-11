@@ -53,6 +53,17 @@ services:
     sync: false
   - key: SMTP_FROM
     sync: false
+  # WhatsApp para alertas diários (opcional)
+  - key: WHATSAPP_PHONE_ID
+    sync: false
+  - key: WHATSAPP_TOKEN
+    sync: false
+  - key: WHATSAPP_API_VERSION
+    value: v21.0
+  - key: WHATSAPP_WEBHOOK_URL
+    sync: false
+  - key: WHATSAPP_TO
+    sync: false
   # Integração opcional Compras MG (Prodemge)
   - key: PRODEMGE_API_KEY
     sync: false

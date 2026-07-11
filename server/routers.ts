@@ -52,6 +52,10 @@ import { pncpRadarRouter } from "./routers/pncpRadar";
 import { emailQuotationsRouter } from "./routers/emailQuotations";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
+import { precificacaoRouter } from "./routers/precificacao";
+import { portalCredentialsRouter } from "./routers/portalCredentials";
+import { agendaRouter } from "./routers/agenda";
+import { desempenhoRouter } from "./routers/desempenho";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
@@ -237,6 +241,10 @@ export const appRouter = router({
   emailQuotations: emailQuotationsRouter,
   certidoes: certidoesRouter,
   ai: aiRouter,
+  precificacao: precificacaoRouter,
+  portalCredentials: portalCredentialsRouter,
+  agenda: agendaRouter,
+  desempenho: desempenhoRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),

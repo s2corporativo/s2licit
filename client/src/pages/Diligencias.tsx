@@ -19,8 +19,8 @@ const initialForm = {
 export default function DiligenciasPage() {
   const [form, setForm] = useState(initialForm);
   const list = trpc.workflow.list.useQuery();
-  const save = trpc.workflow.upsert.useMutation({ onSuccess: () => { toast.success("Fluxo salvo"); list.refetch(); setForm(initialForm); } });
-  const remove = trpc.workflow.remove.useMutation({ onSuccess: () => { toast.success("Fluxo removido"); list.refetch(); } });
+  const save = trpc.workflow.upsert.useMutation({ onSuccess: () => { toast.success("Fluxo salvo"); list.refetch(); setForm(initialForm); }, onError: (e) => toast.error(e.message) });
+  const remove = trpc.workflow.remove.useMutation({ onSuccess: () => { toast.success("Fluxo removido"); list.refetch(); }, onError: (e) => toast.error(e.message) });
 
   return (
     <div className="space-y-6 p-6">

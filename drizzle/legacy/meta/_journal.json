@@ -1,0 +1,153 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1771964839580,
+      "tag": "0000_first_tempest",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1771965049698,
+      "tag": "0001_shiny_emma_frost",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1771973395957,
+      "tag": "0002_worried_rhodey",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1771973544244,
+      "tag": "0003_premium_silver_samurai",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1771974729521,
+      "tag": "0004_fantastic_mandrill",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1771976116459,
+      "tag": "0005_damp_nightmare",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1771978013085,
+      "tag": "0006_romantic_shiver_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1772047568473,
+      "tag": "0007_slim_king_cobra",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1772051613286,
+      "tag": "0008_redundant_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1772063977230,
+      "tag": "0009_absent_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1772064986958,
+      "tag": "0010_youthful_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1772224031490,
+      "tag": "0011_tearful_scourge",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1772226378015,
+      "tag": "0012_cultured_mephistopheles",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1772243801588,
+      "tag": "0013_red_mephistopheles",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1772244611701,
+      "tag": "0014_wise_mulholland_black",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1772245519688,
+      "tag": "0015_overjoyed_orphan",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1772373900858,
+      "tag": "0016_oval_fallen_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1772375807904,
+      "tag": "0017_ambiguous_liz_osborn",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1772378635069,
+      "tag": "0018_vengeful_fantastic_four",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1772402707997,
+      "tag": "0019_bored_lily_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1776183107787,
+      "tag": "0020_patch_modulos_avancados_s2",
+      "breakpoints": true
+    }
+  ]
+}

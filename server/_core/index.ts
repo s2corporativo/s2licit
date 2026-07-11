@@ -14,7 +14,7 @@ import { exportProductsToExcel, importProductsFromExcel } from "../exportExcel";
 import { getProposalWithItems, getCompanySettings, upsertCompanySettings, getDb } from "../db";
 import { declarationTemplates } from "../../drizzle/schema";
 import { inArray } from "drizzle-orm";
-import { storagePut } from "../storage";
+import { storagePut, localUploadDir } from "../storage";
 import multer from "multer";
 import { apiRateLimiter, authRateLimiter } from "./rateLimit";
 
@@ -55,6 +55,8 @@ async function startServer() {
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", uptime: process.uptime() });
   });
+  // Uploads locais (logos etc.) — usado quando não há proxy de storage externo
+  app.use("/uploads", express.static(localUploadDir(), { maxAge: "1d" }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // Login local (email/senha) — modo padrão fora da plataforma Manus
@@ -200,6 +202,13 @@ async function startServer() {
   const port = await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
+    // Em produção, subir noutra porta deixaria o app inacessível por trás do
+    // mapeamento fixo do Docker/proxy — melhor falhar alto do que fingir saúde.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        `Porta ${preferredPort} ocupada — em produção a porta deve ser a configurada (PORT).`,
+      );
+    }
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 

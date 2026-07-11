@@ -97,7 +97,9 @@ export const scraperRouter = router({
 
       try {
         const result = await tambasaScraper.run({
-          email: scraperConfig.email,
+          // decryptPassword é tolerante: devolve texto plano inalterado e
+          // decripta valores cifrados — cobre configs antigas e novas.
+          email: decryptPassword(scraperConfig.email),
           password,
           supplierId: scraperConfig.supplierId,
           enabled: scraperConfig.enabled === "yes",

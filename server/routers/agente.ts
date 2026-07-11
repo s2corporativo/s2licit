@@ -414,8 +414,15 @@ export const agenteRouter = router({
 
         const { finish_reason, message } = choice;
 
-        // Adicionar resposta do assistente ao histórico
-        messages.push({ role: "assistant", content: message.content ?? "" });
+        // Adicionar resposta do assistente ao histórico (preservando tool_calls
+        // para que as mensagens role:"tool" seguintes não fiquem com tool_call_id órfão)
+        messages.push({
+          role: "assistant",
+          content: message.content ?? "",
+          ...(message.tool_calls && message.tool_calls.length > 0
+            ? { tool_calls: message.tool_calls }
+            : {}),
+        });
 
         // Se não há tool_calls, a resposta é final
         if (finish_reason === "stop" || !message.tool_calls || message.tool_calls.length === 0) {

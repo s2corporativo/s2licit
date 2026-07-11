@@ -19,8 +19,8 @@ export default function DocumentosHabilitacaoPage() {
   const [form, setForm] = useState(initialForm);
   const docs = trpc.documents.list.useQuery();
   const summary = trpc.documents.summary.useQuery();
-  const save = trpc.documents.upsert.useMutation({ onSuccess: () => { toast.success("Documento salvo"); docs.refetch(); summary.refetch(); setForm(initialForm); } });
-  const remove = trpc.documents.remove.useMutation({ onSuccess: () => { toast.success("Documento removido"); docs.refetch(); summary.refetch(); } });
+  const save = trpc.documents.upsert.useMutation({ onSuccess: () => { toast.success("Documento salvo"); docs.refetch(); summary.refetch(); setForm(initialForm); }, onError: (e) => toast.error(e.message) });
+  const remove = trpc.documents.remove.useMutation({ onSuccess: () => { toast.success("Documento removido"); docs.refetch(); summary.refetch(); }, onError: (e) => toast.error(e.message) });
 
   return (
     <div className="space-y-6 p-6">

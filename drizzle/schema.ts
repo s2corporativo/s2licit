@@ -8,6 +8,7 @@ import {
   decimal,
   index,
   unique,
+  uniqueIndex,
   json,
   boolean,
   date,
@@ -2253,22 +2254,30 @@ export type BulkPricingApplicationDetail = typeof bulkPricingApplicationDetails.
 export type InsertBulkPricingApplicationDetail = typeof bulkPricingApplicationDetails.$inferInsert;
 
 // ─── NFe Imports ───────────────────────────────────────────────────────────
-export const nfeImports = mysqlTable("nfe_imports", {
-  id: int("id").autoincrement().primaryKey(),
-  nfeNumber: varchar("nfeNumber", { length: 256 }).notNull().unique(),
-  supplierName: varchar("supplierName", { length: 256 }).notNull(),
-  supplierCnpj: varchar("supplierCnpj", { length: 20 }).notNull(),
-  supplierId: int("supplierId")
-    .references(() => suppliers.id, { onDelete: "set null" }),
-  totalProducts: int("totalProducts").default(0),
-  importedProducts: int("importedProducts").default(0),
-  status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).default("pending"),
-  xmlContent: text("xmlContent"),
-  importDate: timestamp("importDate").defaultNow(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+export const nfeImports = mysqlTable(
+  "nfe_imports",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Número da NF é único apenas POR EMITENTE — a unicidade é composta
+    // (nfeNumber + supplierCnpj), definida no índice abaixo.
+    nfeNumber: varchar("nfeNumber", { length: 256 }).notNull(),
+    supplierName: varchar("supplierName", { length: 256 }).notNull(),
+    supplierCnpj: varchar("supplierCnpj", { length: 20 }).notNull(),
+    supplierId: int("supplierId")
+      .references(() => suppliers.id, { onDelete: "set null" }),
+    totalProducts: int("totalProducts").default(0),
+    importedProducts: int("importedProducts").default(0),
+    status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).default("pending"),
+    xmlContent: text("xmlContent"),
+    importDate: timestamp("importDate").defaultNow(),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_nfe_imports_numero_cnpj").on(table.nfeNumber, table.supplierCnpj),
+  ]
+);
 
 export type NfeImport = typeof nfeImports.$inferSelect;
 export type InsertNfeImport = typeof nfeImports.$inferInsert;
@@ -2950,6 +2959,17 @@ export const emailQuotations = mysqlTable(
     totalItems: int("totalItems").notNull().default(0),
     matchedItems: int("matchedItems").notNull().default(0),
     errorMessage: text("errorMessage"),
+    // Resultado da disputa (análise de vitória/derrota)
+    resultado: mysqlEnum("resultado", ["pendente", "ganhou", "perdeu", "cancelada"])
+      .default("pendente")
+      .notNull(),
+    // Valor total que propusemos (para comparar com o vencedor)
+    valorProposto: decimal("valorProposto", { precision: 15, scale: 2 }),
+    // Valor do concorrente vencedor (quando perdemos)
+    valorVencedor: decimal("valorVencedor", { precision: 15, scale: 2 }),
+    categoria: varchar("categoria", { length: 128 }),   // categoria dominante (para segmentar win rate)
+    resultadoObs: text("resultadoObs"),
+    resultadoEm: timestamp("resultadoEm"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -2958,6 +2978,7 @@ export const emailQuotations = mysqlTable(
     index("idx_email_quotations_received").on(table.receivedAt),
     index("idx_email_quotations_from").on(table.fromAddress),
     index("idx_email_quotations_prazo").on(table.prazoResposta),
+    index("idx_email_quotations_resultado").on(table.resultado),
   ]
 );
 export type EmailQuotation = typeof emailQuotations.$inferSelect;
@@ -3027,3 +3048,25 @@ export const importProgress = mysqlTable("import_progress", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 export type ImportProgressRow = typeof importProgress.$inferSelect;
+
+// Credenciais dos portais de licitação (senha criptografada). Uso interno.
+export const portalCredentials = mysqlTable(
+  "portal_credentials",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    portal: varchar("portal", { length: 32 }).notNull(), // comprasnet|comprasmg|fundep|funarbe|copasa|agrega|generico
+    apelido: varchar("apelido", { length: 128 }),          // nome amigável
+    loginUrl: text("loginUrl"),                            // sobrescreve a URL padrão do portal
+    usuario: varchar("usuario", { length: 256 }).notNull(),// login/CNPJ/CPF
+    senhaCriptografada: text("senhaCriptografada").notNull(),
+    cnpj: varchar("cnpj", { length: 18 }),
+    ativo: boolean("ativo").notNull().default(true),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_portal_credentials_portal").on(table.portal),
+    index("idx_portal_credentials_ativo").on(table.ativo),
+  ]
+);
+export type PortalCredentialRow = typeof portalCredentials.$inferSelect;

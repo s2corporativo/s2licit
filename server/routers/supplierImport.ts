@@ -2,9 +2,10 @@ import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { suppliers, supplierImports, products } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { parseStringPromise } from "xml2js";
 import { sql } from "drizzle-orm";
+import { parsePrecoBR } from "../utils/number";
 
 const importSupplierXmlSchema = z.object({
   supplierId: z.number(),
@@ -43,12 +44,12 @@ export const supplierImportRouter = router({
           status: "processing",
         });
 
-      // Obter ID da importação criada
+      // Obter ID da importação criada (registro mais recente)
       const importRecords = await db
         .select()
         .from(supplierImports)
         .where(eq(supplierImports.supplierId, input.supplierId))
-        .orderBy((t) => t.id)
+        .orderBy(desc(supplierImports.id))
         .limit(1);
 
       const importId = importRecords[0]?.id;
@@ -92,11 +93,11 @@ export const supplierImportRouter = router({
             productsMatched++;
           }
 
-          // Converter preço para string DECIMAL
+          // Converter preço para string DECIMAL (trata formato pt-BR "1.234,56")
           let priceValue: string | null = null;
           if (preco) {
-            const parsed = parseFloat(preco);
-            if (!isNaN(parsed) && parsed > 0) {
+            const parsed = parsePrecoBR(preco);
+            if (parsed !== null && parsed > 0) {
               priceValue = parsed.toFixed(2);
             }
           }

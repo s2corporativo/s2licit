@@ -24,24 +24,23 @@ export const reportRouter = router({
     .query(async ({ input }: { input: { supplierId?: number } }) => {
       const db = await getDb();
       if (!db) return [];
-      const whereClause = input.supplierId ? `WHERE supplierId = ${input.supplierId}` : "";
-      const result = await db.execute(sql.raw(`
+      // Placeholder parametrizado (evita interpolação direta do input no SQL)
+      const whereClause = input.supplierId ? sql`WHERE supplierId = ${input.supplierId}` : sql``;
+      const result = await db.execute(sql`
         SELECT supplierId, COUNT(*) as productCount, AVG(price) as avgPrice, MIN(price) as minPrice, MAX(price) as maxPrice
         FROM products
         ${whereClause}
         GROUP BY supplierId
-      `));
+      `);
       return result;
     }),
 
   consolidationReport: adminProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) return [];
-    const result = await db.execute(sql`
-      SELECT status, COUNT(*) as count
-      FROM consolidation_logs
-      GROUP BY status
-    `);
-    return result;
+    // A tabela consolidation_logs não existe no schema — retornar lista vazia com aviso
+    // em vez de quebrar a procedure com erro de SQL.
+    console.warn(
+      "[reportRouter] consolidationReport: tabela consolidation_logs não existe no schema; retornando lista vazia"
+    );
+    return [];
   }),
 });

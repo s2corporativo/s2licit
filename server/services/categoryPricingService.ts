@@ -139,11 +139,18 @@ export class CategoryPricingService {
     // 3. Preço antes da margem
     const priceBeforeMargin = basePrice + totalTaxAmount + freightAmount;
 
-    // 4. Calcular margem
-    const marginAmount = (priceBeforeMargin * rule.marginPercentage) / 100;
+    // 4. Calcular margem REAL sobre o preço de venda (mesmo padrão do pricingService)
+    // FÓRMULA CORRETA: finalPrice = custo / (1 - margem%)
+    if (rule.marginPercentage >= 100) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Margem não pode ser 100% ou superior",
+      });
+    }
 
     // 5. Preço final
-    let finalPrice = priceBeforeMargin + marginAmount;
+    let finalPrice = priceBeforeMargin / (1 - rule.marginPercentage / 100);
+    const marginAmount = finalPrice - priceBeforeMargin;
 
     // 6. Aplicar limites
     if (rule.minPrice && finalPrice < rule.minPrice) {

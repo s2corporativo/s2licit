@@ -180,7 +180,8 @@ export async function getPriceSnapshot(
 
     const supplierMap = snapshot.get(product.id)!;
     const supplierId = (product.supplierId as number | null) || 0;
-    const price = (product.price as number | null) || 0;
+    // Decimal do mysql2 vem como string — normalizar para number antes de comparar
+    const price = product.price === null ? 0 : Number(product.price);
     supplierMap.set(supplierId, price);
   }
 

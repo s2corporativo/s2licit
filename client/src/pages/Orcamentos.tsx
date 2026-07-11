@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { QuotationModal } from "@/components/QuotationModal";
-import { FileText, Plus, Download } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 export function Orcamentos() {
@@ -105,55 +105,6 @@ export function Orcamentos() {
             Novo Orçamento
           </Button>
         </div>
-
-        {/* Cards de Informação */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <Card className="p-6 bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 text-sm">Orçamentos Criados</p>
-                <p className="text-3xl font-bold text-gray-900">0</p>
-              </div>
-              <FileText className="w-12 h-12 text-blue-100" />
-            </div>
-          </Card>
-
-          <Card className="p-6 bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 text-sm">Valor Total</p>
-                <p className="text-3xl font-bold text-gray-900">R$ 0,00</p>
-              </div>
-              <Download className="w-12 h-12 text-green-100" />
-            </div>
-          </Card>
-
-          <Card className="p-6 bg-white border-0 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-gray-600 text-sm">PDFs Gerados</p>
-                <p className="text-3xl font-bold text-gray-900">0</p>
-              </div>
-              <FileText className="w-12 h-12 text-purple-100" />
-            </div>
-          </Card>
-        </div>
-
-        {/* Seção Vazia */}
-        <Card className="p-12 text-center bg-white border-0 shadow-sm">
-          <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Nenhum orçamento criado</h2>
-          <p className="text-gray-600 mb-6">
-            Clique em "Novo Orçamento" para começar a criar propostas comerciais em PDF
-          </p>
-          <Button
-            onClick={() => setIsModalOpen(true)}
-            className="gap-2 bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4" />
-            Criar Primeiro Orçamento
-          </Button>
-        </Card>
 
         {/* Instruções */}
         <Card className="mt-8 p-6 bg-blue-50 border border-blue-200">

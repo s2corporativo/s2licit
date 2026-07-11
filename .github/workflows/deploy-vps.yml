@@ -1,0 +1,73 @@
+# Deploy do Sistema S2 na VPS via SSH.
+#
+# Como usar: GitHub → Actions → "Deploy VPS" → Run workflow.
+# A senha SSH pode vir do campo "password" OU (melhor) do secret VPS_PASSWORD
+# (Settings → Secrets and variables → Actions → New repository secret).
+name: Deploy VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: "IP/host da VPS"
+        required: true
+        default: "13.140.167.153"
+      ssh_user:
+        description: "Usuário SSH"
+        required: true
+        default: "root"
+      password:
+        description: "Senha SSH (deixe vazio para usar o secret VPS_PASSWORD)"
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preparar ferramentas SSH
+        run: |
+          if [ -n "${{ inputs.password }}" ]; then echo "::add-mask::${{ inputs.password }}"; fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass rsync
+
+      - name: Enviar código para a VPS
+        env:
+          SSHPASS: ${{ inputs.password != '' && inputs.password || secrets.VPS_PASSWORD }}
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "::error::Nenhuma senha informada e o secret VPS_PASSWORD não está configurado."
+            exit 1
+          fi
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS "${{ inputs.ssh_user }}@${{ inputs.host }}" "mkdir -p /opt/s2licit"
+          rsync -az --delete \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude dist \
+            --exclude .env \
+            -e "sshpass -e ssh $SSH_OPTS" \
+            ./ "${{ inputs.ssh_user }}@${{ inputs.host }}:/opt/s2licit/"
+
+      - name: Instalar e subir (docker compose)
+        env:
+          SSHPASS: ${{ inputs.password != '' && inputs.password || secrets.VPS_PASSWORD }}
+        run: |
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS "${{ inputs.ssh_user }}@${{ inputs.host }}" \
+            "bash /opt/s2licit/scripts/vps-bootstrap.sh"
+
+      - name: Resumo
+        run: |
+          echo "### Deploy concluído ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: http://${{ inputs.host }}/" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Login inicial: veja /root/s2licit-acesso.txt na VPS (gerado só na 1ª instalação)" >> "$GITHUB_STEP_SUMMARY"

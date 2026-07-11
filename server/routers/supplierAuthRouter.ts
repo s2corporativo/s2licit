@@ -1,4 +1,4 @@
-import { router, protectedProcedure } from "../_core/trpc";
+import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
@@ -16,7 +16,7 @@ export const supplierAuthRouter = router({
   /**
    * Store supplier credentials securely
    */
-  storeCredentials: protectedProcedure
+  storeCredentials: adminProcedure
     .input(
       z.object({
         supplierId: z.number().int().positive(),
@@ -94,7 +94,7 @@ export const supplierAuthRouter = router({
   /**
    * Get decrypted credentials for a supplier
    */
-  getCredentials: protectedProcedure
+  getCredentials: adminProcedure
     .input(
       z.object({
         supplierId: z.number().int().positive(),
@@ -165,7 +165,7 @@ export const supplierAuthRouter = router({
   /**
    * Delete credentials for a supplier
    */
-  deleteCredentials: protectedProcedure
+  deleteCredentials: adminProcedure
     .input(
       z.object({
         supplierId: z.number().int().positive(),

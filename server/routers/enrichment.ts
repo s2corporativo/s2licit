@@ -2,7 +2,7 @@ import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { products, categories } from "../../drizzle/schema";
-import { eq, isNull, and } from "drizzle-orm";
+import { eq, isNull, and, or } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 
 /**
@@ -20,39 +20,35 @@ const EnrichmentResponseSchema = z.object({
 
 type EnrichmentResponse = z.infer<typeof EnrichmentResponseSchema>;
 
-export const enrichmentRouter = router({
-  /**
-   * Enriquecer um produto individual com IA
-   * Extrai: princípio ativo, concentração, categoria, subcategoria, fabricante, indicação
-   */
-  enrichProduct: protectedProcedure
-    .input(
-      z.object({
-        productId: z.number(),
-        productName: z.string(),
-        currentActiveIngredient: z.string().optional(),
-        currentCategory: z.string().optional(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("DB indisponível");
+/**
+ * Enriquece um produto individual com IA.
+ * Lógica compartilhada entre enrichProduct e enrichProductsBatch
+ * (chamada direta, sem depender de caller do tRPC).
+ */
+async function enrichSingleProduct(input: {
+  productId: number;
+  productName: string;
+  currentActiveIngredient?: string;
+  currentCategory?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("DB indisponível");
 
-      // Buscar produto
-      const product = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, input.productId))
-        .limit(1);
+  // Buscar produto
+  const product = await db
+    .select()
+    .from(products)
+    .where(eq(products.id, input.productId))
+    .limit(1);
 
-      if (!product[0]) {
-        throw new Error(`Produto ${input.productId} não encontrado`);
-      }
+  if (!product[0]) {
+    throw new Error(`Produto ${input.productId} não encontrado`);
+  }
 
-      const prod = product[0];
+  const prod = product[0];
 
-      // Preparar prompt para LLM
-      const prompt = `Analise o seguinte produto veterinário/farmacêutico e extraia as informações solicitadas:
+  // Preparar prompt para LLM
+  const prompt = `Analise o seguinte produto veterinário/farmacêutico e extraia as informações solicitadas:
 
 Nome do Produto: ${input.productName}
 Fabricante Atual: ${prod.manufacturer || "Não informado"}
@@ -140,11 +136,29 @@ Responda em JSON válido.`;
         };
       } catch (error) {
         return {
-          success: false,
+          success: false as const,
           productId: input.productId,
           error: (error as Error).message,
         };
       }
+}
+
+export const enrichmentRouter = router({
+  /**
+   * Enriquecer um produto individual com IA
+   * Extrai: princípio ativo, concentração, categoria, subcategoria, fabricante, indicação
+   */
+  enrichProduct: protectedProcedure
+    .input(
+      z.object({
+        productId: z.number(),
+        productName: z.string(),
+        currentActiveIngredient: z.string().optional(),
+        currentCategory: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      return enrichSingleProduct(input);
     }),
 
   /**
@@ -158,7 +172,7 @@ Responda em JSON válido.`;
         batchSize: z.number().default(50),
       })
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
 
@@ -187,8 +201,8 @@ Responda em JSON válido.`;
 
             const prod = product[0];
 
-            // Chamar enriquecimento individual
-            const enrichResult = await (ctx as any).caller.enrichment.enrichProduct({
+            // Chamar enriquecimento individual (função compartilhada, sem caller do tRPC)
+            const enrichResult = await enrichSingleProduct({
               productId,
               productName: prod.name,
               currentActiveIngredient: prod.activeIngredient || undefined,
@@ -237,16 +251,23 @@ Responda em JSON válido.`;
 
       let whereCondition: any = eq(products.isActive, "yes");
 
+      // tipoCatalogo é NOT NULL com default "produto_nao_medicamentoso":
+      // categoria "faltando" = ainda no valor default (ou NULL em dados legados)
+      const missingCategoryCondition = or(
+        isNull(products.tipoCatalogo),
+        eq(products.tipoCatalogo, "produto_nao_medicamentoso")
+      );
+
       if (input.filterType === "missing_active_ingredient") {
         whereCondition = and(eq(products.isActive, "yes"), isNull(products.activeIngredient));
       } else if (input.filterType === "missing_category") {
-        whereCondition = and(eq(products.isActive, "yes"), isNull(products.tipoCatalogo));
+        whereCondition = and(eq(products.isActive, "yes"), missingCategoryCondition);
       } else {
         // both
         whereCondition = and(
           eq(products.isActive, "yes"),
           isNull(products.activeIngredient),
-          isNull(products.tipoCatalogo)
+          missingCategoryCondition
         );
       }
 

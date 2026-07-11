@@ -8,7 +8,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import { productMetadata, products, synonyms as synonymsTable } from "../../drizzle/schema";
-import { eq, and, desc, like, or, isNull } from "drizzle-orm";
+import { eq, and, desc, like, or, isNull, count } from "drizzle-orm";
 import { processProduct, reindexCatalogFromFicha, suggestSynonyms, saveProductMetadata } from "../services/metadataExtractor/extractor";
 import { normalizeProductName } from "../services/metadataExtractor/normalizer";
 
@@ -257,18 +257,18 @@ export const metadataRouter = router({
     const db = await getDb();
     if (!db) return null;
     const [totalMeta] = await db
-      .select({ count: productMetadata.id })
+      .select({ count: count() })
       .from(productMetadata);
     const [needsReview] = await db
-      .select({ count: productMetadata.id })
+      .select({ count: count() })
       .from(productMetadata)
       .where(eq(productMetadata.needsReview, 1));
     const [locked] = await db
-      .select({ count: productMetadata.id })
+      .select({ count: count() })
       .from(productMetadata)
       .where(eq(productMetadata.lockedManual, 1));
     const [withNomeNorm] = await db
-      .select({ count: products.id })
+      .select({ count: count() })
       .from(products)
       .where(and(eq(products.isActive, "yes")));
     return {

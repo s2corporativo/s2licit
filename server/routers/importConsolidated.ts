@@ -186,11 +186,16 @@ export const importConsolidatedRouter = router({
             }
 
             // Vincular preços de todos os fornecedores consolidados
+            // Aguardar todas as promises para que falhas sejam contabilizadas como erro
+            const offerPromises: Promise<unknown>[] = [];
             product.consolidatedPrices.forEach((price, supplierId) => {
               if (supplierId > 0) {
-                void upsertSupplierOffer(productId, supplierId, price, product.code, product.productUrl ?? undefined);
+                offerPromises.push(
+                  upsertSupplierOffer(productId, supplierId, price, product.code, product.productUrl ?? undefined)
+                );
               }
             });
+            await Promise.all(offerPromises);
           } catch (error) {
             importResults.errors++;
             importResults.details.push({

@@ -101,50 +101,11 @@ export const suppliersRouter = router({
       return withErrorHandling("Create supplier", async () => {
         requirePermission(ctx.user.role, ["admin"]);
 
-        const validated = validate<z.infer<typeof CreateSupplierSchema>>(CreateSupplierSchema, input);
-
-        // TODO: Verificar CNPJ já existe
-        // const existing = await db.query.suppliers.findFirst({
-        //   where: eq(suppliers.cnpj, validated.cnpj)
-        // });
-        // if (existing) {
-        //   throw new TRPCError({
-        //     code: 'CONFLICT',
-        //     message: 'CNPJ already registered'
-        //   });
-        // }
-
-        // TODO: Inserir fornecedor
-        // const supplier = await db.insert(suppliers).values({
-        //   name: validated.name,
-        //   cnpj: validated.cnpj,
-        //   email: validated.email,
-        //   phone: validated.phone,
-        //   address: validated.address,
-        //   city: validated.city,
-        //   state: validated.state,
-        //   isActive: validated.active,
-        //   createdBy: ctx.user.id,
-        //   createdAt: new Date()
-        // });
-
-        log.info("SUPPLIER_CREATE", {
-          userId: ctx.user.id,
-          supplierId: 1,
-          supplierName: validated.name,
-          cnpj: validated.cnpj
+        // Não persiste nada — use o fluxo de fornecedores existente (enrichmentGroup.createSupplier)
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Funcionalidade ainda não implementada: use o cadastro de fornecedores existente do sistema"
         });
-
-        // Invalidar cache
-        cache.delete(CACHE_KEYS.SUPPLIERS_LIST);
-
-        return {
-          success: true,
-          supplierId: 1,
-          name: validated.name,
-          cnpj: validated.cnpj,
-          message: "Fornecedor criado com sucesso"
-        };
       });
     }),
 
@@ -347,29 +308,11 @@ export const suppliersRouter = router({
       return withErrorHandling("Update supplier", async () => {
         requirePermission(ctx.user.role, ["admin", "editor"]);
 
-        // TODO: Atualizar
-        // await db.update(suppliers)
-        //   .set({
-        //     ...input,
-        //     updatedAt: new Date()
-        //   })
-        //   .where(eq(suppliers.id, input.id));
-
-        log.info("SUPPLIER_UPDATE", {
-          userId: ctx.user.id,
-          supplierId: input.id,
-          changedFields: Object.keys(input).filter(k => k !== 'id').length
+        // Não persiste nada — use o fluxo de fornecedores existente (enrichmentGroup.updateSupplier)
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Funcionalidade ainda não implementada: use a edição de fornecedores existente do sistema"
         });
-
-        // Invalidar caches
-        cache.delete(CACHE_KEYS.SUPPLIERS_LIST);
-        cache.delete(CACHE_KEYS.SUPPLIER_METRICS(input.id));
-
-        return {
-          success: true,
-          supplierId: input.id,
-          message: "Fornecedor atualizado com sucesso"
-        };
       });
     }),
 
