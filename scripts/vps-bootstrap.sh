@@ -95,23 +95,35 @@ else
 fi
 
 echo "==> [3/5] Build e subida dos containers"
-# Porta 80 pode estar ocupada por outro serviço do host (Apache vem
-# pré-instalado em muitas imagens de VPS). Se estiver, cai para a 8080.
+# A VPS pode ter outros serviços/containers ocupando portas (Apache na 80,
+# outro app na 3000...). Escolhemos portas livres sem derrubar nada.
+porta_ocupada() {
+  ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|\.)$1\$"
+}
+primeira_porta_livre() {
+  for p in "$@"; do
+    if ! porta_ocupada "$p"; then echo "$p"; return 0; fi
+  done
+  return 1
+}
 if ! grep -q '^APP_HTTP_PORT=' .env; then
-  if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE '(:|\.)80$'; then
-    ocupante=$(ss -ltnp 2>/dev/null | grep -E '(:|\.)80\s' | grep -oP 'users:\(\("\K[^"]+' | head -1 || true)
-    echo "APP_HTTP_PORT=8080" >> .env
-    echo "⚠️  Porta 80 já em uso${ocupante:+ por \"$ocupante\"} — o app ficará em :8080 (além da :3000)."
-    echo "   Para usar a porta 80: pare o serviço que a ocupa (ex.: systemctl disable --now apache2),"
-    echo "   remova a linha APP_HTTP_PORT do .env e rode o deploy de novo."
-  fi
+  http_port=$(primeira_porta_livre 80 8080 8088 8090 8181) || { echo "Nenhuma porta HTTP livre"; exit 1; }
+  echo "APP_HTTP_PORT=${http_port}" >> .env
+  [ "$http_port" != "80" ] && echo "⚠️  Porta 80 ocupada — app público ficará na :${http_port}."
 fi
+if ! grep -q '^APP_LOCAL_PORT=' .env; then
+  local_port=$(primeira_porta_livre 3000 3001 3002 3010) || { echo "Nenhuma porta local livre"; exit 1; }
+  echo "APP_LOCAL_PORT=${local_port}" >> .env
+  [ "$local_port" != "3000" ] && echo "⚠️  Porta 3000 ocupada — health check local usará a :${local_port}."
+fi
+HTTP_PORT=$(grep '^APP_HTTP_PORT=' .env | cut -d= -f2)
+LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
 docker compose up -d --build
 
-echo "==> [4/5] Aguardando o app ficar saudável"
+echo "==> [4/5] Aguardando o app ficar saudável (porta local ${LOCAL_PORT})"
 ok=0
 for i in $(seq 1 60); do
-  if curl -fsS -o /dev/null http://127.0.0.1:3000/healthz 2>/dev/null; then
+  if curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>/dev/null; then
     ok=1
     break
   fi
@@ -128,4 +140,11 @@ fi
 echo "==> [5/5] Estado final"
 docker compose ps
 docker image prune -f >/dev/null 2>&1 || true
-echo "Deploy concluído. Acesse: http://$(hostname -I | awk '{print $1}')/"
+sufixo=""
+[ "$HTTP_PORT" != "80" ] && sufixo=":${HTTP_PORT}"
+URL_FINAL="http://$(hostname -I | awk '{print $1}')${sufixo}/"
+# Mantém o arquivo de acesso com a URL correta (a porta pode ter mudado)
+if [ -f /root/s2licit-acesso.txt ]; then
+  sed -i "s|^URL:.*|URL:    ${URL_FINAL}|" /root/s2licit-acesso.txt || true
+fi
+echo "Deploy concluído. Acesse: ${URL_FINAL}"
