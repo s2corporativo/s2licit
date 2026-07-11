@@ -160,6 +160,22 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
     onSuccess: () => { toast.success("Status atualizado."); onChanged(); },
     onError: (e) => toast.error(e.message),
   });
+  const orcamentoMutation = trpc.emailQuotations.gerarOrcamento.useMutation({
+    onSuccess: (res) => {
+      window.open(res.pdfUrl, "_blank");
+      toast.success(
+        `Orçamento gerado: ${res.itemCount} item(ns), margem ${res.marginPercent}%.` +
+          (res.itemsSemPreco > 0 ? ` ${res.itemsSemPreco} sem preço cadastrado.` : ""),
+      );
+      onChanged();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const statusInfo = trpc.emailQuotations.status.useQuery();
+  const responderMutation = trpc.emailQuotations.responderPorEmail.useMutation({
+    onSuccess: (res) => { toast.success(`Proposta enviada para ${res.to}.`); onChanged(); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const { quotation, items } = data;
 
@@ -168,7 +184,26 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
       <div className="p-4 border-b border-gray-100">
         <div className="font-semibold text-gray-900">{quotation.subject || "(sem assunto)"}</div>
         <div className="text-xs text-gray-500 mt-0.5">{quotation.orgao || "—"}</div>
-        <div className="flex gap-2 mt-3">
+        <div className="flex flex-wrap gap-2 mt-3">
+          <button
+            onClick={() => orcamentoMutation.mutate({ id: quotation.id })}
+            disabled={orcamentoMutation.isPending}
+            className="flex items-center gap-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 disabled:opacity-60"
+          >
+            {orcamentoMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+            Gerar orçamento (PDF)
+          </button>
+          {statusInfo.data?.smtpConfigured && (
+            <button
+              onClick={() => responderMutation.mutate({ id: quotation.id })}
+              disabled={responderMutation.isPending}
+              className="flex items-center gap-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 disabled:opacity-60"
+              title="Gera o orçamento e envia por e-mail ao remetente"
+            >
+              {responderMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+              Responder por e-mail
+            </button>
+          )}
           <button
             onClick={() => statusMutation.mutate({ id: quotation.id, status: "respondida" })}
             className="text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 px-3 py-1"

@@ -10,14 +10,17 @@ import {
   listEmailQuotations,
   syncEmailQuotations,
 } from "../services/emailQuotationSyncService";
+import { buildQuotationResponse } from "../services/emailQuotationResponseService";
+import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 
 /**
  * Cotações recebidas por e-mail (COTEP/Compras MG, FUNARB, COPASA, Cemig...).
  */
 export const emailQuotationsRouter = router({
-  /** Status da configuração IMAP (para a UI mostrar orientação). */
+  /** Status da configuração IMAP/SMTP (para a UI mostrar orientação). */
   status: protectedProcedure.query(() => ({
     imapConfigured: isImapConfigured(),
+    smtpConfigured: isSmtpConfigured(),
   })),
 
   /** Dispara a sincronização da caixa de entrada (somente admin). */
@@ -73,6 +76,88 @@ export const emailQuotationsRouter = router({
         })
         .where(eq(emailQuotationItems.id, input.itemId));
       return { success: true };
+    }),
+
+  /** Gera o PDF do orçamento-resposta (aplica margem sobre os itens casados). */
+  gerarOrcamento: protectedProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        marginPercent: z.number().min(0).max(1000).optional(),
+        validDays: z.number().int().positive().max(365).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const result = await buildQuotationResponse(input.id, {
+        marginPercent: input.marginPercent,
+        validDays: input.validDays,
+      });
+      return {
+        success: true as const,
+        pdfUrl: `data:application/pdf;base64,${result.pdfBase64}`,
+        total: result.total,
+        itemCount: result.itemCount,
+        itemsSemPreco: result.itemsSemPreco,
+        marginPercent: result.marginPercent,
+      };
+    }),
+
+  /** Gera o orçamento e envia por e-mail ao remetente, marcando como respondida. */
+  responderPorEmail: protectedProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        to: z.string().email().optional(),
+        marginPercent: z.number().min(0).max(1000).optional(),
+        validDays: z.number().int().positive().max(365).optional(),
+        mensagem: z.string().max(4000).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      if (!isSmtpConfigured()) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "SMTP não configurado. Defina SMTP_HOST, SMTP_USER e SMTP_PASSWORD.",
+        });
+      }
+
+      const data = await getEmailQuotationWithItems(input.id);
+      if (!data) throw new TRPCError({ code: "NOT_FOUND", message: "Cotação não encontrada." });
+
+      const destinatario = input.to ?? data.quotation.fromAddress ?? undefined;
+      if (!destinatario) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Sem destinatário: informe um e-mail (o remetente original não foi identificado).",
+        });
+      }
+
+      const response = await buildQuotationResponse(input.id, {
+        marginPercent: input.marginPercent,
+        validDays: input.validDays,
+      });
+      const pdfBuffer = Buffer.from(response.pdfBase64, "base64");
+
+      await sendEmail({
+        to: destinatario,
+        subject: `Proposta comercial - ${data.quotation.subject ?? `Cotação ${input.id}`}`,
+        text:
+          input.mensagem ??
+          "Prezados,\n\nSegue em anexo nossa proposta comercial em resposta à solicitação de cotação.\n\nAtenciosamente.",
+        attachments: [
+          { filename: `orcamento-${input.id}.pdf`, content: pdfBuffer, contentType: "application/pdf" },
+        ],
+      });
+
+      const db = await getDb();
+      if (db) {
+        await db
+          .update(emailQuotations)
+          .set({ status: "respondida" })
+          .where(eq(emailQuotations.id, input.id));
+      }
+
+      return { success: true as const, to: destinatario, itemCount: response.itemCount };
     }),
 
   /** Atualiza o status de uma cotação (ex.: marcar como respondida/descartada). */
