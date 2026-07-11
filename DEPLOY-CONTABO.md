@@ -158,3 +158,4 @@ A sincronização roda sozinha a cada 15 minutos; na tela **Cotações Recebidas
 você também pode clicar em "Sincronizar" a qualquer momento.
 
 > Para re-disparar o deploy sem mudar código: Actions → Deploy VPS → Run workflow, ou faça qualquer merge no main.
+# Última ativação de configurações: IA (Groq) + e-mail (IMAP/SMTP)
