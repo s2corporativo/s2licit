@@ -73,6 +73,51 @@ jobs:
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
             "bash /opt/s2licit/scripts/vps-bootstrap.sh"
 
+      # Configurações opcionais vindas dos secrets do repositório — aplicadas
+      # no .env da VPS a cada deploy (só as que existirem):
+      #   GROQ_API_KEY   → IA gratuita (Groq)
+      #   EMAIL_PASSWORD → senha de APP do Gmail (IMAP + SMTP)
+      #   EMAIL_USER     → e-mail da caixa (padrão adm@vetmg.com.br)
+      - name: Aplicar configurações opcionais (secrets)
+        env:
+          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          if [ -z "${GROQ_API_KEY}${EMAIL_PASSWORD}" ]; then
+            echo "Nenhum secret opcional configurado — pulando."
+            exit 0
+          fi
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          EMAIL_USER="${EMAIL_USER:-adm@vetmg.com.br}"
+
+          # Monta o script remoto com valores em base64 (à prova de caracteres especiais)
+          {
+            echo 'cd /opt/s2licit'
+            echo 'set_kv() { k="$1"; v=$(echo "$2" | base64 -d); if grep -q "^${k}=" .env; then sed -i "s|^${k}=.*|${k}=${v}|" .env; else echo "${k}=${v}" >> .env; fi; }'
+            if [ -n "$GROQ_API_KEY" ]; then
+              echo "set_kv GROQ_API_KEY $(printf %s "$GROQ_API_KEY" | base64 -w0)"
+            fi
+            if [ -n "$EMAIL_PASSWORD" ]; then
+              echo "set_kv IMAP_HOST $(printf %s 'imap.gmail.com' | base64 -w0)"
+              echo "set_kv IMAP_PORT $(printf %s '993' | base64 -w0)"
+              echo "set_kv IMAP_USER $(printf %s "$EMAIL_USER" | base64 -w0)"
+              echo "set_kv IMAP_PASSWORD $(printf %s "$EMAIL_PASSWORD" | base64 -w0)"
+              echo "set_kv SMTP_HOST $(printf %s 'smtp.gmail.com' | base64 -w0)"
+              echo "set_kv SMTP_PORT $(printf %s '587' | base64 -w0)"
+              echo "set_kv SMTP_SECURE $(printf %s 'false' | base64 -w0)"
+              echo "set_kv SMTP_USER $(printf %s "$EMAIL_USER" | base64 -w0)"
+              echo "set_kv SMTP_PASSWORD $(printf %s "$EMAIL_PASSWORD" | base64 -w0)"
+              echo "set_kv SMTP_FROM $(printf %s "$EMAIL_USER" | base64 -w0)"
+            fi
+            echo 'docker compose up -d --force-recreate app >/dev/null 2>&1'
+            echo 'LOCAL_PORT=$(grep "^APP_LOCAL_PORT=" .env | cut -d= -f2); LOCAL_PORT=${LOCAL_PORT:-3000}'
+            echo 'for i in $(seq 1 30); do curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>/dev/null && { echo "Configurações aplicadas e app saudável ✅"; exit 0; }; sleep 4; done'
+            echo 'echo "App não voltou saudável após aplicar configs" >&2; docker compose logs --tail=40 app >&2; exit 1'
+          } > /tmp/remote-config.sh
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < /tmp/remote-config.sh
+
       - name: Resumo
         run: |
           echo "### Deploy concluído ✅" >> "$GITHUB_STEP_SUMMARY"
