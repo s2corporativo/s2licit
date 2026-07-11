@@ -2486,8 +2486,8 @@ function NewProductModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    if (!form.supplierId) { alert("Selecione um fornecedor."); return; }
-    if (!form.categoryId) { alert("Selecione uma categoria."); return; }
+    if (!form.supplierId) { toast.error("Selecione um fornecedor."); return; }
+    if (!form.categoryId) { toast.error("Selecione uma categoria."); return; }
     onCreate({
       name: form.name.trim(),
       supplierId: Number(form.supplierId),

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { QuotationItemEditor, type QuotationItem } from "./QuotationItemEditor";
+import { toast } from "sonner";
 import { Download, Loader2 } from "lucide-react";
 
 interface QuotationModalProps {
@@ -46,7 +47,7 @@ export function QuotationModal({ isOpen, onClose, onGeneratePdf, preloadedItems 
 
   const handleGeneratePdf = async () => {
     if (items.length === 0) {
-      alert("Adicione pelo menos um item ao orçamento");
+      toast.error("Adicione pelo menos um item ao orçamento");
       return;
     }
 
@@ -65,14 +66,14 @@ export function QuotationModal({ isOpen, onClose, onGeneratePdf, preloadedItems 
 
       if (result.success && result.pdfUrl) {
         window.open(result.pdfUrl, "_blank");
-        alert("PDF gerado com sucesso!");
+        toast.success("PDF gerado com sucesso!");
         handleClose();
       } else {
-        alert(`Erro ao gerar PDF: ${result.message}`);
+        toast.error(`Erro ao gerar PDF: ${result.message}`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
-      alert(`Erro ao gerar PDF: ${errorMessage}`);
+      toast.error(`Erro ao gerar PDF: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }

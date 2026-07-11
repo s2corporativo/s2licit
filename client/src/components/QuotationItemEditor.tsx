@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Trash2, Plus, Edit2 } from "lucide-react";
+import { toast } from "sonner";
 
 export interface QuotationItem {
   id?: string;
@@ -44,7 +45,7 @@ export function QuotationItemEditor({ items, onItemsChange, onTotalsChange }: Qu
 
   const handleSaveItem = () => {
     if (!editingItem || !editingItem.productName) {
-      alert("Nome do produto é obrigatório");
+      toast.error("Nome do produto é obrigatório");
       return;
     }
 
