@@ -3174,3 +3174,39 @@ export const taxRules = mysqlTable(
   ]
 );
 export type TaxRule = typeof taxRules.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Motor de Fretes (Freight Engine): cotações de frete registradas (manuais ou
+// de tabelas negociadas), separando frete de ENTRADA (fornecedor → empresa)
+// e de SAÍDA (empresa/fornecedor → órgão). Integrações com APIs de
+// transportadoras ficam como interface pendente (spec §39).
+// ─────────────────────────────────────────────────────────────────────────────
+export const freightQuotes = mysqlTable(
+  "freight_quotes",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    descricao: varchar("descricao", { length: 256 }).notNull(),
+    tipo: mysqlEnum("tipo", ["entrada", "saida"]).notNull(),
+    transportadora: varchar("transportadora", { length: 128 }),
+    origemCep: varchar("origemCep", { length: 9 }),
+    destinoCep: varchar("destinoCep", { length: 9 }),
+    ufDestino: varchar("ufDestino", { length: 2 }),
+    pesoKg: decimal("pesoKg", { precision: 10, scale: 3 }),
+    valorFrete: decimal("valorFrete", { precision: 12, scale: 2 }).notNull(),
+    prazoDias: int("prazoDias"),
+    validade: date("validade"),
+    // Vínculos opcionais para rastreabilidade
+    funilId: int("funilId"),
+    supplierId: int("supplierId"),
+    observacoes: text("observacoes"),
+    criadoPor: varchar("criadoPor", { length: 128 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_freight_tipo").on(table.tipo),
+    index("idx_freight_uf").on(table.ufDestino),
+    index("idx_freight_funil").on(table.funilId),
+  ]
+);
+export type FreightQuote = typeof freightQuotes.$inferSelect;
