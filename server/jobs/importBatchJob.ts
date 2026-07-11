@@ -2,8 +2,8 @@ import { checkDuplicatesInRows, bulkInsertProducts, mergeProductFromRow, createI
 import { randomUUID } from "crypto";
 import { notifyOwner } from "../_core/notification";
 import type { InsertProduct } from "../../drizzle/schema";
-import { products } from "../../drizzle/schema";
-import { eq, isNull, and } from "drizzle-orm";
+import { products, importProgress } from "../../drizzle/schema";
+import { eq, isNull, and, sql } from "drizzle-orm";
 import { getDb } from "../db";
 
 export interface ImportBatchProgress {
@@ -543,12 +543,41 @@ async function processImportBatchAsync(
 function updateProgress(queueId: string, updates: Partial<ImportBatchProgress>): void {
   const current = importProgressMap.get(queueId);
   if (current) {
-    importProgressMap.set(queueId, { ...current, ...updates });
+    const next = { ...current, ...updates };
+    importProgressMap.set(queueId, next);
+    // Persiste um snapshot no banco (fire-and-forget) para sobreviver a restart.
+    void persistProgress(next);
   }
 }
 
-export function getImportProgress(queueId: string): ImportBatchProgress | null {
-  return importProgressMap.get(queueId) || null;
+/** Grava o snapshot de progresso no banco (best-effort). */
+async function persistProgress(p: ImportBatchProgress): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const progressJson = JSON.stringify(p);
+    await db
+      .insert(importProgress)
+      .values({ queueId: p.queueId, status: p.status, progressJson })
+      .onDuplicateKeyUpdate({ set: { status: p.status, progressJson } });
+  } catch {
+    // Persistência de progresso é best-effort; o Map em memória é a fonte rápida.
+  }
+}
+
+export async function getImportProgress(queueId: string): Promise<ImportBatchProgress | null> {
+  const inMemory = importProgressMap.get(queueId);
+  if (inMemory) return inMemory;
+  // Fallback: recupera do banco (ex.: após restart do processo).
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    const rows = await db.select().from(importProgress).where(eq(importProgress.queueId, queueId)).limit(1);
+    if (rows[0]) return JSON.parse(rows[0].progressJson) as ImportBatchProgress;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 export function cleanupOldProgress(): void {
@@ -559,6 +588,18 @@ export function cleanupOldProgress(): void {
       if (ageMs > 3600000) importProgressMap.delete(queueId);
     }
   }
+  // Limpa também os snapshots persistidos com mais de 24h (best-effort).
+  void (async () => {
+    try {
+      const db = await getDb();
+      if (!db) return;
+      await db.execute(
+        sql`DELETE FROM import_progress WHERE updatedAt < DATE_SUB(NOW(), INTERVAL 24 HOUR)`,
+      );
+    } catch {
+      /* ignore */
+    }
+  })();
 }
 
 // Limpar progresso antigo a cada 10 minutos

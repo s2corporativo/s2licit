@@ -3018,3 +3018,12 @@ export const certidoes = mysqlTable(
 );
 export type Certidao = typeof certidoes.$inferSelect;
 export type InsertCertidao = typeof certidoes.$inferInsert;
+
+// Progresso de jobs de importação (persistido para sobreviver a restart).
+export const importProgress = mysqlTable("import_progress", {
+  queueId: varchar("queueId", { length: 64 }).primaryKey(),
+  status: varchar("status", { length: 32 }),
+  progressJson: text("progressJson").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type ImportProgressRow = typeof importProgress.$inferSelect;

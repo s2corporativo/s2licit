@@ -1009,7 +1009,7 @@ Responda APENAS com JSON array no formato:
       .query(async ({ input }) => {
         try {
           const { getImportProgress } = await import("../jobs/importBatchJob");
-          const progress = getImportProgress(input.queueId);
+          const progress = await getImportProgress(input.queueId);
           if (!progress) return { found: false, message: "Importação não encontrada ou expirada" };
           return { found: true, ...progress };
         } catch (error: any) {
