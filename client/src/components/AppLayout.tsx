@@ -37,6 +37,7 @@ import {
   KeyRound,
   CalendarClock,
   Trophy,
+  KanbanSquare,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -62,6 +63,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Propostas",
     items: [
+      { href: "/funil", icon: KanbanSquare, label: "Funil de Oportunidades" },
       { href: "/central-operacional", icon: ClipboardList, label: "Central Operacional" },
       { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações Recebidas" },
       { href: "/radar-pncp", icon: Radar, label: "Radar de Oportunidades" },

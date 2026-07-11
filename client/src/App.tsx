@@ -59,6 +59,7 @@ import SalaDisputa from "./pages/SalaDisputa";
 import PortaisLicitacao from "./pages/PortaisLicitacao";
 import Agenda from "./pages/Agenda";
 import Desempenho from "./pages/Desempenho";
+import Funil from "./pages/Funil";
 import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
 import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
 import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
@@ -78,6 +79,7 @@ function Router() {
         <Route path="/dashboard"><Redirect to="/" /></Route>
         <Route path="/agenda" component={Agenda} />
         <Route path="/desempenho" component={Desempenho} />
+        <Route path="/funil" component={Funil} />
         <Route path="/busca" component={BuscaRapida} />
         <Route path="/comparacao" component={Comparacao} />
         <Route path="/categorias" component={Categorias} />
