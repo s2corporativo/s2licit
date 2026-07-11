@@ -40,6 +40,7 @@ import {
   KanbanSquare,
   Percent,
   Truck,
+  PackageCheck,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
       { href: "/tributos", icon: Percent, label: "Motor Tributário" },
       { href: "/custo-total", icon: Truck, label: "Custo Total & Fretes" },
       { href: "/contratos-pos-licitacao", icon: FileText, label: "Contratos Pós-Licitação" },
+      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
       { href: "/diligencias", icon: ShieldAlert, label: "Diligências" },
       { href: "/documentos-habilitacao", icon: FolderClock, label: "Documentos" },
       { href: "/certidoes", icon: ShieldCheck, label: "Certidões" },
