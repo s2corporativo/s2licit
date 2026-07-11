@@ -52,6 +52,7 @@ const navGroups: NavGroup[] = [
     label: "Geral",
     items: [
       { href: "/", icon: LayoutGrid, label: "Dashboard" },
+      { href: "/busca-global", icon: Search, label: "Busca Global" },
       { href: "/agenda", icon: CalendarClock, label: "Agenda" },
       { href: "/desempenho", icon: Trophy, label: "Desempenho" },
     ],
