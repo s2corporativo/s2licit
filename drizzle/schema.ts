@@ -3210,3 +3210,113 @@ export const freightQuotes = mysqlTable(
   ]
 );
 export type FreightQuote = typeof freightQuotes.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pós-venda (spec §20-23): venda confirmada → pedido de compra ao fornecedor
+// → entrega → nota fiscal → recebimento; contas a pagar e fluxo de caixa.
+// ─────────────────────────────────────────────────────────────────────────────
+export const purchaseOrders = mysqlTable(
+  "purchase_orders",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    funilId: int("funilId"),
+    supplierId: int("supplierId"),
+    fornecedorNome: varchar("fornecedorNome", { length: 256 }).notNull(),
+    descricao: varchar("descricao", { length: 512 }).notNull(),
+    valorTotal: decimal("valorTotal", { precision: 15, scale: 2 }).notNull(),
+    prazoEntrega: date("prazoEntrega"),
+    vinculo: varchar("vinculo", { length: 256 }), // contrato/empenho/AF de referência
+    status: mysqlEnum("status", [
+      "solicitado", "confirmado", "faturado", "enviado", "recebido", "divergente", "cancelado",
+    ]).default("solicitado").notNull(),
+    observacoes: text("observacoes"),
+    criadoPor: varchar("criadoPor", { length: 128 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_po_status").on(t.status), index("idx_po_funil").on(t.funilId)]
+);
+export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
+
+export const purchaseOrderItems = mysqlTable(
+  "purchase_order_items",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    orderId: int("orderId").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    descricao: varchar("descricao", { length: 512 }).notNull(),
+    quantidade: decimal("quantidade", { precision: 15, scale: 4 }).notNull(),
+    precoUnit: decimal("precoUnit", { precision: 15, scale: 4 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [index("idx_poi_order").on(t.orderId)]
+);
+
+export const deliveries = mysqlTable(
+  "deliveries",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    orderId: int("orderId"),
+    funilId: int("funilId"),
+    descricao: varchar("descricao", { length: 512 }).notNull(),
+    transportadora: varchar("transportadora", { length: 128 }),
+    rastreio: varchar("rastreio", { length: 128 }),
+    previsao: date("previsao"),
+    entregueEm: date("entregueEm"),
+    recebedor: varchar("recebedor", { length: 128 }),
+    status: mysqlEnum("status", ["preparando", "transito", "entregue", "atrasada", "devolvida"])
+      .default("preparando").notNull(),
+    observacoes: text("observacoes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_del_status").on(t.status), index("idx_del_previsao").on(t.previsao)]
+);
+export type Delivery = typeof deliveries.$inferSelect;
+
+// Notas fiscais de venda (contas a RECEBER)
+export const salesInvoices = mysqlTable(
+  "sales_invoices",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    funilId: int("funilId"),
+    numero: varchar("numero", { length: 64 }).notNull(),
+    orgao: varchar("orgao", { length: 256 }).notNull(),
+    valorBruto: decimal("valorBruto", { precision: 15, scale: 2 }).notNull(),
+    retencoes: decimal("retencoes", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    dataEmissao: date("dataEmissao").notNull(),
+    vencimento: date("vencimento"),
+    recebidoEm: date("recebidoEm"),
+    status: mysqlEnum("status", ["emitida", "atestada", "liquidada", "paga", "cancelada"])
+      .default("emitida").notNull(),
+    observacoes: text("observacoes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [
+    index("idx_si_status").on(t.status),
+    index("idx_si_vencimento").on(t.vencimento),
+    index("idx_si_funil").on(t.funilId),
+  ]
+);
+export type SalesInvoice = typeof salesInvoices.$inferSelect;
+
+// Contas a PAGAR
+export const payables = mysqlTable(
+  "payables",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    descricao: varchar("descricao", { length: 512 }).notNull(),
+    credor: varchar("credor", { length: 256 }),
+    categoria: mysqlEnum("categoria", ["fornecedor", "frete", "imposto", "taxa", "despesa"])
+      .default("fornecedor").notNull(),
+    valor: decimal("valor", { precision: 15, scale: 2 }).notNull(),
+    vencimento: date("vencimento").notNull(),
+    pagoEm: date("pagoEm"),
+    orderId: int("orderId"),
+    observacoes: text("observacoes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_pay_vencimento").on(t.vencimento), index("idx_pay_pago").on(t.pagoEm)]
+);
+export type Payable = typeof payables.$inferSelect;

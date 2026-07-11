@@ -29,6 +29,13 @@
       "when": 1783800915044,
       "tag": "0003_freight_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1783801276704,
+      "tag": "0004_pos_venda",
+      "breakpoints": true
     }
   ]
 }

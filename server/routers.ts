@@ -59,6 +59,7 @@ import { desempenhoRouter } from "./routers/desempenho";
 import { funilRouter } from "./routers/funil";
 import { taxRulesRouter } from "./routers/taxRules";
 import { fretesRouter } from "./routers/fretes";
+import { posVendaRouter } from "./routers/posVenda";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
@@ -251,6 +252,7 @@ export const appRouter = router({
   funil: funilRouter,
   taxRules: taxRulesRouter,
   fretes: fretesRouter,
+  posVenda: posVendaRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),

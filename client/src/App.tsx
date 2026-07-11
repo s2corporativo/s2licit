@@ -62,6 +62,7 @@ import Desempenho from "./pages/Desempenho";
 import Funil from "./pages/Funil";
 import MotorTributario from "./pages/MotorTributario";
 import CustoTotal from "./pages/CustoTotal";
+import PosVenda from "./pages/PosVenda";
 import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
 import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
 import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
@@ -84,6 +85,7 @@ function Router() {
         <Route path="/funil" component={Funil} />
         <Route path="/tributos" component={MotorTributario} />
         <Route path="/custo-total" component={CustoTotal} />
+        <Route path="/pos-venda" component={PosVenda} />
         <Route path="/busca" component={BuscaRapida} />
         <Route path="/comparacao" component={Comparacao} />
         <Route path="/categorias" component={Categorias} />
