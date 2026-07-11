@@ -29,9 +29,7 @@ import TemplatesProposta from "./pages/TemplatesProposta";
 import PropostaAutomatica from "./pages/PropostaAutomatica";
 import { DataQualityDashboard } from "./pages/DataQualityDashboard";
 import { ImportarNfe } from "./pages/ImportarNfe";
-import ConfiguradorScraper from "./pages/ConfiguradorScraper";
 import ConfiguradorFornecedores from "./pages/ConfiguradorFornecedores";
-import ConfiguradorPrecificacao from "./pages/ConfiguradorPrecificacao";
 import AplicarPrecificacao from "./pages/AplicarPrecificacao";
 import RegrasCategoria from "./pages/RegrasCategoria";
 import { AnalisePrecosV2 } from "./pages/AnalisePrecosV2";
@@ -40,7 +38,6 @@ import AgenteProposta from "./pages/AgenteProposta";
 import Agente from "./pages/Agente";
 import { CaptureReview } from "./pages/CaptureReview";
 import { CaptureSchedulerMonitor } from "./pages/CaptureSchedulerMonitor";
-import { AIEnrichment } from "./pages/AIEnrichment";
 import { CaptureAnalytics } from "./pages/CaptureAnalytics";
 import { NfeEnrichmentPipeline } from "./pages/NfeEnrichmentPipeline";
 import HistoricoEnriquecimento from "./pages/HistoricoEnriquecimento";
@@ -109,19 +106,9 @@ function Router() {
             <ImportarNfe />
           </RequireAuth>
         </Route>
-        <Route path="/configurador-scraper">
-          <RequireAuth message="Configure o scraper automático após fazer login." minRole="admin">
-            <ConfiguradorScraper />
-          </RequireAuth>
-        </Route>
         <Route path="/configurador-fornecedores">
           <RequireAuth message="Configure fornecedores após fazer login." minRole="admin">
             <ConfiguradorFornecedores />
-          </RequireAuth>
-        </Route>
-        <Route path="/configurador-precificacao">
-          <RequireAuth message="Configure precificação após fazer login." minRole="admin">
-            <ConfiguradorPrecificacao />
           </RequireAuth>
         </Route>
         <Route path="/aplicar-precificacao">
@@ -147,11 +134,6 @@ function Router() {
         <Route path="/captura-scheduler">
           <RequireAuth message="Gerencie agendamentos de captura após fazer login." minRole="editor">
             <CaptureSchedulerMonitor />
-          </RequireAuth>
-        </Route>
-        <Route path="/enriquecimento-ia">
-          <RequireAuth message="Enriqueça produtos com IA após fazer login." minRole="editor">
-            <AIEnrichment />
           </RequireAuth>
         </Route>
         <Route path="/captura-analytics">
