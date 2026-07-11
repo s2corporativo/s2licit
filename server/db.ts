@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, like, ne, notInArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql2 from "mysql2/promise";
+import { escapeLike, simplifyDbError, normalize, matches, normalizeName, levenshtein, similarity } from "./db/_helpers";
 import {
   Category,
   InsertCategory,
@@ -67,9 +68,6 @@ import { ENV } from "./_core/env";
  * Escapa caracteres especiais do operador LIKE no MySQL.
  * Previne LIKE injection via wildcards % e _.
  */
-function escapeLike(term: string): string {
-  return term.replace(/[%_\\]/g, "\\$&");
-}
 
 let _db: ReturnType<typeof drizzle> | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -494,22 +492,6 @@ export async function bulkInsertProducts(data: InsertProduct[]): Promise<{ inser
   return { inserted, skipped, errors };
 }
 
-function simplifyDbError(msg: string): string {
-  if (msg.includes("Data too long")) {
-    const match = msg.match(/column '(\w+)'/i);
-    return match ? `Valor muito longo para o campo "${match[1]}"` : "Valor muito longo para um dos campos";
-  }
-  if (msg.includes("Incorrect decimal value") || msg.includes("Out of range")) {
-    return "Valor numérico inválido no campo de preço";
-  }
-  if (msg.includes("Cannot add or update a child row") || msg.includes("foreign key")) {
-    return "Referência inválida: fornecedor ou categoria não encontrada";
-  }
-  if (msg.includes("Duplicate entry")) {
-    return "Produto duplicado (já existe com o mesmo código)";
-  }
-  return msg.length > 120 ? msg.slice(0, 120) + "..." : msg;
-}
 
 export async function deactivateProductsByBatch(supplierId: number, batchId: number) {
   const db = await getDb();
@@ -1502,24 +1484,7 @@ export async function getExpiringProposals(daysAhead = 7) {
 /**
  * Normaliza uma string para comparação: maiúsculas, sem acentos, sem espaços extras.
  */
-function normalize(s: string | null | undefined): string {
-  if (!s) return "";
-  return s
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
-/**
- * Verifica se dois valores normalizados são iguais e não-vazios.
- */
-function matches(a: string | null | undefined, b: string | null | undefined): boolean {
-  const na = normalize(a);
-  const nb = normalize(b);
-  return na.length > 0 && nb.length > 0 && na === nb;
-}
 
 export type MatchResult = {
   matched: boolean;
@@ -3473,39 +3438,7 @@ export async function bulkDeleteFeedback(ids: number[]): Promise<void> {
 // ─── Detecção e Fusão de Duplicatas ──────────────────────────────────────────
 
 /** Normaliza string para comparação fuzzy */
-function normalizeName(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
-/** Calcula distância de Levenshtein entre duas strings */
-function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
-/** Calcula similaridade 0-1 entre dois nomes normalizados */
-function similarity(a: string, b: string): number {
-  if (a === b) return 1;
-  const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(a, b) / maxLen;
-}
 
 export type DuplicateGroup = {
   groupId: number;
