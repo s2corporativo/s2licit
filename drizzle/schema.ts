@@ -3027,3 +3027,25 @@ export const importProgress = mysqlTable("import_progress", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 export type ImportProgressRow = typeof importProgress.$inferSelect;
+
+// Credenciais dos portais de licitação (senha criptografada). Uso interno.
+export const portalCredentials = mysqlTable(
+  "portal_credentials",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    portal: varchar("portal", { length: 32 }).notNull(), // comprasnet|comprasmg|fundep|funarbe|copasa|agrega|generico
+    apelido: varchar("apelido", { length: 128 }),          // nome amigável
+    loginUrl: text("loginUrl"),                            // sobrescreve a URL padrão do portal
+    usuario: varchar("usuario", { length: 256 }).notNull(),// login/CNPJ/CPF
+    senhaCriptografada: text("senhaCriptografada").notNull(),
+    cnpj: varchar("cnpj", { length: 18 }),
+    ativo: boolean("ativo").notNull().default(true),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_portal_credentials_portal").on(table.portal),
+    index("idx_portal_credentials_ativo").on(table.ativo),
+  ]
+);
+export type PortalCredentialRow = typeof portalCredentials.$inferSelect;

@@ -34,6 +34,7 @@ import {
   Radar,
   Brain,
   Gavel,
+  KeyRound,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -97,6 +98,7 @@ const navGroups: NavGroup[] = [
       { href: "/fornecedores", icon: Building2, label: "Fornecedores" },
       { href: "/agente", icon: Bot, label: "Assistente IA" },
       { href: "/agente-proposta", icon: Zap, label: "Agente de Propostas" },
+      { href: "/portais-licitacao", icon: KeyRound, label: "Portais de Licitação" },
       { href: "/captura-inteligente", icon: Globe, label: "Captura Inteligente" },
       { href: "/scraper-fornecedores", icon: Globe, label: "Agente de Preços" },
       { href: "/central-ia", icon: Brain, label: "Central de IA" },

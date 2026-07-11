@@ -20,7 +20,7 @@ import { decryptPassword } from "../utils/encryption";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "agrega" | "generico";
+export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "agrega" | "generico";
 
 export interface PortalConfig {
   nome: string;
@@ -195,6 +195,57 @@ export const PORTAL_CONFIGS: Record<PortalType, PortalConfig> = {
       botaoSalvar: '#btnSalvar, input[id="btnSalvar"], input[value="Salvar"]',
       botaoEnviar: '#btnEnviarProposta, input[id*="Enviar"], input[value="Enviar Proposta"]',
       confirmacaoEnvio: '#btnConfirmar, input[value="Confirmar"]',
+    },
+  },
+
+  // ── FUNARBE (Fundação Arthur Bernardes / UFV Viçosa-MG) ───────────────────
+  // Portal: compras.funarbe.org.br — cotações, pregões e dispensas.
+  // Login do fornecedor + senha cadastrada na Funarbe.
+  funarbe: {
+    nome: "FUNARBE / Compras Funarbe (UFV)",
+    loginUrl: "https://compras.funarbe.org.br/",
+    notasImportantes:
+      "Portal de compras da Fundação Arthur Bernardes (UFV, Viçosa-MG). " +
+      "Acesse 'Portal do Fornecedor', faça login e localize a cotação/pregão em andamento. " +
+      "Confira os seletores na primeira execução — o robô loga e pré-preenche; você revisa e envia.",
+    estrategia: "form_padrao",
+    seletores: {
+      loginCpfCnpj: 'input[name*="login"], input[name*="cnpj"], input[name="email"], input[id*="login"], input[placeholder*="CNPJ"], input[placeholder*="usu"]',
+      loginSenha: 'input[type="password"], input[name*="senha"], input[name="password"]',
+      loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"], input[value="Acessar"]',
+      loginSucesso: "fornecedor",
+      tabelaItens: 'table tbody tr, .item-cotacao, tr[class*="item"], [class*="linha-item"]',
+      inputPreco: 'input[name*="preco"], input[name*="valor"], input[id*="preco"], input[type="number"]',
+      inputMarca: 'input[name*="marca"], input[id*="marca"], input[name*="fabricante"]',
+      inputValidade: 'input[name*="validade"], input[id*="validade"], input[name*="prazo"]',
+      botaoSalvar: 'button[id*="salvar"], input[value*="Salvar"], button[type="submit"]',
+      botaoEnviar: 'button[id*="enviar"], input[value*="Enviar"]',
+      confirmacaoEnvio: 'button[id*="confirmar"], input[value="Confirmar"], input[value="OK"]',
+    },
+  },
+
+  // ── COPASA (Cia. de Saneamento de MG) — Agência Virtual ───────────────────
+  // Portal: copasaportalprd.azurewebsites.net (ASP.NET). Login do fornecedor.
+  copasa: {
+    nome: "COPASA / Agência Virtual",
+    loginUrl: "https://copasaportalprd.azurewebsites.net/Copasa.Portal/Login/index",
+    notasImportantes:
+      "Agência Virtual da COPASA (fornecedores). Faça login e acesse a área de " +
+      "abastecimento/cotações. Portal ASP.NET — confira os seletores na 1ª execução. " +
+      "O robô loga e pré-preenche; você revisa e envia.",
+    estrategia: "form_padrao",
+    seletores: {
+      loginCpfCnpj: 'input[name*="Login"], input[name*="User"], input[name*="cnpj"], input[name*="cpf"], input[id*="Login"], input[id*="User"]',
+      loginSenha: 'input[type="password"], input[name*="Password"], input[name*="Senha"], input[id*="Password"]',
+      loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"], input[value="Acessar"], #btnLogin',
+      loginSucesso: "home",
+      tabelaItens: 'table tbody tr, .grid-row, tr[class*="row"], [class*="item"]',
+      inputPreco: 'input[name*="Preco"], input[name*="Valor"], input[id*="Preco"], input[type="number"]',
+      inputMarca: 'input[name*="Marca"], input[id*="Marca"], input[name*="Fabricante"]',
+      inputValidade: 'input[name*="Validade"], input[id*="Validade"], input[name*="Prazo"]',
+      botaoSalvar: 'button[id*="Salvar"], input[value*="Salvar"], button[type="submit"]',
+      botaoEnviar: 'button[id*="Enviar"], input[value*="Enviar"]',
+      confirmacaoEnvio: 'button[id*="Confirmar"], input[value="Confirmar"], input[value="OK"]',
     },
   },
 

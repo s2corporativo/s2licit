@@ -56,6 +56,7 @@ import RadarPncp from "./pages/RadarPncp";
 import Certidoes from "./pages/Certidoes";
 import CentralIA from "./pages/CentralIA";
 import SalaDisputa from "./pages/SalaDisputa";
+import PortaisLicitacao from "./pages/PortaisLicitacao";
 import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
 import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
 import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
@@ -192,6 +193,11 @@ function Router() {
         <Route path="/sala-disputa">
           <RequireAuth message="Acesse a Sala de Disputa após fazer login." minRole="editor">
             <SalaDisputa />
+          </RequireAuth>
+        </Route>
+        <Route path="/portais-licitacao">
+          <RequireAuth message="Acesse os portais de licitação após fazer login." minRole="editor">
+            <PortaisLicitacao />
           </RequireAuth>
         </Route>
         <Route path="/documentos-habilitacao">

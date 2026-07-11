@@ -53,6 +53,7 @@ import { emailQuotationsRouter } from "./routers/emailQuotations";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
 import { precificacaoRouter } from "./routers/precificacao";
+import { portalCredentialsRouter } from "./routers/portalCredentials";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
@@ -239,6 +240,7 @@ export const appRouter = router({
   certidoes: certidoesRouter,
   ai: aiRouter,
   precificacao: precificacaoRouter,
+  portalCredentials: portalCredentialsRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
