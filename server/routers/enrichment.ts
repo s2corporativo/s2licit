@@ -1,4 +1,4 @@
-import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { products, categories } from "../../drizzle/schema";
@@ -223,7 +223,7 @@ Responda em JSON válido.`;
    * Listar produtos sem princípio ativo ou categoria
    * Para identificar quais precisam enriquecimento
    */
-  listProductsNeedingEnrichment: publicProcedure
+  listProductsNeedingEnrichment: protectedProcedure
     .input(
       z.object({
         limit: z.number().default(100),
@@ -274,7 +274,7 @@ Responda em JSON válido.`;
    * Obter sugestões de enriquecimento para um produto
    * Sem aplicar automaticamente, apenas retorna sugestões
    */
-  getSuggestions: publicProcedure
+  getSuggestions: protectedProcedure
     .input(
       z.object({
         productId: z.number(),
@@ -409,7 +409,7 @@ Forneça sugestões de:
    * Estatísticas de enriquecimento
    * Retorna quantidade de produtos enriquecidos, pendentes, etc
    */
-  getEnrichmentStats: publicProcedure.query(async () => {
+  getEnrichmentStats: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("DB indisponível");
 

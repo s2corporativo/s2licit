@@ -1,4 +1,4 @@
-import { router, protectedProcedure, publicProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import {
   matchProductToMaster,
@@ -148,7 +148,7 @@ export const productMatchingRouter = router({
   /**
    * Lista todos os Master Products disponíveis
    */
-  listMasterProducts: publicProcedure
+  listMasterProducts: protectedProcedure
     .input(
       z.object({
         limit: z.number().min(1).max(1000).default(100),
@@ -178,7 +178,7 @@ export const productMatchingRouter = router({
   /**
    * Busca Master Products por termo
    */
-  searchMasterProducts: publicProcedure
+  searchMasterProducts: protectedProcedure
     .input(
       z.object({
         query: z.string().min(1),

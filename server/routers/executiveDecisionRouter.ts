@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import {
   evaluateOpportunity,
   getDecision,
@@ -12,11 +12,11 @@ export const executiveDecisionRouter = router({
     .input(z.object({ proposalId: z.number() }))
     .mutation(async ({ input }) => evaluateOpportunity(input.proposalId)),
 
-  getDecision: publicProcedure
+  getDecision: protectedProcedure
     .input(z.object({ decisionId: z.number() }))
     .query(async ({ input }) => getDecision(input.decisionId)),
 
-  listRecentDecisions: publicProcedure
+  listRecentDecisions: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(100).default(20) }))
     .query(async ({ input }) => listRecentDecisions(input.limit)),
 

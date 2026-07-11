@@ -42,7 +42,7 @@ describe("postAwardContractsRouter", () => {
     vi.clearAllMocks();
   });
 
-  it("retorna dashboard público do módulo de contratos", async () => {
+  it("retorna dashboard do módulo de contratos para usuário autenticado", async () => {
     serviceMocks.getContractsDashboard.mockResolvedValue({
       totalContratos: 3,
       contratosAtivos: 2,
@@ -51,7 +51,7 @@ describe("postAwardContractsRouter", () => {
       proximosVencimentos: [],
     });
 
-    const caller = appRouter.createCaller(createContext(null));
+    const caller = appRouter.createCaller(createContext(adminUser));
     const result = await caller.postAwardContracts.dashboard();
 
     expect(serviceMocks.getContractsDashboard).toHaveBeenCalledTimes(1);
@@ -59,12 +59,12 @@ describe("postAwardContractsRouter", () => {
     expect(result.contratosAtivos).toBe(2);
   });
 
-  it("lista contratos com filtros públicos", async () => {
+  it("lista contratos com filtros para usuário autenticado", async () => {
     serviceMocks.listPostAwardContracts.mockResolvedValue([
       { id: 10, contractNumber: "CT-001/2026", status: "active" },
     ]);
 
-    const caller = appRouter.createCaller(createContext(null));
+    const caller = appRouter.createCaller(createContext(adminUser));
     const result = await caller.postAwardContracts.list({ status: "active", orgId: 7 });
 
     expect(serviceMocks.listPostAwardContracts).toHaveBeenCalledWith({ status: "active", orgId: 7 });

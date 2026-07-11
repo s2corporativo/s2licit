@@ -14,6 +14,7 @@ import { declarationTemplates } from "../../drizzle/schema";
 import { inArray } from "drizzle-orm";
 import { storagePut } from "../storage";
 import multer from "multer";
+import { apiRateLimiter, authRateLimiter } from "./rateLimit";
 
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -38,9 +39,16 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  // Atrás de proxy reverso (Render, nginx), confiar no primeiro salto para
+  // que req.ip reflita o cliente real (necessário para o rate limiter).
+  app.set("trust proxy", 1);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Rate limiting: geral na API, estrito na autenticação
+  app.use("/api", apiRateLimiter);
+  app.use("/api/auth", authRateLimiter);
+  app.use("/api/oauth", authRateLimiter);
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // Logo upload route (multipart/form-data)

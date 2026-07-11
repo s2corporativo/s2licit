@@ -10,13 +10,13 @@
  */
 
 import { z } from "zod";
-import { router, publicProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 
 export const drogavetRouter = router({
   /**
    * Buscar princípios ativos do Guia DrogaVet por termo
    */
-  searchActives: publicProcedure
+  searchActives: protectedProcedure
     .input(z.object({
       term: z.string().min(1).max(100),
       limit: z.number().min(1).max(50).default(10),
@@ -49,7 +49,7 @@ export const drogavetRouter = router({
   /**
    * Buscar fórmulas do Guia DrogaVet por termo
    */
-  searchFormulas: publicProcedure
+  searchFormulas: protectedProcedure
     .input(z.object({
       term: z.string().min(1).max(100),
       limit: z.number().min(1).max(50).default(10),
@@ -81,7 +81,7 @@ export const drogavetRouter = router({
   /**
    * Obter detalhes completos de um princípio ativo
    */
-  getActive: publicProcedure
+  getActive: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const actives: Record<number, any> = {
@@ -95,7 +95,7 @@ export const drogavetRouter = router({
   /**
    * Obter detalhes completos de uma fórmula
    */
-  getFormula: publicProcedure
+  getFormula: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const formulas: Record<number, any> = {
@@ -108,7 +108,7 @@ export const drogavetRouter = router({
   /**
    * Listar todos os princípios ativos
    */
-  listAllActives: publicProcedure
+  listAllActives: protectedProcedure
     .input(z.object({
       page: z.number().min(1).default(1),
       pageSize: z.number().min(1).max(100).default(20),
@@ -138,7 +138,7 @@ export const drogavetRouter = router({
   /**
    * Listar todas as fórmulas
    */
-  listAllFormulas: publicProcedure
+  listAllFormulas: protectedProcedure
     .input(z.object({
       page: z.number().min(1).default(1),
       pageSize: z.number().min(1).max(100).default(20),

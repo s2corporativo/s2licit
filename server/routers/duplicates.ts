@@ -1,4 +1,4 @@
-import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
@@ -66,7 +66,7 @@ export const duplicatesRouter = router({
    * Detectar produtos duplicados
    * Retorna grupos de produtos com similaridade > 0.7 em nome + concentração
    */
-  detectDuplicates: publicProcedure
+  detectDuplicates: protectedProcedure
     .input(z.object({ 
       minSimilarity: z.number().min(0).max(1).default(0.7),
       limit: z.number().min(1).max(1000).default(100)
@@ -295,7 +295,7 @@ export const duplicatesRouter = router({
    * Listar todos os grupos de duplicados detectados
    * Com paginação e filtros
    */
-  listDuplicateGroups: publicProcedure
+  listDuplicateGroups: protectedProcedure
     .input(z.object({
       page: z.number().min(1).default(1),
       pageSize: z.number().min(1).max(100).default(20),
@@ -378,7 +378,7 @@ export const duplicatesRouter = router({
   /**
    * Obter estatísticas de duplicados
    */
-  getDuplicateStats: publicProcedure
+  getDuplicateStats: protectedProcedure
     .query(async () => {
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");

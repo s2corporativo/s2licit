@@ -1,4 +1,4 @@
-import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
@@ -79,7 +79,7 @@ export const imagesRouter = router({
    * Buscar produtos por nome parcial com thumbnails
    * Retorna id, name, manufacturer, imageUrl atual
    */
-  searchByName: publicProcedure
+  searchByName: protectedProcedure
     .input(z.object({ nameTerm: z.string().min(1) }))
     .query(async ({ input }: { input: { nameTerm: string } }) => {
       const db = await getDb();
@@ -198,7 +198,7 @@ export const imagesRouter = router({
    * Obter thumbnail de produto com fallback
    * Retorna imageUrl ou null se não disponível
    */
-  getThumbnail: publicProcedure
+  getThumbnail: protectedProcedure
     .input(z.object({ productId: z.number() }))
     .query(async ({ input }: { input: { productId: number } }) => {
       const db = await getDb();
@@ -220,7 +220,7 @@ export const imagesRouter = router({
    * Obter múltiplos thumbnails em lote
    * Retorna array de { productId, imageUrl }
    */
-  getThumbnailsBatch: publicProcedure
+  getThumbnailsBatch: protectedProcedure
     .input(z.object({ productIds: z.array(z.number()) }))
     .query(async ({ input }: { input: { productIds: number[] } }) => {
       const db = await getDb();
@@ -254,7 +254,7 @@ export const imagesRouter = router({
    * Detectar colunas de imagem em planilha importada
    * Retorna nome da coluna se encontrada (imageUrl, imagem, url_imagem, image, foto, picture, img)
    */
-  detectImageColumn: publicProcedure
+  detectImageColumn: protectedProcedure
     .input(z.object({ headers: z.array(z.string()) }))
     .query(({ input }: { input: { headers: string[] } }) => {
       const imageColumnPatterns = [
@@ -285,7 +285,7 @@ export const imagesRouter = router({
    * Estatísticas de imagens no catálogo
    * Retorna total de produtos, com imagem, sem imagem, percentual
    */
-  getImageStats: publicProcedure.query(async (): Promise<any> => {
+  getImageStats: protectedProcedure.query(async (): Promise<any> => {
     const db = await getDb();
     if (!db) throw new Error("DB indisponível");
 

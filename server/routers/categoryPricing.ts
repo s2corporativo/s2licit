@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import {
   listCategoryPricingRules,
@@ -196,7 +196,7 @@ export const categoryPricingRouter = router({
   /**
    * Calcular preço com regra de categoria
    */
-  calculatePrice: publicProcedure
+  calculatePrice: protectedProcedure
     .input(
       z.object({
         categoryId: z.number(),

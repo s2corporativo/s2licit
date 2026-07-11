@@ -39,10 +39,13 @@ export function getSessionCookieOptions(
   //       ? hostname
   //       : undefined;
 
+  // "lax" bloqueia envio do cookie em requisições cross-site (mitigação de
+  // CSRF) sem atrapalhar a navegação normal. "none" só era necessário para
+  // rodar embutido em iframe na plataforma Manus.
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    sameSite: "lax",
     secure: isSecureRequest(req),
   };
 }

@@ -1,4 +1,4 @@
-import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { enrichmentHistoryService } from "../services/enrichmentHistoryService";
 import { TRPCError } from "@trpc/server";

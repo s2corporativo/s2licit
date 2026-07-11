@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import {
   createCaptureBatch,
   getCaptureBatch,
@@ -57,11 +57,11 @@ function normalizeBatchResponse(result: Awaited<ReturnType<typeof createCaptureB
 }
 
 export const intelligentCaptureRouter = router({
-  listBatches: publicProcedure
+  listBatches: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(100).default(20) }).default({ limit: 20 }))
     .query(async ({ input }) => listCaptureBatches(input.limit)),
 
-  getBatch: publicProcedure
+  getBatch: protectedProcedure
     .input(z.object({ batchId: z.number() }))
     .query(async ({ input }) => getCaptureBatch(input.batchId)),
 

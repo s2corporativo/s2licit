@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import {
   approveMerge,
   getProductDuplicateProfile,
@@ -22,7 +22,7 @@ export const duplicateDetectionRouter = router({
       });
     }),
 
-  listResults: publicProcedure
+  listResults: protectedProcedure
     .input(
       z.object({
         classification: z.enum(["all", "confirmed", "probable", "review", "distinct"]).default("all"),
@@ -35,7 +35,7 @@ export const duplicateDetectionRouter = router({
       return listPotentialDuplicates(input);
     }),
 
-  listGroups: publicProcedure
+  listGroups: protectedProcedure
     .input(
       z.object({
         runId: z.number().optional(),
@@ -79,7 +79,7 @@ export const duplicateDetectionRouter = router({
       return ignoreResult({ resultId: input.resultId, performedByUserId: ctx.user.id, markDistinct: input.markDistinct });
     }),
 
-  getProductDuplicateProfile: publicProcedure
+  getProductDuplicateProfile: protectedProcedure
     .input(z.object({ productId: z.number() }))
     .query(async ({ input }) => {
       const rows = await getProductDuplicateProfile(input.productId);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import {
   createPostAwardContract,
   getContractsDashboard,
@@ -14,7 +14,7 @@ const contractStatusSchema = z.enum(["draft", "active", "suspended", "expired", 
 const movementTypeSchema = z.enum(["empenho", "faturamento", "consumo", "reforco", "glosa", "outro"]);
 
 export const postAwardContractsRouter = router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(z.object({
       status: contractStatusSchema.optional(),
       orgId: z.number().optional(),
@@ -22,11 +22,11 @@ export const postAwardContractsRouter = router({
     }).default({}))
     .query(async ({ input }) => listPostAwardContracts(input)),
 
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ contractId: z.number() }))
     .query(async ({ input }) => getPostAwardContract(input.contractId)),
 
-  dashboard: publicProcedure
+  dashboard: protectedProcedure
     .input(z.object({}).default({}))
     .query(async () => getContractsDashboard()),
 

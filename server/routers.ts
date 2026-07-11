@@ -186,7 +186,7 @@ import {
 import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc, lt, gt, gte } from "drizzle-orm";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
@@ -238,8 +238,8 @@ export const appRouter = router({
 
   // ─── Categories ───────────────────────────────────────────────────────────
   categories: router({
-    list: publicProcedure.query(() => listCategories()),
-    listHierarchy: publicProcedure.query(() => listCategoriesHierarchy()),
+    list: protectedProcedure.query(() => listCategories()),
+    listHierarchy: protectedProcedure.query(() => listCategoriesHierarchy()),
 
     create: protectedProcedure
       .input(
@@ -350,11 +350,11 @@ export const appRouter = router({
 
   // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ activeOnly: z.boolean().optional() }).optional())
       .query(({ input }) => listSuppliers(input?.activeOnly)),
 
-    get: publicProcedure
+    get: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getSupplierById(input.id)),
 
@@ -396,7 +396,7 @@ export const appRouter = router({
 
   // ─── Products ─────────────────────────────────────────────────────────────
   products: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(
         z.object({
           categoryId: z.number().optional(),
@@ -419,7 +419,7 @@ export const appRouter = router({
       )
       .query(({ input }) => listProducts(input as any)),
 
-    get: publicProcedure
+    get: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getProductById(input.id)),
 
@@ -546,7 +546,7 @@ export const appRouter = router({
         return { deleted: input.ids.length };
       }),
 
-    smartSearch: publicProcedure
+    smartSearch: protectedProcedure
       .input(
         z.object({
           query: z.string().min(1),
@@ -555,7 +555,7 @@ export const appRouter = router({
       )
       .query(({ input }) => smartSearch(input.query, input.categoryId)),
 
-    compareByActiveIngredient: publicProcedure
+    compareByActiveIngredient: protectedProcedure
       .input(
         z.object({
           activeIngredient: z.string().min(1),
@@ -566,7 +566,7 @@ export const appRouter = router({
         compareByActiveIngredient(input.activeIngredient, input.categoryId)
       ),
 
-    autocomplete: publicProcedure
+    autocomplete: protectedProcedure
       .input(
         z.object({
           query: z.string().min(1),
@@ -576,7 +576,7 @@ export const appRouter = router({
       .query(({ input }) => autocompleteSearch(input.query, input.limit ?? 12)),
 
     // ─── Image Management ───────────────────────────────────────────────
-    searchByName: publicProcedure
+    searchByName: protectedProcedure
       .input(
         z.object({
           nameTerm: z.string().min(2),
@@ -584,7 +584,7 @@ export const appRouter = router({
         })
       )
       .query(({ input }) => searchProductsByName(input.nameTerm, input.limit ?? 100)),
-    quickSearch: publicProcedure
+    quickSearch: protectedProcedure
       .input(z.object({ query: z.string().min(1), limit: z.number().optional() }))
       .query(async ({ input }) => {
         const db = await getDb();
@@ -651,7 +651,7 @@ export const appRouter = router({
       }).optional())
       .query(({ input }) => findDuplicateGroups(input ?? {})),
     // ─── Preços por Fornecedor ───────────────────────────────────────────────────
-    getSupplierPrices: publicProcedure
+    getSupplierPrices: protectedProcedure
       .input(z.object({ productId: z.number() }))
       .query(async ({ input }) => {
         const { getProductSupplierPrices } = await import("./db");
@@ -675,13 +675,13 @@ export const appRouter = router({
         });
         return { ok: true };
       }),
-    priceHistoryByProduct: publicProcedure
+    priceHistoryByProduct: protectedProcedure
       .input(z.object({ productId: z.number(), supplierId: z.number().optional(), limit: z.number().default(20) }))
       .query(async ({ input }) => {
         const { getPriceHistory } = await import("./db");
         return getPriceHistory(input.productId, input.supplierId, input.limit);
       }),
-    findByEan: publicProcedure
+    findByEan: protectedProcedure
       .input(z.object({ ean: z.string() }))
       .query(async ({ input }) => {
         const { findProductByEan } = await import("./db");
@@ -704,7 +704,7 @@ export const appRouter = router({
      * técnica (princípio ativo, concentração, forma farmacêutica, classe terapêutica)
      * e ordenando os aprovados pelo menor preço.
      */
-    suggestEquivalentsByFichaTecnica: publicProcedure
+    suggestEquivalentsByFichaTecnica: protectedProcedure
       .input(z.object({
         productId: z.number(),
         limit: z.number().int().min(1).max(50).default(20),
@@ -1002,7 +1002,7 @@ export const appRouter = router({
         return runEnrichFichaTecnicaBatch();
       }),
 
-    getEnrichmentProgress: publicProcedure
+    getEnrichmentProgress: protectedProcedure
       .query(async () => {
         const { getEnrichmentProgress } = await import("./jobs/enrichFichaTecnicaJob");
         return getEnrichmentProgress();
@@ -1033,11 +1033,11 @@ export const appRouter = router({
 
   // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ categoryId: z.number().optional() }).optional())
       .query(({ input }) => listEquivalenceGroups(input?.categoryId)),
 
-    get: publicProcedure
+    get: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getEquivalenceGroupWithMembers(input.id)),
 
@@ -1095,7 +1095,7 @@ export const appRouter = router({
       )
       .mutation(({ input }) => applyEquivalenceGroups(input.groups)),
 
-    stats: publicProcedure.query(() => getEquivalenceStats()),
+    stats: protectedProcedure.query(() => getEquivalenceStats()),
     // Geração inicial com 1 clique: preview + apply automático de todos os grupos novos
     generateAndApplyAll: protectedProcedure
       .input(
@@ -1127,7 +1127,7 @@ export const appRouter = router({
 
   // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ limit: z.number().optional() }).optional())
       .query(({ input }) => listImportLogs(input?.limit)),
 
@@ -1701,7 +1701,7 @@ export const appRouter = router({
       }),
 
     // ── getStatus: polling de status de uma importação em andamento ──
-    getStatus: publicProcedure
+    getStatus: protectedProcedure
       .input(z.object({ batchId: z.number() }))
       .query(async ({ input }) => {
         const db = await getDb();
@@ -1728,7 +1728,7 @@ export const appRouter = router({
       }),
 
     // ── getErrors: erros linha a linha de uma importação ──
-    getErrors: publicProcedure
+    getErrors: protectedProcedure
       .input(z.object({ batchId: z.number() }))
       .query(async ({ input }) => {
         const db = await getDb();
@@ -1992,7 +1992,7 @@ Responda APENAS com JSON array no formato:
       }),
 
     // ── getImportProgress: obtém progresso da importação em lote ──
-    getImportProgress: publicProcedure
+    getImportProgress: protectedProcedure
       .input(z.object({ queueId: z.string().uuid() }))
       .query(async ({ input }) => {
         try {
@@ -2008,15 +2008,15 @@ Responda APENAS com JSON array no formato:
   }),
    // ─── Dashboard ────────────────────────────────────────────────────────────
   dashboard: router({
-    stats: publicProcedure.query(() => getDashboardStats()),
-    productsPerCategory: publicProcedure.query(() => getProductsPerCategory()),
-    expiringProposals: publicProcedure
+    stats: protectedProcedure.query(() => getDashboardStats()),
+    productsPerCategory: protectedProcedure.query(() => getProductsPerCategory()),
+    expiringProposals: protectedProcedure
       .input(z.object({ daysAhead: z.number().optional() }).optional())
       .query(({ input }) => getExpiringProposals(input?.daysAhead ?? 7)),
-    financialSummary: publicProcedure.query(() => getFinancialSummary()),
-    proposalStats: publicProcedure.query(() => getProposalFinancialStats()),
-    marginByCategory: publicProcedure.query(() => getMarginByCategory()),
-    extendedStats: publicProcedure.query(async () => {
+    financialSummary: protectedProcedure.query(() => getFinancialSummary()),
+    proposalStats: protectedProcedure.query(() => getProposalFinancialStats()),
+    marginByCategory: protectedProcedure.query(() => getMarginByCategory()),
+    extendedStats: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return { revenueInOrders: 0, avgTicket: 0, wonProposals: 0, productsWithoutCategory: 0, productsWithoutAI: 0 };
       const [orderRows, wonRows, noCatRows, noAIRows] = await Promise.all([
@@ -2045,7 +2045,7 @@ Responda APENAS com JSON array no formato:
       };
     }),
 
-     recentActivity: publicProcedure.query(async () => {
+     recentActivity: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db
@@ -2063,7 +2063,7 @@ Responda APENAS com JSON array no formato:
     }),
 
     // ── catalogHealth: saúde cadastral detalhada do catálogo ──
-    catalogHealth: publicProcedure.query(async () => {
+    catalogHealth: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return { withoutFichaTecnica: 0, withoutActiveIngredient: 0, withoutManufacturer: 0, withoutEan: 0, withoutCategory: 0, withoutImage: 0, withoutPrice: 0, total: 0 };
       // Query consolidada: 1 passagem pela tabela em vez de 7 queries separadas
@@ -2092,7 +2092,7 @@ Responda APENAS com JSON array no formato:
     }),
 
     // ── proposalPipeline: pipeline de propostas por estágio com valor e prazo ──
-    proposalPipeline: publicProcedure.query(async () => {
+    proposalPipeline: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       const rows = await db
@@ -2122,7 +2122,7 @@ Responda APENAS com JSON array no formato:
     }),
 
     // ── actionQueue: fila de ações do dia priorizadas ──
-    actionQueue: publicProcedure.query(async () => {
+    actionQueue: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       const now = new Date();
@@ -2159,8 +2159,8 @@ Responda APENAS com JSON array no formato:
 
   // ─── Company Settings ────────────────────────────────────────────────────────
   company: router({
-    get: publicProcedure.query(() => getCompanySettings()),
-    upsert: publicProcedure
+    get: protectedProcedure.query(() => getCompanySettings()),
+    upsert: protectedProcedure
       .input(
         z.object({
           name: z.string().max(256).optional(),
@@ -2183,15 +2183,15 @@ Responda APENAS com JSON array no formato:
 
   // ─── Requesting Orgs ─────────────────────────────────────────────────────────
   orgs: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ search: z.string().optional() }))
       .query(({ input }) => listRequestingOrgs(input.search)),
 
-    get: publicProcedure
+    get: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getRequestingOrgById(input.id)),
 
-    upsert: publicProcedure
+    upsert: protectedProcedure
       .input(
         z.object({
           name: z.string().min(1).max(256),
@@ -2207,7 +2207,7 @@ Responda APENAS com JSON array no formato:
       )
       .mutation(({ input }) => upsertRequestingOrg(input as any)),
 
-    update: publicProcedure
+    update: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -2227,19 +2227,19 @@ Responda APENAS com JSON array no formato:
         return updateRequestingOrg(id, data as any);
       }),
 
-    delete: publicProcedure
+    delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteRequestingOrg(input.id)),
   }),
 
   // ─── Proposals ───────────────────────────────────────────────────────────────
   proposals: router({
-    list: publicProcedure.query(() => listProposals()),
+    list: protectedProcedure.query(() => listProposals()),
 
-    get: publicProcedure
+    get: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getProposalWithItems(input.id)),
-    create: publicProcedure
+    create: protectedProcedure
       .input(
         z.object({
           title: z.string().min(1).max(256),
@@ -2257,7 +2257,7 @@ Responda APENAS com JSON array no formato:
       )
       .mutation(({ input }) => createProposal(input as any)),
 
-    update: publicProcedure
+    update: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -2278,11 +2278,11 @@ Responda APENAS com JSON array no formato:
         return updateProposal(id, data as any);
       }),
 
-     delete: publicProcedure
+     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteProposal(input.id)),
 
-    addItem: publicProcedure
+    addItem: protectedProcedure
       .input(
         z.object({
           proposalId: z.number(),
@@ -2304,7 +2304,7 @@ Responda APENAS com JSON array no formato:
       )
       .mutation(({ input }) => addProposalItem(input as any)),
 
-    updateItem: publicProcedure
+    updateItem: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -2333,11 +2333,11 @@ Responda APENAS com JSON array no formato:
         return updateProposalItem(id, data as any);
       }),
 
-    removeItem: publicProcedure
+    removeItem: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => removeProposalItem(input.id)),
     // Administration
-    listAdmin: publicProcedure
+    listAdmin: protectedProcedure
       .input(z.object({
         status: z.string().optional(),
         orgName: z.string().optional(),
@@ -2345,7 +2345,7 @@ Responda APENAS com JSON array no formato:
         dateTo: z.date().optional(),
       }).optional())
       .query(({ input }) => listProposalsAdmin(input)),
-    advanceStatus: publicProcedure
+    advanceStatus: protectedProcedure
       .input(z.object({
         id: z.number(),
         newStatus: z.enum(["draft", "sent", "order", "in_transit", "delivered", "cancelled"]),
@@ -2407,7 +2407,7 @@ Responda APENAS com JSON array no formato:
         }
         return { success: true };
       }),
-    updateFreight: publicProcedure
+    updateFreight: protectedProcedure
       .input(z.object({
         id: z.number(),
         freightValue: z.string().optional().nullable(),
@@ -2419,22 +2419,22 @@ Responda APENAS com JSON array no formato:
         const { id, ...data } = input;
         return updateProposalFreight(id, data as any);
       }),
-    getStatusHistory: publicProcedure
+    getStatusHistory: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getProposalStatusHistory(input.id)),
-    duplicate: publicProcedure
+    duplicate: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => duplicateProposal(input.id)),
 
     // Sugestão automática de produtos a partir de lista de texto/planilha
-    suggestFromList: publicProcedure
+    suggestFromList: protectedProcedure
       .input(z.object({
         productNames: z.array(z.string().min(1)).min(1).max(200),
       }))
       .mutation(({ input }) => suggestProductsFromList(input.productNames)),
 
     // Busca similares mais baratos para um produto recém-adicionado à proposta
-    findCheaperSimilar: publicProcedure
+    findCheaperSimilar: protectedProcedure
       .input(z.object({
         productId: z.number(),          // produto recém-adicionado
         unitPrice: z.string(),          // preço unitário do produto adicionado
@@ -2522,7 +2522,7 @@ Responda APENAS com JSON array no formato:
 
   // ─── Financial Entries ────────────────────────────────────────────────
   financial: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({
         type: z.enum(["income", "expense"]).optional(),
         isPaid: z.enum(["yes", "no"]).optional(),
@@ -2531,7 +2531,7 @@ Responda APENAS com JSON array no formato:
         proposalId: z.number().optional(),
       }).optional())
       .query(({ input }) => listFinancialEntries(input)),
-    create: publicProcedure
+    create: protectedProcedure
       .input(z.object({
         type: z.enum(["income", "expense"]),
         category: z.string().max(128).optional().nullable(),
@@ -2544,7 +2544,7 @@ Responda APENAS com JSON array no formato:
         notes: z.string().optional().nullable(),
       }))
       .mutation(({ input }) => createFinancialEntry(input as any)),
-    update: publicProcedure
+    update: protectedProcedure
       .input(z.object({
         id: z.number(),
         type: z.enum(["income", "expense"]).optional(),
@@ -2561,24 +2561,24 @@ Responda APENAS com JSON array no formato:
         const { id, ...data } = input;
         return updateFinancialEntry(id, data as any);
       }),
-    delete: publicProcedure
+    delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteFinancialEntry(input.id)),
-    summary: publicProcedure
+    summary: protectedProcedure
       .input(z.object({
         dateFrom: z.date().optional(),
         dateTo: z.date().optional(),
       }).optional())
       .query(({ input }) => getFinancialSummary(input?.dateFrom, input?.dateTo)),
-    proposalStats: publicProcedure
+    proposalStats: protectedProcedure
       .query(() => getProposalFinancialStats()),
-    freightReport: publicProcedure
+    freightReport: protectedProcedure
       .input(z.object({
         dateFrom: z.date().optional(),
         dateTo: z.date().optional(),
       }).optional())
       .query(({ input }) => getFreightReport(input?.dateFrom, input?.dateTo)),
-    createFromProposal: publicProcedure
+    createFromProposal: protectedProcedure
       .input(z.object({
         proposalId: z.number(),
         amount: z.string(),
@@ -2599,21 +2599,21 @@ Responda APENAS com JSON array no formato:
       ),
   }),
   masterProducts: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({ search: z.string().optional(), limit: z.number().optional() }).optional())
       .query(({ input }) => listMasterProducts(input?.search, input?.limit ?? 50)),
 
-    search: publicProcedure
+    search: protectedProcedure
       .input(z.object({ query: z.string(), limit: z.number().optional() }))
       .query(({ input }) => searchMasterProducts(input.query, input.limit ?? 20)),
 
-    previewImport: publicProcedure
+    previewImport: protectedProcedure
       .input(z.object({
         rows: z.array(z.record(z.string(), z.string())),
       }))
       .mutation(({ input }) => previewImportRows(input.rows)),
 
-     previewImportFuzzy: publicProcedure
+     previewImportFuzzy: protectedProcedure
       .input(z.object({
         rows: z.array(z.record(z.string(), z.string())),
         supplierId: z.number().optional(),
@@ -2629,7 +2629,7 @@ Responda APENAS com JSON array no formato:
           throw new Error(`Erro ao processar preview de importação: ${error?.message || "Erro desconhecido"}`);
         }
       }),
-    previewWithDuplicates: publicProcedure
+    previewWithDuplicates: protectedProcedure
       .input(z.object({
         rows: z.array(z.object({
           name: z.string().optional(),
@@ -2653,7 +2653,7 @@ Responda APENAS com JSON array no formato:
           throw new Error(`Erro ao verificar duplicatas: ${error?.message || "Erro desconhecido"}`);
         }
       }),
-    pricesByName: publicProcedure
+    pricesByName: protectedProcedure
       .input(z.object({ name: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -2670,14 +2670,14 @@ Responda APENAS com JSON array no formato:
 
   priceIntelligence: router({
     // Similares por princípio ativo
-    similarByIngredient: publicProcedure
+    similarByIngredient: protectedProcedure
       .input(z.object({
         productId: z.number(),
         referencePrice: z.number().nullable().optional(),
       }))
       .query(({ input }) => getSimilarProductsByIngredient(input.productId, input.referencePrice ?? null)),
 
-    cheaperAlternatives: publicProcedure
+    cheaperAlternatives: protectedProcedure
       .input(z.object({
         productId: z.number(),
         referencePrice: z.number().nullable().optional(),
@@ -2685,16 +2685,16 @@ Responda APENAS com JSON array no formato:
       .query(({ input }) => getCheaperAlternatives(input.productId, input.referencePrice ?? null)),
 
     // Histórico de preços
-    priceHistory: publicProcedure
+    priceHistory: protectedProcedure
       .input(z.object({ productId: z.number() }))
       .query(({ input }) => getProductPriceHistory(input.productId)),
 
     // Alertas de inflação
-    priceAlerts: publicProcedure
+    priceAlerts: protectedProcedure
       .query(() => getProductsWithPriceAlert()),
 
     // Listagem com Landed Cost
-    listWithLandedCost: publicProcedure
+    listWithLandedCost: protectedProcedure
       .input(z.object({
         categoryId: z.number().optional(),
         supplierId: z.number().optional(),
@@ -3343,7 +3343,7 @@ Responda APENAS com JSON array no formato:
       }),
 
   // Novos endpoints de enriquecimento com IA (Fase 3)
-  listProductsNeedingEnrichment: publicProcedure
+  listProductsNeedingEnrichment: protectedProcedure
     .input(
       z.object({
         limit: z.number().default(100),
@@ -3389,7 +3389,7 @@ Responda APENAS com JSON array no formato:
       };
     }),
 
-  getEnrichmentStats: publicProcedure.query(async () => {
+  getEnrichmentStats: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("DB indisponível");
 
@@ -3622,7 +3622,7 @@ Por favor, forneça em JSON:
     }),
 
   // Obter sugestões sem aplicar
-  getSuggestions: publicProcedure
+  getSuggestions: protectedProcedure
     .input(z.object({ productId: z.number(), productName: z.string() }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -3722,7 +3722,7 @@ Por favor, forneça em JSON:
   // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────────────────────
   edital: router({
     // Extrai texto de PDF ou DOCX (base64) e usa IA para identificar itens do edital
-    extract: publicProcedure
+    extract: protectedProcedure
       .input(
         z.object({
           fileBase64: z.string().min(10),
@@ -3857,7 +3857,7 @@ Por favor, forneça em JSON:
       }),
 
     // Para cada item do edital, busca o melhor produto do catálogo
-    matchCatalog: publicProcedure
+    matchCatalog: protectedProcedure
       .input(
         z.object({
           itens: z.array(
@@ -4090,7 +4090,7 @@ Por favor, forneça em JSON:
 
     // Valida integridade dos itens antes de criar a proposta
     // Verifica se os productIds ainda existem no banco e retorna divergências
-    validateItems: publicProcedure
+    validateItems: protectedProcedure
       .input(
         z.object({
           itens: z.array(
@@ -4151,7 +4151,7 @@ Por favor, forneça em JSON:
       }),
 
     // Cria proposta comercial a partir dos itens do edital com matches do catálogo
-    createProposal: publicProcedure
+    createProposal: protectedProcedure
       .input(
         z.object({
           processo: z.object({
@@ -4311,7 +4311,7 @@ Por favor, forneça em JSON:
 
   // ─── (E) Declarações fixas (templates) ───────────────────────────────────────
   declarations: router({
-    listTemplates: publicProcedure.query(async () => {
+    listTemplates: protectedProcedure.query(async () => {
       const db = await getDb();
       return (db as any).select().from(declarationTemplates).orderBy(asc(declarationTemplates.sortOrder));
     }),
@@ -4377,7 +4377,7 @@ Por favor, forneça em JSON:
         }
         return { ok: true };
       }),
-    getForProposal: publicProcedure
+    getForProposal: protectedProcedure
       .input(z.object({ proposalId: z.number() }))
       .query(async ({ input }) => {
         const db = await getDb();
@@ -4403,7 +4403,7 @@ Por favor, forneça em JSON:
   // ─── Reclassificação em Lote via IA ───────────────────────────────────────
   reclassificacao: router({
     // Conta quantos produtos serão afetados pelos filtros
-    preview: publicProcedure
+    preview: protectedProcedure
       .input(z.object({
         categoryId: z.number().nullable().optional(),
         supplierId: z.number().nullable().optional(),
@@ -4437,7 +4437,7 @@ Por favor, forneça em JSON:
       }),
 
     // Processa um lote de produtos via IA e atualiza o campo solicitado
-    runBatch: publicProcedure
+    runBatch: protectedProcedure
       .input(z.object({
         categoryId: z.number().nullable().optional(),
         supplierId: z.number().nullable().optional(),
@@ -4692,7 +4692,7 @@ Por favor, forneça em JSON:
   }),
   // ─── Sinônimos para Matchingg ───────────────────────────────────────────────
   synonyms: router({
-    list: publicProcedure
+    list: protectedProcedure
       .input(z.object({
         category: z.string().optional(),
         search: z.string().optional(),
@@ -4750,7 +4750,7 @@ Por favor, forneça em JSON:
       }))
       .mutation(({ input }) => bulkDeleteSynonyms(input.ids)),
     // Retorna estatísticas de uso dos sinônimos
-    stats: publicProcedure.query(async () => {
+    stats: protectedProcedure.query(async () => {
       const db = await getDb();
       if (!db) return { total: 0, byCategory: [] };
       const [rows] = await (db as any).execute(sql`

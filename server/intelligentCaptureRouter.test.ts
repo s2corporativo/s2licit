@@ -39,10 +39,10 @@ describe("intelligentCaptureRouter", () => {
     vi.clearAllMocks();
   });
 
-  it("lista lotes capturados em endpoint público", async () => {
+  it("lista lotes capturados para usuário autenticado", async () => {
     captureMocks.listCaptureBatches.mockResolvedValue([{ id: 1, sourceType: "xml" }]);
 
-    const caller = appRouter.createCaller(createContext(null));
+    const caller = appRouter.createCaller(createContext(editorUser));
     const result = await caller.intelligentCapture.listBatches({ limit: 5 });
 
     expect(captureMocks.listCaptureBatches).toHaveBeenCalledWith(5);

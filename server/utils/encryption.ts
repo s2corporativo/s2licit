@@ -13,13 +13,19 @@ const SALT = "s2-scraper-salt-v1";
 
 function getDerivedKey(): Buffer {
   const secret = process.env.ENCRYPTION_KEY;
-  if (!secret || secret.length < 16) {
-    // Fallback seguro: usa JWT_SECRET se ENCRYPTION_KEY não estiver definida.
-    // Em produção, defina ENCRYPTION_KEY com pelo menos 32 chars aleatórios.
-    const fallback = process.env.JWT_SECRET ?? "default-insecure-key-change-me-now";
+  if (secret && secret.length >= 16) {
+    return scryptSync(secret, SALT, 32);
+  }
+  // Fallback: JWT_SECRET. Sem nenhum dos dois é erro — criptografar com
+  // chave previsível equivale a texto plano para quem tiver o dump do banco.
+  const fallback = process.env.JWT_SECRET;
+  if (fallback && fallback.length >= 16) {
     return scryptSync(fallback, SALT, 32);
   }
-  return scryptSync(secret, SALT, 32);
+  throw new Error(
+    "ENCRYPTION_KEY (ou JWT_SECRET) não definida — impossível criptografar credenciais com segurança. " +
+      "Gere uma com: openssl rand -base64 48"
+  );
 }
 
 /**
