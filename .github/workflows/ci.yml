@@ -12,15 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A versão do pnpm vem do campo "packageManager" do package.json.
-      - name: Instalar pnpm
-        uses: pnpm/action-setup@v4
-
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+
+      # pnpm via Corepack (embutido no Node) — evita depender de actions de
+      # terceiros, que podem ser bloqueadas pela política de Actions da org.
+      # A versão vem do campo "packageManager" do package.json.
+      - name: Habilitar pnpm (corepack)
+        run: corepack enable
 
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile --ignore-scripts
