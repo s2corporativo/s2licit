@@ -23,8 +23,18 @@ export interface BuildResponseResult {
   marginPercent: number;
 }
 
-function applyMargin(basePrice: number, marginPercent: number): number {
-  return basePrice * (1 + marginPercent / 100);
+/**
+ * Aplica margem SOBRE O PREÇO DE VENDA (mesma fórmula do PricingService):
+ *   precoVenda = custo / (1 - margem%/100)
+ * Ex.: custo 100, margem 30% → 142,86 (margem real 30%), e não 130 (markup,
+ * que daria só 23,1% de margem real). Margem ≥ 100% é inválida.
+ */
+export function applyMargin(basePrice: number, marginPercent: number): number {
+  if (marginPercent >= 100) {
+    throw new Error("Margem não pode ser 100% ou superior.");
+  }
+  if (marginPercent <= 0) return basePrice;
+  return basePrice / (1 - marginPercent / 100);
 }
 
 export async function buildQuotationResponse(

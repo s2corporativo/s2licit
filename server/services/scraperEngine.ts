@@ -9,7 +9,7 @@
 import puppeteer, { Browser, Page } from "puppeteer";
 import { getDb } from "../db";
 import { products, scraperConfigs, scraperLogs, productSupplierOffers } from "../../drizzle/schema";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, like } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
 
@@ -383,14 +383,18 @@ export class ScraperEngine {
         if (!productId) {
           const normName = normalizeText(sp.name);
           if (normName.length >= 4) {
+            // Narrowing no banco: filtra por LIKE na primeira palavra
+            // significativa (MySQL LIKE é case-insensitive na collation padrão),
+            // e refina por similaridade em JS. Antes, o filtro LIKE não existia
+            // (db.$client ? undefined : undefined), varrendo só 20 produtos.
+            const firstWord = sp.name.trim().split(/\s+/).find((w) => w.length >= 3) ?? "";
             const byName = await db.select({ id: products.id, name: products.name })
               .from(products)
               .where(and(
                 eq(products.supplierId, supplierId),
-                // MySQL LIKE case-insensitive
-                db.$client ? undefined : undefined
+                firstWord ? like(products.name, `%${firstWord}%`) : undefined,
               ))
-              .limit(20);
+              .limit(50);
 
             // Match por similaridade no nome
             const best = byName.find(p => normalizeText(p.name).includes(normName.slice(0, 20)));
