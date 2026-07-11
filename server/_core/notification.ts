@@ -68,18 +68,12 @@ export async function notifyOwner(
 ): Promise<boolean> {
   const { title, content } = validatePayload(payload);
 
-  if (!ENV.forgeApiUrl) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Notification service URL is not configured.",
-    });
-  }
-
-  if (!ENV.forgeApiKey) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Notification service API key is not configured.",
-    });
+  // Serviço externo de notificação é opcional (era o serviço da plataforma
+  // Manus). Sem configuração, apenas registra no log do servidor — os
+  // webhooks internos (Slack/e-mail) continuam funcionando por outra via.
+  if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
+    console.log(`[Notification] (sem serviço externo configurado) ${title}: ${content.slice(0, 200)}`);
+    return false;
   }
 
   const endpoint = buildEndpointUrl(ENV.forgeApiUrl);

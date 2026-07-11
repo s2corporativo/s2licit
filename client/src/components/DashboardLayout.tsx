@@ -171,14 +171,14 @@ function DashboardLayoutContent({
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <img
-                    src="https://files.manuscdn.com/user_upload_by_module/session_file/310419663032500506/XTyybwkAyjjGCowK.png"
+                    src="/logo-s2.svg"
                     alt="S2 Corporativo"
                     className="h-8 w-auto object-contain max-w-[160px]"
                   />
                 </div>
               ) : (
                 <img
-                  src="https://files.manuscdn.com/user_upload_by_module/session_file/310419663032500506/XTyybwkAyjjGCowK.png"
+                  src="/logo-s2.svg"
                   alt="S2"
                   className="h-7 w-7 object-contain"
                 />

@@ -58,11 +58,17 @@ import ExecutiveDecisionCenter from "./pages/ExecutiveDecisionCenter";
 import PostAwardContractsCenter from "./pages/PostAwardContractsCenter";
 import IntelligentCaptureCenter from "./pages/IntelligentCaptureCenter";
 import { DatabaseIntegrityCheck } from "./pages/DatabaseIntegrityCheck";
+import Login from "./pages/Login";
 
 function Router() {
   return (
-    <AppLayout>
-      <Switch>
+    <Switch>
+      {/* Login fica fora do layout e da exigência de autenticação */}
+      <Route path="/login" component={Login} />
+      <Route>
+        <AppLayout>
+          <RequireAuth message="Faça login para acessar o sistema.">
+            <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/dashboard"><Redirect to="/" /></Route>
         <Route path="/busca" component={BuscaRapida} />
@@ -296,10 +302,13 @@ function Router() {
             <Agente />
           </RequireAuth>
         </Route>
-        <Route path="/404" component={NotFound} />
-        <Route component={NotFound} />
-      </Switch>
-    </AppLayout>
+            <Route path="/404" component={NotFound} />
+            <Route component={NotFound} />
+            </Switch>
+          </RequireAuth>
+        </AppLayout>
+      </Route>
+    </Switch>
   );
 }
 

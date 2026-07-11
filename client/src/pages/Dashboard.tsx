@@ -261,7 +261,7 @@ export default function Dashboard() {
           <div className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/6 px-4 py-4 backdrop-blur-sm">
             <div className="flex items-center gap-5">
               <img
-                src="https://files.manuscdn.com/user_upload_by_module/session_file/310419663032500506/XTyybwkAyjjGCowK.png"
+                src="/logo-s2.svg"
                 alt="S2 Corporativo"
                 className="h-16 w-auto object-contain drop-shadow-lg"
               />

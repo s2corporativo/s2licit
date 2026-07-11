@@ -209,15 +209,39 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+/**
+ * Provedor de IA, em ordem de preferência:
+ * 1. API da Anthropic (endpoint compatível com OpenAI) — defina ANTHROPIC_API_KEY.
+ * 2. Endpoint legado do Manus Forge — apenas se BUILT_IN_FORGE_API_URL/KEY existirem.
+ */
+interface LlmProvider {
+  url: string;
+  apiKey: string;
+  model: string;
+  isAnthropic: boolean;
+}
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+const resolveProvider = (): LlmProvider => {
+  if (ENV.anthropicApiKey) {
+    return {
+      url: "https://api.anthropic.com/v1/chat/completions",
+      apiKey: ENV.anthropicApiKey,
+      model: ENV.anthropicModel,
+      isAnthropic: true,
+    };
   }
+  if (ENV.forgeApiUrl && ENV.forgeApiKey) {
+    return {
+      url: `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
+      apiKey: ENV.forgeApiKey,
+      model: "gemini-2.5-flash",
+      isAnthropic: false,
+    };
+  }
+  throw new Error(
+    "Nenhum provedor de IA configurado. Defina ANTHROPIC_API_KEY no ambiente " +
+      "para habilitar os recursos de IA (enriquecimento, classificação, agentes)."
+  );
 };
 
 const normalizeResponseFormat = ({
@@ -266,7 +290,7 @@ const normalizeResponseFormat = ({
 };
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+  const provider = resolveProvider();
 
   const {
     messages,
@@ -280,7 +304,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: provider.model,
     messages: messages.map(normalizeMessage),
   };
 
@@ -296,9 +320,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 128
+  payload.model = provider.model;
+  payload.max_tokens = 32768;
+  if (!provider.isAnthropic) {
+    // Parâmetro específico do endpoint legado (Manus Forge)
+    payload.thinking = { budget_tokens: 128 };
   }
 
   const normalizedResponseFormat = normalizeResponseFormat({
@@ -312,11 +338,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
+  const response = await fetch(provider.url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${provider.apiKey}`,
     },
     body: JSON.stringify(payload),
   });

@@ -4,6 +4,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
+import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -51,6 +52,11 @@ async function startServer() {
   app.use("/api/oauth", authRateLimiter);
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+  // Login local (email/senha) — modo padrão fora da plataforma Manus
+  registerLocalAuthRoutes(app);
+  ensurePasswordColumn()
+    .then(() => ensureAdminUser())
+    .catch(err => console.error("[LocalAuth] Falha na inicialização:", err));
   // Logo upload route (multipart/form-data)
   const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
   app.post("/api/upload/logo", logoUpload.single("logo"), async (req: any, res: any) => {
