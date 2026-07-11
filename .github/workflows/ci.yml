@@ -12,10 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A versão do pnpm vem do campo "packageManager" do package.json.
       - name: Instalar pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10.4.1
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
