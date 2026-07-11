@@ -49,13 +49,15 @@ export const taxRulesRouter = router({
         vigenciaFim: input.vigenciaFim ? new Date(`${input.vigenciaFim}T12:00:00`) : null,
         ativo: input.ativo ?? true,
         observacoes: input.observacoes,
-        criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
       };
       if (input.id) {
+        // No update NÃO mexemos em criadoPor — preserva quem cadastrou a regra.
         await db.update(taxRules).set(valores).where(eq(taxRules.id, input.id));
         return { id: input.id };
       }
-      const [res] = await db.insert(taxRules).values(valores);
+      const [res] = await db
+        .insert(taxRules)
+        .values({ ...valores, criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema" });
       return { id: Number((res as any).insertId) };
     }),
 

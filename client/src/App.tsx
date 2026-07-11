@@ -28,9 +28,6 @@ import Sinonimos from "./pages/Sinonimos";
 import TemplatesProposta from "./pages/TemplatesProposta";
 import PropostaAutomatica from "./pages/PropostaAutomatica";
 import { DataQualityDashboard } from "./pages/DataQualityDashboard";
-import { GestaoProducts } from "./pages/GestaoProducts";
-import { ComparadorFornecedores } from "./pages/ComparadorFornecedores";
-import { Orcamentos } from "./pages/Orcamentos";
 import { ImportarNfe } from "./pages/ImportarNfe";
 import ConfiguradorScraper from "./pages/ConfiguradorScraper";
 import ConfiguradorFornecedores from "./pages/ConfiguradorFornecedores";
@@ -41,7 +38,6 @@ import { AnalisePrecosV2 } from "./pages/AnalisePrecosV2";
 import ScraperFornecedores from "./pages/ScraperFornecedores";
 import AgenteProposta from "./pages/AgenteProposta";
 import Agente from "./pages/Agente";
-import MarginOptimization from "./pages/MarginOptimization";
 import { CaptureReview } from "./pages/CaptureReview";
 import { CaptureSchedulerMonitor } from "./pages/CaptureSchedulerMonitor";
 import { AIEnrichment } from "./pages/AIEnrichment";
@@ -92,17 +88,6 @@ function Router() {
         <Route path="/comparacao" component={Comparacao} />
         <Route path="/categorias" component={Categorias} />
         <Route path="/produtos" component={Produtos} />
-        <Route path="/gestao-produtos">
-          <RequireAuth message="Gerencie produtos após fazer login." minRole="editor">
-            <GestaoProducts />
-          </RequireAuth>
-        </Route>
-        <Route path="/comparador-fornecedores" component={ComparadorFornecedores} />
-        <Route path="/orcamentos">
-          <RequireAuth message="Crie orçamentos após fazer login.">
-            <Orcamentos />
-          </RequireAuth>
-        </Route>
         <Route path="/equivalencias" component={Equivalencias} />
         <Route path="/qualidade">
           <RequireAuth message="Acesse o Dashboard de Qualidade após fazer login." minRole="editor">
@@ -152,11 +137,6 @@ function Router() {
         <Route path="/analise-precos">
           <RequireAuth message="Analise preços após fazer login." minRole="editor">
             <AnalisePrecosV2 />
-          </RequireAuth>
-        </Route>
-        <Route path="/margens">
-          <RequireAuth message="Acesse o painel de margens após fazer login." minRole="editor">
-            <MarginOptimization />
           </RequireAuth>
         </Route>
         <Route path="/captura-revisao">

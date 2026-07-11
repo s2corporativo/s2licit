@@ -4,7 +4,6 @@ import { duplicatesRouter } from "./routers/duplicates";
 import { drogavetRouter } from "./routers/drogavet";
 import { imagesRouter } from "./routers/images";
 import { recognitionRouter } from "./routers/recognition";
-import { enrichmentRouter } from "./routers/enrichment";
 import { reclassificationRouter } from "./routers/reclassification";
 import { importConsolidatedRouter } from "./routers/importConsolidated";
 import { productMatchingRouter } from "./routers/productMatching";

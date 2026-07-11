@@ -23,6 +23,9 @@ export function CaptureSchedulerMonitor() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | undefined>();
   const [frequencyHours, setFrequencyHours] = useState("24");
 
+  // Lista real de fornecedores (antes era hardcoded "Fornecedor 1/2")
+  const { data: suppliers = [] } = trpc.suppliers.list.useQuery();
+
   // Queries
   const { data: schedulerStatus, refetch: refetchStatus } =
     trpc.captureScheduler.getStatus.useQuery();
@@ -150,10 +153,11 @@ export function CaptureSchedulerMonitor() {
                 <SelectValue placeholder="Selecione..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Nenhum</SelectItem>
-                {/* TODO: Carregar lista de fornecedores */}
-                <SelectItem value="1">Fornecedor 1</SelectItem>
-                <SelectItem value="2">Fornecedor 2</SelectItem>
+                {suppliers.map((s) => (
+                  <SelectItem key={s.id} value={s.id.toString()}>
+                    {s.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
