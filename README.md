@@ -72,6 +72,20 @@ e-mail/senha do administrador configurado em `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
 | `pnpm db:push` | Gera e aplica migrações Drizzle |
 | `pnpm db:backup [dir]` | Backup do banco (mysqldump + gzip) a partir de `DATABASE_URL` |
 
+### Importar catálogo de uma planilha
+
+Além da tela **Importar Planilha** (upload com mapeamento de colunas na UI),
+há um script para carga inicial em lote de um catálogo consolidado:
+
+```bash
+node scripts/import-catalog-xlsx.mjs /caminho/CONSOLIDADO_FINAL.xlsx --supplier "Catálogo de Referência"
+# use --dry-run para simular sem gravar
+```
+
+Mapeia as colunas (Produto, Laboratório, Princípio Ativo, Apresentação,
+Classe Terapêutica, Custo, Imagem, MAPA, EAN...) para `products`, cria um
+fornecedor de referência, deduplica por nome e ignora preços fora da faixa.
+
 ### Backup do banco
 
 `pnpm db:backup /caminho/backups` gera `s2-backup-AAAA-MM-DD-HHMMSS.sql.gz`.
