@@ -5,6 +5,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
+import { initScheduledJobs } from "../services/scheduledJobs";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -206,7 +207,12 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 
-  // Jobs agendados removidos (licitações, CNPJ, radar, keyword scan)
+  // Jobs recorrentes: sincronização de e-mail e alertas proativos.
+  try {
+    initScheduledJobs();
+  } catch (err) {
+    console.error("[Scheduler] Falha ao inicializar jobs agendados:", err);
+  }
 }
 
 startServer().catch(console.error);

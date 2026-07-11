@@ -210,37 +210,78 @@ const normalizeToolChoice = (
 };
 
 /**
- * Provedor de IA, em ordem de preferência:
- * 1. API da Anthropic (endpoint compatível com OpenAI) — defina ANTHROPIC_API_KEY.
- * 2. Endpoint legado do Manus Forge — apenas se BUILT_IN_FORGE_API_URL/KEY existirem.
+ * Provedores de IA (todos usam endpoint compatível com OpenAI):
+ * - anthropic: API da Anthropic (ANTHROPIC_API_KEY) — mais precisa.
+ * - groq: GroqCloud (GROQ_API_KEY) — rápida, tem tier gratuito.
+ * - forge: endpoint legado do Manus (BUILT_IN_FORGE_API_URL/KEY).
+ *
+ * A seleção é controlada por AI_PROVIDER ("anthropic"|"groq"|"auto").
+ * Em "auto", tenta anthropic → groq → forge conforme as chaves presentes.
  */
+export type LlmProviderKind = "anthropic" | "groq" | "forge";
+
 interface LlmProvider {
+  kind: LlmProviderKind;
   url: string;
   apiKey: string;
   model: string;
-  isAnthropic: boolean;
+  /** Provedores que só aceitam response_format json_object (sem json_schema). */
+  jsonObjectOnly: boolean;
+}
+
+function anthropicProvider(): LlmProvider | null {
+  if (!ENV.anthropicApiKey) return null;
+  return {
+    kind: "anthropic",
+    url: "https://api.anthropic.com/v1/chat/completions",
+    apiKey: ENV.anthropicApiKey,
+    model: ENV.anthropicModel,
+    jsonObjectOnly: false,
+  };
+}
+function groqProvider(): LlmProvider | null {
+  if (!ENV.groqApiKey) return null;
+  return {
+    kind: "groq",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    apiKey: ENV.groqApiKey,
+    model: ENV.groqModel,
+    jsonObjectOnly: true,
+  };
+}
+function forgeProvider(): LlmProvider | null {
+  if (!ENV.forgeApiUrl || !ENV.forgeApiKey) return null;
+  return {
+    kind: "forge",
+    url: `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
+    apiKey: ENV.forgeApiKey,
+    model: "gemini-2.5-flash",
+    jsonObjectOnly: false,
+  };
+}
+
+/** Lista os provedores configurados (para diagnóstico/central de IA). */
+export function listConfiguredProviders(): Array<{ kind: LlmProviderKind; model: string }> {
+  return [anthropicProvider(), groqProvider(), forgeProvider()]
+    .filter((p): p is LlmProvider => p != null)
+    .map((p) => ({ kind: p.kind, model: p.model }));
+}
+
+/** Retorna o provedor ativo (respeitando AI_PROVIDER) ou null se nenhum. */
+export function activeProvider(): LlmProvider | null {
+  const pref = ENV.aiProvider;
+  if (pref === "anthropic") return anthropicProvider() ?? groqProvider() ?? forgeProvider();
+  if (pref === "groq") return groqProvider() ?? anthropicProvider() ?? forgeProvider();
+  // auto
+  return anthropicProvider() ?? groqProvider() ?? forgeProvider();
 }
 
 const resolveProvider = (): LlmProvider => {
-  if (ENV.anthropicApiKey) {
-    return {
-      url: "https://api.anthropic.com/v1/chat/completions",
-      apiKey: ENV.anthropicApiKey,
-      model: ENV.anthropicModel,
-      isAnthropic: true,
-    };
-  }
-  if (ENV.forgeApiUrl && ENV.forgeApiKey) {
-    return {
-      url: `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
-      apiKey: ENV.forgeApiKey,
-      model: "gemini-2.5-flash",
-      isAnthropic: false,
-    };
-  }
+  const p = activeProvider();
+  if (p) return p;
   throw new Error(
-    "Nenhum provedor de IA configurado. Defina ANTHROPIC_API_KEY no ambiente " +
-      "para habilitar os recursos de IA (enriquecimento, classificação, agentes)."
+    "Nenhum provedor de IA configurado. Defina ANTHROPIC_API_KEY ou GROQ_API_KEY " +
+      "no ambiente para habilitar os recursos de IA (enriquecimento, classificação, agentes)."
   );
 };
 
@@ -322,17 +363,23 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   payload.model = provider.model;
   payload.max_tokens = 32768;
-  if (!provider.isAnthropic) {
+  if (provider.kind === "forge") {
     // Parâmetro específico do endpoint legado (Manus Forge)
     payload.thinking = { budget_tokens: 128 };
   }
 
-  const normalizedResponseFormat = normalizeResponseFormat({
+  let normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,
     response_format,
     outputSchema,
     output_schema,
   });
+
+  // Provedores que não suportam json_schema (ex.: Groq) recebem json_object.
+  // O schema continua guiando via prompt/outputSchema; o cliente faz JSON.parse.
+  if (normalizedResponseFormat?.type === "json_schema" && provider.jsonObjectOnly) {
+    normalizedResponseFormat = { type: "json_object" };
+  }
 
   if (normalizedResponseFormat) {
     payload.response_format = normalizedResponseFormat;

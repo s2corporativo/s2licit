@@ -65,4 +65,8 @@ export const ENV = {
   adminPassword: process.env.ADMIN_PASSWORD ?? "",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
+  groqApiKey: process.env.GROQ_API_KEY ?? "",
+  groqModel: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
+  // Provedor de IA preferido: "anthropic" | "groq" | "auto" (padrão)
+  aiProvider: (process.env.AI_PROVIDER ?? "auto").toLowerCase(),
 };

@@ -32,6 +32,7 @@ import {
   ClipboardList,
   MailCheck,
   Radar,
+  Brain,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -96,6 +97,7 @@ const navGroups: NavGroup[] = [
       { href: "/agente-proposta", icon: Zap, label: "Agente de Propostas" },
       { href: "/captura-inteligente", icon: Globe, label: "Captura Inteligente" },
       { href: "/scraper-fornecedores", icon: Globe, label: "Agente de Preços" },
+      { href: "/central-ia", icon: Brain, label: "Central de IA" },
       { href: "/configuracao", icon: Settings, label: "Configurações" },
     ],
   },
