@@ -8,6 +8,13 @@
       "when": 1783787044933,
       "tag": "0000_consolidado_producao",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1783799912322,
+      "tag": "0001_funil_oportunidades",
+      "breakpoints": true
     }
   ]
 }

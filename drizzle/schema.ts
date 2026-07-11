@@ -3070,3 +3070,76 @@ export const portalCredentials = mysqlTable(
   ]
 );
 export type PortalCredentialRow = typeof portalCredentials.$inferSelect;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Funil de Oportunidades: pipeline unificado (kanban) de todas as disputas,
+// da triagem ao recebimento, com histórico auditável de movimentação.
+// ─────────────────────────────────────────────────────────────────────────────
+export const ETAPAS_FUNIL = [
+  "nova",
+  "triagem",
+  "analise",
+  "cotacao",
+  "precificacao",
+  "proposta",
+  "enviada",
+  "disputa",
+  "habilitacao",
+  "vencida",
+  "perdida",
+  "cancelada",
+  "contrato",
+  "entrega",
+  "faturamento",
+  "recebimento",
+  "encerrada",
+] as const;
+export type EtapaFunil = (typeof ETAPAS_FUNIL)[number];
+
+export const funilOportunidades = mysqlTable(
+  "funil_oportunidades",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    titulo: varchar("titulo", { length: 512 }).notNull(),
+    orgao: varchar("orgao", { length: 256 }),
+    modalidade: varchar("modalidade", { length: 128 }),
+    numeroProcesso: varchar("numeroProcesso", { length: 128 }),
+    objeto: text("objeto"),
+    // De onde a oportunidade veio (para rastreabilidade e navegação)
+    origemTipo: mysqlEnum("origemTipo", ["manual", "pncp", "email", "edital"]).default("manual").notNull(),
+    origemId: int("origemId"),
+    etapa: mysqlEnum("etapa", ETAPAS_FUNIL).default("nova").notNull(),
+    valorEstimado: decimal("valorEstimado", { precision: 15, scale: 2 }),
+    dataAbertura: timestamp("dataAbertura"),
+    prazoEnvio: date("prazoEnvio"),
+    risco: mysqlEnum("risco", ["baixo", "medio", "alto"]).default("medio").notNull(),
+    responsavel: varchar("responsavel", { length: 128 }),
+    observacoes: text("observacoes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_funil_etapa").on(table.etapa),
+    index("idx_funil_prazo").on(table.prazoEnvio),
+    index("idx_funil_orgao").on(table.orgao),
+    index("idx_funil_origem").on(table.origemTipo, table.origemId),
+  ]
+);
+export type FunilOportunidade = typeof funilOportunidades.$inferSelect;
+
+export const funilEventos = mysqlTable(
+  "funil_eventos",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    oportunidadeId: int("oportunidadeId")
+      .notNull()
+      .references(() => funilOportunidades.id, { onDelete: "cascade" }),
+    deEtapa: varchar("deEtapa", { length: 32 }),
+    paraEtapa: varchar("paraEtapa", { length: 32 }).notNull(),
+    justificativa: text("justificativa"),
+    usuario: varchar("usuario", { length: 128 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [index("idx_funil_eventos_oportunidade").on(table.oportunidadeId)]
+);
+export type FunilEvento = typeof funilEventos.$inferSelect;
