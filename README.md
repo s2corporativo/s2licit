@@ -70,6 +70,16 @@ e-mail/senha do administrador configurado em `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
 | `pnpm check` | Verificação de tipos (`tsc --noEmit`) |
 | `pnpm test` | Suíte de testes (Vitest) |
 | `pnpm db:push` | Gera e aplica migrações Drizzle |
+| `pnpm db:backup [dir]` | Backup do banco (mysqldump + gzip) a partir de `DATABASE_URL` |
+
+### Backup do banco
+
+`pnpm db:backup /caminho/backups` gera `s2-backup-AAAA-MM-DD-HHMMSS.sql.gz`.
+Requer o cliente `mysqldump`. Para backup diário automático, agende via cron:
+
+```
+0 2 * * * cd /caminho/do/projeto && pnpm db:backup /backups >> /var/log/s2-backup.log 2>&1
+```
 
 ## Autenticação
 
