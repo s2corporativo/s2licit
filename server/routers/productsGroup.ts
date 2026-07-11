@@ -1,0 +1,779 @@
+import { invokeLLM } from "../_core/llm";
+import { notifyOwner } from "../_core/notification";
+import { validateEquivalenceForMultipleItems } from "../services/equivalenceValidationService";
+
+
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+import {
+  addEquivalenceMember,
+  addProposalItem,
+  addQuotationItem,
+  bulkInsertProducts,
+  bulkUpdateProducts,
+  compareByActiveIngredient,
+  createCategory,
+  createProduct,
+  createEquivalenceGroup,
+  createImportLog,
+  createProposal,
+  createQuotation,
+  createSupplier,
+  deactivateProductsByBatch,
+  deleteCategory,
+  deleteEquivalenceGroup,
+  deleteProduct,
+  deleteProposal,
+  deleteQuotation,
+  deleteRequestingOrg,
+  deleteSupplier,
+  getDashboardStats,
+  getCompanySettings,
+  getEquivalenceGroupWithMembers,
+  getProductById,
+  getProductsPerCategory,
+  getProposalWithItems,
+  getQuotationWithItems,
+  getRequestingOrgById,
+  getSupplierById,
+  listCategories,
+  listCategoriesHierarchy,
+  listEquivalenceGroups,
+  listImportLogs,
+  listProducts,
+  listProposals,
+  listQuotations,
+  listRequestingOrgs,
+  listSuppliers,
+  removeEquivalenceMember,
+  removeProposalItem,
+  removeQuotationItem,
+  autocompleteSearch,
+  searchProductsByName,
+  applyImageByName,
+  smartSearch,
+  updateCategory,
+  updateImportLog,
+  updateProduct,
+  updateProposal,
+  updateProposalItem,
+  updateQuotation,
+  updateQuotationItem,
+  updateRequestingOrg,
+  updateSupplier,
+  upsertCompanySettings,
+  upsertRequestingOrg,
+  // Proposal administration
+  listProposalsAdmin,
+  advanceProposalStatus,
+  updateProposalFreight,
+  getProposalStatusHistory,
+  duplicateProposal,
+  // Financial entries
+  listFinancialEntries,
+  createFinancialEntry,
+  updateFinancialEntry,
+  deleteFinancialEntry,
+  getFinancialSummary,
+  getProposalFinancialStats,
+  getMarginByCategory,
+  // Freight report & expiring proposals
+  getFreightReport,
+  getExpiringProposals,
+  // Master products (base mestre)
+  listMasterProducts,
+  searchMasterProducts,
+  previewImportRows,
+  getProductPricesByMasterName,
+  // Fuzzy matching
+  previewImportRowsFuzzy,
+  getCheaperAlternatives,
+  getSimilarProductsByIngredient,
+  // Landed Cost e histórico de preços
+  recordPriceHistory,
+  getProductPriceHistory,
+  getProductsWithPriceAlert,
+  listProductsWithLandedCost,
+  autoLinkImageUrls,
+  bulkApplyImageUrls,
+  previewEquivalenceGroups,
+  applyEquivalenceGroups,
+  getEquivalenceStats,
+  suggestProductsFromList,
+  getDb,
+  checkDuplicatesInRows,
+  mergeProductFromRow,
+  // Synonyms
+  listSynonyms,
+  createSynonym,
+  updateSynonym,
+  deleteSynonym,
+  bulkCreateSynonyms,
+  bulkToggleSynonyms,
+  bulkDeleteSynonyms,
+  loadSynonymMap,
+  listProposalTemplates,
+  getProposalTemplate,
+  createProposalTemplate,
+  updateProposalTemplate,
+  deleteProposalTemplate,
+  getDefaultProposalTemplate,
+  loadFeedbackMap,
+  recordFeedback,
+  listFeedbacks,
+  deleteFeedback,
+  bulkDeleteFeedback,
+  normalizeEditalTerm,
+  findDuplicateGroups,
+  mergeProductGroup,
+} from "../db";
+import {
+  products, categories, suppliers, proposals,
+  declarationTemplates, proposalDeclarations,
+  productSupplierPrices,
+  importLogs,
+} from "../../drizzle/schema";
+import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc, lt, gt, gte } from "drizzle-orm";
+import { getSessionCookieOptions } from "../_core/cookies";
+import { systemRouter } from "../_core/systemRouter";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+
+export const productsRouter = router({
+    list: protectedProcedure
+      .input(
+        z.object({
+          categoryId: z.number().optional(),
+          categoryIds: z.array(z.number()).optional(),
+          supplierId: z.number().optional(),
+          search: z.string().optional(),
+          searchField: z.enum(["all", "name", "code", "activeIngredient", "manufacturer", "barcode", "concentration", "presentation"]).optional(),
+          manufacturer: z.string().optional(),
+          isActive: z.enum(["yes", "no", "all"]).optional(),
+          priceMin: z.number().optional(),
+          priceMax: z.number().optional(),
+          hasImage: z.boolean().optional(),
+          hasProductUrl: z.boolean().optional(),
+          withoutFichaTecnica: z.boolean().optional(),
+          limit: z.number().min(1).max(500).optional(),
+          offset: z.number().min(0).optional(),
+          sortBy: z.enum(["name", "price", "mapa", "supplier", "category", "manufacturer", "createdAt"]).optional(),
+          sortDir: z.enum(["asc", "desc"]).optional(),
+        })
+      )
+      .query(({ input }) => listProducts(input as any)),
+
+    get: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(({ input }) => getProductById(input.id)),
+
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1).max(512),
+          supplierId: z.number(),
+          categoryId: z.number(),
+          code: z.string().optional().nullable(),
+          description: z.string().optional().nullable(),
+          activeIngredient: z.string().optional().nullable(),
+          manufacturer: z.string().optional().nullable(),
+          unit: z.string().optional().nullable(),
+          concentration: z.string().optional().nullable(),
+          presentation: z.string().optional().nullable(),
+          price: z.string().optional().nullable(),
+          priceUnit: z.string().optional().nullable(),
+          stock: z.string().optional().nullable(),
+          barcode: z.string().optional().nullable(),
+          catmasCode: z.string().max(32).optional().nullable(),
+          catmatCode: z.string().max(32).optional().nullable(),
+          mapa: z.string().optional().nullable().refine(
+            (v) => { if (!v) return true; const n = parseFloat(v.replace(',','.')); return isNaN(n) || n > 0; },
+            { message: "Registro MAPA deve ser positivo" }
+          ),
+          imageUrl: z.string().optional().nullable(),
+          productUrl: z.string().optional().nullable(),
+          isActive: z.enum(["yes", "no"]).optional(),
+        })
+      )
+      .mutation(({ input }) => createProduct(input as any)),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          code: z.string().optional().nullable(),
+          name: z.string().min(1).max(512).optional(),
+          description: z.string().optional().nullable(),
+          activeIngredient: z.string().optional().nullable(),
+          manufacturer: z.string().optional().nullable(),
+          unit: z.string().optional().nullable(),
+          concentration: z.string().optional().nullable(),
+          presentation: z.string().optional().nullable(),
+          pharmaceuticalForm: z.string().optional().nullable(),
+          price: z.string().optional().nullable(),
+          priceUnit: z.string().optional().nullable(),
+          stock: z.string().optional().nullable(),
+          barcode: z.string().optional().nullable(),
+          gtin: z.string().optional().nullable(),
+          ean: z.string().optional().nullable(),
+          registroRegulatorio: z.enum(["MAPA", "ANVISA", "FORN"]).optional().nullable(),
+          codigoFornecedor: z.string().optional().nullable(),
+          catmasCode: z.string().max(32).optional().nullable(),
+          catmatCode: z.string().max(32).optional().nullable(),
+          informacaoTecnica: z.string().optional().nullable(),
+          fichaTecnica: z.string().optional().nullable(),
+          subcategoria: z.string().optional().nullable(),
+          mapa: z.string().optional().nullable().refine(
+            (v) => { if (!v) return true; const n = parseFloat(v.replace(',','.')); return isNaN(n) || n > 0; },
+            { message: "Registro MAPA deve ser positivo" }
+          ),
+          imageUrl: z.string().optional().nullable(),
+          productUrl: z.string().optional().nullable(),
+          isActive: z.enum(["yes", "no"]).optional(),
+          supplierId: z.number().optional(),
+          categoryId: z.number().optional(),
+          freightValue: z.string().optional().nullable(),
+          taxValue: z.string().optional().nullable(),
+        })
+      )
+      .mutation(({ input }) => {
+        const { id, ...data } = input;
+        return updateProduct(id, data as any);
+      }),
+
+    bulkUpdate: protectedProcedure
+      .input(
+        z.object({
+          ids: z.array(z.number()).min(1),
+          supplierId: z.number().optional(),
+          categoryId: z.number().optional(),
+          name: z.string().optional(),
+          code: z.string().optional(),
+          activeIngredient: z.string().optional(),
+          manufacturer: z.string().optional(),
+          concentration: z.string().optional(),
+          presentation: z.string().optional(),
+          pharmaceuticalForm: z.string().optional(),
+          unit: z.string().optional(),
+          price: z.string().optional(),
+          priceUnit: z.string().optional(),
+          mapa: z.string().optional(),
+          barcode: z.string().optional(),
+          description: z.string().optional(),
+          imageUrl: z.string().optional(),
+          productUrl: z.string().optional(),
+          stock: z.string().optional(),
+          isActive: z.enum(["yes", "no"]).optional(),
+          priceAdjustPercent: z.number().optional(),
+          // Campos V2
+          fichaTecnica: z.string().optional().nullable(),
+          codigoFornecedor: z.string().optional().nullable(),
+          ean: z.string().optional().nullable(),
+          gtin: z.string().optional().nullable(),
+          subcategoria: z.string().optional().nullable(),
+          registroRegulatorio: z.enum(["MAPA", "ANVISA", "FORN"]).optional().nullable(),
+          laboratorio: z.string().optional().nullable(),
+          nomeProduto: z.string().optional().nullable(),
+        })
+      )
+      .mutation(({ input }) => {
+        const { ids, ...data } = input;
+        return bulkUpdateProducts(ids, data as any);
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(({ input }) => deleteProduct(input.id)),
+
+    bulkDelete: protectedProcedure
+      .input(z.object({ ids: z.array(z.number()).min(1) }))
+      .mutation(async ({ input }) => {
+        for (const id of input.ids) {
+          await deleteProduct(id);
+        }
+        return { deleted: input.ids.length };
+      }),
+
+    smartSearch: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().min(1),
+          categoryId: z.number().optional(),
+        })
+      )
+      .query(({ input }) => smartSearch(input.query, input.categoryId)),
+
+    compareByActiveIngredient: protectedProcedure
+      .input(
+        z.object({
+          activeIngredient: z.string().min(1),
+          categoryId: z.number().optional(),
+        })
+      )
+      .query(({ input }) =>
+        compareByActiveIngredient(input.activeIngredient, input.categoryId)
+      ),
+
+    autocomplete: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().min(1),
+          limit: z.number().min(1).max(20).optional(),
+        })
+      )
+      .query(({ input }) => autocompleteSearch(input.query, input.limit ?? 12)),
+
+    // ─── Image Management ───────────────────────────────────────────────
+    searchByName: protectedProcedure
+      .input(
+        z.object({
+          nameTerm: z.string().min(2),
+          limit: z.number().min(1).max(200).optional(),
+        })
+      )
+      .query(({ input }) => searchProductsByName(input.nameTerm, input.limit ?? 100)),
+    quickSearch: protectedProcedure
+      .input(z.object({ query: z.string().min(1), limit: z.number().optional() }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+        const rows = await db
+          .select({
+            id: products.id,
+            name: products.name,
+            manufacturer: products.manufacturer,
+            price: products.price,
+            priceUnit: products.priceUnit,
+            unit: products.unit,
+            concentration: products.concentration,
+            presentation: products.presentation,
+            activeIngredient: products.activeIngredient,
+            imageUrl: products.imageUrl,
+            productUrl: products.productUrl,
+            supplierId: products.supplierId,
+            supplierName: suppliers.name,
+          })
+          .from(products)
+          .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
+          .where(and(eq(products.isActive, "yes"), like(products.name, `%${input.query}%`)))
+          .orderBy(asc(products.name))
+          .limit(input.limit ?? 20);
+        return rows;
+      }),
+
+    applyImageByName: protectedProcedure
+      .input(
+        z.object({
+          nameTerm: z.string().min(2),
+          imageUrl: z.string().url(),
+        })
+      )
+      .mutation(({ input }) => applyImageByName(input.nameTerm, input.imageUrl)),
+
+    // Auto-link: dado array de URLs, tenta vincular cada uma a um produto pelo nome extraído da URL
+    autoLinkImageUrls: protectedProcedure
+      .input(z.object({ imageUrls: z.array(z.string()) }))
+      .mutation(({ input }) => autoLinkImageUrls(input.imageUrls)),
+
+    // Aplica em lote as URLs de imagem nos produtos correspondentes
+    bulkApplyImageUrls: protectedProcedure
+      .input(
+        z.object({
+          items: z.array(
+            z.object({
+              productId: z.number(),
+              imageUrl: z.string(),
+            })
+          ),
+        })
+      )
+      .mutation(({ input }) => bulkApplyImageUrls(input.items)),
+
+    // ─── Detecção de duplicatas por fuzzy matching ─────────────────────────
+    findDuplicates: protectedProcedure
+      .input(z.object({
+        threshold: z.number().min(0.5).max(1).optional(),
+        supplierId: z.number().optional(),
+        categoryId: z.number().optional(),
+        limit: z.number().min(1).max(500).optional(),
+      }).optional())
+      .query(({ input }) => findDuplicateGroups(input ?? {})),
+    // ─── Preços por Fornecedor ───────────────────────────────────────────────────
+    getSupplierPrices: protectedProcedure
+      .input(z.object({ productId: z.number() }))
+      .query(async ({ input }) => {
+        const { getProductSupplierPrices } = await import("../db");
+        return getProductSupplierPrices(input.productId);
+      }),
+    upsertSupplierPrice: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+        supplierId: z.number(),
+        price: z.string().nullable(),
+        codigoFornecedor: z.string().optional(),
+        linkProduto: z.string().optional(),
+        origem: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { upsertProductSupplierPrice } = await import("../db");
+        await upsertProductSupplierPrice(input.productId, input.supplierId, input.price, {
+          codigoFornecedor: input.codigoFornecedor,
+          linkProduto: input.linkProduto,
+          origem: input.origem ?? 'manual',
+        });
+        return { ok: true };
+      }),
+    priceHistoryByProduct: protectedProcedure
+      .input(z.object({ productId: z.number(), supplierId: z.number().optional(), limit: z.number().default(20) }))
+      .query(async ({ input }) => {
+        const { getPriceHistory } = await import("../db");
+        return getPriceHistory(input.productId, input.supplierId, input.limit);
+      }),
+    findByEan: protectedProcedure
+      .input(z.object({ ean: z.string() }))
+      .query(async ({ input }) => {
+        const { findProductByEan } = await import("../db");
+        return findProductByEan(input.ean);
+      }),
+    deleteSupplierPrice: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+        supplierId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { deleteProductSupplierPrice } = await import("../db");
+        await deleteProductSupplierPrice(input.productId, input.supplierId);
+        return { ok: true };
+      }),
+    // ─── Sugestão de Equivalentes por Ficha Técnica ────────────────────────────
+    /**
+     * Dado um productId, extrai a ficha técnica estruturada do produto e busca
+     * candidatos equivalentes no catálogo, ranqueando por score de compatibilidade
+     * técnica (princípio ativo, concentração, forma farmacêutica, classe terapêutica)
+     * e ordenando os aprovados pelo menor preço.
+     */
+    suggestEquivalentsByFichaTecnica: protectedProcedure
+      .input(z.object({
+        productId: z.number(),
+        limit: z.number().int().min(1).max(50).default(20),
+        onlyWithPrice: z.boolean().default(false),
+      }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return { product: null, equivalents: [], totalFound: 0 };
+
+        // 1. Buscar o produto de referência com ficha técnica
+        const [ref] = await db
+          .select({
+            id: products.id,
+            name: products.name,
+            activeIngredient: products.activeIngredient,
+            concentration: products.concentration,
+            presentation: products.presentation,
+            fichaTecnica: products.fichaTecnica,
+            manufacturer: products.manufacturer,
+            price: products.price,
+            priceUnit: products.priceUnit,
+            unit: products.unit,
+            supplierId: products.supplierId,
+            imageUrl: products.imageUrl,
+            productUrl: products.productUrl,
+            categoryId: products.categoryId,
+          })
+          .from(products)
+          .where(eq(products.id, input.productId))
+          .limit(1);
+
+        if (!ref) return { product: null, equivalents: [], totalFound: 0 };
+
+        // 2. Parsear ficha técnica estruturada (JSON ou texto livre)
+        type FichaParsed = {
+          principioAtivo?: string;
+          concentracao?: string;
+          formaFarmaceutica?: string;
+          classeTerapeutica?: string;
+          especieAlvo?: string;
+          indicacoes?: string;
+        };
+        let fichaRef: FichaParsed = {};
+        if (ref.fichaTecnica) {
+          try {
+            const parsed = JSON.parse(ref.fichaTecnica);
+            fichaRef = {
+              principioAtivo: parsed.principioAtivo ?? parsed.principio_ativo ?? parsed.activeIngredient ?? ref.activeIngredient ?? undefined,
+              concentracao: parsed.concentracao ?? parsed.concentration ?? ref.concentration ?? undefined,
+              formaFarmaceutica: parsed.formaFarmaceutica ?? parsed.forma_farmaceutica ?? parsed.formFarmaceutica ?? ref.presentation ?? undefined,
+              classeTerapeutica: parsed.classeTerapeutica ?? parsed.classe_terapeutica ?? undefined,
+              especieAlvo: parsed.especieAlvo ?? parsed.especie_alvo ?? undefined,
+              indicacoes: parsed.indicacoes ?? undefined,
+            };
+          } catch {
+            // Texto livre — usar campos diretos do produto
+            fichaRef = {
+              principioAtivo: ref.activeIngredient ?? undefined,
+              concentracao: ref.concentration ?? undefined,
+              formaFarmaceutica: ref.presentation ?? undefined,
+            };
+          }
+        } else {
+          fichaRef = {
+            principioAtivo: ref.activeIngredient ?? undefined,
+            concentracao: ref.concentration ?? undefined,
+            formaFarmaceutica: ref.presentation ?? undefined,
+          };
+        }
+
+        // 3. Buscar candidatos por princípio ativo (campo direto + ficha técnica)
+        const paSearch = fichaRef.principioAtivo ?? ref.activeIngredient;
+        if (!paSearch || paSearch.trim().length < 2) {
+          return { product: ref, equivalents: [], totalFound: 0, fichaRef };
+        }
+
+        const paTerm = `%${paSearch.trim()}%`;
+        const candidates = await db
+          .select({
+            id: products.id,
+            name: products.name,
+            activeIngredient: products.activeIngredient,
+            concentration: products.concentration,
+            presentation: products.presentation,
+            fichaTecnica: products.fichaTecnica,
+            manufacturer: products.manufacturer,
+            price: products.price,
+            priceUnit: products.priceUnit,
+            unit: products.unit,
+            supplierId: products.supplierId,
+            supplierName: suppliers.name,
+            categoryId: products.categoryId,
+            categoryName: categories.name,
+            imageUrl: products.imageUrl,
+            productUrl: products.productUrl,
+            mapa: products.mapa,
+          })
+          .from(products)
+          .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
+          .leftJoin(categories, eq(products.categoryId, categories.id))
+          .where(
+            and(
+              eq(products.isActive, "yes"),
+              sql`${products.id} != ${input.productId}`,
+              or(
+                like(products.activeIngredient, paTerm),
+                like(products.fichaTecnica, paTerm),
+              )
+            )
+          )
+          .orderBy(asc(products.price))
+          .limit(200);
+
+        // 4. Calcular score de equivalência técnica para cada candidato
+        type EquivalentResult = {
+          id: number;
+          name: string;
+          activeIngredient: string | null;
+          concentration: string | null;
+          presentation: string | null;
+          fichaTecnica: string | null;
+          fichaParsed: FichaParsed;
+          manufacturer: string | null;
+          price: string | null;
+          priceUnit: string | null;
+          unit: string | null;
+          supplierId: number | null;
+          supplierName: string | null;
+          categoryId: number | null;
+          categoryName: string | null;
+          imageUrl: string | null;
+          productUrl: string | null;
+          mapa: string | null;
+          score: number;
+          matchDetails: { field: string; refValue: string; candValue: string; match: boolean }[];
+          status: "APROVADO" | "REVISAO" | "DIVERGENTE";
+          economia: number | null;
+        };
+
+        const normalize = (s?: string | null) =>
+          (s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+        const scored: EquivalentResult[] = [];
+
+        for (const cand of candidates) {
+          if (input.onlyWithPrice && (!cand.price || parseFloat(String(cand.price)) <= 0)) continue;
+
+          // Parsear ficha técnica do candidato
+          let fichaCand: FichaParsed = {};
+          if (cand.fichaTecnica) {
+            try {
+              const parsed = JSON.parse(cand.fichaTecnica);
+              fichaCand = {
+                principioAtivo: parsed.principioAtivo ?? parsed.principio_ativo ?? parsed.activeIngredient ?? cand.activeIngredient ?? undefined,
+                concentracao: parsed.concentracao ?? parsed.concentration ?? cand.concentration ?? undefined,
+                formaFarmaceutica: parsed.formaFarmaceutica ?? parsed.forma_farmaceutica ?? cand.presentation ?? undefined,
+                classeTerapeutica: parsed.classeTerapeutica ?? parsed.classe_terapeutica ?? undefined,
+                especieAlvo: parsed.especieAlvo ?? parsed.especie_alvo ?? undefined,
+                indicacoes: parsed.indicacoes ?? undefined,
+              };
+            } catch {
+              fichaCand = {
+                principioAtivo: cand.activeIngredient ?? undefined,
+                concentracao: cand.concentration ?? undefined,
+                formaFarmaceutica: cand.presentation ?? undefined,
+              };
+            }
+          } else {
+            fichaCand = {
+              principioAtivo: cand.activeIngredient ?? undefined,
+              concentracao: cand.concentration ?? undefined,
+              formaFarmaceutica: cand.presentation ?? undefined,
+            };
+          }
+
+          // Calcular score por campo
+          const matchDetails: EquivalentResult["matchDetails"] = [];
+          let totalPoints = 0;
+          let earnedPoints = 0;
+          let hasCriticalDivergence = false;
+
+          // Princípio ativo (crítico — peso 40)
+          const paRef = normalize(fichaRef.principioAtivo);
+          const paCand = normalize(fichaCand.principioAtivo);
+          if (paRef && paCand) {
+            totalPoints += 40;
+            const match = paRef === paCand || paCand.includes(paRef) || paRef.includes(paCand);
+            if (match) earnedPoints += 40;
+            else hasCriticalDivergence = true;
+            matchDetails.push({ field: "Princípio Ativo", refValue: fichaRef.principioAtivo!, candValue: fichaCand.principioAtivo!, match });
+          }
+
+          // Concentração (crítico — peso 30)
+          const concRef = normalize(fichaRef.concentracao);
+          const concCand = normalize(fichaCand.concentracao);
+          if (concRef && concCand) {
+            totalPoints += 30;
+            const match = concRef === concCand || concCand.includes(concRef) || concRef.includes(concCand);
+            if (match) earnedPoints += 30;
+            else hasCriticalDivergence = true;
+            matchDetails.push({ field: "Concentração", refValue: fichaRef.concentracao!, candValue: fichaCand.concentracao!, match });
+          }
+
+          // Forma farmacêutica (importante — peso 20)
+          const ffRef = normalize(fichaRef.formaFarmaceutica);
+          const ffCand = normalize(fichaCand.formaFarmaceutica);
+          if (ffRef && ffCand) {
+            totalPoints += 20;
+            const match = ffRef === ffCand || ffCand.includes(ffRef) || ffRef.includes(ffCand);
+            if (match) earnedPoints += 20;
+            matchDetails.push({ field: "Forma Farmacêutica", refValue: fichaRef.formaFarmaceutica!, candValue: fichaCand.formaFarmaceutica!, match });
+          }
+
+          // Classe terapêutica (informativo — peso 10)
+          const ctRef = normalize(fichaRef.classeTerapeutica);
+          const ctCand = normalize(fichaCand.classeTerapeutica);
+          if (ctRef && ctCand) {
+            totalPoints += 10;
+            const match = ctRef === ctCand || ctCand.includes(ctRef) || ctRef.includes(ctCand);
+            if (match) earnedPoints += 10;
+            matchDetails.push({ field: "Classe Terapêutica", refValue: fichaRef.classeTerapeutica!, candValue: fichaCand.classeTerapeutica!, match });
+          }
+
+          const score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 50;
+          const status: EquivalentResult["status"] = hasCriticalDivergence ? "DIVERGENTE" : score >= 70 ? "APROVADO" : "REVISAO";
+
+          // Calcular economia
+          const refPrice = ref.price ? parseFloat(String(ref.price)) : null;
+          const candPrice = cand.price ? parseFloat(String(cand.price)) : null;
+          const economia = refPrice && candPrice && candPrice < refPrice
+            ? Math.round(((refPrice - candPrice) / refPrice) * 100)
+            : null;
+
+          scored.push({
+            id: cand.id,
+            name: cand.name,
+            activeIngredient: cand.activeIngredient,
+            concentration: cand.concentration,
+            presentation: cand.presentation,
+            fichaTecnica: cand.fichaTecnica,
+            fichaParsed: fichaCand,
+            manufacturer: cand.manufacturer,
+            price: cand.price,
+            priceUnit: cand.priceUnit,
+            unit: cand.unit,
+            supplierId: cand.supplierId,
+            supplierName: cand.supplierName,
+            categoryId: cand.categoryId,
+            categoryName: cand.categoryName,
+            imageUrl: cand.imageUrl,
+            productUrl: cand.productUrl,
+            mapa: cand.mapa,
+            score,
+            matchDetails,
+            status,
+            economia,
+          });
+        }
+
+        // 5. Ordenar: APROVADO primeiro (por preço asc), depois REVISAO, depois DIVERGENTE
+        scored.sort((a, b) => {
+          const statusOrder = { APROVADO: 0, REVISAO: 1, DIVERGENTE: 2 };
+          const sA = statusOrder[a.status];
+          const sB = statusOrder[b.status];
+          if (sA !== sB) return sA - sB;
+          // Dentro do mesmo status: menor preço primeiro
+          const pA = a.price ? parseFloat(String(a.price)) : Infinity;
+          const pB = b.price ? parseFloat(String(b.price)) : Infinity;
+          return pA - pB;
+        });
+
+        return {
+          product: {
+            ...ref,
+            fichaParsed: fichaRef,
+          },
+          equivalents: scored.slice(0, input.limit),
+          totalFound: scored.length,
+          fichaRef,
+        };
+      }),
+
+    // ─── Fusão de duplicatas ───────────────────────────────────────────────────
+    mergeDuplicates: protectedProcedure
+      .input(z.object({
+        masterId: z.number(),
+        duplicateIds: z.array(z.number()).min(1),
+      }))
+      .mutation(({ input }) => mergeProductGroup(input.masterId, input.duplicateIds)),
+
+    // ─── Enriquecimento em Lote de Fichas Técnicas ──────────────────────────────
+    enrichFichaTecnicaBatch: protectedProcedure
+      .query(async () => {
+        const { runEnrichFichaTecnicaBatch } = await import("../jobs/enrichFichaTecnicaJob");
+        return runEnrichFichaTecnicaBatch();
+      }),
+
+    getEnrichmentProgress: protectedProcedure
+      .query(async () => {
+        const { getEnrichmentProgress } = await import("../jobs/enrichFichaTecnicaJob");
+        return getEnrichmentProgress();
+      }),
+
+    // ─── Exportação em Excel ───────────────────────────────────────────────────
+    exportToExcel: protectedProcedure
+      .input(
+        z.object({
+          supplierId: z.number().optional(),
+          categoryId: z.number().optional(),
+          isActive: z.enum(["yes", "no", "all"]).optional(),
+          withoutFichaTecnica: z.boolean().optional(),
+          withoutCategory: z.boolean().optional(),
+          search: z.string().optional(),
+          limit: z.number().min(1).max(5000).default(2000), // limite obrigatório por segurança
+        })
+      )
+      .query(async ({ input }) => {
+        const { exportProductsToExcel } = await import("../exportExcel");
+        const buffer = await exportProductsToExcel(input as any);
+        return {
+          data: buffer.toString("base64"),
+          filename: `catalogo-produtos-${new Date().toISOString().split("T")[0]}.xlsx`,
+        };
+      }),
+  });

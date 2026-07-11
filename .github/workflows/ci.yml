@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # pnpm via Corepack (embutido no Node) — evita depender de actions de
+      # terceiros, que podem ser bloqueadas pela política de Actions da org.
+      # A versão vem do campo "packageManager" do package.json.
+      - name: Habilitar pnpm (corepack)
+        run: corepack enable
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Verificação de tipos (tsc)
+        run: pnpm run check
+
+      - name: Testes (vitest)
+        run: pnpm test
+
+      - name: Build de produção
+        run: pnpm run build

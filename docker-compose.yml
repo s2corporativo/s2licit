@@ -31,11 +31,14 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      PORT: 3000
       DATABASE_URL: mysql://s2user:s2pass2024@db:3306/sistema_s2
-      JWT_SECRET: s2_jwt_secret_change_in_production_2024
+      # ATENÇÃO: segredos abaixo são apenas para uso local; troque em produção.
+      JWT_SECRET: s2_jwt_secret_change_in_production_2024_min32chars
+      ENCRYPTION_KEY: s2_encryption_key_change_in_production_2024
       VITE_APP_ID: sistema-s2
     ports:
-      - "5000:5000"
+      - "3000:3000"
     depends_on:
       db:
         condition: service_healthy

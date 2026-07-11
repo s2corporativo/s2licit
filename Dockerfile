@@ -18,8 +18,8 @@ COPY . .
 # Build do frontend e backend
 RUN pnpm run build
 
-# Expor porta
-EXPOSE 5000
+# Expor porta (a porta efetiva vem da variável PORT, padrão 3000)
+EXPOSE 3000
 
 # Aguardar DB e rodar migrações antes de iniciar
 CMD ["sh", "-c", "node -e \"require('child_process').execSync('pnpm db:push', {stdio:'inherit'})\" 2>/dev/null || true && node dist/index.js"]
