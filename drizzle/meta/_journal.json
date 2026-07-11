@@ -15,6 +15,13 @@
       "when": 1783799912322,
       "tag": "0001_funil_oportunidades",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1783800605748,
+      "tag": "0002_tax_engine",
+      "breakpoints": true
     }
   ]
 }
