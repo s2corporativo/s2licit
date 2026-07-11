@@ -66,6 +66,14 @@ export async function ensureAdminUser(): Promise<void> {
       .set({ passwordHash, role: "admin", loginMethod: "local" })
       .where(eq(users.id, existing[0].id));
     console.log(`[LocalAuth] Senha definida para o administrador existente: ${email}`);
+  } else if (!credentialEncryptionService.verifyPassword(ENV.adminPassword, existing[0].passwordHash)) {
+    // ADMIN_PASSWORD do ambiente é a fonte de verdade: se mudou, sincroniza.
+    // (Sistema de uso interno single-user — trocar a senha = trocar o env e reiniciar.)
+    await db
+      .update(users)
+      .set({ passwordHash })
+      .where(eq(users.id, existing[0].id));
+    console.log(`[LocalAuth] Senha do administrador sincronizada com ADMIN_PASSWORD: ${email}`);
   }
 }
 
