@@ -96,28 +96,46 @@ fi
 
 echo "==> [3/5] Build e subida dos containers"
 # A VPS pode ter outros serviços/containers ocupando portas (Apache na 80,
-# outro app na 3000...). Escolhemos portas livres sem derrubar nada.
+# outro app na 3000, algo em 127.0.0.1:8080...). Escolhemos portas livres
+# sem derrubar nada — e REVALIDAMOS a cada deploy: o que estava livre ontem
+# pode estar ocupado hoje. Paramos só o nosso app antes, para que as portas
+# que nós mesmos seguramos não contem como "ocupadas".
+docker compose stop app >/dev/null 2>&1 || true
+
 porta_ocupada() {
   ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|\.)$1\$"
 }
 primeira_porta_livre() {
   for p in "$@"; do
+    [ -n "$p" ] || continue
     if ! porta_ocupada "$p"; then echo "$p"; return 0; fi
   done
   return 1
 }
-if ! grep -q '^APP_HTTP_PORT=' .env; then
-  http_port=$(primeira_porta_livre 80 8080 8088 8090 8181) || { echo "Nenhuma porta HTTP livre"; exit 1; }
-  echo "APP_HTTP_PORT=${http_port}" >> .env
-  [ "$http_port" != "80" ] && echo "⚠️  Porta 80 ocupada — app público ficará na :${http_port}."
-fi
-if ! grep -q '^APP_LOCAL_PORT=' .env; then
-  local_port=$(primeira_porta_livre 3000 3001 3002 3010) || { echo "Nenhuma porta local livre"; exit 1; }
-  echo "APP_LOCAL_PORT=${local_port}" >> .env
-  [ "$local_port" != "3000" ] && echo "⚠️  Porta 3000 ocupada — health check local usará a :${local_port}."
-fi
+# garantir_porta VAR porta_preferida [alternativas...]
+# Mantém o valor já gravado no .env se a porta continuar livre; senão
+# escolhe a primeira livre da lista e atualiza o .env.
+garantir_porta() {
+  var="$1"; shift
+  atual=$(grep "^${var}=" .env 2>/dev/null | head -1 | cut -d= -f2 || true)
+  livre=$(primeira_porta_livre "$atual" "$@") || { echo "❌ Nenhuma porta livre para ${var} (testadas: ${atual} $*)"; exit 1; }
+  if [ "$livre" = "$atual" ]; then return 0; fi
+  if [ -n "$atual" ]; then
+    sed -i "s/^${var}=.*/${var}=${livre}/" .env
+    echo "⚠️  Porta ${atual} (${var}) ficou ocupada — trocando para :${livre}."
+  else
+    echo "${var}=${livre}" >> .env
+    if [ "$livre" != "$1" ]; then
+      echo "⚠️  Porta preferida ocupada — ${var} usará :${livre}."
+    fi
+  fi
+  return 0
+}
+garantir_porta APP_HTTP_PORT 80 8080 8088 8090 8181
+garantir_porta APP_LOCAL_PORT 3000 3001 3002 3010
 HTTP_PORT=$(grep '^APP_HTTP_PORT=' .env | cut -d= -f2)
 LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
+echo "Portas: pública :${HTTP_PORT} · local :${LOCAL_PORT}"
 docker compose up -d --build
 
 echo "==> [4/5] Aguardando o app ficar saudável (porta local ${LOCAL_PORT})"
