@@ -33,6 +33,7 @@ import {
   MailCheck,
   Radar,
   Brain,
+  Gavel,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -59,6 +60,7 @@ const navGroups: NavGroup[] = [
       { href: "/central-operacional", icon: ClipboardList, label: "Central Operacional" },
       { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações Recebidas" },
       { href: "/radar-pncp", icon: Radar, label: "Radar de Oportunidades" },
+      { href: "/sala-disputa", icon: Gavel, label: "Sala de Disputa" },
       { href: "/edital", icon: FileScan, label: "Importar Edital" },
       { href: "/proposta-rapida", icon: Sparkles, label: "Proposta Rápida" },
       { href: "/propostas", icon: FileText, label: "Propostas Comerciais" },
