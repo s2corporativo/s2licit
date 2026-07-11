@@ -150,6 +150,80 @@ export async function buscarItensPNCP(
   return result.payload?.data ?? [];
 }
 
+export interface PncpItemResultado {
+  numeroItem: number;
+  fornecedorNome: string | null;
+  fornecedorCnpjCpf: string | null;
+  quantidadeHomologada: number | null;
+  valorUnitarioHomologado: number | null;
+  valorTotalHomologado: number | null;
+  dataResultado: string | null;
+}
+
+/**
+ * Busca os resultados (homologação) de um item de uma compra — quem venceu e
+ * por qual preço. Base para a inteligência de preços: saber o preço homologado
+ * real do item em contratações anteriores.
+ */
+export async function buscarResultadosItemPNCP(
+  cnpj: string,
+  ano: number,
+  sequencial: number,
+  numeroItem: number,
+): Promise<PncpItemResultado[]> {
+  const url = `${PNCP_ORGAOS_BASE}/v1/orgaos/${cnpj}/compras/${ano}/${sequencial}/itens/${numeroItem}/resultados?pagina=1&tamanhoPagina=100`;
+  const result = await robustFetch(url, "pncp");
+
+  if (!result.success) {
+    if (result.statusCode === 404) return [];
+    throw new Error(result.errorMessage || "PNCP resultados API error");
+  }
+
+  const rows: any[] = result.payload?.data ?? [];
+  return rows.map((r) => ({
+    numeroItem,
+    fornecedorNome: r.nomeRazaoSocialFornecedor ?? r.niFornecedor ?? null,
+    fornecedorCnpjCpf: r.niFornecedor ?? null,
+    quantidadeHomologada: typeof r.quantidadeHomologada === "number" ? r.quantidadeHomologada : null,
+    valorUnitarioHomologado: typeof r.valorUnitarioHomologado === "number" ? r.valorUnitarioHomologado : null,
+    valorTotalHomologado: typeof r.valorTotalHomologado === "number" ? r.valorTotalHomologado : null,
+    dataResultado: r.dataResultado ?? null,
+  }));
+}
+
+/**
+ * Calcula estatísticas de preço homologado a partir de uma lista de resultados
+ * (média, mínimo, máximo, mediana dos valores unitários). Pura e testável.
+ */
+export function estatisticasPreco(resultados: PncpItemResultado[]): {
+  amostras: number;
+  media: number | null;
+  minimo: number | null;
+  maximo: number | null;
+  mediana: number | null;
+} {
+  const valores = resultados
+    .map((r) => r.valorUnitarioHomologado)
+    .filter((v): v is number => typeof v === "number" && v > 0)
+    .sort((a, b) => a - b);
+
+  if (valores.length === 0) {
+    return { amostras: 0, media: null, minimo: null, maximo: null, mediana: null };
+  }
+
+  const soma = valores.reduce((s, v) => s + v, 0);
+  const mid = Math.floor(valores.length / 2);
+  const mediana = valores.length % 2 === 0 ? (valores[mid - 1] + valores[mid]) / 2 : valores[mid];
+
+  return {
+    amostras: valores.length,
+    media: Number((soma / valores.length).toFixed(2)),
+    minimo: valores[0],
+    maximo: valores[valores.length - 1],
+    mediana: Number(mediana.toFixed(2)),
+  };
+}
+
 /**
  * Normaliza uma licitação PNCP para o modelo unificado NormalizedLicitacao.
  */

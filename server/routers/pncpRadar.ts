@@ -15,6 +15,8 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   buscarItensPNCP,
   buscarLicitacoesMultiModalidade,
+  buscarResultadosItemPNCP,
+  estatisticasPreco,
   normalizePncpLicitacao,
 } from "../connectors/pncpConnector";
 import type { NormalizedLicitacao } from "../connectors/baseConnector";
@@ -91,5 +93,21 @@ export const pncpRadarRouter = router({
     .query(async ({ input }) => {
       const itens = await buscarItensPNCP(input.cnpj, input.ano, input.sequencial);
       return { total: itens.length, itens };
+    }),
+
+  /**
+   * Inteligência de preço: resultados homologados de um item (quem venceu e
+   * por qual preço) + estatísticas (média, mínimo, máximo, mediana).
+   */
+  precoHomologado: protectedProcedure
+    .input(ItensSchema.extend({ numeroItem: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const resultados = await buscarResultadosItemPNCP(
+        input.cnpj,
+        input.ano,
+        input.sequencial,
+        input.numeroItem,
+      );
+      return { resultados, estatisticas: estatisticasPreco(resultados) };
     }),
 });
