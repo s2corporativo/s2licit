@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Edit2, Trash2, Plus, Save } from "lucide-react";
+import { Edit2, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 
 interface CategoryRule {
@@ -21,52 +21,24 @@ interface CategoryRule {
   isActive: boolean;
 }
 
-const DEFAULT_CATEGORIES = [
-  { id: 1, name: "Medicamentos Veterinários" },
-  { id: 2, name: "Medicamentos Humanos" },
-  { id: 3, name: "Produtos Agro" },
-  { id: 4, name: "Insumos" },
-  { id: 5, name: "Materiais Diversos" },
-];
-
-const RECOMMENDED_MARGINS: Record<string, number> = {
-  "Medicamentos Veterinários": 35,
-  "Medicamentos Humanos": 30,
-  "Produtos Agro": 25,
-  "Insumos": 20,
-  "Materiais Diversos": 25,
-};
-
 export default function RegrasCategoria() {
-  const [rules, setRules] = useState<CategoryRule[]>(
-    DEFAULT_CATEGORIES.map((cat) => ({
-      categoryId: cat.id,
-      categoryName: cat.name,
-      marginPercentage: RECOMMENDED_MARGINS[cat.name] || 30,
-      icmsPercentage: 0,
-      ipPercentage: 0,
-      pisPercentage: 0,
-      cofinsPercentage: 0,
-      freightType: "fixed",
-      freightValue: 0,
-      isActive: true,
-    }))
-  );
+  const [rules, setRules] = useState<CategoryRule[]>([]);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingRule, setEditingRule] = useState<CategoryRule | null>(null);
 
-  // Carregar regras do servidor
+  // Carregar regras e categorias do servidor
   const { data: rulesData, isLoading } = trpc.categoryPricing.listRules.useQuery();
+  const { data: categories } = trpc.categories.list.useQuery();
   const updateRuleMutation = trpc.categoryPricing.updateRule.useMutation();
   const deleteRuleMutation = trpc.categoryPricing.deleteRule.useMutation();
 
   useEffect(() => {
-    if (rulesData && rulesData.length > 0) {
-      // Mesclar dados do servidor com nomes de categorias locais
+    if (rulesData) {
+      // Mesclar dados do servidor com nomes reais das categorias
       const merged: CategoryRule[] = rulesData.map((r) => ({
         categoryId: r.categoryId,
-        categoryName: DEFAULT_CATEGORIES.find((c) => c.id === r.categoryId)?.name ?? `Categoria ${r.categoryId}`,
+        categoryName: categories?.find((c) => c.id === r.categoryId)?.name ?? `Categoria ${r.categoryId}`,
         marginPercentage: r.marginPercentage,
         icmsPercentage: r.icmsPercentage,
         ipPercentage: r.ipPercentage,
@@ -78,7 +50,7 @@ export default function RegrasCategoria() {
       }));
       setRules(merged);
     }
-  }, [rulesData]);
+  }, [rulesData, categories]);
 
   const handleEdit = (rule: CategoryRule) => {
     setEditingId(rule.categoryId);
@@ -111,12 +83,6 @@ export default function RegrasCategoria() {
   const handleCancel = () => {
     setEditingId(null);
     setEditingRule(null);
-  };
-
-  const handleToggleActive = (categoryId: number) => {
-    setRules(
-      rules.map((r) => (r.categoryId === categoryId ? { ...r, isActive: !r.isActive } : r))
-    );
   };
 
   const handleDelete = async (categoryId: number) => {
@@ -152,6 +118,8 @@ export default function RegrasCategoria() {
         <div className="grid gap-4">
           {isLoading ? (
             <div className="text-center py-8">Carregando regras...</div>
+          ) : rules.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">Nenhuma regra de categoria cadastrada.</div>
           ) : (
             rules.map((rule) => (
             <Card key={rule.categoryId} className={!rule.isActive ? "opacity-50" : ""}>
@@ -215,7 +183,7 @@ export default function RegrasCategoria() {
                           onChange={(e) =>
                             setEditingRule({
                               ...editingRule,
-                              marginPercentage: parseFloat(e.target.value),
+                              marginPercentage: parseFloat(e.target.value) || 0,
                             })
                           }
                         />
@@ -233,7 +201,7 @@ export default function RegrasCategoria() {
                             onChange={(e) =>
                               setEditingRule({
                                 ...editingRule,
-                                icmsPercentage: parseFloat(e.target.value),
+                                icmsPercentage: parseFloat(e.target.value) || 0,
                               })
                             }
                           />
@@ -247,7 +215,7 @@ export default function RegrasCategoria() {
                             onChange={(e) =>
                               setEditingRule({
                                 ...editingRule,
-                                ipPercentage: parseFloat(e.target.value),
+                                ipPercentage: parseFloat(e.target.value) || 0,
                               })
                             }
                           />
@@ -261,7 +229,7 @@ export default function RegrasCategoria() {
                             onChange={(e) =>
                               setEditingRule({
                                 ...editingRule,
-                                pisPercentage: parseFloat(e.target.value),
+                                pisPercentage: parseFloat(e.target.value) || 0,
                               })
                             }
                           />
@@ -275,7 +243,7 @@ export default function RegrasCategoria() {
                             onChange={(e) =>
                               setEditingRule({
                                 ...editingRule,
-                                cofinsPercentage: parseFloat(e.target.value),
+                                cofinsPercentage: parseFloat(e.target.value) || 0,
                               })
                             }
                           />
@@ -314,7 +282,7 @@ export default function RegrasCategoria() {
                           onChange={(e) =>
                             setEditingRule({
                               ...editingRule,
-                              freightValue: parseFloat(e.target.value),
+                              freightValue: parseFloat(e.target.value) || 0,
                             })
                           }
                         />
@@ -327,11 +295,6 @@ export default function RegrasCategoria() {
             ))
           )}
         </div>
-
-        <Button className="w-full" size="lg">
-          <Plus className="w-4 h-4 mr-2" />
-          Adicionar Nova Categoria
-        </Button>
       </div>
     </>
   );

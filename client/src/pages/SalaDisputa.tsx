@@ -40,8 +40,8 @@ export default function SalaDisputa() {
     if (itens.length === 0) return;
     setPayload({
       itens,
-      margemMinima: margemMinima ? parseFloat(margemMinima) : undefined,
-      margemDesejada: margemDesejada ? parseFloat(margemDesejada) : undefined,
+      margemMinima: margemMinima ? parseFloat(margemMinima.replace(",", ".")) : undefined,
+      margemDesejada: margemDesejada ? parseFloat(margemDesejada.replace(",", ".")) : undefined,
     });
   };
 

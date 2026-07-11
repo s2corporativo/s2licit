@@ -1,6 +1,7 @@
 import { getDb } from "../db";
 import { suppliers, products } from "../../drizzle/schema";
 import { eq, and, like } from "drizzle-orm";
+import { parsePrecoBR } from "../utils/number";
 
 export interface PriceRow {
   productName: string;
@@ -91,18 +92,19 @@ export async function detectSupplierFromFile(
  */
 export async function matchProductByIdentifier(
   productName: string,
+  supplierId: number,
   ean?: string,
   productCode?: string
 ): Promise<{ id: number; name: string } | null> {
   const db = await getDb();
   if (!db) return null;
 
-  // Primeiro, tentar match por EAN
+  // Primeiro, tentar match por EAN (sempre restrito ao fornecedor da importação)
   if (ean) {
     const byEan = await db
       .select({ id: products.id, name: products.name })
       .from(products)
-      .where(eq(products.ean, ean))
+      .where(and(eq(products.ean, ean), eq(products.supplierId, supplierId)))
       .limit(1);
 
     if (byEan.length > 0) {
@@ -115,7 +117,12 @@ export async function matchProductByIdentifier(
     const byCode = await db
       .select({ id: products.id, name: products.name })
       .from(products)
-      .where(eq(products.codigoFornecedor, productCode))
+      .where(
+        and(
+          eq(products.codigoFornecedor, productCode),
+          eq(products.supplierId, supplierId)
+        )
+      )
       .limit(1);
 
     if (byCode.length > 0) {
@@ -127,7 +134,12 @@ export async function matchProductByIdentifier(
   const byName = await db
     .select({ id: products.id, name: products.name })
     .from(products)
-    .where(like(products.name, `%${productName}%`))
+    .where(
+      and(
+        like(products.name, `%${productName}%`),
+        eq(products.supplierId, supplierId)
+      )
+    )
     .limit(1);
 
   if (byName.length > 0) {
@@ -165,9 +177,10 @@ export async function previewPriceImport(
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
 
-    // Tentar fazer matching do produto
+    // Tentar fazer matching do produto (restrito ao fornecedor)
     const matchedProduct = await matchProductByIdentifier(
       row.productName,
+      supplierId,
       row.ean,
       row.productCode
     );
@@ -279,9 +292,10 @@ export async function importPricesWithSupplier(
     const row = rows[index];
 
     try {
-      // Fazer matching do produto
+      // Fazer matching do produto (restrito ao fornecedor)
       const matchedProduct = await matchProductByIdentifier(
         row.productName,
+        supplierId,
         row.ean,
         row.productCode
       );
@@ -376,8 +390,8 @@ export function extractPriceRowsFromSpreadsheet(data: any[][]): PriceRow[] {
 
     if (!productName || !priceStr) continue;
 
-    const price = parseFloat(priceStr.replace(",", "."));
-    if (isNaN(price)) continue;
+    const price = parsePrecoBR(priceStr);
+    if (price === null) continue;
 
     rows.push({
       productName,

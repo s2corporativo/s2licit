@@ -561,7 +561,9 @@ export default function PropostaEditor() {
           id,
           newStatus: "delivered",
           installments: installmentForm.nInstallments > 1 ? installmentForm.nInstallments : undefined,
-          firstDueDate: new Date(installmentForm.firstDueDate + "T12:00:00"),
+          firstDueDate: installmentForm.firstDueDate
+            ? new Date(installmentForm.firstDueDate + "T12:00:00")
+            : undefined,
         });
       },
     });

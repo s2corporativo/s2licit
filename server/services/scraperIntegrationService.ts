@@ -2,6 +2,7 @@ import { getDb } from "../db";
 import { supplierCaptureConfigs, suppliers } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
+import { parsePrecoBR } from "../utils/number";
 
 /**
  * Interface para produto capturado de scraper
@@ -174,7 +175,7 @@ function parseProductFromHtml(
     return {
       name: nameMatch[1]?.trim() || "",
       price: priceMatch
-        ? parseFloat(priceMatch[1].replace(".", "").replace(",", "."))
+        ? parsePrecoBR(priceMatch[1]) ?? undefined
         : undefined,
       imageUrl: imageMatch ? imageMatch[1] : undefined,
       ean: eanMatch ? eanMatch[1] : undefined,

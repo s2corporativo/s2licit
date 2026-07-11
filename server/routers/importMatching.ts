@@ -1,5 +1,6 @@
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import {
   processImportedProductsWithMatching,
   calculateImportMatchingStats,
@@ -167,19 +168,17 @@ export const importMatchingRouter = router({
           warnings.push(`${duplicatesInBatch.length} duplicata(s) consolidada(s)`);
         }
 
-        const report = await generateImportMatchingReport(results, stats, duplicatesInBatch.length, warnings);
+        await generateImportMatchingReport(results, stats, duplicatesInBatch.length, warnings);
 
-        // TODO: Implementar salvamento no banco
-        // - Criar novos produtos (action: create)
-        // - Atualizar preços de produtos existentes (action: update)
-        // - Consolidar preços de fornecedores
-
-        return {
-          success: true,
-          message: `Importação concluída: ${stats.newProducts} novo(s), ${stats.updatedProducts} atualização(ões)`,
-          report,
-        };
+        // O salvamento no banco (criar produtos, atualizar preços, consolidar fornecedores)
+        // ainda não foi implementado — não fingir sucesso.
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message:
+            "Funcionalidade ainda não implementada: a persistência da importação com matching não está disponível. Use previewImportWithMatching para simular o resultado.",
+        });
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
         return {
           success: false,

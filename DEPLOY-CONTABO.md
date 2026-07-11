@@ -3,6 +3,13 @@
 Guia passo a passo para subir o sistema num VPS Contabo (Ubuntu) usando Docker.
 O `docker-compose.yml` sobe **dois containers**: o app e o banco MySQL.
 
+> **Jeito automático (recomendado):** GitHub → **Actions** → **Deploy VPS** →
+> *Run workflow*. Informe o IP e a senha SSH (ou cadastre o secret
+> `VPS_PASSWORD` uma vez e deixe o campo em branco). O workflow envia o
+> código, instala o Docker se preciso, gera o `.env` com segredos na primeira
+> vez (credenciais ficam em `/root/s2licit-acesso.txt` na VPS) e sobe tudo.
+> Os passos manuais abaixo continuam valendo como referência.
+
 ---
 
 ## 0. Pré-requisitos
@@ -125,11 +132,17 @@ sozinho. (Depois disso, feche a porta 3000 no firewall e acesse só pelo domíni
 | Ver logs | `docker compose logs -f app` |
 | Reiniciar | `docker compose restart app` |
 | Parar tudo | `docker compose down` |
-| Atualizar o sistema | `git pull && docker compose up -d --build` |
-| Backup do banco | `docker compose exec app pnpm db:backup /app/uploads` |
+| Atualizar o sistema | `git pull && docker compose up -d --build` (ou o workflow **Deploy VPS**) |
+| Backup do banco | `docker compose exec db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot sistema_s2' \| gzip > backup-$(date +%F).sql.gz` |
 
-O backup fica em `/opt/s2licit` (volume `uploads_data`). Agende um backup
-diário com cron no host se quiser.
+O comando acima gera o arquivo no diretório atual do **host** (ex.:
+`/opt/s2licit/backup-2026-07-11.sql.gz`). Agende diário com cron:
+
+```
+0 3 * * * cd /opt/s2licit && docker compose exec -T db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot sistema_s2' | gzip > /root/backups/s2-$(date +\%F).sql.gz
+```
+
+(crie a pasta antes: `mkdir -p /root/backups`)
 
 ---
 

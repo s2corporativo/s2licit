@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 
@@ -25,10 +26,10 @@ export const alertConfigRouter = router({
       emailNotifications: z.boolean().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-      
-      // Placeholder - implement when alert_configs table is available
-      return { success: true };
+      // Não existe tabela de configuração de alertas no schema — não fingir sucesso
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "Funcionalidade ainda não implementada: a persistência da configuração de alertas não está disponível.",
+      });
     }),
 });

@@ -2,7 +2,7 @@ import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
-import { eq, like, and } from "drizzle-orm";
+import { eq, like, and, inArray } from "drizzle-orm";
 
 /**
  * Algoritmo de similaridade Jaro-Winkler simplificado
@@ -236,7 +236,8 @@ export const imagesRouter = router({
         .from(products)
         .where(
           and(
-            eq(products.isActive, "yes")
+            eq(products.isActive, "yes"),
+            inArray(products.id, input.productIds)
           )
         )
         .limit(input.productIds.length);

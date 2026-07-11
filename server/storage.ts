@@ -1,9 +1,24 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
+// Armazenamento de arquivos (logos, anexos).
+//
+// Dois modos, escolhidos automaticamente:
+//  - Proxy legado (Manus/Forge): quando BUILT_IN_FORGE_API_URL/KEY existem.
+//  - Disco local (padrão em VPS): grava em UPLOAD_DIR (padrão ./uploads) e
+//    serve em /uploads/<chave> (rota estática registrada no boot).
 
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
 import { ENV } from './_core/env';
 
 type StorageConfig = { baseUrl: string; apiKey: string };
+
+/** Diretório local de uploads (persistido via volume no docker-compose). */
+export function localUploadDir(): string {
+  return process.env.UPLOAD_DIR || path.resolve(process.cwd(), "uploads");
+}
+
+function hasForgeProxy(): boolean {
+  return Boolean(ENV.forgeApiUrl && ENV.forgeApiKey);
+}
 
 function getStorageConfig(): StorageConfig {
   const baseUrl = ENV.forgeApiUrl;
@@ -67,11 +82,28 @@ function buildAuthHeaders(apiKey: string): HeadersInit {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
+/** Grava no disco local e devolve a URL pública relativa (/uploads/...). */
+async function localPut(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+): Promise<{ key: string; url: string }> {
+  const key = normalizeKey(relKey);
+  // Bloqueia path traversal (../../etc) na chave
+  const safeKey = key.split("/").filter((p) => p && p !== "." && p !== "..").join("/");
+  const filePath = path.join(localUploadDir(), safeKey);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, typeof data === "string" ? Buffer.from(data) : Buffer.from(data));
+  return { key: safeKey, url: `/uploads/${safeKey}` };
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
+  if (!hasForgeProxy()) {
+    return localPut(relKey, data);
+  }
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   const uploadUrl = buildUploadUrl(baseUrl, key);
@@ -93,6 +125,10 @@ export async function storagePut(
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
+  if (!hasForgeProxy()) {
+    const key = normalizeKey(relKey);
+    return { key, url: `/uploads/${key}` };
+  }
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   return {

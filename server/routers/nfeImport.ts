@@ -1,5 +1,6 @@
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { parseNfeXml, validateNfeData } from "../services/nfeParserService";
 import {
   validateSupplierData,
@@ -73,10 +74,16 @@ async function upsertNfeImportRecord(db: any, payload: {
   notes?: string;
 }) {
   try {
+    // Chave composta: mesmo número de NFe pode existir para fornecedores diferentes
     const existing = await db
       .select({ id: nfeImports.id })
       .from(nfeImports)
-      .where(eq(nfeImports.nfeNumber, payload.nfeNumber))
+      .where(
+        and(
+          eq(nfeImports.nfeNumber, payload.nfeNumber),
+          eq(nfeImports.supplierCnpj, payload.supplierCnpj)
+        )
+      )
       .limit(1);
 
     if (existing.length > 0) {
@@ -516,20 +523,14 @@ export const nfeImportRouter = router({
           return { success: false, error: "NFe import not found" };
         }
 
-        // Update products with master product links
-        let linkedCount = 0;
-        for (const mapping of input.productMappings) {
-          // This would require a products table with nfeProductId field
-          // For now, we'll just track the mapping
-          linkedCount++;
-        }
-
-        return {
-          success: true,
-          message: `${linkedCount} produto(s) vinculado(s) com sucesso`,
-          linkedCount,
-        };
+        // O vínculo exigiria um campo nfeProductId na tabela de produtos,
+        // que não existe no schema — não fingir sucesso.
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Funcionalidade ainda não implementada: o vínculo de produtos da NFe com master products não está disponível.",
+        });
       } catch (error) {
+        if (error instanceof TRPCError) throw error;
         return {
           success: false,
           error: `Erro ao vincular produtos: ${error instanceof Error ? error.message : "Unknown error"}`,

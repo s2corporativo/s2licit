@@ -331,41 +331,68 @@ export const captureReviewRouter = router({
           .execute();
 
         let appliedCount = 0;
+        let errorCount = 0;
+
+        // Whitelist de campos que podem ser atualizados dinamicamente
+        // (nomes reais das colunas em drizzle/schema.ts → products)
+        const allowedFields = new Set([
+          "price",
+          "name",
+          "description",
+          "manufacturer",
+          "ean",
+          "code",
+        ]);
 
         // Aplicar cada mudança ao produto
         for (const change of approved) {
           try {
+            // Validar campo permitido antes de atualizar
+            if (!allowedFields.has(change.fieldChanged)) {
+              console.error(
+                `Campo não permitido para atualização dinâmica: ${change.fieldChanged}`
+              );
+              errorCount++;
+              continue;
+            }
+
             const product = await db
-              .select()
+              .select({ id: products.id })
               .from(products)
               .where(eq(products.id, change.productId))
               .limit(1)
               .execute();
 
-            if (product.length > 0) {
-              // Atualizar o campo do produto com o novo valor
-              const updateData: Record<string, any> = {};
-              updateData[change.fieldChanged] = change.valueAfter;
-
-              // Nota: Para atualizar campos dinamicamente, usar uma abordagem alternativa
-              // por enquanto apenas registrar a mudança como aplicada
-              // Em produção, implementar validação de campos permitidos e usar Drizzle update()
-
-              // Marcar como aplicado
-              await db
-                .update(productCaptureHistory)
-                .set({ status: "applied" })
-                .where(eq(productCaptureHistory.id, change.id))
-                .execute();
-
-              appliedCount++;
+            if (product.length === 0) {
+              errorCount++;
+              continue;
             }
+
+            // Atualizar o campo do produto com o novo valor
+            const updateData: Record<string, any> = {};
+            updateData[change.fieldChanged] = change.valueAfter;
+
+            await db
+              .update(products)
+              .set(updateData)
+              .where(eq(products.id, change.productId))
+              .execute();
+
+            // Marcar como aplicado
+            await db
+              .update(productCaptureHistory)
+              .set({ status: "applied" })
+              .where(eq(productCaptureHistory.id, change.id))
+              .execute();
+
+            appliedCount++;
           } catch (err) {
             console.error(`Error applying change ${change.id}:`, err);
+            errorCount++;
           }
         }
 
-        return { success: true, applied: appliedCount };
+        return { success: true, applied: appliedCount, errors: errorCount };
       } catch (error) {
         console.error("Error applying approved changes:", error);
         return { success: false, applied: 0, error: String(error) };

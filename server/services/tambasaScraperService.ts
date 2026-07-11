@@ -2,6 +2,7 @@ import puppeteer, { Browser, Page } from "puppeteer";
 import { getDb } from "../db";
 import { eq } from "drizzle-orm";
 import { products, suppliers } from "../../drizzle/schema";
+import { parsePrecoBR } from "../utils/number";
 
 export interface TambasaScraperConfig {
   email: string;
@@ -188,8 +189,8 @@ export class TambasaScraperService {
         (el: any) => el.textContent?.trim() || "0"
       );
 
-      // Remove "R$" e converte para número
-      const price = parseFloat(priceText.replace(/[^\d,.-]/g, "").replace(",", "."));
+      // Remove "R$" e converte para número (trata milhar pt-BR "1.234,56")
+      const price = parsePrecoBR(priceText);
 
       const code = await element.$eval(
         '[data-product-code]',
@@ -211,7 +212,7 @@ export class TambasaScraperService {
         (el: any) => el.href || undefined
       ).catch(() => undefined);
 
-      if (!name || isNaN(price)) {
+      if (!name || price === null) {
         return null;
       }
 

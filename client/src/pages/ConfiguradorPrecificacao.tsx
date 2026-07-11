@@ -4,12 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Calculator, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2, Calculator, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 interface PricingConfig {
-  supplierId: number;
-  region: string;
   icmsPercentage: number;
   ipPercentage: number;
   pisPercentage: number;
@@ -17,35 +15,15 @@ interface PricingConfig {
   freightType: "fixed" | "percentage";
   freightValue: number;
   marginPercentage: number;
-  minPrice?: number;
-  maxPrice?: number;
-  roundingMethod: "round" | "ceil" | "floor";
 }
 
-interface PricingCalculation {
-  finalPrice: number;
-  basePriceBeforeTax: number;
-  priceBeforeMargin: number;
-  icmsAmount: number;
-  ipAmount: number;
-  pisAmount: number;
-  cofinsAmount: number;
-  freightAmount: number;
-  marginAmount: number;
-  breakdown: {
-    basePrice: number;
-    taxes: number;
-    freight: number;
-    margin: number;
-    final: number;
-  };
+function brl(n: number) {
+  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 export default function ConfiguradorPrecificacao() {
   const [basePrice, setBasePrice] = useState<string>("100");
   const [config, setConfig] = useState<PricingConfig>({
-    supplierId: 0,
-    region: "Nacional",
     icmsPercentage: 0,
     ipPercentage: 0,
     pisPercentage: 0,
@@ -53,37 +31,45 @@ export default function ConfiguradorPrecificacao() {
     freightType: "fixed",
     freightValue: 0,
     marginPercentage: 30,
-    roundingMethod: "round",
   });
 
-  // Queries
-  const { data: suppliers } = trpc.suppliers.list.useQuery();
-  // calculatePrice não implementado no router
-  const [calculation] = useState<PricingCalculation | null>(null);
-  const isCalculating = false;
-
-  const { data: validation } = trpc.pricing.validateConfig.useQuery(config);
-
-  const handleSupplierChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setConfig({ ...config, supplierId: parseInt(e.target.value) });
-  };
+  const [payload, setPayload] = useState<any>(null);
+  const calcQuery = trpc.precificacao.sugerirLote.useQuery(payload, {
+    enabled: payload != null,
+    retry: false,
+  });
+  const isCalculating = payload != null && calcQuery.isFetching;
 
   const handleConfigChange = (field: keyof PricingConfig, value: any) => {
     setConfig({ ...config, [field]: value });
   };
 
   const handleCalculate = () => {
-    if (!basePrice || parseFloat(basePrice) <= 0) {
+    const custo = parseFloat(basePrice.replace(",", "."));
+    if (!custo || custo <= 0) {
       toast.error("Digite um preço base válido");
       return;
     }
-    // O cálculo já é feito automaticamente pela query
-    toast.success("Preço calculado com sucesso");
+    setPayload({
+      itens: [{ custo, quantidade: 1 }],
+      impostos: {
+        icmsPercentage: config.icmsPercentage,
+        ipPercentage: config.ipPercentage,
+        pisPercentage: config.pisPercentage,
+        cofinsPercentage: config.cofinsPercentage,
+        freightType: config.freightType,
+        freightValue: config.freightValue,
+      },
+      margemDesejada: config.marginPercentage,
+    });
   };
 
   const totalTaxPercentage = useMemo(() => {
     return config.icmsPercentage + config.ipPercentage + config.pisPercentage + config.cofinsPercentage;
   }, [config]);
+
+  const resultado = calcQuery.data;
+  const item = resultado?.itens?.[0];
 
   return (
     <>
@@ -103,36 +89,9 @@ export default function ConfiguradorPrecificacao() {
               <CardDescription>Defina os parâmetros para cálculo de preços</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Fornecedor */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Fornecedor</label>
-                <select
-                  value={config.supplierId}
-                  onChange={handleSupplierChange}
-                  className="w-full px-3 py-2 border rounded-md"
-                >
-                  <option value={0}>Selecione um fornecedor</option>
-                  {suppliers?.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Região */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Região</label>
-                <Input
-                  value={config.region}
-                  onChange={(e) => handleConfigChange("region", e.target.value)}
-                  placeholder="Ex: Nacional, SP, RJ"
-                />
-              </div>
-
               {/* Preço Base */}
               <div>
-                <label className="block text-sm font-medium mb-2">Preço Base (R$)</label>
+                <label className="block text-sm font-medium mb-2">Preço Base / Custo (R$)</label>
                 <Input
                   type="number"
                   step="0.01"
@@ -152,7 +111,7 @@ export default function ConfiguradorPrecificacao() {
                       type="number"
                       step="0.01"
                       value={config.icmsPercentage}
-                      onChange={(e) => handleConfigChange("icmsPercentage", parseFloat(e.target.value))}
+                      onChange={(e) => handleConfigChange("icmsPercentage", parseFloat(e.target.value) || 0)}
                       placeholder="0"
                     />
                   </div>
@@ -162,7 +121,7 @@ export default function ConfiguradorPrecificacao() {
                       type="number"
                       step="0.01"
                       value={config.ipPercentage}
-                      onChange={(e) => handleConfigChange("ipPercentage", parseFloat(e.target.value))}
+                      onChange={(e) => handleConfigChange("ipPercentage", parseFloat(e.target.value) || 0)}
                       placeholder="0"
                     />
                   </div>
@@ -172,7 +131,7 @@ export default function ConfiguradorPrecificacao() {
                       type="number"
                       step="0.01"
                       value={config.pisPercentage}
-                      onChange={(e) => handleConfigChange("pisPercentage", parseFloat(e.target.value))}
+                      onChange={(e) => handleConfigChange("pisPercentage", parseFloat(e.target.value) || 0)}
                       placeholder="0"
                     />
                   </div>
@@ -182,7 +141,7 @@ export default function ConfiguradorPrecificacao() {
                       type="number"
                       step="0.01"
                       value={config.cofinsPercentage}
-                      onChange={(e) => handleConfigChange("cofinsPercentage", parseFloat(e.target.value))}
+                      onChange={(e) => handleConfigChange("cofinsPercentage", parseFloat(e.target.value) || 0)}
                       placeholder="0"
                     />
                   </div>
@@ -215,7 +174,7 @@ export default function ConfiguradorPrecificacao() {
                       type="number"
                       step="0.01"
                       value={config.freightValue}
-                      onChange={(e) => handleConfigChange("freightValue", parseFloat(e.target.value))}
+                      onChange={(e) => handleConfigChange("freightValue", parseFloat(e.target.value) || 0)}
                       placeholder="0"
                     />
                   </div>
@@ -224,64 +183,20 @@ export default function ConfiguradorPrecificacao() {
 
               {/* Margem */}
               <div className="border-t pt-4">
-                <h3 className="font-semibold mb-3">Margem de Lucro</h3>
+                <h3 className="font-semibold mb-3">Margem de Lucro Desejada</h3>
                 <div>
                   <label className="block text-sm mb-1">Percentual (%)</label>
                   <Input
                     type="number"
                     step="0.01"
                     value={config.marginPercentage}
-                    onChange={(e) => handleConfigChange("marginPercentage", parseFloat(e.target.value))}
+                    onChange={(e) => handleConfigChange("marginPercentage", parseFloat(e.target.value) || 0)}
                     placeholder="30"
                   />
                 </div>
-              </div>
-
-              {/* Limites */}
-              <div className="border-t pt-4">
-                <h3 className="font-semibold mb-3">Limites de Preço</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm mb-1">Preço Mínimo (R$)</label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={config.minPrice || ""}
-                      onChange={(e) =>
-                        handleConfigChange("minPrice", e.target.value ? parseFloat(e.target.value) : undefined)
-                      }
-                      placeholder="Opcional"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm mb-1">Preço Máximo (R$)</label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={config.maxPrice || ""}
-                      onChange={(e) =>
-                        handleConfigChange("maxPrice", e.target.value ? parseFloat(e.target.value) : undefined)
-                      }
-                      placeholder="Opcional"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Arredondamento */}
-              <div className="border-t pt-4">
-                <label className="block text-sm font-medium mb-2">Método de Arredondamento</label>
-                <select
-                  value={config.roundingMethod}
-                  onChange={(e) =>
-                    handleConfigChange("roundingMethod", e.target.value as "round" | "ceil" | "floor")
-                  }
-                  className="w-full px-3 py-2 border rounded-md"
-                >
-                  <option value="round">Arredondar</option>
-                  <option value="ceil">Sempre para cima</option>
-                  <option value="floor">Sempre para baixo</option>
-                </select>
+                <p className="text-sm text-gray-600 mt-2">
+                  A margem mínima (piso) é a configurada nos dados da empresa.
+                </p>
               </div>
 
               <Button onClick={handleCalculate} className="w-full" disabled={isCalculating}>
@@ -298,11 +213,9 @@ export default function ConfiguradorPrecificacao() {
                 )}
               </Button>
 
-              {validation && !validation.isValid && (
+              {calcQuery.error && (
                 <Alert className="bg-red-50 border-red-200">
-                  <AlertDescription className="text-red-800">
-                    {validation.errors.join("; ")}
-                  </AlertDescription>
+                  <AlertDescription className="text-red-800">{calcQuery.error.message}</AlertDescription>
                 </Alert>
               )}
             </CardContent>
@@ -310,120 +223,56 @@ export default function ConfiguradorPrecificacao() {
 
           {/* Resultado */}
           <div className="space-y-4">
-            {calculation ? (
+            {resultado && item ? (
               <>
                 {/* Resumo */}
                 <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-blue-200">
                   <CardHeader>
-                    <CardTitle className="text-2xl">Preço Final</CardTitle>
+                    <CardTitle className="text-2xl">Preço Sugerido</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-4xl font-bold text-blue-900">
-                      R$ {calculation.finalPrice.toFixed(2)}
-                    </div>
+                    <div className="text-4xl font-bold text-blue-900">{brl(item.sugerido)}</div>
                     <p className="text-sm text-blue-700 mt-2">
-                      Preço base: R$ {calculation.basePriceBeforeTax.toFixed(2)}
+                      Custo base: {brl(item.custo)} · Margem no sugerido: {item.margemNoSugerido.toFixed(1)}%
                     </p>
                   </CardContent>
                 </Card>
 
-                {/* Breakdown */}
+                {/* Detalhamento */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Detalhamento do Cálculo</CardTitle>
+                    <CardDescription>
+                      Margens aplicadas: mínima {resultado.margemMinima}% / desejada {resultado.margemDesejada}%
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex justify-between items-center py-2 border-b">
-                      <span>Preço Base</span>
-                      <span className="font-semibold">R$ {calculation.breakdown.basePrice.toFixed(2)}</span>
+                      <span>Custo Base</span>
+                      <span className="font-semibold">{brl(item.custo)}</span>
                     </div>
 
                     <div className="flex justify-between items-center py-2 border-b text-red-600">
-                      <span>Impostos</span>
-                      <span className="font-semibold">+ R$ {calculation.breakdown.taxes.toFixed(2)}</span>
-                    </div>
-
-                    {calculation.icmsAmount > 0 && (
-                      <div className="flex justify-between items-center py-1 pl-4 text-sm text-gray-600">
-                        <span>ICMS</span>
-                        <span>R$ {calculation.icmsAmount.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {calculation.ipAmount > 0 && (
-                      <div className="flex justify-between items-center py-1 pl-4 text-sm text-gray-600">
-                        <span>IP</span>
-                        <span>R$ {calculation.ipAmount.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {calculation.pisAmount > 0 && (
-                      <div className="flex justify-between items-center py-1 pl-4 text-sm text-gray-600">
-                        <span>PIS</span>
-                        <span>R$ {calculation.pisAmount.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {calculation.cofinsAmount > 0 && (
-                      <div className="flex justify-between items-center py-1 pl-4 text-sm text-gray-600">
-                        <span>COFINS</span>
-                        <span>R$ {calculation.cofinsAmount.toFixed(2)}</span>
-                      </div>
-                    )}
-
-                    <div className="flex justify-between items-center py-2 border-b text-orange-600">
-                      <span>Frete</span>
-                      <span className="font-semibold">+ R$ {calculation.breakdown.freight.toFixed(2)}</span>
+                      <span>PISO (não desça abaixo)</span>
+                      <span className="font-semibold">{brl(item.piso)}</span>
                     </div>
 
                     <div className="flex justify-between items-center py-2 border-b text-gray-600">
-                      <span>Subtotal (com impostos e frete)</span>
-                      <span className="font-semibold">R$ {calculation.priceBeforeMargin.toFixed(2)}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center py-2 border-b text-green-600">
-                      <span>Margem de Lucro ({config.marginPercentage}%)</span>
-                      <span className="font-semibold">+ R$ {calculation.breakdown.margin.toFixed(2)}</span>
+                      <span>Alvo (margem desejada)</span>
+                      <span className="font-semibold">{brl(item.alvo)}</span>
                     </div>
 
                     <div className="flex justify-between items-center py-3 bg-blue-50 px-3 rounded-lg border border-blue-200">
-                      <span className="font-bold text-lg">PREÇO FINAL</span>
-                      <span className="font-bold text-lg text-blue-900">
-                        R$ {calculation.breakdown.final.toFixed(2)}
-                      </span>
+                      <span className="font-bold text-lg">PREÇO SUGERIDO</span>
+                      <span className="font-bold text-lg text-blue-900">{brl(item.sugerido)}</span>
                     </div>
 
-                    {/* Economia */}
-                    <div className="pt-4 border-t">
-                      <div className="flex items-center gap-2 text-sm">
-                        {calculation.finalPrice > calculation.basePriceBeforeTax ? (
-                          <>
-                            <TrendingUp className="w-4 h-4 text-red-600" />
-                            <span className="text-red-600">
-                              Aumento de R${" "}
-                              {(calculation.finalPrice - calculation.basePriceBeforeTax).toFixed(2)} (
-                              {(
-                                ((calculation.finalPrice - calculation.basePriceBeforeTax) /
-                                  calculation.basePriceBeforeTax) *
-                                100
-                              ).toFixed(2)}
-                              %)
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <TrendingDown className="w-4 h-4 text-green-600" />
-                            <span className="text-green-600">
-                              Economia de R${" "}
-                              {(calculation.basePriceBeforeTax - calculation.finalPrice).toFixed(2)} (
-                              {(
-                                ((calculation.basePriceBeforeTax - calculation.finalPrice) /
-                                  calculation.basePriceBeforeTax) *
-                                100
-                              ).toFixed(2)}
-                              %)
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
+                    {item.alerta && (
+                      <Alert className="bg-amber-50 border-amber-200">
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        <AlertDescription className="text-amber-800">{item.alerta}</AlertDescription>
+                      </Alert>
+                    )}
                   </CardContent>
                 </Card>
               </>
@@ -431,7 +280,7 @@ export default function ConfiguradorPrecificacao() {
               <Card className="h-full flex items-center justify-center">
                 <CardContent className="text-center text-gray-500">
                   <Calculator className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>Digite um preço base para ver o cálculo</p>
+                  <p>Digite um preço base e clique em "Calcular Preço" para ver o cálculo</p>
                 </CardContent>
               </Card>
             )}

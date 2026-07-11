@@ -63,7 +63,7 @@ export const agendaRouter = router({
           link: "/cotacoes-recebidas",
         });
       }
-    } catch { /* ignore */ }
+    } catch (err) { console.error("[Agenda] Erro ao buscar cotações:", (err as Error).message); }
 
     // Certidões
     try {
@@ -82,7 +82,7 @@ export const agendaRouter = router({
           link: "/certidoes",
         });
       }
-    } catch { /* ignore */ }
+    } catch (err) { console.error("[Agenda] Erro ao buscar certidões:", (err as Error).message); }
 
     // Alertas de contrato (abertos)
     try {
@@ -100,7 +100,7 @@ export const agendaRouter = router({
           link: "/contratos-pos-licitacao",
         });
       }
-    } catch { /* ignore */ }
+    } catch (err) { console.error("[Agenda] Erro ao buscar alertas de contrato:", (err as Error).message); }
 
     // Fim de contratos
     try {
@@ -122,7 +122,7 @@ export const agendaRouter = router({
           link: "/contratos-pos-licitacao",
         });
       }
-    } catch { /* ignore */ }
+    } catch (err) { console.error("[Agenda] Erro ao buscar fim de contratos:", (err as Error).message); }
 
     itens.sort((a, b) => a.diasRestantes - b.diasRestantes);
 

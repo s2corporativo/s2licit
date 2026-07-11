@@ -8,6 +8,7 @@ import {
   decimal,
   index,
   unique,
+  uniqueIndex,
   json,
   boolean,
   date,
@@ -2253,22 +2254,30 @@ export type BulkPricingApplicationDetail = typeof bulkPricingApplicationDetails.
 export type InsertBulkPricingApplicationDetail = typeof bulkPricingApplicationDetails.$inferInsert;
 
 // ─── NFe Imports ───────────────────────────────────────────────────────────
-export const nfeImports = mysqlTable("nfe_imports", {
-  id: int("id").autoincrement().primaryKey(),
-  nfeNumber: varchar("nfeNumber", { length: 256 }).notNull().unique(),
-  supplierName: varchar("supplierName", { length: 256 }).notNull(),
-  supplierCnpj: varchar("supplierCnpj", { length: 20 }).notNull(),
-  supplierId: int("supplierId")
-    .references(() => suppliers.id, { onDelete: "set null" }),
-  totalProducts: int("totalProducts").default(0),
-  importedProducts: int("importedProducts").default(0),
-  status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).default("pending"),
-  xmlContent: text("xmlContent"),
-  importDate: timestamp("importDate").defaultNow(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+export const nfeImports = mysqlTable(
+  "nfe_imports",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Número da NF é único apenas POR EMITENTE — a unicidade é composta
+    // (nfeNumber + supplierCnpj), definida no índice abaixo.
+    nfeNumber: varchar("nfeNumber", { length: 256 }).notNull(),
+    supplierName: varchar("supplierName", { length: 256 }).notNull(),
+    supplierCnpj: varchar("supplierCnpj", { length: 20 }).notNull(),
+    supplierId: int("supplierId")
+      .references(() => suppliers.id, { onDelete: "set null" }),
+    totalProducts: int("totalProducts").default(0),
+    importedProducts: int("importedProducts").default(0),
+    status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).default("pending"),
+    xmlContent: text("xmlContent"),
+    importDate: timestamp("importDate").defaultNow(),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_nfe_imports_numero_cnpj").on(table.nfeNumber, table.supplierCnpj),
+  ]
+);
 
 export type NfeImport = typeof nfeImports.$inferSelect;
 export type InsertNfeImport = typeof nfeImports.$inferInsert;

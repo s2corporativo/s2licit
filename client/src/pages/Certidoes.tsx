@@ -63,7 +63,7 @@ export default function Certidoes() {
       {isAdmin && (
         <div className="mb-6 border border-gray-200 p-4">
           <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">Cadastrar certidão</div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <input
               value={form.tipo}
               onChange={(e) => setForm({ ...form, tipo: e.target.value })}
@@ -74,6 +74,12 @@ export default function Certidoes() {
               value={form.orgaoEmissor}
               onChange={(e) => setForm({ ...form, orgaoEmissor: e.target.value })}
               placeholder="Órgão emissor"
+              className="border border-gray-300 px-3 py-2 text-sm"
+            />
+            <input
+              value={form.numero}
+              onChange={(e) => setForm({ ...form, numero: e.target.value })}
+              placeholder="Número"
               className="border border-gray-300 px-3 py-2 text-sm"
             />
             <input

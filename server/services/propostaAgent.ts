@@ -355,10 +355,16 @@ export class PropostaAgente {
   }
 
   async fechar(): Promise<void> {
+    // try/catch separados: se o page.close() falhar, o browser ainda é
+    // encerrado (senão o processo do Chromium vaza a cada erro).
     try {
-      if (this.page) { await this.page.close(); this.page = null; }
-      if (this.browser) { await this.browser.close(); this.browser = null; }
+      if (this.page) { await this.page.close(); }
     } catch {}
+    this.page = null;
+    try {
+      if (this.browser) { await this.browser.close(); }
+    } catch {}
+    this.browser = null;
   }
 
   private async esperarElemento(seletores: string, timeout = 10000): Promise<boolean> {
@@ -474,6 +480,19 @@ export class PropostaAgente {
       throw new Error(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
     }
 
+    // Confirmação positiva: indicador de sucesso na página OU URL mudou.
+    // Sem isso, CAPTCHA/manutenção/layout novo passavam como "login ok".
+    const indicador = cfg.seletores.loginSucesso?.toLowerCase();
+    const sucessoIndicado = indicador ? textoPage.toLowerCase().includes(indicador) : false;
+    const urlMudou = urlAtual !== url;
+    if (!sucessoIndicado && !urlMudou) {
+      await this.capturarTela("Login não confirmado");
+      throw new Error(
+        `Não foi possível confirmar o login no portal ${cfg.nome} — ` +
+          `indicador de sucesso ausente e a URL não mudou (CAPTCHA? layout novo? credenciais?).`,
+      );
+    }
+
     this.addLog(`✅ Login realizado. URL: ${urlAtual}`);
     await this.capturarTela("Após login");
   }
@@ -519,12 +538,12 @@ export class PropostaAgente {
     }
 
     const linhasSel = cfg.seletores.tabelaItens || "table tbody tr";
-    const linhas = await this.page.$$(linhasSel.split(",")[0].trim()).catch(() => []);
+    const linhas = await this.page.$$(linhasSel).catch(() => []);
     this.addLog(`📊 ${linhas.length} linhas detectadas`);
 
     // Buscar todos os inputs de preço da página de uma vez
     const todosInputsPreco = cfg.seletores.inputPreco
-      ? await this.page.$$(cfg.seletores.inputPreco.split(",")[0].trim()).catch(() => [])
+      ? await this.page.$$(cfg.seletores.inputPreco).catch(() => [])
       : [];
 
     for (const item of itens) {
@@ -537,7 +556,7 @@ export class PropostaAgente {
         // Estratégia 1: input na linha correspondente
         const linhaAtual = linhas[item.numero - 1];
         if (linhaAtual && cfg.seletores.inputPreco) {
-          const inputsNaLinha = await linhaAtual.$$(cfg.seletores.inputPreco.split(",")[0].trim()).catch(() => []);
+          const inputsNaLinha = await linhaAtual.$$(cfg.seletores.inputPreco).catch(() => []);
           if (inputsNaLinha.length > 0) {
             await inputsNaLinha[0].click({ clickCount: 3 });
             await inputsNaLinha[0].type(valorBR, { delay: 60 });
@@ -545,7 +564,7 @@ export class PropostaAgente {
 
             // Marca
             if (cfg.seletores.inputMarca && item.marca) {
-              const marcaInps = await linhaAtual.$$(cfg.seletores.inputMarca.split(",")[0].trim()).catch(() => []);
+              const marcaInps = await linhaAtual.$$(cfg.seletores.inputMarca).catch(() => []);
               if (marcaInps[0]) {
                 await marcaInps[0].click({ clickCount: 3 });
                 await marcaInps[0].type(item.marca, { delay: 50 });

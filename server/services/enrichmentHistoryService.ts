@@ -7,7 +7,7 @@ import {
   EnrichmentResult,
   InsertEnrichmentResult,
 } from "../../drizzle/schema";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, count } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 export interface EnrichmentExecutionStats {
@@ -171,7 +171,7 @@ export class EnrichmentHistoryService {
       .offset(offset);
 
     const countResult = await db
-      .select({ count: enrichmentHistory.id })
+      .select({ count: count() })
       .from(enrichmentHistory)
       .where(whereClause);
 

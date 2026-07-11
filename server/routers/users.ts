@@ -7,7 +7,9 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, count } from "drizzle-orm";
+import { getDb } from "../db";
+import { users } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
 import { createLogger, logAction as logActionFromLogger } from "../_core/logger";
 import { cache, CACHE_KEYS, CACHE_TTL } from "../_core/cache";
@@ -116,45 +118,11 @@ export const usersRouter = router({
       return withErrorHandling("Create user", async () => {
         requirePermission(ctx.user.role, ["admin"]);
 
-        const validated = validate<z.infer<typeof CreateUserSchema>>(CreateUserSchema, input);
-
-        // TODO: Verificar email já existe
-        // const existing = await db.query.users.findFirst({
-        //   where: eq(users.email, sanitizeEmail(validated.email))
-        // });
-        // if (existing) {
-        //   throw new TRPCError({
-        //     code: 'CONFLICT',
-        //     message: 'Email already registered'
-        //   });
-        // }
-
-        // TODO: Inserir usuário
-        // const user = await db.insert(users).values({
-        //   email: sanitizeEmail(validated.email),
-        //   name: validated.name,
-        //   role: validated.role,
-        //   company: validated.company,
-        //   phone: validated.phone,
-        //   isActive: validated.active,
-        //   createdBy: ctx.user.id,
-        //   createdAt: new Date()
-        // });
-
-        logActionLocal("USER_CREATE", {
-          userId: ctx.user.id,
-          newUserId: 1,
-          email: validated.email,
-          role: validated.role
+        // A criação de usuários é feita pelo admin local no boot (ver server/_core/localAuth.ts)
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Funcionalidade ainda não implementada: a criação de usuários é feita pelo admin local no boot do sistema"
         });
-
-        return {
-          success: true,
-          userId: 1,
-          email: sanitizeEmail(validated.email),
-          role: validated.role,
-          message: "Usuário criado com sucesso"
-        };
       });
     }),
 
@@ -169,60 +137,47 @@ export const usersRouter = router({
       return withErrorHandling("List users", async () => {
         requirePermission(ctx.user.role, ["admin"]);
 
+        const db = await getDb();
+        if (!db) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Banco de dados indisponível"
+          });
+        }
+
         const offset = (input.page - 1) * input.limit;
 
-        // Query com filtros e paginação
-        // SELECT id, email, name, role, company, last_login,
-        //        created_at, active
-        // FROM users
-        // WHERE is_active = true
-        //   AND (? IS NULL OR role = ?)
-        // ORDER BY created_at DESC
-        // LIMIT ? OFFSET ?
+        // Filtro por role (a tabela users não possui soft delete, filtro "active" não se aplica)
+        const whereCondition = input.role ? eq(users.role, input.role as any) : undefined;
 
-        // TODO: Implementar
-        // const users = await db.select({
-        //   id: users.id,
-        //   email: users.email,
-        //   name: users.name,
-        //   role: users.role,
-        //   company: users.company,
-        //   lastLogin: users.lastLogin,
-        //   createdAt: users.createdAt
-        // })
-        //   .from(users)
-        //   .where(
-        //     and(
-        //       eq(users.isActive, true),
-        //       input.role ? eq(users.role, input.role) : undefined
-        //     )
-        //   )
-        //   .orderBy(desc(users.createdAt))
-        //   .limit(input.limit)
-        //   .offset(offset);
+        const rows = await db
+          .select({
+            id: users.id,
+            email: users.email,
+            name: users.name,
+            role: users.role,
+            lastSignedIn: users.lastSignedIn,
+            createdAt: users.createdAt
+          })
+          .from(users)
+          .where(whereCondition)
+          .orderBy(desc(users.createdAt))
+          .limit(input.limit)
+          .offset(offset);
 
-        // TODO: Contar total
-        // const [{ count }] = await db.select({ count: count() })
-        //   .from(users)
-        //   .where(eq(users.isActive, true));
+        const totalResult = await db
+          .select({ count: count() })
+          .from(users)
+          .where(whereCondition);
+        const total = totalResult[0]?.count ?? 0;
 
         return {
-          data: [
-            {
-              id: 1,
-              email: "admin@company.com",
-              name: "Admin User",
-              role: "admin",
-              company: "Company Name",
-              lastLogin: new Date(),
-              createdAt: new Date()
-            }
-          ],
+          data: rows,
           pagination: {
             page: input.page,
             limit: input.limit,
-            total: 15,
-            pages: 1
+            total,
+            pages: Math.max(1, Math.ceil(total / input.limit))
           }
         };
       });
@@ -332,28 +287,11 @@ export const usersRouter = router({
       return withErrorHandling("Update user", async () => {
         requirePermission(ctx.user.role, ["admin"]);
 
-        // TODO: Atualizar usuário
-        // await db.update(users)
-        //   .set({
-        //     ...input,
-        //     updatedAt: new Date()
-        //   })
-        //   .where(eq(users.id, input.id));
-
-        logActionLocal("USER_UPDATE", {
-          userId: ctx.user.id,
-          updatedUserId: input.id,
-          changedFields: Object.keys(input).filter(k => k !== 'id').length
+        // A gestão de usuários é feita pelo admin local no boot (ver server/_core/localAuth.ts)
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Funcionalidade ainda não implementada: a atualização de usuários é feita pelo admin local no boot do sistema"
         });
-
-        // Invalidar cache do usuário
-        cache.delete(CACHE_KEYS.USER_BY_ID(input.id));
-
-        return {
-          success: true,
-          userId: input.id,
-          message: "Usuário atualizado com sucesso"
-        };
       });
     }),
 
@@ -367,24 +305,11 @@ export const usersRouter = router({
       return withErrorHandling("Deactivate user", async () => {
         requirePermission(ctx.user.role, ["admin"]);
 
-        // TODO: Soft delete
-        // await db.update(users)
-        //   .set({ isActive: false, deactivatedAt: new Date() })
-        //   .where(eq(users.id, input.id));
-
-        logActionLocal("USER_DEACTIVATE", {
-          userId: ctx.user.id,
-          deactivatedUserId: input.id
+        // A gestão de usuários é feita pelo admin local no boot (ver server/_core/localAuth.ts)
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Funcionalidade ainda não implementada: a desativação de usuários é feita pelo admin local no boot do sistema"
         });
-
-        // Invalidar cache
-        cache.delete(CACHE_KEYS.USER_BY_ID(input.id));
-
-        return {
-          success: true,
-          userId: input.id,
-          message: "Usuário desativado com sucesso"
-        };
       });
     }),
 

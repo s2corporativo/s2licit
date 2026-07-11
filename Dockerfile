@@ -1,25 +1,39 @@
-FROM node:22-slim
+FROM node:22-bookworm-slim
+
+# Chromium do sistema para o Puppeteer (automação de portais) — evita o
+# download do Chrome próprio do Puppeteer no install.
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PUPPETEER_SKIP_DOWNLOAD=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libgbm1 \
+    libnss3 \
+    libxss1 \
+    curl \
+    default-mysql-client \
+  && rm -rf /var/lib/apt/lists/*
 
 # Instalar pnpm
 RUN npm install -g pnpm@10.4.1
 
 WORKDIR /app
 
-# Copiar arquivos de dependências
-COPY package.json pnpm-lock.yaml* ./
-COPY patches/ ./patches/ 2>/dev/null || true
-
-# Instalar dependências (sem puppeteer para produção)
+# Dependências primeiro (camada cacheável)
+COPY package.json pnpm-lock.yaml ./
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
-# Copiar código fonte
+# Código e build (frontend + backend)
 COPY . .
-
-# Build do frontend e backend
 RUN pnpm run build
 
-# Expor porta (a porta efetiva vem da variável PORT, padrão 3000)
+# A porta efetiva vem da variável PORT (padrão 3000)
 EXPOSE 3000
 
-# Aguardar DB e rodar migrações antes de iniciar
-CMD ["sh", "-c", "node -e \"require('child_process').execSync('pnpm db:push', {stdio:'inherit'})\" 2>/dev/null || true && node dist/index.js"]
+# Aplica migrações (schema.ts é a fonte de verdade) e inicia o servidor.
+# Se a migração falhar, loga o aviso mas ainda tenta subir com o schema atual.
+CMD ["sh", "-c", "pnpm db:push || echo '[boot] aviso: db:push falhou — seguindo com o schema existente'; exec node dist/index.js"]

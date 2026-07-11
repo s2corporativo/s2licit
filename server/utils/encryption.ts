@@ -54,13 +54,23 @@ export function encryptPassword(plaintext: string): string {
  * Suporta retrocompatibilidade com valores legados em base64 puro.
  */
 export function decryptPassword(encrypted: string): string {
-  // Compatibilidade retroativa: valores gravados com base64 simples
+  // Compatibilidade retroativa: valores gravados com base64 simples OU em
+  // texto plano (ex.: e-mails salvos sem cifrar por versões antigas).
+  // Só decodifica base64 se o round-trip bater — senão devolve como está,
+  // em vez de corromper o valor em lixo binário silenciosamente.
   if (isLegacyBase64(encrypted)) {
-    try {
-      return Buffer.from(encrypted, "base64").toString("utf-8");
-    } catch {
-      return encrypted;
+    if (/^[A-Za-z0-9+/]+={0,2}$/.test(encrypted) && encrypted.length % 4 === 0) {
+      try {
+        const decoded = Buffer.from(encrypted, "base64").toString("utf-8");
+        const roundTrip = Buffer.from(decoded, "utf-8").toString("base64");
+        if (roundTrip === encrypted && !/[\x00-\x08\x0e-\x1f]/.test(decoded)) {
+          return decoded;
+        }
+      } catch {
+        /* cai no retorno plano */
+      }
     }
+    return encrypted;
   }
 
   try {

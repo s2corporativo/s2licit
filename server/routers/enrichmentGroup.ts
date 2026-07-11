@@ -773,15 +773,22 @@ export const enrichmentRouter = router({  // INSIDE appRouter
 
       let whereCondition: any = eq(products.isActive, "yes");
 
+      // tipoCatalogo é NOT NULL com default "produto_nao_medicamentoso":
+      // categoria "faltando" = ainda no valor default (ou NULL em dados legados)
+      const missingCategoryCondition = or(
+        isNull(products.tipoCatalogo),
+        eq(products.tipoCatalogo, "produto_nao_medicamentoso")
+      );
+
       if (input.filterType === "missing_active_ingredient") {
         whereCondition = and(eq(products.isActive, "yes"), isNull(products.activeIngredient));
       } else if (input.filterType === "missing_category") {
-        whereCondition = and(eq(products.isActive, "yes"), isNull(products.tipoCatalogo));
+        whereCondition = and(eq(products.isActive, "yes"), missingCategoryCondition);
       } else {
         whereCondition = and(
           eq(products.isActive, "yes"),
           isNull(products.activeIngredient),
-          isNull(products.tipoCatalogo)
+          missingCategoryCondition
         );
       }
 
