@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import { readRows } from "@/lib/spreadsheet";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
@@ -130,33 +130,24 @@ function parseTextList(text: string): string[] {
     .filter((l) => l.length > 1);
 }
 
-function parseSpreadsheet(file: File): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 });
-        const names: string[] = [];
-        for (const row of rows) {
-          if (!Array.isArray(row)) continue;
-          for (const cell of row) {
-            if (typeof cell === "string" && cell.trim().length > 2) {
-              names.push(cell.trim());
-              break;
-            }
-          }
+async function parseSpreadsheet(file: File): Promise<string[]> {
+  try {
+    const buffer = await file.arrayBuffer();
+    const rows = await readRows(buffer);
+    const names: string[] = [];
+    for (const row of rows) {
+      if (!Array.isArray(row)) continue;
+      for (const cell of row) {
+        if (typeof cell === "string" && cell.trim().length > 2) {
+          names.push(cell.trim());
+          break;
         }
-        resolve(names.filter(Boolean));
-      } catch (err: any) {
-        reject(new Error("Não foi possível ler o arquivo: " + err.message));
       }
-    };
-    reader.onerror = () => reject(new Error("Erro ao ler o arquivo."));
-    reader.readAsArrayBuffer(file);
-  });
+    }
+    return names.filter(Boolean);
+  } catch (err: any) {
+    throw new Error("Não foi possível ler o arquivo: " + err.message);
+  }
 }
 
 // ─── Similarity bar ───────────────────────────────────────────────────────────

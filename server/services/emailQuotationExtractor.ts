@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import { readAllSheetsAsRows } from "../utils/spreadsheet";
 import { extractTextFromBinaryDocument } from "./intelligentCaptureIngestionService";
 import { invokeLLM } from "../_core/llm";
 
@@ -69,13 +69,11 @@ function parseNumber(value: unknown): number | undefined {
  * Extrai itens de uma planilha (XLSX/CSV). Detecta a linha de cabeçalho
  * procurando uma linha que contenha a coluna de descrição.
  */
-export function extractItemsFromSpreadsheet(buffer: Buffer): ExtractedItem[] {
-  const workbook = XLSX.read(buffer, { type: "buffer" });
+export async function extractItemsFromSpreadsheet(buffer: Buffer): Promise<ExtractedItem[]> {
+  const sheets = await readAllSheetsAsRows(buffer);
   const items: ExtractedItem[] = [];
 
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+  for (const rows of sheets) {
     if (rows.length === 0) continue;
 
     // Localiza a linha de cabeçalho: a primeira com uma coluna de "descrição".
@@ -201,7 +199,7 @@ export async function extractItemsFromAttachment(
 
   if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || lower.endsWith(".csv") ||
       mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType === "text/csv") {
-    return { items: extractItemsFromSpreadsheet(buffer), sourceType: "spreadsheet" };
+    return { items: await extractItemsFromSpreadsheet(buffer), sourceType: "spreadsheet" };
   }
 
   const text = await extractTextFromBinaryDocument(buffer, filename, mimeType);

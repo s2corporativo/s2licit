@@ -3,7 +3,7 @@ import { AlertCircle, AlertTriangle, CheckCircle2, FileSpreadsheet, GitMerge, Im
 import Papa from "papaparse";
 import { useCallback, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { read as xlsxRead, utils as xlsxUtils } from "xlsx";
+import { readObjects } from "@/lib/spreadsheet";
 import { ImportProgressDialog } from "@/components/ImportProgressDialog";
 import { ImportDuplicatesReviewModal } from "@/components/ImportDuplicatesReviewModal";
 
@@ -365,12 +365,7 @@ export default function ImportarPlanilha() {
         rows = result.data;
       } else {
         const buffer = await file.arrayBuffer();
-        const wb = xlsxRead(buffer, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        rows = xlsxUtils.sheet_to_json<Record<string, string>>(ws, {
-          defval: "",
-          raw: false,
-        });
+        rows = (await readObjects(buffer, { defval: "" })) as Record<string, string>[];
       }
 
       if (rows.length === 0) {

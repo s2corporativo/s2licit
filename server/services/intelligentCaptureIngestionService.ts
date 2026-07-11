@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import { readSheetAsObjects } from "../utils/spreadsheet";
 import { parseStringPromise } from "xml2js";
 import { parseNfeXml } from "./nfeParserService";
 import { detectCategory, discoverCatalogPages, extractProductData, normalizeProductName } from "./catalogDiscoveryService";
@@ -164,12 +164,8 @@ export function extractProductsFromDelimitedText(text: string): CaptureProductIn
 }
 
 export async function extractProductsFromSpreadsheetBuffer(buffer: Buffer, fileName: string): Promise<CaptureProductInput[]> {
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) return [];
-
-  const worksheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
+  const rows = await readSheetAsObjects(buffer, { defval: "" });
+  if (rows.length === 0) return [];
 
   return compactProducts(
     rows.map((row, index) => {

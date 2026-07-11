@@ -20,7 +20,7 @@ import { readFileSync } from "fs";
 import { config } from "dotenv";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, "../.env") });
@@ -55,11 +55,35 @@ function str(v, max) {
   return max ? s.slice(0, max) : s;
 }
 
+function cellVal(v) {
+  if (v == null) return null;
+  if (typeof v === "object") {
+    if (v.result !== undefined) return v.result;
+    if (v.text !== undefined) return v.text;
+    if (v.richText) return v.richText.map((t) => t.text).join("");
+    if (v instanceof Date) return v;
+    return String(v);
+  }
+  return v;
+}
+
 async function main() {
-  const wb = XLSX.read(readFileSync(xlsxPath), { type: "buffer" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
-  console.log(`Lidas ${rows.length} linhas de ${wb.SheetNames[0]}`);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(readFileSync(xlsxPath));
+  const ws = wb.worksheets[0];
+  const matrix = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const arr = [];
+    for (let c = 1; c <= ws.columnCount; c++) arr.push(cellVal(row.getCell(c).value));
+    matrix.push(arr);
+  });
+  const headers = (matrix[0] ?? []).map((h) => (h == null ? "" : String(h).trim()));
+  const rows = matrix.slice(1).map((r) => {
+    const o = {};
+    headers.forEach((h, i) => { if (h) o[h] = r[i] ?? null; });
+    return o;
+  });
+  console.log(`Lidas ${rows.length} linhas de ${ws.name}`);
 
   const conn = await createConnection(process.env.DATABASE_URL);
   try {

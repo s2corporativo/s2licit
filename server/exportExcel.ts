@@ -2,7 +2,7 @@
  * exportExcel.ts
  * Geração de planilha Excel para exportação e template de atualização em massa.
  */
-import * as XLSX from "xlsx";
+import { readSheetAsObjects, writeSheetsToBuffer } from "./utils/spreadsheet";
 import { getDb } from "./db";
 import { products, categories, suppliers } from "../drizzle/schema";
 import { eq, and, inArray, like, or, isNull, isNotNull, asc } from "drizzle-orm";
@@ -158,17 +158,6 @@ export async function exportProductsToExcel(filters: ExportFilters = {}): Promis
     );
   }
 
-  // Criar workbook
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(data);
-
-  // Definir larguras das colunas
-  ws["!cols"] = PRODUCT_EXCEL_HEADERS.map(h => ({ wch: h.width }));
-
-  // Estilo do cabeçalho (negrito) - XLSX SheetJS não suporta estilos sem xlsx-style,
-  // mas podemos congelar a primeira linha para facilitar navegação
-  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
-
   // Aba de instruções
   const instrucoes = [
     ["INSTRUÇÕES DE USO - ATUALIZAÇÃO EM MASSA DE PRODUTOS"],
@@ -193,14 +182,10 @@ export async function exportProductsToExcel(filters: ExportFilters = {}): Promis
     ["use os filtros na página Produtos antes de exportar."],
   ];
 
-  const wsInstr = XLSX.utils.aoa_to_sheet(instrucoes);
-  wsInstr["!cols"] = [{ wch: 80 }];
-
-  XLSX.utils.book_append_sheet(wb, ws, "Produtos");
-  XLSX.utils.book_append_sheet(wb, wsInstr, "Instruções");
-
-  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-  return Buffer.from(buffer);
+  return writeSheetsToBuffer([
+    { name: "Produtos", rows: data },
+    { name: "Instruções", rows: instrucoes },
+  ]);
 }
 
 // ─── Processar importação Excel para atualização em massa ──────────────────────
@@ -216,17 +201,11 @@ export async function importProductsFromExcel(buffer: Buffer): Promise<UpdateRes
   const db = await getDb();
   if (!db) throw new Error("Banco de dados não disponível");
 
-  const wb = XLSX.read(buffer, { type: "buffer" });
-
-  // Usar a primeira aba (Produtos)
-  const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes("produto")) ?? wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  if (!ws) throw new Error("Planilha 'Produtos' não encontrada no arquivo");
-
-  const rawData = XLSX.utils.sheet_to_json<Record<string, string | number | null>>(ws, {
-    defval: null,
-    raw: false,
-  });
+  // A aba "Produtos" é a primeira do template exportado.
+  const rawData = (await readSheetAsObjects(buffer, { defval: null })) as Record<
+    string,
+    string | number | null
+  >[];
 
   if (rawData.length === 0) throw new Error("Planilha vazia ou sem dados");
 
