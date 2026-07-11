@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -130,16 +129,16 @@ export default function ConfiguradorFornecedores() {
 
   if (isLoading) {
     return (
-      <DashboardLayout>
+      <>
         <div className="flex items-center justify-center h-96">
           <Loader2 className="w-8 h-8 animate-spin" />
         </div>
-      </DashboardLayout>
+      </>
     );
   }
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Configuração de Fornecedores</h1>
@@ -390,6 +389,6 @@ export default function ConfiguradorFornecedores() {
           )}
         </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

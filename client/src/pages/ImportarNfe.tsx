@@ -1,4 +1,3 @@
-import { DashboardLayout } from "@/components/DashboardLayout";
 import { BatchXmlImportComponent } from "@/components/BatchXmlImportComponent";
 import { NfeUploadComponent } from "@/components/NfeUploadComponent";
 import { PriceImportComponent } from "@/components/PriceImportComponent";
@@ -20,7 +19,7 @@ export function ImportarNfe() {
   const importHistory = historyData?.imports || [];
 
   return (
-    <DashboardLayout>
+    <>
       <div className="container mx-auto py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight">Importar Dados</h1>
@@ -223,6 +222,6 @@ export function ImportarNfe() {
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

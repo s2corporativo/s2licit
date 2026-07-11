@@ -124,8 +124,11 @@ export function DataQualityDashboard() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-gray-500">
-                <p>Componente ImagesDashboard será integrado aqui</p>
+              <div className="text-center py-8 text-gray-500 space-y-3">
+                <p>A gestão completa de imagens fica na página dedicada.</p>
+                <a href="/imagens" className="inline-block text-sm font-semibold text-blue-700 hover:text-blue-900 underline">
+                  Abrir Gestão de Imagens →
+                </a>
               </div>
             </CardContent>
           </Card>
@@ -141,8 +144,11 @@ export function DataQualityDashboard() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-gray-500">
-                <p>Componente DuplicatesDashboard será integrado aqui</p>
+              <div className="text-center py-8 text-gray-500 space-y-3">
+                <p>A revisão e mesclagem de duplicados é feita no catálogo de produtos.</p>
+                <a href="/produtos" className="inline-block text-sm font-semibold text-blue-700 hover:text-blue-900 underline">
+                  Abrir Catálogo de Produtos →
+                </a>
               </div>
             </CardContent>
           </Card>

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { DashboardLayout } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,7 +68,7 @@ export default function AplicarPrecificacao() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Aplicar Precificação em Massa</h1>
@@ -249,6 +248,6 @@ export default function AplicarPrecificacao() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { DashboardLayout } from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -135,7 +134,7 @@ export default function RegrasCategoria() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Regras de Precificação por Categoria</h1>
@@ -334,6 +333,6 @@ export default function RegrasCategoria() {
           Adicionar Nova Categoria
         </Button>
       </div>
-    </DashboardLayout>
+    </>
   );
 }

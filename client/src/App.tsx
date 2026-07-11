@@ -41,14 +41,11 @@ import { AnalisePrecosV2 } from "./pages/AnalisePrecosV2";
 import ScraperFornecedores from "./pages/ScraperFornecedores";
 import AgenteProposta from "./pages/AgenteProposta";
 import Agente from "./pages/Agente";
-import MonitoringDashboard from "./pages/MonitoringDashboard";
-import PriceAnalyticsDashboard from "./pages/PriceAnalyticsDashboard";
 import MarginOptimization from "./pages/MarginOptimization";
 import { CaptureReview } from "./pages/CaptureReview";
 import { CaptureSchedulerMonitor } from "./pages/CaptureSchedulerMonitor";
 import { AIEnrichment } from "./pages/AIEnrichment";
 import { CaptureAnalytics } from "./pages/CaptureAnalytics";
-import { NfeImport } from "./pages/NfeImport";
 import { NfeEnrichmentPipeline } from "./pages/NfeEnrichmentPipeline";
 import HistoricoEnriquecimento from "./pages/HistoricoEnriquecimento";
 import DiligenciasPage from "./pages/Diligencias";
@@ -137,16 +134,6 @@ function Router() {
             <AnalisePrecosV2 />
           </RequireAuth>
         </Route>
-        <Route path="/monitoramento">
-          <RequireAuth message="Acesse o dashboard de monitoramento após fazer login." minRole="editor">
-            <MonitoringDashboard />
-          </RequireAuth>
-        </Route>
-        <Route path="/analise-precos-v2">
-          <RequireAuth message="Analise preços em detalhes após fazer login." minRole="editor">
-            <PriceAnalyticsDashboard />
-          </RequireAuth>
-        </Route>
         <Route path="/margens">
           <RequireAuth message="Acesse o painel de margens após fazer login." minRole="editor">
             <MarginOptimization />
@@ -185,11 +172,6 @@ function Router() {
         <Route path="/diligencias">
           <RequireAuth message="Gerencie diligências e recursos após fazer login." minRole="editor">
             <DiligenciasPage />
-          </RequireAuth>
-        </Route>
-        <Route path="/importar-nfe">
-          <RequireAuth message="Importe NF-es após fazer login." minRole="editor">
-            <NfeImport />
           </RequireAuth>
         </Route>
         <Route path="/enriquecimento-nfe">
