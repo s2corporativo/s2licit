@@ -95,6 +95,17 @@ else
 fi
 
 echo "==> [3/5] Build e subida dos containers"
+# Porta 80 pode estar ocupada por outro serviço do host (Apache vem
+# pré-instalado em muitas imagens de VPS). Se estiver, cai para a 8080.
+if ! grep -q '^APP_HTTP_PORT=' .env; then
+  if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE '(:|\.)80$'; then
+    ocupante=$(ss -ltnp 2>/dev/null | grep -E '(:|\.)80\s' | grep -oP 'users:\(\("\K[^"]+' | head -1 || true)
+    echo "APP_HTTP_PORT=8080" >> .env
+    echo "⚠️  Porta 80 já em uso${ocupante:+ por \"$ocupante\"} — o app ficará em :8080 (além da :3000)."
+    echo "   Para usar a porta 80: pare o serviço que a ocupa (ex.: systemctl disable --now apache2),"
+    echo "   remova a linha APP_HTTP_PORT do .env e rode o deploy de novo."
+  fi
+fi
 docker compose up -d --build
 
 echo "==> [4/5] Aguardando o app ficar saudável"
