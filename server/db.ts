@@ -2522,6 +2522,8 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
       price: products.price,
       concentration: products.concentration,
       presentation: products.presentation,
+      pharmaceuticalForm: products.pharmaceuticalForm,
+      especieAnimal: products.especieAnimal,
       importBatchId: products.importBatchId,
     })
     .from(products)
@@ -2529,9 +2531,12 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(baseCondition);
 
-  // 2. Normaliza e agrupa por activeIngredient
-  const normalize = (s: string) =>
-    s.toLowerCase()
+  // 2. Normaliza e agrupa por (princ\u00edpio ativo + concentra\u00e7\u00e3o + forma + esp\u00e9cie).
+  //    Antes agrupava S\u00d3 por princ\u00edpio ativo, tratando como equivalentes
+  //    "Amoxicilina 250mg comprimido (c\u00e3o)" e "Amoxicilina 150mg/mL injet\u00e1vel
+  //    (bovino)". A chave composta evita esse falso positivo.
+  const normalize = (s: string | null | undefined) =>
+    (s ?? "").toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, " ")
@@ -2540,7 +2545,14 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
   const grouped = new Map<string, typeof allProducts>();
   for (const p of allProducts) {
     if (!p.activeIngredient?.trim()) continue;
-    const key = normalize(p.activeIngredient);
+    // Forma: usa pharmaceuticalForm; cai para presentation quando ausente.
+    const forma = normalize(p.pharmaceuticalForm) || normalize(p.presentation);
+    const key = [
+      normalize(p.activeIngredient),
+      normalize(p.concentration),
+      forma,
+      normalize(p.especieAnimal),
+    ].join("|");
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(p);
   }

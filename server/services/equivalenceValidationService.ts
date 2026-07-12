@@ -163,15 +163,27 @@ function calculateAttributeScore(
   // Busca parcial (substring)
   if (cand.includes(ref) || ref.includes(cand)) return { score: 75 * weight, match: true };
 
-  // Comparação numérica para concentrações
-  const refNum = parseFloat(ref.match(/[\d.]+/)?.[0] || "");
-  const candNum = parseFloat(cand.match(/[\d.]+/)?.[0] || "");
-
-  if (!isNaN(refNum) && !isNaN(candNum)) {
-    const diff = Math.abs(refNum - candNum) / refNum;
-    if (diff <= 0.05) return { score: 90 * weight, match: true }; // 5% tolerance
-    if (diff <= 0.1) return { score: 70 * weight, match: true }; // 10% tolerance
-    if (diff <= 0.2) return { score: 50 * weight, match: true }; // 20% tolerance
+  // Comparação numérica para concentrações — sensível à UNIDADE.
+  // Antes comparava só a magnitude ("10 mg/mL" x "10 mcg/mL" = match), o que é
+  // perigoso em medicamento (1000x de diferença). Agora exige a mesma unidade
+  // e usa tolerância apertada.
+  const parseQuantidade = (s: string): { num: number; unit: string } | null => {
+    const m = s.match(/([\d.]+)\s*([a-zµμ%/]+)?/i);
+    if (!m) return null;
+    const num = parseFloat(m[1]);
+    if (isNaN(num)) return null;
+    const unit = (m[2] ?? "").toLowerCase().replace("μ", "u").replace("µ", "u");
+    return { num, unit };
+  };
+  const rQ = parseQuantidade(ref);
+  const cQ = parseQuantidade(cand);
+  if (rQ && cQ && rQ.num > 0) {
+    // Unidades diferentes (mg vs mcg vs g vs ml vs %) → NÃO é equivalente.
+    if (rQ.unit !== cQ.unit) return { score: 0, match: false };
+    const diff = Math.abs(rQ.num - cQ.num) / rQ.num;
+    if (diff <= 0.02) return { score: 90 * weight, match: true }; // praticamente igual
+    if (diff <= 0.05) return { score: 60 * weight, match: true }; // 5% — margem estreita
+    return { score: 0, match: false };
   }
 
   return { score: 0, match: false };
@@ -200,6 +212,7 @@ export async function findEquivalentProducts(
           activeIngredient: products.activeIngredient,
           concentration: products.concentration,
           presentation: products.presentation,
+          pharmaceuticalForm: products.pharmaceuticalForm,
           price: products.price,
           priceUnit: products.priceUnit,
           unit: products.unit,
@@ -226,6 +239,7 @@ export async function findEquivalentProducts(
           activeIngredient: products.activeIngredient,
           concentration: products.concentration,
           presentation: products.presentation,
+          pharmaceuticalForm: products.pharmaceuticalForm,
           price: products.price,
           priceUnit: products.priceUnit,
           unit: products.unit,
@@ -257,7 +271,10 @@ export async function findEquivalentProducts(
         ),
         presentation: calculateAttributeScore(
           attributes.formaFarmaceutica,
-          product.presentation,
+          // Compara a forma farmacêutica extraída contra pharmaceuticalForm
+          // (antes comparava contra presentation, o campo errado). Cai para
+          // presentation só quando a forma não está preenchida.
+          product.pharmaceuticalForm || product.presentation,
           25
         ),
       };
