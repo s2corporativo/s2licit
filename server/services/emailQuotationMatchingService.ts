@@ -48,9 +48,11 @@ export function bestNameMatch(
 }
 
 function isCatmasCode(code: string): boolean {
-  // CATMAS costuma ter 9 dígitos; CATMAT costuma ter 6. Heurística de fallback:
-  // tentamos ambos os catálogos de qualquer forma.
-  return /^\d{7,}$/.test(code.trim());
+  // CATMAS (MG) costuma ter 8+ dígitos; CATMAT (federal) ~6. Usamos o formato
+  // para escolher UM catálogo — nunca cruzamos CATMAS↔CATMAT (numerações
+  // independentes; um código pode existir por coincidência no outro catálogo e
+  // ligar o item ao produto errado com "score 1").
+  return /^\d{8,}$/.test(code.trim());
 }
 
 /**
@@ -64,22 +66,18 @@ export async function matchQuotationItem(
   const code = item.codigoCatalogo?.trim();
 
   if (code) {
-    // Tenta CATMAS e CATMAT (não sabemos a origem com certeza).
-    const preferCatmasFirst = isCatmasCode(code);
-    const lookups = preferCatmasFirst
-      ? ([["catmas", findProductByCatmas], ["catmat", findProductByCatmat]] as const)
-      : ([["catmat", findProductByCatmat], ["catmas", findProductByCatmas]] as const);
-
-    for (const [method, lookup] of lookups) {
-      const found = await lookup(code);
-      if (found) {
-        return {
-          produtoMatchId: found.id,
-          matchScore: 1,
-          matchMethod: method as MatchMethod,
-          precoSugerido: found.price ?? null,
-        };
-      }
+    // Escolhe UM catálogo pelo formato do código e consulta só ele.
+    const [method, lookup] = isCatmasCode(code)
+      ? (["catmas", findProductByCatmas] as const)
+      : (["catmat", findProductByCatmat] as const);
+    const found = await lookup(code);
+    if (found) {
+      return {
+        produtoMatchId: found.id,
+        matchScore: 1,
+        matchMethod: method as MatchMethod,
+        precoSugerido: found.price ?? null,
+      };
     }
   }
 

@@ -60,8 +60,8 @@ function tokenSimilarity(a: string, b: string) {
 }
 
 export function computeDuplicateScore(primary: StructuredTokens, secondary: StructuredTokens) {
+  // EAN/GTIN é globalmente único — confirma sozinho.
   if (primary.ean && secondary.ean && primary.ean === secondary.ean) return 100;
-  if (primary.sku && secondary.sku && primary.sku === secondary.sku) return 95;
 
   const nameScore = tokenSimilarity(primary.normalizedName, secondary.normalizedName) * 30;
   const manufacturerScore = tokenSimilarity(primary.normalizedManufacturer, secondary.normalizedManufacturer) * 15;
@@ -70,7 +70,13 @@ export function computeDuplicateScore(primary: StructuredTokens, secondary: Stru
   const presentationScore = tokenSimilarity(primary.normalizedPresentation, secondary.normalizedPresentation) * 15;
   const unitScore = tokenSimilarity(primary.normalizedUnit, secondary.normalizedUnit) * 5;
 
-  return Math.round(nameScore + manufacturerScore + brandScore + concentrationScore + presentationScore + unitScore);
+  let score = nameScore + manufacturerScore + brandScore + concentrationScore + presentationScore + unitScore;
+  // SKU/código de fornecedor NÃO é único entre fornecedores: só reforça o score
+  // combinado (antes retornava 95 sozinho → "confirmed" → mesclava produtos
+  // distintos que compartilhavam um código interno como "001").
+  if (primary.sku && secondary.sku && primary.sku === secondary.sku) score += 25;
+
+  return Math.min(100, Math.round(score));
 }
 
 export function classifyDuplicate(score: number): DuplicateClassification {

@@ -4,23 +4,42 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { auditLogs, documentosHabilitacao } from "../../drizzle/schema";
 
+/**
+ * Status de validade calculado a partir da data de vencimento (não do campo
+ * manual). Antes o statusValidade era gravado à mão e nunca recomputado, então
+ * um documento com vencimento no passado podia ficar "valido" e não alertar.
+ */
+export type StatusValidade = "valido" | "expirando" | "vencido" | "sem_data";
+export function statusValidadeEfetivo(dataVencimento: string | Date | null | undefined, diasAlerta = 30): StatusValidade {
+  if (!dataVencimento) return "sem_data";
+  const d = new Date(dataVencimento);
+  if (isNaN(d.getTime())) return "sem_data";
+  const dias = Math.floor((d.getTime() - Date.now()) / 86400000);
+  if (dias < 0) return "vencido";
+  if (dias <= diasAlerta) return "expirando";
+  return "valido";
+}
+
 export const documentGovernanceRouter = router({
   list: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
-    return db.select().from(documentosHabilitacao).orderBy(asc(documentosHabilitacao.tipo), asc(documentosHabilitacao.nome));
+    const docs = await db.select().from(documentosHabilitacao).orderBy(asc(documentosHabilitacao.tipo), asc(documentosHabilitacao.nome));
+    // Sobrescreve com o status calculado da data de vencimento.
+    return docs.map((d) => ({ ...d, statusValidade: statusValidadeEfetivo(d.dataVencimento) }));
   }),
 
   summary: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
     const docs = await db.select().from(documentosHabilitacao);
+    const st = docs.map((d) => statusValidadeEfetivo(d.dataVencimento));
     return {
       total: docs.length,
-      validos: docs.filter((d) => d.statusValidade === "valido").length,
-      expirando: docs.filter((d) => d.statusValidade === "expirando").length,
-      vencidos: docs.filter((d) => d.statusValidade === "vencido").length,
-      semData: docs.filter((d) => d.statusValidade === "sem_data").length,
+      validos: st.filter((s) => s === "valido").length,
+      expirando: st.filter((s) => s === "expirando").length,
+      vencidos: st.filter((s) => s === "vencido").length,
+      semData: st.filter((s) => s === "sem_data").length,
     };
   }),
 
@@ -78,6 +97,10 @@ export const documentGovernanceRouter = router({
   alerts: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
-    return db.select().from(documentosHabilitacao).where(or(eq(documentosHabilitacao.statusValidade, "expirando"), eq(documentosHabilitacao.statusValidade, "vencido"))).orderBy(desc(documentosHabilitacao.dataVencimento));
+    const docs = await db.select().from(documentosHabilitacao).orderBy(desc(documentosHabilitacao.dataVencimento));
+    // Filtra pelo status calculado da data (não pelo campo manual).
+    return docs
+      .map((d) => ({ ...d, statusValidade: statusValidadeEfetivo(d.dataVencimento) }))
+      .filter((d) => d.statusValidade === "expirando" || d.statusValidade === "vencido");
   }),
 });
