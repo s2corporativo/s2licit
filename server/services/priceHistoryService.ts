@@ -1,5 +1,5 @@
 import { getDb } from "../db";
-import { products, suppliers } from "../../drizzle/schema";
+import { products, suppliers, priceHistory } from "../../drizzle/schema";
 import { eq, and, inArray, desc } from "drizzle-orm";
 
 /**
@@ -68,24 +68,38 @@ export async function getPriceHistory(
 
     const supplierName = supplier[0]?.name || `Supplier ${supplierId}`;
 
-    // For now, return current price as single event
-    // In production, this would query an audit table
-    const currentPrice = (product[0].price as any) as number || 0;
+    // Lê o histórico real da tabela price_history (antes era um stub que
+    // devolvia um único evento com oldPrice==newPrice).
+    const rows = await db
+      .select({ price: priceHistory.price, recordedAt: priceHistory.recordedAt })
+      .from(priceHistory)
+      .where(and(eq(priceHistory.productId, productId), eq(priceHistory.supplierId, supplierId)))
+      .orderBy(desc(priceHistory.recordedAt))
+      .limit(limit + 1);
 
-    return [
-      {
+    if (rows.length === 0) return [];
+
+    // Cada par consecutivo (mais novo → mais antigo) vira um evento de variação.
+    const events: PriceChangeEvent[] = [];
+    for (let i = 0; i < rows.length - 1; i++) {
+      const newPrice = parseFloat(String(rows[i].price ?? "")) || 0;
+      const oldPrice = parseFloat(String(rows[i + 1].price ?? "")) || 0;
+      if (oldPrice === newPrice) continue;
+      const changeAmount = newPrice - oldPrice;
+      events.push({
         productId,
         productName: product[0].name,
         supplierId,
         supplierName,
-        oldPrice: currentPrice,
-        newPrice: currentPrice,
-        changePercent: 0,
-        changeAmount: 0,
-        timestamp: new Date(),
-        isIncrease: false,
-      },
-    ];
+        oldPrice,
+        newPrice,
+        changePercent: oldPrice > 0 ? (changeAmount / oldPrice) * 100 : 0,
+        changeAmount,
+        timestamp: rows[i].recordedAt ?? new Date(),
+        isIncrease: changeAmount > 0,
+      });
+    }
+    return events.slice(0, limit);
   } catch (error) {
     console.error("Error getting price history:", error);
     return [];

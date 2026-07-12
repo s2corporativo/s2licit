@@ -7,7 +7,7 @@
  */
 
 import puppeteer, { Browser, Page } from "puppeteer";
-import { getDb } from "../db";
+import { getDb, recordPriceHistory } from "../db";
 import { products, scraperConfigs, scraperLogs, productSupplierOffers } from "../../drizzle/schema";
 import { eq, and, or, like } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
@@ -445,6 +445,12 @@ export class ScraperEngine {
           await db.update(products)
             .set({ price: String(sp.price), updatedAt: new Date() })
             .where(and(eq(products.id, productId), eq(products.supplierId, supplierId)));
+
+          // Versiona o preço capturado no histórico (antes o scraping não
+          // registrava, deixando alertas de variação cegos para a captura).
+          try {
+            await recordPriceHistory({ productId, supplierId, price: String(sp.price) });
+          } catch { /* não bloqueia a captura por falha de histórico */ }
         }
       } catch (err: any) {
         errors.push(`Erro no produto "${sp.name}": ${err?.message}`);
