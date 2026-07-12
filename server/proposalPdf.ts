@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import https from "https";
 import http from "http";
+import { valorPorExtenso } from "./utils/extenso";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanySettings {
@@ -648,7 +649,17 @@ export async function generateProposalPdf(
         align: "right",
       });
 
-    rowY += 40;
+    // Valor total por extenso — exigido por muitos editais/minutas.
+    doc
+      .font("Helvetica-Oblique")
+      .fontSize(8)
+      .fillColor(GRAY)
+      .text(`(${valorPorExtenso(grandTotal)})`, 50, rowY + 30, {
+        width: pageWidth,
+        align: "right",
+      });
+
+    rowY += 52;
 
     // ── CONDITIONS ────────────────────────────────────────────────────────────
     const conditions: Array<{ label: string; value: string }> = [];

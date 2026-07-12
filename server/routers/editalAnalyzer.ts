@@ -345,7 +345,7 @@ REGRAS:
             descricaoPadronizada: z.string(),
             especificacaoTecnica: z.string().optional(),
           })
-        ),
+        ).max(300),
       })
     )
     .mutation(async ({ input }: any) => {
@@ -356,6 +356,11 @@ REGRAS:
       const { like, or } = await import("drizzle-orm");
 
       const resultados = [];
+
+      // Teto de chamadas de IA por operação — evita custo imprevisível quando o
+      // edital tem centenas de itens (era 1 chamada de LLM por item, sem limite).
+      const MAX_IA = 80;
+      let iaCalls = 0;
 
       for (const itemEdital of input.itens) {
         // Busca simples por palavras-chave no catálogo
@@ -387,7 +392,14 @@ REGRAS:
         let produtoSugerido = null;
         let justificativa = "Nenhum produto encontrado no catálogo.";
 
-        if (candidatos.length > 0) {
+        if (candidatos.length > 0 && iaCalls >= MAX_IA) {
+          // Acima do teto de IA: entrega os candidatos por palavra-chave, mas
+          // marca para revisão humana em vez de classificar por IA.
+          grauCorrespondencia = "revisar";
+          produtoSugerido = candidatos[0];
+          justificativa = "Acima do limite de classificação por IA — revisar manualmente.";
+        } else if (candidatos.length > 0) {
+          iaCalls++;
           const promptClassificacao = `Item do edital: "${itemEdital.descricaoPadronizada}"
 Especificação: "${itemEdital.especificacaoTecnica || "não informada"}"
 
