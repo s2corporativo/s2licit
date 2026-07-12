@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
+import { precoFinalUnificado } from "../services/precoUnificado";
 
 export const pricingRouter = router({
   calculateBatchPrices: adminProcedure
@@ -10,11 +11,21 @@ export const pricingRouter = router({
       freightValue: z.number().min(0).default(0),
     }))
     .query(({ input }: { input: any }) => {
-      return input.products.map((p: any) => ({
-        id: p.id,
-        basePrice: p.basePrice,
-        finalPrice: p.basePrice * (1 + input.marginPercentage / 100) * (1 + input.icmsPercentage / 100) + input.freightValue,
-      }));
+      // Fórmula unificada (divisor, imposto por dentro) — antes usava markup
+      // multiplicativo `custo·(1+margem)·(1+icms)+frete`, que subprecificava.
+      return input.products.map((p: any) => {
+        const preco = precoFinalUnificado({
+          custo: p.basePrice,
+          margemPct: input.marginPercentage,
+          impostosPct: input.icmsPercentage,
+          freteUnit: input.freightValue,
+        });
+        return {
+          id: p.id,
+          basePrice: p.basePrice,
+          finalPrice: preco ?? p.basePrice,
+        };
+      });
     }),
 
   getDefaultConfig: adminProcedure

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, getCompanySettings } from "../db";
 import { freightQuotes, taxRules } from "../../drizzle/schema";
 import { calcularCustoTotal } from "../services/custoTotalService";
 import { aliquotaTotal } from "../services/taxEngine";
@@ -105,7 +105,10 @@ export const fretesRouter = router({
       let impostosPct = 0;
       if (db && input.ufDestino) {
         const regras = await db.select().from(taxRules);
-        impostosPct = aliquotaTotal({ ufOrigem: "MG", ufDestino: input.ufDestino, regras });
+        // UF de origem vem das configurações da empresa (antes era fixo "MG").
+        const company = await getCompanySettings().catch(() => null);
+        const ufOrigem = (company?.state || "MG").toUpperCase();
+        impostosPct = aliquotaTotal({ ufOrigem, ufDestino: input.ufDestino, regras });
       }
       const res = calcularCustoTotal({
         precoProdutoUnit: input.precoProdutoUnit,

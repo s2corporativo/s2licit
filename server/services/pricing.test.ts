@@ -19,20 +19,19 @@ describe("PricingService", () => {
     it("should calculate final price with all taxes and freight", () => {
       const result = PricingService.calculatePrice(100, baseConfig);
 
-      // Impostos: 18 + 0 + 1.65 + 7.6 = 27.25
-      expect(result.totalTaxAmount).toBe(27.25);
+      // Impostos POR DENTRO (% sobre a venda): 27.25% de 257.31 ≈ 70.12
+      expect(result.totalTaxAmount).toBeCloseTo(70.12, 1);
 
       // Frete: 10
       expect(result.freightAmount).toBe(10);
 
-      // Preço antes da margem (custo total): 100 + 27.25 + 10 = 137.25
-      expect(result.priceBeforeMargin).toBe(137.25);
-
-      // MARGEM REAL 30%: finalPrice = 137.25 / (1 - 0.30) = 196.07
-      // marginAmount = 196.07 - 137.25 = 58.82
-      // Verificar: (196.07 - 137.25) / 196.07 ≈ 30% ✓
-      expect(result.finalPrice).toBeCloseTo(196.07, 1);
-      expect(result.marginAmount).toBeCloseTo(58.82, 1);
+      // Custo de aquisição = 100 + 10 = 110; divisor = 1 - (27.25+30)/100 = 0.4275
+      // finalPrice = 110 / 0.4275 = 257.31 (a venda cobre imposto sobre a venda)
+      expect(result.finalPrice).toBeCloseTo(257.31, 1);
+      // priceBeforeMargin = custo+frete+imposto = 110 + 70.12 = 180.12
+      expect(result.priceBeforeMargin).toBeCloseTo(180.12, 1);
+      // marginAmount = 257.31 - 180.12 = 77.19 → 30% da venda
+      expect(result.marginAmount).toBeCloseTo(77.19, 1);
     });
 
     it("should handle percentage-based freight", () => {
@@ -51,13 +50,13 @@ describe("PricingService", () => {
     it("should respect minimum price limit", () => {
       const configWithMinPrice: PricingConfiguration = {
         ...baseConfig,
-        minPrice: 200,
+        minPrice: 300, // acima do preço natural (~257.31) para exercer o piso
       };
 
       const result = PricingService.calculatePrice(100, configWithMinPrice);
 
-      // Preço final deve ser no mínimo 200
-      expect(result.finalPrice).toBe(200);
+      // Preço final deve ser elevado ao mínimo 300
+      expect(result.finalPrice).toBe(300);
     });
 
     it("should respect maximum price limit", () => {
@@ -115,10 +114,9 @@ describe("PricingService", () => {
 
       const result = PricingService.calculatePrice(100, configFloor);
 
-      // Resultado deve ser arredondado para baixo (floor)
-      // O preço final será arredondado para baixo, então deve ser <= 196.07
-      expect(result.finalPrice).toBeLessThanOrEqual(196.08);
-      expect(result.finalPrice).toBeGreaterThanOrEqual(196.06);
+      // Resultado deve ser arredondado para baixo (floor) — natural ~257.31
+      expect(result.finalPrice).toBeLessThanOrEqual(257.31);
+      expect(result.finalPrice).toBeGreaterThanOrEqual(257.29);
     })
   });
 

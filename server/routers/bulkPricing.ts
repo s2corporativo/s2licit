@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { precoFinalUnificado } from "../services/precoUnificado";
 import {
   createBulkPricingApplication,
   listBulkPricingApplications,
@@ -62,9 +63,11 @@ export const bulkPricingRouter = router({
             input.freightType === "percentage"
               ? basePrice * (input.freightValue / 100)
               : input.freightValue;
-          const priceAfterTax = basePrice * (1 + totalTax);
-          const priceAfterFreight = priceAfterTax + freightAmount;
-          let newPrice = priceAfterFreight * (1 + margin);
+          // Fórmula unificada (divisor, imposto por dentro) — antes markup.
+          let newPrice = precoFinalUnificado({
+            custo: basePrice, margemPct: margin * 100,
+            impostosPct: totalTax * 100, freteUnit: freightAmount,
+          }) ?? basePrice;
 
           // Arredondamento
           if (input.roundingMethod === "ceil") newPrice = Math.ceil(newPrice * 100) / 100;
@@ -177,9 +180,10 @@ export const bulkPricingRouter = router({
             input.freightType === "percentage"
               ? basePrice * (input.freightValue / 100)
               : input.freightValue;
-          const priceAfterTax = basePrice * (1 + totalTax);
-          const priceAfterFreight = priceAfterTax + freightAmount;
-          const newPrice = Math.round(priceAfterFreight * (1 + margin) * 100) / 100;
+          const newPrice = precoFinalUnificado({
+            custo: basePrice, margemPct: margin * 100,
+            impostosPct: totalTax * 100, freteUnit: freightAmount,
+          }) ?? basePrice;
           const increase = newPrice - basePrice;
           const increasePercentage = basePrice > 0 ? (increase / basePrice) * 100 : 0;
 
