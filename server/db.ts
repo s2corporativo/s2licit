@@ -2524,6 +2524,7 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
       presentation: products.presentation,
       pharmaceuticalForm: products.pharmaceuticalForm,
       especieAnimal: products.especieAnimal,
+      viaAdministracao: products.viaAdministracao,
       importBatchId: products.importBatchId,
     })
     .from(products)
@@ -2552,6 +2553,7 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
       normalize(p.concentration),
       forma,
       normalize(p.especieAnimal),
+      normalize(p.viaAdministracao),
     ].join("|");
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(p);
