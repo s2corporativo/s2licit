@@ -237,9 +237,11 @@ export async function robustFetch(
 }
 
 /**
- * Registrar chamada de API no banco de dados
+ * Registrar chamada de API no banco de dados. Exportado para connectors que
+ * fazem fetch fora do robustFetch (ex.: scrapers de HTML) manterem a mesma
+ * trilha de auditoria em api_logs.
  */
-async function logApiCall(params: {
+export async function logApiCall(params: {
   source: string;
   endpoint: string;
   requestUrl: string;

@@ -1,32 +1,67 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Radar, Search, Loader2, ExternalLink } from "lucide-react";
+import { Radar, Search, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
+type Fonte = "pncp" | "comprasgov" | "fiemg";
+
+/** Rótulo e cor do badge de cada fonte. */
+const FONTE_META: Record<string, { label: string; badge: string }> = {
+  pncp: { label: "PNCP", badge: "bg-blue-100 text-blue-800" },
+  comprasgov: { label: "Compras.gov.br", badge: "bg-emerald-100 text-emerald-800" },
+  fiemg: { label: "Sistema S / FIEMG", badge: "bg-amber-100 text-amber-800" },
+};
+
+const FONTES_DISPONIVEIS: { id: Fonte; label: string }[] = [
+  { id: "pncp", label: "PNCP" },
+  { id: "comprasgov", label: "Compras.gov.br" },
+  { id: "fiemg", label: "Sistema S / FIEMG" },
+];
+
 /**
- * Radar de oportunidades PNCP — busca pública de licitações por palavra-chave.
+ * Radar de oportunidades — busca pública de licitações em múltiplas fontes
+ * (PNCP, Compras.gov.br e Sistema S / FIEMG) por palavra-chave.
  */
 export default function RadarPncp() {
   const [keywordsInput, setKeywordsInput] = useState("");
   const [uf, setUf] = useState("");
   const [dias, setDias] = useState(7);
-  const [params, setParams] = useState<{ keywords: string[]; uf?: string; diasAtras: number } | null>(null);
+  const [fontes, setFontes] = useState<Fonte[]>(["pncp", "comprasgov", "fiemg"]);
+  const [params, setParams] = useState<{
+    keywords: string[];
+    uf?: string;
+    diasAtras: number;
+    fontes: Fonte[];
+  } | null>(null);
 
   const query = trpc.pncpRadar.buscarOportunidades.useQuery(
     {
       keywords: params?.keywords ?? [],
       uf: params?.uf,
       diasAtras: params?.diasAtras ?? 7,
+      fontes: params?.fontes ?? ["pncp", "comprasgov", "fiemg"],
     },
     { enabled: params != null, retry: false },
   );
+
+  const toggleFonte = (id: Fonte) => {
+    setFontes((atual) =>
+      atual.includes(id) ? atual.filter((f) => f !== id) : [...atual, id],
+    );
+  };
 
   const buscar = () => {
     const keywords = keywordsInput
       .split(",")
       .map((k) => k.trim())
       .filter((k) => k.length >= 2);
-    setParams({ keywords, uf: uf.trim() ? uf.trim().toUpperCase() : undefined, diasAtras: dias });
+    const fontesEscolhidas = fontes.length > 0 ? fontes : (["pncp"] as Fonte[]);
+    setParams({
+      keywords,
+      uf: uf.trim() ? uf.trim().toUpperCase() : undefined,
+      diasAtras: dias,
+      fontes: fontesEscolhidas,
+    });
   };
 
   if (query.error) toast.error("Falha ao consultar o PNCP: " + query.error.message);
@@ -37,7 +72,7 @@ export default function RadarPncp() {
         <Radar className="w-7 h-7 text-blue-600" />
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Radar de Oportunidades</h1>
-          <p className="text-sm text-gray-500">Licitações publicadas no PNCP (Portal Nacional de Contratações Públicas)</p>
+          <p className="text-sm text-gray-500">Licitações do PNCP, Compras.gov.br e Sistema S / FIEMG em um só lugar</p>
         </div>
       </div>
 
@@ -84,11 +119,53 @@ export default function RadarPncp() {
           {query.isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
           Buscar
         </button>
+
+        {/* Seleção de fontes */}
+        <div className="w-full">
+          <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Fontes</label>
+          <div className="flex flex-wrap gap-3">
+            {FONTES_DISPONIVEIS.map((f) => (
+              <label key={f.id} className="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={fontes.includes(f.id)}
+                  onChange={() => toggleFonte(f.id)}
+                  className="accent-blue-600"
+                />
+                {f.label}
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
 
       {params && query.data && (
         <div className="text-sm text-gray-500 mb-3">
-          {query.data.encontradas} oportunidade(s) encontrada(s) de {query.data.totalRegistros} no período.
+          {query.data.encontradas} oportunidade(s) encontrada(s)
+          {typeof query.data.totalRegistros === "number" && query.data.totalRegistros > 0
+            ? ` — ${query.data.totalRegistros} no PNCP no período`
+            : ""}
+          {query.data.porFonte && Object.keys(query.data.porFonte).length > 0 && (
+            <span className="ml-1 text-gray-400">
+              ({Object.entries(query.data.porFonte)
+                .map(([src, n]) => `${FONTE_META[src]?.label ?? src}: ${n}`)
+                .join(" · ")})
+            </span>
+          )}
+        </div>
+      )}
+
+      {query.data?.erros && query.data.erros.length > 0 && (
+        <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 mb-3">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold">Algumas fontes não responderam</span> (as demais foram consultadas normalmente):
+            <ul className="list-disc list-inside mt-0.5">
+              {query.data.erros.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          </div>
         </div>
       )}
 
@@ -101,7 +178,12 @@ export default function RadarPncp() {
                   <div className="font-semibold text-gray-900">{op.orgao}</div>
                   <div className="text-xs text-gray-500">{op.unidadeCompradora} · {op.uf} {op.municipio ? `· ${op.municipio}` : ""}</div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-100 text-blue-800 shrink-0">{op.modalidade}</span>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className={`text-[10px] font-bold px-2 py-0.5 ${FONTE_META[op.source]?.badge ?? "bg-gray-100 text-gray-700"}`}>
+                    {FONTE_META[op.source]?.label ?? op.source}
+                  </span>
+                  <span className="text-[10px] font-medium px-2 py-0.5 bg-gray-100 text-gray-600">{op.modalidade}</span>
+                </div>
               </div>
               <p className="text-sm text-gray-700 mt-2 line-clamp-3">{op.objeto}</p>
               <div className="flex items-center justify-between mt-3 text-xs text-gray-500">

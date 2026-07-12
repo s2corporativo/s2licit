@@ -19,6 +19,8 @@ import {
   estatisticasPreco,
   normalizePncpLicitacao,
 } from "../connectors/pncpConnector";
+import { buscarLicitacoesComprasGov } from "../connectors/comprasGovConnector";
+import { buscarLicitacoesFiemg } from "../connectors/fiemgConnector";
 import type { NormalizedLicitacao } from "../connectors/baseConnector";
 
 function toDateStr(d: Date): string {
@@ -35,6 +37,9 @@ function matchesKeywords(lic: NormalizedLicitacao, keywords: string[]): boolean 
   return keywords.some((k) => haystack.includes(k.toLowerCase()));
 }
 
+/** Fontes disponíveis no Radar. PNCP é a principal; as demais complementam. */
+const FonteEnum = z.enum(["pncp", "comprasgov", "fiemg"]);
+
 const BuscarSchema = z.object({
   // Palavras-chave (ex.: "medicamento", "seringa", "amoxicilina"). Vazio = tudo.
   keywords: z.array(z.string().min(2)).max(20).default([]),
@@ -44,7 +49,30 @@ const BuscarSchema = z.object({
   pagina: z.number().int().positive().default(1),
   // Modalidades PNCP (8 = pregão eletrônico, 6 = concorrência eletrônica).
   modalidades: z.array(z.number().int()).max(6).default([8, 6]),
+  // Fontes a consultar. Padrão: todas. Fontes extras (comprasgov/fiemg) só são
+  // consultadas na página 1 — o PNCP continua paginando normalmente.
+  fontes: z.array(FonteEnum).min(1).default(["pncp", "comprasgov", "fiemg"]),
 });
+
+/** Rótulos legíveis das fontes para exibição/telemetria. */
+const FONTE_LABEL: Record<string, string> = {
+  pncp: "PNCP",
+  comprasgov: "Compras.gov.br",
+  fiemg: "Sistema S / FIEMG",
+};
+
+/** Deduplica mantendo a primeira ocorrência (PNCP tem prioridade na ordem). */
+function dedupe(licitacoes: NormalizedLicitacao[]): NormalizedLicitacao[] {
+  const vistos = new Set<string>();
+  const saida: NormalizedLicitacao[] = [];
+  for (const lic of licitacoes) {
+    const chave = lic.dedupeKey || `${lic.source}:${lic.sourceId}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    saida.push(lic);
+  }
+  return saida;
+}
 
 const ItensSchema = z.object({
   cnpj: z.string().min(14).max(14),
@@ -54,7 +82,13 @@ const ItensSchema = z.object({
 
 export const pncpRadarRouter = router({
   /**
-   * Busca oportunidades no PNCP filtradas por palavra-chave e UF.
+   * Busca oportunidades em múltiplas fontes (PNCP + Compras.gov.br + FIEMG),
+   * filtradas por palavra-chave e UF, com deduplicação.
+   *
+   * Cada fonte é consultada de forma isolada (Promise.allSettled): uma fonte
+   * fora do ar ou lenta NUNCA derruba a busca — apenas contribui com zero e o
+   * erro fica registrado em api_logs. As fontes complementares (Compras.gov.br
+   * e FIEMG) só entram na página 1 para não conflitar com a paginação do PNCP.
    */
   buscarOportunidades: protectedProcedure
     .input(BuscarSchema)
@@ -62,19 +96,78 @@ export const pncpRadarRouter = router({
       const now = new Date();
       const inicio = new Date(now);
       inicio.setDate(inicio.getDate() - input.diasAtras);
-
-      const { data, totalRegistros, totalPaginas } = await buscarLicitacoesMultiModalidade(
-        toDateStr(inicio),
-        toDateStr(now),
-        input.pagina,
-        input.modalidades,
-      );
-
       const uf = input.uf?.toUpperCase();
-      const oportunidades = data
-        .map(normalizePncpLicitacao)
+      const fontes = new Set(input.fontes);
+      const primeiraPagina = input.pagina === 1;
+
+      // ── PNCP (fonte principal, paginada) ──
+      const pncpPromise = fontes.has("pncp")
+        ? buscarLicitacoesMultiModalidade(
+            toDateStr(inicio),
+            toDateStr(now),
+            input.pagina,
+            input.modalidades,
+          )
+        : Promise.resolve({ data: [], totalRegistros: 0, totalPaginas: 1 });
+
+      // ── Compras.gov.br (complementar, só na página 1) ──
+      const comprasPromise =
+        fontes.has("comprasgov") && primeiraPagina
+          ? buscarLicitacoesComprasGov(inicio, now, uf)
+          : Promise.resolve([] as NormalizedLicitacao[]);
+
+      // ── Sistema S / FIEMG (complementar, só na página 1) ──
+      const fiemgPromise =
+        fontes.has("fiemg") && primeiraPagina
+          ? buscarLicitacoesFiemg(inicio, now)
+          : Promise.resolve([] as NormalizedLicitacao[]);
+
+      const [pncpRes, comprasRes, fiemgRes] = await Promise.allSettled([
+        pncpPromise,
+        comprasPromise,
+        fiemgPromise,
+      ]);
+
+      const porFonte: Record<string, number> = {};
+      const erros: string[] = [];
+
+      // PNCP
+      let totalRegistros = 0;
+      let totalPaginas = 1;
+      let pncpLicitacoes: NormalizedLicitacao[] = [];
+      if (pncpRes.status === "fulfilled") {
+        totalRegistros = pncpRes.value.totalRegistros;
+        totalPaginas = pncpRes.value.totalPaginas;
+        pncpLicitacoes = pncpRes.value.data.map(normalizePncpLicitacao);
+      } else if (fontes.has("pncp")) {
+        erros.push(`PNCP: ${String(pncpRes.reason).slice(0, 120)}`);
+      }
+
+      const comprasLicitacoes =
+        comprasRes.status === "fulfilled" ? comprasRes.value : [];
+      if (comprasRes.status === "rejected" && fontes.has("comprasgov")) {
+        erros.push(`Compras.gov.br: ${String(comprasRes.reason).slice(0, 120)}`);
+      }
+
+      const fiemgLicitacoes = fiemgRes.status === "fulfilled" ? fiemgRes.value : [];
+      if (fiemgRes.status === "rejected" && fontes.has("fiemg")) {
+        erros.push(`FIEMG: ${String(fiemgRes.reason).slice(0, 120)}`);
+      }
+
+      // Ordem de merge define prioridade na deduplicação: PNCP primeiro.
+      const todas = [...pncpLicitacoes, ...comprasLicitacoes, ...fiemgLicitacoes]
         .filter((lic) => matchesKeywords(lic, input.keywords))
         .filter((lic) => (uf ? lic.uf.toUpperCase() === uf : true));
+
+      const oportunidades = dedupe(todas).sort((a, b) => {
+        const ta = a.dataPublicacao ? a.dataPublicacao.getTime() : 0;
+        const tb = b.dataPublicacao ? b.dataPublicacao.getTime() : 0;
+        return tb - ta;
+      });
+
+      for (const lic of oportunidades) {
+        porFonte[lic.source] = (porFonte[lic.source] ?? 0) + 1;
+      }
 
       return {
         totalRegistros,
@@ -82,6 +175,10 @@ export const pncpRadarRouter = router({
         pagina: input.pagina,
         encontradas: oportunidades.length,
         oportunidades,
+        // Telemetria por fonte para a UI mostrar a cobertura e sinalizar falhas.
+        porFonte,
+        fontesConsultadas: Array.from(fontes).map((f) => FONTE_LABEL[f] ?? f),
+        erros,
       };
     }),
 
