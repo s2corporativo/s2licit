@@ -11,7 +11,6 @@ import { notifyOwner } from "../_core/notification";
 import {
   createCaptureLog,
   finalizeCaptureLog,
-  logCaptureError,
 } from "./captureLogService";
 
 interface ScheduledJob {

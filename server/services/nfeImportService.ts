@@ -1,4 +1,4 @@
-import { NfeData, NfeProduct, ParsedNfeProduct } from "./nfeParserService";
+import { NfeData, ParsedNfeProduct } from "./nfeParserService";
 import { calculateStringSimilarity } from "./productMatchingService";
 
 export interface NfeImportResult {

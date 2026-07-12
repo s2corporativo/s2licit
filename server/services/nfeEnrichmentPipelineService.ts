@@ -1,5 +1,5 @@
 import { getDb } from "../db";
-import { products, productSupplierPrices } from "../../drizzle/schema";
+import { products } from "../../drizzle/schema";
 import { eq, and, like } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";

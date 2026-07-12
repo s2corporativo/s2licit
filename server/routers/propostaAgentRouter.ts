@@ -3,13 +3,10 @@
  * Endpoints tRPC para o Agente de Preenchimento de Propostas
  */
 
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { encryptPassword } from "../utils/encryption";
-import { getDb } from "../db";
-import { scraperConfigs } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
 import {
   PORTAL_CONFIGS,
   executarAgenteProposta,

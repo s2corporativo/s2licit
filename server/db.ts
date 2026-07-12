@@ -1,16 +1,14 @@
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, like, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, like, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql2 from "mysql2/promise";
-import { escapeLike, simplifyDbError, normalize, matches, normalizeName, levenshtein, similarity } from "./db/_helpers";
+import { escapeLike, simplifyDbError, normalize, matches, normalizeName, similarity } from "./db/_helpers";
 import {
-  Category,
   InsertCategory,
   InsertCompanySettings,
   InsertImportLog,
   InsertProduct,
   InsertProposal,
   InsertProposalItem,
-  InsertProposalStatusHistory,
   InsertFinancialEntry,
   InsertQuotation,
   InsertQuotationItem,
@@ -34,7 +32,6 @@ import {
   masterProducts,
   type InsertUser,
   type MasterProduct,
-  type InsertMasterProduct,
   synonyms,
   type Synonym,
   type InsertSynonym,
@@ -43,24 +40,6 @@ import {
   type InsertProposalTemplate,
   matchFeedback,
   type MatchFeedback,
-  type InsertMatchFeedback,
-  type LicitacaoDescoberta,
-  type InsertLicitacaoDescoberta,
-  type DocumentoHabilitacao,
-  type InsertDocumentoHabilitacao,
-  editalAnalyses,
-  type EditalAnalysis,
-  type InsertEditalAnalysis,
-  matchLogs,
-  type MatchLog,
-  type InsertMatchLog,
-  matchFeedbackV2,
-  type MatchFeedbackV2,
-  type InsertMatchFeedbackV2,
-  productSupplierPrices,
-  type ProductSupplierPrice,
-  type InsertProductSupplierPrice,
-  radarOpportunities,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -1733,7 +1712,7 @@ export async function getProductPricesByMasterName(masterName: string) {
 
 // ─── Fuzzy Matching com Base Mestre ──────────────────────────────────────────
 
-import { isSameProduct, stringSimilarity, normalizeStr } from "./fuzzy";
+import { isSameProduct } from "./fuzzy";
 
 /**
  * Reconhecimento inteligente com fuzzy matching (Jaro-Winkler ≥ 85%).
@@ -2077,7 +2056,6 @@ export async function getCheaperAlternatives(
 import {
   priceHistory,
   type PriceHistory,
-  type InsertPriceHistory,
 } from "../drizzle/schema";
 
 /**

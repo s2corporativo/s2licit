@@ -10,8 +10,6 @@ import {
   ChevronRight,
   Clock,
   DollarSign,
-  ExternalLink,
-  FileCheck,
   FileScan,
   FileText,
   GitMerge,
@@ -27,11 +25,9 @@ import {
   TrendingUp,
   Workflow,
   Zap,
-  AlertCircle,
   XCircle,
   BarChart2,
   Activity,
-  Radio,
   Sheet,
   Stethoscope,
   CheckCircle,
@@ -42,7 +38,7 @@ import {
   Trash2,
   WrenchIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,

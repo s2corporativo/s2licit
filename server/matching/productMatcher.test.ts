@@ -5,7 +5,6 @@ import {
   levenshteinSimilarity,
   jaroWinklerSimilarity,
   tokenSimilarity,
-  combinedStringSimilarity,
   calculateProductSimilarity,
   matchEditalItem,
   getMatchDecision,

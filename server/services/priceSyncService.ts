@@ -1,6 +1,6 @@
 import { getDb } from "../db";
 import { products, suppliers } from "../../drizzle/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 
 /**
  * Represents a price update for a product from a supplier

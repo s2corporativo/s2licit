@@ -7,7 +7,7 @@
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
-import { scraperConfigs, scraperLogs, suppliers } from "../../drizzle/schema";
+import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
 import { executarScraper, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
@@ -93,7 +93,7 @@ export const scraperAgentRouter = router({
       const [result] = await db.insert(scraperConfigs).values({
         supplierId: input.supplierId,
         scraperType: input.scraperType,
-        email: encryptPassword(input.email),
+        email: input.email,
         passwordHash: encryptPassword(input.password),
         scheduleTime: input.scheduleTime,
         enabled: input.enabled,
@@ -110,7 +110,7 @@ export const scraperAgentRouter = router({
       if (!db) throw new Error("Banco indisponível");
 
       const updates: Record<string, any> = {};
-      if (input.email) updates.email = encryptPassword(input.email);
+      if (input.email) updates.email = input.email; // e-mail em texto puro
       if (input.password) updates.passwordHash = encryptPassword(input.password);
       if (input.scheduleTime) updates.scheduleTime = input.scheduleTime;
       if (input.enabled) updates.enabled = input.enabled;
@@ -234,10 +234,13 @@ export const scraperAgentRouter = router({
       const rows = await db.select({ email: scraperConfigs.email })
         .from(scraperConfigs).where(eq(scraperConfigs.id, input.id)).limit(1);
       if (!rows[0]) return { email: null };
+      // E-mail é texto puro; tolera registros antigos criptografados.
+      const raw = rows[0].email ?? "";
+      if (raw.includes("@")) return { email: raw };
       try {
-        return { email: decryptPassword(rows[0].email) };
+        return { email: decryptPassword(raw) };
       } catch {
-        return { email: "(erro ao descriptografar)" };
+        return { email: raw };
       }
     }),
 });

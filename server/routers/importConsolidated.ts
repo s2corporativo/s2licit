@@ -4,7 +4,6 @@ import {
   detectDuplicatesInBatch,
   prepareConsolidatedForImport,
   calculateConsolidationStats,
-  type ImportProduct,
 } from "../services/importConsolidationService";
 import { createProduct, updateProduct, getDb } from "../db";
 import { productSupplierOffers } from "../../drizzle/schema";

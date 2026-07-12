@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Upload, AlertCircle, CheckCircle2, FileText } from "lucide-react";
+import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";

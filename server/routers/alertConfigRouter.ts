@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
 
 export const alertConfigRouter = router({
   getConfig: protectedProcedure.query(async ({ ctx }) => {

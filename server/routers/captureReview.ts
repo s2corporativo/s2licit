@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { eq, desc, and, inArray, sql } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { productCaptureHistory, products, suppliers } from "../../drizzle/schema";
 
 export const captureReviewRouter = router({

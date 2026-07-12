@@ -1,8 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import {
     ArrowLeft,
-    ChevronDown,
-    ChevronUp,
     Download,
     Edit2,
     ExternalLink,
@@ -15,14 +13,13 @@ import {
     Printer,
     Save,
     ScrollText,
-    Search,
     ShoppingCart,
     Trash2,
     TrendingDown,
     TrendingUp,
     X,
   } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 

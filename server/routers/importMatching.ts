@@ -7,9 +7,8 @@ import {
   validateImportedProductsForMatching,
   detectDuplicatesInImportBatch,
   generateImportMatchingReport,
-  type ImportedProduct,
 } from "../services/importMatchingService";
-import { listMasterProducts, listProducts } from "../db";
+import { listMasterProducts } from "../db";
 
 export const importMatchingRouter = router({
   /**

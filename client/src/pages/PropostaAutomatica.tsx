@@ -25,7 +25,6 @@ import {
   Package,
   Download,
   Save,
-  ExternalLink,
   Upload,
   X,
 } from "lucide-react";

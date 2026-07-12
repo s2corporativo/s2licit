@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Bot, Play, CheckCircle2, XCircle, Loader2, Eye, EyeOff,
   Clock, Send, Shield, AlertTriangle, FileText, Globe,
-  ChevronDown, ChevronUp, RotateCcw, ImageIcon, Zap,
+  ChevronDown, ChevronUp, ImageIcon, Zap,
 } from "lucide-react";
 
 type PortalType = "comprasnet" | "comprasmg" | "fundep" | "agrega" | "generico";

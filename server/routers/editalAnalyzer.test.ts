@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { editalAnalyzerRouter } from "./editalAnalyzer";
-import { protectedProcedure } from "../_core/trpc";
+import { describe, it, expect } from "vitest";
 
 describe("editalAnalyzerRouter", () => {
   describe("extrair", () => {

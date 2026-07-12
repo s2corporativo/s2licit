@@ -103,11 +103,21 @@ export async function fetchAndParsePage(
       }
     }
 
-    // Detectar próxima página
+    // Detectar próxima página. `:contains()` é seletor do jQuery/Sizzle, NÃO é
+    // CSS válido — o querySelector do jsdom lançava SyntaxError e derrubava toda
+    // a página (descartando até os links já coletados). Usamos CSS válido e,
+    // como fallback, varremos as âncoras por texto ("próxima"/"next").
     let nextPageUrl: string | undefined;
-    const nextPageLink = document.querySelector(
-      'a[rel="next"], a:contains("Próxima"), a:contains("Next")'
+    let nextPageLink: Element | null = document.querySelector(
+      'a[rel="next"], a.next, a.pagination-next, .pagination-next a, .pagination__next',
     );
+    if (!nextPageLink) {
+      const anchors = Array.from(document.querySelectorAll("a"));
+      nextPageLink = anchors.find((a) => {
+        const t = (a.textContent ?? "").trim().toLowerCase();
+        return t === "próxima" || t === "proxima" || t === "next" || t === "próximo" || t === "»";
+      }) ?? null;
+    }
     if (nextPageLink) {
       const href = nextPageLink.getAttribute("href");
       if (href) {

@@ -11,8 +11,8 @@
 
 import { invokeLLM } from "../_core/llm";
 import { getDb } from "../db";
-import { products, extractedAttributes } from "../../drizzle/schema";
-import { eq, and, like, sql } from "drizzle-orm";
+import { products } from "../../drizzle/schema";
+import { eq, and, like } from "drizzle-orm";
 
 export interface PregoItem {
   id: string;

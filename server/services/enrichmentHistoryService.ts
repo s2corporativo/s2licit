@@ -3,9 +3,7 @@ import {
   enrichmentHistory,
   enrichmentResults,
   EnrichmentHistory,
-  InsertEnrichmentHistory,
   EnrichmentResult,
-  InsertEnrichmentResult,
 } from "../../drizzle/schema";
 import { eq, and, gte, lte, desc, count } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";

@@ -7,7 +7,6 @@ import {
   filterAlertsBySeverity,
   getCriticalAlerts,
   groupAlertsByProduct,
-  groupAlertsBySupplier,
   calculateAlertStats,
   generateAlertSummary,
   acknowledgeAlert,

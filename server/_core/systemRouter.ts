@@ -4,7 +4,6 @@ import { adminProcedure, publicProcedure, protectedProcedure, router } from "./t
 import { getDb } from "../db";
 import { importLogs, products, categories } from "../../drizzle/schema";
 import { desc, eq, or, sql, isNull, count } from "drizzle-orm";
-import { invokeLLM } from "./llm";
 
 export const systemRouter = router({
   health: publicProcedure

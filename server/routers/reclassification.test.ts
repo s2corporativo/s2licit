@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { reclassificationRouter } from "./reclassification";
 import { getDb } from "../db";
-import { products } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
 
 describe("reclassificationRouter", () => {
   let db: any;

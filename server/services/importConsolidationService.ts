@@ -11,8 +11,6 @@
 import {
   generateProductSignature,
   groupProductsBySignature,
-  type ProductSignature,
-  type ConsolidatedProduct,
 } from "./productConsolidationService";
 
 export interface ImportProduct {

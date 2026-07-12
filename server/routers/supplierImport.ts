@@ -1,7 +1,7 @@
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
-import { suppliers, supplierImports, products } from "../../drizzle/schema";
+import { supplierImports, products } from "../../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
 import { parseStringPromise } from "xml2js";
 import { sql } from "drizzle-orm";

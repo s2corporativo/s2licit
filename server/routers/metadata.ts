@@ -7,8 +7,8 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { productMetadata, products, synonyms as synonymsTable } from "../../drizzle/schema";
-import { eq, and, desc, like, or, isNull, count } from "drizzle-orm";
+import { productMetadata, products } from "../../drizzle/schema";
+import { eq, and, desc, like, or, count } from "drizzle-orm";
 import { processProduct, reindexCatalogFromFicha, suggestSynonyms, saveProductMetadata } from "../services/metadataExtractor/extractor";
 import { normalizeProductName } from "../services/metadataExtractor/normalizer";
 
