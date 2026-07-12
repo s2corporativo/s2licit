@@ -152,6 +152,38 @@ export async function registerContractMovement(input: CreateMovementInput) {
   if (!contract) throw new Error("Contrato não encontrado");
 
   const amount = Number(input.amount ?? 0);
+
+  // Semântica do saldo de EXECUÇÃO (valor que ainda pode ser entregue/faturado):
+  //  - reforço aumenta; empenho é reserva orçamentária do órgão e NÃO reduz o
+  //    saldo de execução (antes reduzia, causando contagem em dobro com o
+  //    faturamento); faturamento/consumo/glosa reduzem; "outro" é neutro.
+  const signal =
+    input.movementType === "reforco" ? 1 :
+    input.movementType === "empenho" || input.movementType === "outro" ? 0 : -1;
+
+  // Impede lançar o mesmo empenho/faturamento duas vezes pela referência.
+  if (input.referenceNumber) {
+    const dup = await db
+      .select({ id: contractBalanceMovements.id })
+      .from(contractBalanceMovements)
+      .where(and(
+        eq(contractBalanceMovements.contractId, input.contractId),
+        eq(contractBalanceMovements.movementType, input.movementType),
+        eq(contractBalanceMovements.referenceNumber, input.referenceNumber),
+      ))
+      .limit(1);
+    if (dup.length > 0) {
+      throw new Error(`Já existe um movimento "${input.movementType}" com a referência ${input.referenceNumber} neste contrato.`);
+    }
+  }
+
+  const saldoAnterior = Number(contract.saldoAtual ?? 0);
+  const saldoAtual = saldoAnterior + signal * amount;
+  // Não deixa o saldo ficar negativo (faturar/consumir além do contratado).
+  if (signal < 0 && saldoAtual < 0) {
+    throw new Error(`Saldo insuficiente: contrato tem R$ ${saldoAnterior.toFixed(2)} e o movimento consumiria R$ ${amount.toFixed(2)}.`);
+  }
+
   const result = await db.insert(contractBalanceMovements).values({
     contractId: input.contractId,
     movementType: input.movementType,
@@ -162,8 +194,6 @@ export async function registerContractMovement(input: CreateMovementInput) {
     createdByUserId: input.createdByUserId ?? null,
   });
 
-  const signal = input.movementType === "reforco" ? 1 : -1;
-  const saldoAtual = Number(contract.saldoAtual ?? 0) + signal * amount;
   await db.update(postAwardContracts).set({ saldoAtual: dec(saldoAtual) }).where(eq(postAwardContracts.id, input.contractId));
 
   return Number(result[0].insertId);
@@ -184,7 +214,19 @@ export async function registerContractReajuste(input: CreateReajusteInput) {
   } as any);
 
   if (input.updatedValue !== undefined && input.updatedValue !== null) {
-    await db.update(postAwardContracts).set({ saldoAtual: dec(input.updatedValue) }).where(eq(postAwardContracts.id, input.contractId));
+    // Reajuste soma o DELTA ao saldo (preserva o consumo acumulado). Antes
+    // sobrescrevia o saldo, apagando o que já havia sido consumido.
+    const [c] = await db.select().from(postAwardContracts).where(eq(postAwardContracts.id, input.contractId)).limit(1);
+    if (c) {
+      const base = input.previousValue !== undefined && input.previousValue !== null
+        ? Number(input.previousValue)
+        : Number(c.valueGlobal ?? c.saldoAtual ?? 0);
+      const delta = Number(input.updatedValue) - base;
+      const novoSaldo = Number(c.saldoAtual ?? 0) + delta;
+      await db.update(postAwardContracts)
+        .set({ saldoAtual: dec(novoSaldo), valueGlobal: dec(input.updatedValue) })
+        .where(eq(postAwardContracts.id, input.contractId));
+    }
   }
 
   return Number(result[0].insertId);
