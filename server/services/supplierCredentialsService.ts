@@ -73,7 +73,9 @@ export class SupplierCredentialsService {
       supplierName: config.supplierName,
       scraperType: config.scraperType,
       email: config.email,
-      password: decryptPassword(config.passwordHash),
+      // Nunca devolver a senha em claro numa listagem para a UI. O scraper
+      // decifra a senha server-side no momento do uso (não por esta lista).
+      password: config.passwordHash ? "••••••••" : "",
       scheduleTime: config.scheduleTime || "02:00",
       enabled: config.enabled === "yes",
       lastRunAt: config.lastRunAt,

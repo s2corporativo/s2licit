@@ -200,7 +200,7 @@ import {
 import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc, lt, gt, gte } from "drizzle-orm";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, editorProcedure, router } from "./_core/trpc";
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
@@ -254,7 +254,13 @@ export const appRouter = router({
   diagnostico: diagnosticoRouter,
 
   auth: router({
-    me: publicProcedure.query((opts) => opts.ctx.user),
+    me: publicProcedure.query((opts) => {
+      const u = opts.ctx.user;
+      if (!u) return null;
+      // Nunca serializar o hash de senha para o cliente (era vazado no payload).
+      const { passwordHash, ...safe } = u as typeof u & { passwordHash?: unknown };
+      return safe;
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
@@ -296,7 +302,7 @@ export const appRouter = router({
         return updateCategory(id, data);
       }),
 
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteCategory(input.id)),
     // ── Sugestão automática de categoria via LLM ──────────────────────────
@@ -415,7 +421,7 @@ export const appRouter = router({
         return updateSupplier(id, data);
       }),
 
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteSupplier(input.id)),
   }),
@@ -452,7 +458,7 @@ export const appRouter = router({
       .input(z.object({ groupId: z.number(), productId: z.number() }))
       .mutation(({ input }) => removeEquivalenceMember(input.groupId, input.productId)),
 
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteEquivalenceGroup(input.id)),
 
@@ -740,7 +746,7 @@ export const appRouter = router({
         return updateRequestingOrg(id, data as any);
       }),
 
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteRequestingOrg(input.id)),
   }),
@@ -791,7 +797,7 @@ export const appRouter = router({
         return updateProposal(id, data as any);
       }),
 
-     delete: protectedProcedure
+     delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteProposal(input.id)),
 
@@ -1074,7 +1080,7 @@ export const appRouter = router({
         const { id, ...data } = input;
         return updateFinancialEntry(id, data as any);
       }),
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteFinancialEntry(input.id)),
     summary: protectedProcedure
@@ -2249,7 +2255,7 @@ export const appRouter = router({
         return updateSynonym(id, data as any);
       }),
 
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteSynonym(input.id)),
 
@@ -2359,7 +2365,7 @@ export const appRouter = router({
         } as any);
       }),
 
-    delete: protectedProcedure
+    delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteProposalTemplate(input.id)),
     seedDefaults: protectedProcedure

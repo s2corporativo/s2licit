@@ -43,3 +43,19 @@ export const adminProcedure = t.procedure.use(
     });
   }),
 );
+
+// Hierarquia de papéis: admin > editor > viewer > user. O RBAC antes só existia
+// no frontend (RequireAuth), então um "viewer" podia chamar mutações destrutivas
+// direto na API. `editorProcedure` exige editor+ no servidor para operações de
+// escrita/remoção sensíveis.
+const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
+export const editorProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    const rank = ROLE_RANK[(ctx.user?.role as string) ?? "user"] ?? 0;
+    if (!ctx.user || rank < ROLE_RANK.editor) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Requer perfil Editor ou superior" });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  }),
+);
