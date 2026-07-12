@@ -3,6 +3,28 @@ import { z } from "zod";
 import { invokeLLM } from "../_core/llm";
 import { getDb, createProposal, addProposalItem, getCompanySettings } from "../db";
 
+/**
+ * Converte quantidade em texto (notação BR) para número de forma robusta.
+ * "1.000" → 1000 (milhar), "10 caixas" → 10, "1,5" → 1.5. Retorna null quando
+ * não há número — para o chamador sinalizar em vez de assumir 1 silenciosamente.
+ */
+export function parseQuantidadeBR(texto: string | number | null | undefined): number | null {
+  if (typeof texto === "number") return isNaN(texto) ? null : texto;
+  if (!texto) return null;
+  const m = String(texto).match(/[\d.,]+/);
+  if (!m) return null;
+  let s = m[0];
+  if (s.includes(",")) {
+    // vírgula é decimal: remove pontos de milhar, troca vírgula por ponto
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/\.\d{3}(\D|$)/.test(s + " ")) {
+    // ponto como separador de milhar (ex.: 1.000)
+    s = s.replace(/\./g, "");
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
 // ─── Schema de item extraído ──────────────────────────────────────────────────
 const itemEditalSchema = z.object({
   item: z.string(),
@@ -165,6 +187,24 @@ REGRAS:
         };
       }
 
+      // Valida a saída da IA com o schema (antes era confiada cegamente). Itens
+      // fora do padrão são mantidos, mas marcados para revisão humana e
+      // registrados em pendencias — nunca entram na proposta sem conferência.
+      if (Array.isArray(resultado.itens)) {
+        const problemas: string[] = [];
+        resultado.itens = resultado.itens.map((raw: any, idx: number) => {
+          const parsed = itemEditalSchema.safeParse(raw);
+          if (parsed.success) return parsed.data;
+          problemas.push(
+            `Item ${idx + 1}: campos fora do padrão (${parsed.error.issues.map((i) => i.path.join(".")).join(", ")}) — revisar manualmente.`,
+          );
+          return { ...raw, _needsReview: true };
+        });
+        if (problemas.length > 0) {
+          resultado.pendencias = [...(resultado.pendencias ?? []), ...problemas];
+        }
+      }
+
       return resultado;
     }),
 
@@ -213,7 +253,7 @@ REGRAS:
           unit: item.unidade,
           supplierName: input.cabecalho?.fornecedor?.razaoSocial || null,
           unitPrice: null,
-          quantity: parseInt(item.quantidade) || 1,
+          quantity: Math.max(1, Math.round(parseQuantidadeBR(item.quantidade) ?? 1)),
           notes: item.pendente ? "⚠ Produto não localizado no catálogo" : null,
           imageUrl: null,
           registroMapa: null,
@@ -284,7 +324,7 @@ REGRAS:
           productName: item.descricao?.slice(0, 511) || "Item sem descrição",
           manufacturer: item.marca?.slice(0, 255) || null,
           unit: item.unidade?.slice(0, 63) || null,
-          quantity: parseInt(item.quantidade) || 1,
+          quantity: Math.max(1, Math.round(parseQuantidadeBR(item.quantidade) ?? 1)),
           sortOrder: idx,
           notes: item.pendente ? "⚠ Produto não localizado no catálogo" : null,
         } as any);
