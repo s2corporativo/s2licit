@@ -52,7 +52,11 @@ warnIfMissingInProduction(
 );
 
 export const ENV = {
-  appId: process.env.VITE_APP_ID ?? "",
+  // Identificador da aplicação embutido no token de sessão. Era uma variável
+  // da plataforma Manus (VITE_APP_ID); fora dela precisa de um valor padrão
+  // NÃO VAZIO, senão verifySession rejeita toda sessão (exige appId não-vazio)
+  // e o login "correto" nunca entra. O valor só precisa ser consistente.
+  appId: process.env.VITE_APP_ID || "s2licit",
   cookieSecret: resolveCookieSecret(),
   databaseUrl,
   encryptionKey,
