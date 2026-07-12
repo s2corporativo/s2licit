@@ -7,7 +7,7 @@
  */
 
 import puppeteer, { Browser, Page } from "puppeteer";
-import { getDb } from "../db";
+import { getDb, recordPriceHistory } from "../db";
 import { products, scraperConfigs, scraperLogs, productSupplierOffers } from "../../drizzle/schema";
 import { eq, and, or, like } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
@@ -234,28 +234,31 @@ export class ScraperEngine {
     // Verificar sucesso
     const currentUrl = this.page.url();
     const pageText = await this.page.evaluate(() => document.body?.innerText ?? "");
+    // Sinal positivo: se ainda há campo de senha na tela, o login NÃO passou.
+    const stillHasPasswordField = await this.page.evaluate(
+      () => !!document.querySelector('input[type="password"]'),
+    );
+
+    const hasErrorText =
+      pageText.toLowerCase().includes("senha incorreta") ||
+      pageText.toLowerCase().includes("usuário não encontrado") ||
+      pageText.toLowerCase().includes("credenciais inválidas");
 
     const loginFailed =
       (cfg.loginSuccessUrl && !currentUrl.includes(cfg.loginSuccessUrl)) ||
       (cfg.loginSuccessText && !pageText.includes(cfg.loginSuccessText)) ||
       currentUrl.includes("login") ||
-      pageText.toLowerCase().includes("senha incorreta") ||
-      pageText.toLowerCase().includes("usuário não encontrado") ||
-      pageText.toLowerCase().includes("credenciais inválidas");
-
-    if (loginFailed && !cfg.loginSuccessUrl && !cfg.loginSuccessText) {
-      // Sem critério de sucesso definido — assumir OK se não há erro óbvio
-      if (!pageText.toLowerCase().includes("senha incorreta")) {
-        this.addLog("Login concluído (sem critério de sucesso definido).");
-        return;
-      }
-    }
+      hasErrorText ||
+      // Sem critério configurado, exige sinal positivo: página sem campo de
+      // senha. Antes assumia sucesso só por não ver "senha incorreta", raspando
+      // páginas deslogadas e gravando preços errados como oficiais.
+      (!cfg.loginSuccessUrl && !cfg.loginSuccessText && stillHasPasswordField);
 
     if (loginFailed) {
-      throw new Error(`Login falhou. URL atual: ${currentUrl}`);
+      throw new Error(`Login falhou ou não pôde ser confirmado. URL atual: ${currentUrl}`);
     }
 
-    this.addLog(`Login bem-sucedido. URL: ${currentUrl}`);
+    this.addLog(`Login confirmado. URL: ${currentUrl}`);
   }
 
   /** Extrai produtos de uma URL de categoria */
@@ -442,6 +445,12 @@ export class ScraperEngine {
           await db.update(products)
             .set({ price: String(sp.price), updatedAt: new Date() })
             .where(and(eq(products.id, productId), eq(products.supplierId, supplierId)));
+
+          // Versiona o preço capturado no histórico (antes o scraping não
+          // registrava, deixando alertas de variação cegos para a captura).
+          try {
+            await recordPriceHistory({ productId, supplierId, price: String(sp.price) });
+          } catch { /* não bloqueia a captura por falha de histórico */ }
         }
       } catch (err: any) {
         errors.push(`Erro no produto "${sp.name}": ${err?.message}`);
@@ -516,6 +525,13 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
       allScraped.push(...prods);
     }
     result.productsScraped = allScraped.length;
+
+    // Fail-closed: 0 produtos capturados quase sempre é falha silenciosa
+    // (login não confirmado ou seletor CSS quebrado). Antes marcava "sucesso"
+    // e a equipe confiava em preços não atualizados.
+    if (allScraped.length === 0) {
+      throw new Error("Nenhum produto capturado — verifique login e seletores (possível falha silenciosa).");
+    }
 
     // Match e atualização
     const { matched, updated, created, errors } = await engine.matchAndUpdate(

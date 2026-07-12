@@ -202,13 +202,28 @@ export function estatisticasPreco(resultados: PncpItemResultado[]): {
   maximo: number | null;
   mediana: number | null;
 } {
-  const valores = resultados
+  let valores = resultados
     .map((r) => r.valorUnitarioHomologado)
     .filter((v): v is number => typeof v === "number" && v > 0)
     .sort((a, b) => a - b);
 
   if (valores.length === 0) {
     return { amostras: 0, media: null, minimo: null, maximo: null, mediana: null };
+  }
+
+  // Remove outliers (preço inexequível ou erro de cadastro) por IQR quando há
+  // amostra suficiente — antes um valor absurdo distorcia média/mín/máx usados
+  // como referência de preço.
+  if (valores.length >= 8) {
+    const q = (p: number) => {
+      const idx = (valores.length - 1) * p;
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      return valores[lo] + (valores[hi] - valores[lo]) * (idx - lo);
+    };
+    const q1 = q(0.25), q3 = q(0.75), iqr = q3 - q1;
+    const lim = [q1 - 1.5 * iqr, q3 + 1.5 * iqr];
+    const filtrados = valores.filter((v) => v >= lim[0] && v <= lim[1]);
+    if (filtrados.length >= 4) valores = filtrados;
   }
 
   const soma = valores.reduce((s, v) => s + v, 0);

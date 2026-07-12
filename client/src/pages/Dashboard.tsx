@@ -168,17 +168,10 @@ function KpiCard({
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
-  const [period, setPeriod] = useState<Period>(() => {
-    try { return (localStorage.getItem("dash_period") as Period) ?? "30d"; } catch { return "30d"; }
-  });
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [catalogCollapsed, setCatalogCollapsed] = useState(false);
   const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
-
-  useEffect(() => {
-    try { localStorage.setItem("dash_period", period); } catch { /* noop */ }
-  }, [period]);
 
   // ── Queries ──
   const { data: stats, isLoading: statsLoading } = trpc.dashboard.stats.useQuery();
@@ -247,7 +240,6 @@ export default function Dashboard() {
       ) / (catalogTotal * 3)) * 100)
     : 100;
 
-  const PERIOD_LABELS: Record<Period, string> = { today: "Hoje", "7d": "7 dias", "30d": "30 dias", month: "Mês atual" };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(26,63,143,0.08),_transparent_36%),linear-gradient(180deg,#f8fbff_0%,#f2f5fb_45%,#eef2f8_100%)]">
@@ -273,20 +265,6 @@ export default function Dashboard() {
                   Orçamentos · Fornecedores · Propostas · Licitações
                 </p>
               </div>
-            </div>
-            {/* Filtro de período */}
-            <div className="flex items-center gap-1 rounded-xl border border-white/20 bg-white/10 p-1 shadow-inner shadow-white/10">
-              {(["today", "7d", "30d", "month"] as Period[]).map(p => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition-all ${
-                    period === p ? "bg-white text-blue-900 shadow-sm" : "text-white/75 hover:bg-white/10 hover:text-white"
-                  }`}
-                >
-                  {PERIOD_LABELS[p]}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -1020,7 +998,7 @@ export default function Dashboard() {
               <div className="text-[10px] font-black tracking-widest uppercase text-rose-700 mb-3 flex items-center gap-1.5"><ShieldAlert size={11} /> Financeiro</div>
               <div className="space-y-1.5">
                 {[
-                  { href: "/controle-financeiro", label: "Controle Financeiro", desc: "Pedidos e receitas" },
+                  { href: "/financeiro", label: "Controle Financeiro", desc: "Pedidos e receitas" },
                   { href: "/propostas", label: "Propostas Comerciais", desc: "Gerir e acompanhar" },
                 ].map(a => (
                   <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-rose-50 transition-colors group rounded-sm">

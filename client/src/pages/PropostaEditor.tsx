@@ -25,7 +25,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import { toast } from "sonner";
-import { PregoItemSearchDialog } from "@/components/PregoItemSearchDialog";
 
 // ─── Item Row ─────────────────────────────────────────────────────────────────
 function ItemRow({
@@ -610,7 +609,6 @@ export default function PropostaEditor() {
 
   // ── Manual item modal ──────────────────────────────────────────────────────
   const [showManualModal, setShowManualModal] = useState(false);
-  const [showPregoSearchDialog, setShowPregoSearchDialog] = useState(false);
   const emptyManualForm = {
     productName: "",
     activeIngredient: "",
@@ -1189,14 +1187,6 @@ export default function PropostaEditor() {
           <div className="flex items-center justify-between mb-2 print:hidden">
             <div className="text-[10px] font-bold tracking-widest uppercase text-gray-400">Itens da Proposta</div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowPregoSearchDialog(true)}
-                className="flex items-center gap-2 border border-blue-800 px-3 py-1.5 text-xs font-bold text-blue-800 hover:bg-blue-50 transition-colors"
-                title="Buscar itens em PNCP, Compras MG e Portal de Compras Públicas"
-              >
-                <Search size={12} />
-                Buscar Itens do Pregão
-              </button>
               <button
                 onClick={() => setShowManualModal(true)}
                 className="flex items-center gap-2 border border-gray-900 px-3 py-1.5 text-xs font-bold text-gray-900 hover:bg-gray-900 hover:text-white transition-colors"
@@ -1837,31 +1827,6 @@ export default function PropostaEditor() {
           </div>
         </div>
       )}
-      {/* Diálogo de Busca de Itens de Pregão */}
-      <PregoItemSearchDialog
-        open={showPregoSearchDialog}
-        onOpenChange={setShowPregoSearchDialog}
-        onItemsSelected={(items) => {
-          // Adicionar itens selecionados à proposta
-          items.forEach((item) => {
-            addManualItem.mutate({
-              proposalId: id,
-              productName: item.description,
-              activeIngredient: "",
-              manufacturer: "",
-              concentration: "",
-              presentation: "",
-              unit: item.unit,
-              supplierName: "",
-              registroMapa: "",
-              unitPrice: item.estimatedValue ? String(item.estimatedValue) : "",
-              quantity: item.quantity,
-              notes: `Origem: ${item.platform} | ID: ${item.id}`,
-            });
-          });
-        }}
-      />
-
       {/* Modal de Parcelamento ao Marcar como Entregue */}
       {showInstallmentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

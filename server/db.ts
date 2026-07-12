@@ -1149,6 +1149,22 @@ export async function deleteProposal(id: number) {
   await db.delete(proposals).where(eq(proposals.id, id));
 }
 
+/**
+ * Recalcula e persiste proposals.totalValue a partir da soma dos itens.
+ * Sem isto, o total ficava sempre nulo e o faturamento (que depende de
+ * `if (proposal.totalValue)`) nunca era gerado ao entregar.
+ */
+export async function recalcProposalTotal(proposalId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const [row] = await db
+    .select({ total: sql<number>`COALESCE(SUM(CAST(${proposalItems.totalPrice} AS DECIMAL(15,2))), 0)` })
+    .from(proposalItems)
+    .where(eq(proposalItems.proposalId, proposalId));
+  const total = Number(row?.total ?? 0);
+  await db.update(proposals).set({ totalValue: total.toFixed(2) as any }).where(eq(proposals.id, proposalId));
+}
+
 export async function addProposalItem(data: InsertProposalItem) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
@@ -1167,6 +1183,7 @@ export async function addProposalItem(data: InsertProposalItem) {
     totalPrice: total as any,
     sortOrder: nextNum,
   });
+  await recalcProposalTotal(data.proposalId);
   return (result as any).insertId as number;
 }
 
@@ -1186,12 +1203,16 @@ export async function updateProposalItem(id: number, data: Partial<InsertProposa
     }
   }
   await db.update(proposalItems).set(data).where(eq(proposalItems.id, id));
+  const [it] = await db.select({ proposalId: proposalItems.proposalId }).from(proposalItems).where(eq(proposalItems.id, id)).limit(1);
+  if (it) await recalcProposalTotal(it.proposalId);
 }
 
 export async function removeProposalItem(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
+  const [it] = await db.select({ proposalId: proposalItems.proposalId }).from(proposalItems).where(eq(proposalItems.id, id)).limit(1);
   await db.delete(proposalItems).where(eq(proposalItems.id, id));
+  if (it) await recalcProposalTotal(it.proposalId);
 }
 
 // ─── Proposal Administration ─────────────────────────────────────────────────
@@ -2501,6 +2522,8 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
       price: products.price,
       concentration: products.concentration,
       presentation: products.presentation,
+      pharmaceuticalForm: products.pharmaceuticalForm,
+      especieAnimal: products.especieAnimal,
       importBatchId: products.importBatchId,
     })
     .from(products)
@@ -2508,9 +2531,12 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(baseCondition);
 
-  // 2. Normaliza e agrupa por activeIngredient
-  const normalize = (s: string) =>
-    s.toLowerCase()
+  // 2. Normaliza e agrupa por (princ\u00edpio ativo + concentra\u00e7\u00e3o + forma + esp\u00e9cie).
+  //    Antes agrupava S\u00d3 por princ\u00edpio ativo, tratando como equivalentes
+  //    "Amoxicilina 250mg comprimido (c\u00e3o)" e "Amoxicilina 150mg/mL injet\u00e1vel
+  //    (bovino)". A chave composta evita esse falso positivo.
+  const normalize = (s: string | null | undefined) =>
+    (s ?? "").toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, " ")
@@ -2519,7 +2545,14 @@ export async function previewEquivalenceGroups(opts: PreviewEquivOptions = {}): 
   const grouped = new Map<string, typeof allProducts>();
   for (const p of allProducts) {
     if (!p.activeIngredient?.trim()) continue;
-    const key = normalize(p.activeIngredient);
+    // Forma: usa pharmaceuticalForm; cai para presentation quando ausente.
+    const forma = normalize(p.pharmaceuticalForm) || normalize(p.presentation);
+    const key = [
+      normalize(p.activeIngredient),
+      normalize(p.concentration),
+      forma,
+      normalize(p.especieAnimal),
+    ].join("|");
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key)!.push(p);
   }

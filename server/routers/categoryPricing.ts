@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { precoFinalUnificado } from "../services/precoUnificado";
 import {
   listCategoryPricingRules,
   getCategoryPricingRule,
@@ -228,18 +229,22 @@ export const categoryPricingRouter = router({
             ? input.basePrice * (freightValue / 100)
             : freightValue;
 
-        const priceAfterTax = input.basePrice * (1 + totalTax);
-        const priceAfterFreight = priceAfterTax + freightAmount;
-        const finalPrice = priceAfterFreight * (1 + margin);
+        // Fórmula unificada (divisor, imposto por dentro) — antes markup.
+        const finalPrice = precoFinalUnificado({
+          custo: input.basePrice, margemPct: margin * 100,
+          impostosPct: totalTax * 100, freteUnit: freightAmount,
+        }) ?? input.basePrice;
 
         return {
           basePrice: input.basePrice,
           finalPrice: Math.round(finalPrice * 100) / 100,
           ruleFound: true,
           breakdown: {
-            taxAmount: priceAfterTax - input.basePrice,
+            // Imposto por dentro: % sobre a venda (finalPrice).
+            taxAmount: Math.round(finalPrice * totalTax * 100) / 100,
             freightAmount,
-            marginAmount: finalPrice - priceAfterFreight,
+            marginAmount:
+              Math.round((finalPrice - input.basePrice - freightAmount - finalPrice * totalTax) * 100) / 100,
           },
         };
       } catch (error) {

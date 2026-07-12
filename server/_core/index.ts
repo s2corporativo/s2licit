@@ -9,7 +9,9 @@ import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "
 import { initScheduledJobs } from "../services/scheduledJobs";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
+import type { Request, Response, NextFunction } from "express";
 import { generateProposalPdf, type DeclarationTemplate } from "../proposalPdf";
 import { exportProductsToExcel, importProductsFromExcel } from "../exportExcel";
 import { getProposalWithItems, getCompanySettings, upsertCompanySettings, getDb } from "../db";
@@ -68,9 +70,21 @@ async function startServer() {
   ensurePasswordColumn()
     .then(() => ensureAdminUser())
     .catch(err => console.error("[LocalAuth] Falha na inicialização:", err));
+  // Guarda de autenticação para as rotas REST fora do tRPC (download de PDF,
+  // exportação/importação de catálogo, upload de logo). Sem isto, essas rotas
+  // ficavam abertas a qualquer anônimo (IDOR: baixar proposta trocando o id).
+  const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      await sdk.authenticateRequest(req);
+      next();
+    } catch {
+      res.status(401).json({ error: "Não autenticado" });
+    }
+  };
+
   // Logo upload route (multipart/form-data)
   const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-  app.post("/api/upload/logo", logoUpload.single("logo"), async (req: any, res: any) => {
+  app.post("/api/upload/logo", requireAuth, logoUpload.single("logo"), async (req: any, res: any) => {
     try {
       if (!req.file) {
         res.status(400).json({ error: "Nenhum arquivo enviado" });
@@ -89,7 +103,7 @@ async function startServer() {
   });
 
   // PDF download route for proposals
-  app.get("/api/proposals/:id/pdf", async (req, res) => {
+  app.get("/api/proposals/:id/pdf", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
@@ -133,7 +147,7 @@ async function startServer() {
   });
 
   // ─── Exportação do catálogo em Excel ─────────────────────────────────────────
-  app.get("/api/products/export-excel", async (req: any, res: any) => {
+  app.get("/api/products/export-excel", requireAuth, async (req: any, res: any) => {
     try {
       const filters: Record<string, any> = {};
       if (req.query.supplierId) filters.supplierId = parseInt(req.query.supplierId);
@@ -157,7 +171,7 @@ async function startServer() {
 
   // ─── Importação de Excel para atualização em massa ────────────────────────────
   const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-  app.post("/api/products/import-excel-update", excelUpload.single("file"), async (req: any, res: any) => {
+  app.post("/api/products/import-excel-update", requireAuth, excelUpload.single("file"), async (req: any, res: any) => {
     try {
       if (!req.file) {
         res.status(400).json({ error: "Nenhum arquivo enviado" });

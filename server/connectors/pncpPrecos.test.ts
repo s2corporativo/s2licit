@@ -38,4 +38,17 @@ describe("estatisticasPreco", () => {
     expect(s.minimo).toBe(100);
     expect(s.maximo).toBe(200);
   });
+
+  it("remove outliers por IQR quando há amostra suficiente (>=8)", () => {
+    const s = estatisticasPreco([r(10), r(10), r(11), r(11), r(12), r(12), r(13), r(1000)]);
+    // O 1000 (inexequível/erro) é descartado; máximo volta a um valor real.
+    expect(s.maximo).toBe(13);
+    expect(s.amostras).toBe(7);
+  });
+
+  it("não remove nada em amostras pequenas (<8)", () => {
+    const s = estatisticasPreco([r(10), r(1000)]);
+    expect(s.maximo).toBe(1000);
+    expect(s.amostras).toBe(2);
+  });
 });

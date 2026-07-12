@@ -162,12 +162,22 @@ export async function generateProposalPdf(
   declarations: DeclarationTemplate[] = []
 ): Promise<Buffer> {
   return new Promise(async (resolve, reject) => {
+    // Identificação da empresa: o banco (company_settings) vence o fallback de
+    // env. Antes só o cabeçalho usava o banco; rodapé, assinatura e declarações
+    // usavam env (CNPJ vazio), gerando peças vinculantes com dados divergentes.
+    const co = { ...S2_COMPANY };
+    if (company) {
+      for (const k of ["name", "cnpj", "address", "city", "state", "zipCode", "phone", "email", "bankName", "bankAgency", "bankAccount"] as const) {
+        const v = (company as any)[k];
+        if (typeof v === "string" && v.trim()) (co as any)[k] = v;
+      }
+    }
     const doc = new PDFDocument({
       size: "A4",
       margins: { top: 50, bottom: 70, left: 50, right: 50 },
       info: {
         Title: `Proposta Comercial — ${proposal.title}`,
-        Author: S2_COMPANY.name,
+        Author: co.name,
       },
     });
 
@@ -194,13 +204,13 @@ export async function generateProposalPdf(
         .font("Helvetica-Bold")
         .fontSize(7)
         .fillColor(WHITE)
-        .text(S2_COMPANY.name, 50, footerY + 8, { width: pageWidth / 2 });
+        .text(co.name, 50, footerY + 8, { width: pageWidth / 2 });
 
       doc
         .font("Helvetica")
         .fontSize(6.5)
         .fillColor("#BFD0F0")
-        .text(`CNPJ ${S2_COMPANY.cnpj}`, 50, footerY + 18, {
+        .text(`CNPJ ${co.cnpj}`, 50, footerY + 18, {
           width: pageWidth / 2,
         });
 
@@ -209,7 +219,7 @@ export async function generateProposalPdf(
         .fontSize(6.5)
         .fillColor("#BFD0F0")
         .text(
-          `${S2_COMPANY.address}, ${S2_COMPANY.city} ${S2_COMPANY.state} — ${S2_COMPANY.zipCode}`,
+          `${co.address}, ${co.city} ${co.state} — ${co.zipCode}`,
           50,
           footerY + 28,
           { width: pageWidth / 2 }
@@ -223,7 +233,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(6.5)
         .fillColor(WHITE)
-        .text(`Tel/WhatsApp: ${S2_COMPANY.phone}`, rightX, footerY + 8, {
+        .text(`Tel/WhatsApp: ${co.phone}`, rightX, footerY + 8, {
           width: rightW,
         });
 
@@ -231,7 +241,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(6.5)
         .fillColor("#BFD0F0")
-        .text(`E-mail: ${S2_COMPANY.email}`, rightX, footerY + 18, {
+        .text(`E-mail: ${co.email}`, rightX, footerY + 18, {
           width: rightW,
         });
 
@@ -240,7 +250,7 @@ export async function generateProposalPdf(
         .fontSize(6.5)
         .fillColor("#BFD0F0")
         .text(
-          `${S2_COMPANY.bankName}  Ag ${S2_COMPANY.bankAgency}  CC ${S2_COMPANY.bankAccount}`,
+          `${co.bankName}  Ag ${co.bankAgency}  CC ${co.bankAccount}`,
           rightX,
           footerY + 28,
           { width: rightW }
@@ -289,19 +299,19 @@ export async function generateProposalPdf(
     const textEndX = s2LogoLoaded ? 50 + pageWidth - 140 : 50 + pageWidth;
     const textWidth = textEndX - textStartX;
 
-    const displayName = company?.name ?? S2_COMPANY.name;
+    const displayName = company?.name ?? co.name;
     doc
       .font("Helvetica-Bold")
       .fontSize(13)
       .fillColor(BLACK)
       .text(displayName, textStartX, 52, { width: textWidth });
 
-    const cnpj = company?.cnpj ?? S2_COMPANY.cnpj;
-    const addr = company?.address ?? S2_COMPANY.address;
-    const city = company?.city ?? S2_COMPANY.city;
-    const state = company?.state ?? S2_COMPANY.state;
-    const phone = company?.phone ?? S2_COMPANY.phone;
-    const email = company?.email ?? S2_COMPANY.email;
+    const cnpj = company?.cnpj ?? co.cnpj;
+    const addr = company?.address ?? co.address;
+    const city = company?.city ?? co.city;
+    const state = company?.state ?? co.state;
+    const phone = company?.phone ?? co.phone;
+    const email = company?.email ?? co.email;
 
     const companyDetails: string[] = [];
     if (cnpj) companyDetails.push(`CNPJ: ${cnpj}`);
@@ -704,9 +714,9 @@ export async function generateProposalPdf(
 
     // ── BANK INFO ─────────────────────────────────────────────────────────────
     {
-      const bankName = company?.bankName ?? S2_COMPANY.bankName;
-      const bankAgency = company?.bankAgency ?? S2_COMPANY.bankAgency;
-      const bankAccount = company?.bankAccount ?? S2_COMPANY.bankAccount;
+      const bankName = company?.bankName ?? co.bankName;
+      const bankAgency = company?.bankAgency ?? co.bankAgency;
+      const bankAccount = company?.bankAccount ?? co.bankAccount;
       const pixKey = company?.bankPixKey;
 
       if (rowY + 30 > doc.page.height - 80) {
@@ -757,7 +767,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(8)
         .fillColor(GRAY)
-        .text(S2_COMPANY.name, 50, finalSigY + 6, {
+        .text(co.name, 50, finalSigY + 6, {
           width: pageWidth / 2 - 20,
           align: "center",
         });
@@ -766,7 +776,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(7)
         .fillColor(GRAY)
-        .text(`CNPJ ${S2_COMPANY.cnpj}`, 50, finalSigY + 18, {
+        .text(`CNPJ ${co.cnpj}`, 50, finalSigY + 18, {
           width: pageWidth / 2 - 20,
           align: "center",
         });
@@ -825,7 +835,7 @@ export async function generateProposalPdf(
           .font("Helvetica")
           .fontSize(8)
           .fillColor(GRAY)
-          .text(S2_COMPANY.name, 50, declSigY + 6, {
+          .text(co.name, 50, declSigY + 6, {
             width: pageWidth / 2 - 20,
             align: "center",
           });
@@ -833,7 +843,7 @@ export async function generateProposalPdf(
           .font("Helvetica")
           .fontSize(7)
           .fillColor(GRAY)
-          .text(`CNPJ ${S2_COMPANY.cnpj}`, 50, declSigY + 18, {
+          .text(`CNPJ ${co.cnpj}`, 50, declSigY + 18, {
             width: pageWidth / 2 - 20,
             align: "center",
           });
@@ -844,7 +854,7 @@ export async function generateProposalPdf(
           .fontSize(8)
           .fillColor(GRAY)
           .text(
-            `${S2_COMPANY.city}, ${formatDate(new Date())}`,
+            `${co.city}, ${formatDate(new Date())}`,
             50 + pageWidth / 2 + 10,
             declSigY + 6,
             { width: pageWidth / 2 - 10, align: "center" }

@@ -64,14 +64,7 @@ export class PricingService {
       });
     }
 
-    // 1. Calcular impostos
-    const icmsAmount = (basePrice * config.icmsPercentage) / 100;
-    const ipAmount = (basePrice * config.ipPercentage) / 100;
-    const pisAmount = (basePrice * config.pisPercentage) / 100;
-    const cofinsAmount = (basePrice * config.cofinsPercentage) / 100;
-    const totalTaxAmount = icmsAmount + ipAmount + pisAmount + cofinsAmount;
-
-    // 2. Calcular frete
+    // 1. Frete (custo de aquisição — recebe margem)
     let freightAmount = 0;
     if (config.freightType === "fixed") {
       freightAmount = config.freightValue;
@@ -79,17 +72,26 @@ export class PricingService {
       freightAmount = (basePrice * config.freightValue) / 100;
     }
 
-    // 3. Preço antes da margem (custo total = produto + impostos + frete)
-    const priceBeforeMargin = basePrice + totalTaxAmount + freightAmount;
-
-    // 4. Calcular margem REAL sobre o preço de venda
-    // FÓRMULA CORRETA: finalPrice = custo / (1 - margem%)
-    // Diferença do mark-up (errado): custo * (1 + margem%) → resulta em margem MENOR que o configurado
-    // Exemplo com 30%: custo=100 → markup daria 130 (margem real 23,1%), margem correta daria 142,86 (margem real 30%)
-    if (config.marginPercentage >= 100) {
-      throw new Error("Margem não pode ser 100% ou superior");
+    // 2. Impostos POR DENTRO (% sobre a venda), consistente com o custoTotal.
+    // Antes o ICMS era calculado sobre o custo (por fora), subdimensionando o
+    // tributo e empurrando o piso abaixo do custo real coberto.
+    const totalTaxPct =
+      config.icmsPercentage + config.ipPercentage + config.pisPercentage + config.cofinsPercentage;
+    const custoAquisicao = basePrice + freightAmount;
+    const divisor = 1 - (totalTaxPct + config.marginPercentage) / 100;
+    if (divisor <= 0) {
+      throw new Error("Impostos + margem somam 100% ou mais da venda — operação inviável.");
     }
-    let finalPrice = priceBeforeMargin / (1 - config.marginPercentage / 100);
+    // 3. Preço final (divisor): a venda cobre custo + frete + impostos + margem.
+    let finalPrice = custoAquisicao / divisor;
+
+    // 4. Decompõe os valores como % sobre a VENDA (por dentro).
+    const icmsAmount = (finalPrice * config.icmsPercentage) / 100;
+    const ipAmount = (finalPrice * config.ipPercentage) / 100;
+    const pisAmount = (finalPrice * config.pisPercentage) / 100;
+    const cofinsAmount = (finalPrice * config.cofinsPercentage) / 100;
+    const totalTaxAmount = icmsAmount + ipAmount + pisAmount + cofinsAmount;
+    const priceBeforeMargin = custoAquisicao + totalTaxAmount;
     const marginAmount = finalPrice - priceBeforeMargin;
 
     // 6. Aplicar limites

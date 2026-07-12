@@ -345,6 +345,8 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     output_schema,
     responseFormat,
     response_format,
+    maxTokens,
+    max_tokens,
   } = params;
 
   const payload: Record<string, unknown> = {
@@ -365,7 +367,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   payload.model = provider.model;
-  payload.max_tokens = 32768;
+  // Respeita o teto pedido pelo chamador (antes era fixo em 32768, inflando
+  // custo/latência e ignorando a intenção de quem chamou).
+  payload.max_tokens = Math.min(maxTokens ?? max_tokens ?? 8192, 32768);
   if (provider.kind === "forge") {
     // Parâmetro específico do endpoint legado (Manus Forge)
     payload.thinking = { budget_tokens: 128 };
@@ -388,14 +392,30 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(provider.url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${provider.apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  // Timeout: sem isto, uma chamada travada deixava a request tRPC pendurada
+  // indefinidamente. Configurável por env (padrão 90s).
+  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 90000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(provider.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`LLM invoke timeout após ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
