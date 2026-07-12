@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Radar, Search, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -64,7 +64,11 @@ export default function RadarPncp() {
     });
   };
 
-  if (query.error) toast.error("Falha ao consultar o PNCP: " + query.error.message);
+  // Toast de erro num efeito (antes era disparado no corpo do render, empilhando
+  // a cada re-render).
+  useEffect(() => {
+    if (query.error) toast.error("Falha ao consultar o Radar: " + query.error.message);
+  }, [query.error]);
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
