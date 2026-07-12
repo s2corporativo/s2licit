@@ -117,6 +117,8 @@ export const products = mysqlTable(
     ncm: varchar("ncm", { length: 16 }),                    // Código NCM (Nomenclatura Comum do Mercosul)
     laboratorio: varchar("laboratorio", { length: 256 }),   // Laboratório fabricante
     especieAnimal: varchar("especieAnimal", { length: 256 }), // Espécie animal (cão, gato, bovino, etc.)
+    viaAdministracao: varchar("viaAdministracao", { length: 128 }), // Via (oral, IM, IV, tópica, pour-on...)
+    validadeMeses: int("validadeMeses"),                    // Prazo de validade (shelf-life) em meses
     classeTerapeutica: varchar("classeTerapeutica", { length: 256 }), // Classe terapêutica (Anestésico, Antibiótico, etc.)
     // ─── Campos Padronizados V2 ───────────────────────────────────────────────
     nomeProduto: varchar("nomeProduto", { length: 512 }),           // Nome padronizado (alias de name)

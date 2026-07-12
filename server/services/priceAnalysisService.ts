@@ -206,16 +206,23 @@ export async function getSupplierComparison(): Promise<SupplierComparison[]> {
   const supplierList = await db.select().from(suppliers);
   const comparisons: SupplierComparison[] = [];
 
-  // Obter todos os preços para calcular percentis globais
+  // Mediana de preço POR CATEGORIA — comparar a média global de um fornecedor
+  // enviesava tudo pelo mix (fornecedor de seringas vs de antibióticos). Aqui
+  // cada produto é comparado com a mediana da sua própria categoria.
   const allProducts = await db.select().from(products);
-  const allPrices = allProducts
-    .map((p) => parseFloat(String(p.price || 0)))
-    .filter((p) => p > 0)
-    .sort((a, b) => a - b);
-
-  const globalP25 = allPrices[Math.floor(allPrices.length * 0.25)];
-  const globalP50 = allPrices[Math.floor(allPrices.length * 0.5)];
-  const globalP75 = allPrices[Math.floor(allPrices.length * 0.75)];
+  const precoPorCategoria = new Map<number, number[]>();
+  for (const p of allProducts) {
+    const preco = parseFloat(String(p.price || 0));
+    if (preco > 0 && p.categoryId != null) {
+      if (!precoPorCategoria.has(p.categoryId)) precoPorCategoria.set(p.categoryId, []);
+      precoPorCategoria.get(p.categoryId)!.push(preco);
+    }
+  }
+  const medianaCategoria = new Map<number, number>();
+  for (const [cat, precos] of precoPorCategoria) {
+    precos.sort((a, b) => a - b);
+    medianaCategoria.set(cat, precos[Math.floor(precos.length / 2)]);
+  }
 
   for (const supplier of supplierList) {
     const supplierProducts = await db
@@ -241,13 +248,26 @@ export async function getSupplierComparison(): Promise<SupplierComparison[]> {
     const p50 = prices[Math.floor(prices.length * 0.5)];
     const p75 = prices[Math.floor(prices.length * 0.75)];
 
-    // Determinar competitividade
+    // Competitividade = fração de produtos do fornecedor abaixo da mediana da
+    // sua categoria (comparação normalizada por categoria, não pela média do mix).
+    let comparaveis = 0;
+    let abaixoDaMediana = 0;
+    for (const prod of supplierProducts) {
+      const preco = parseFloat(String(prod.price || 0));
+      const med = prod.categoryId != null ? medianaCategoria.get(prod.categoryId) : undefined;
+      if (preco > 0 && med != null) {
+        comparaveis++;
+        if (preco <= med) abaixoDaMediana++;
+      }
+    }
+    const fracaoAbaixo = comparaveis > 0 ? abaixoDaMediana / comparaveis : 0.5;
+
     let competitiveness: "very_competitive" | "competitive" | "average" | "expensive";
-    if (averagePrice < globalP25) {
+    if (fracaoAbaixo >= 0.65) {
       competitiveness = "very_competitive";
-    } else if (averagePrice < globalP50) {
+    } else if (fracaoAbaixo >= 0.5) {
       competitiveness = "competitive";
-    } else if (averagePrice < globalP75) {
+    } else if (fracaoAbaixo >= 0.35) {
       competitiveness = "average";
     } else {
       competitiveness = "expensive";

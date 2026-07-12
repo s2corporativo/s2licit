@@ -6,6 +6,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
+import { ensureProductColumns } from "./ensureSchema";
 import { initScheduledJobs } from "../services/scheduledJobs";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -70,6 +71,7 @@ async function startServer() {
   ensurePasswordColumn()
     .then(() => ensureAdminUser())
     .catch(err => console.error("[LocalAuth] Falha na inicialização:", err));
+  ensureProductColumns().catch(err => console.error("[Schema] Falha na inicialização:", err));
   // Guarda de autenticação para as rotas REST fora do tRPC (download de PDF,
   // exportação/importação de catálogo, upload de logo). Sem isto, essas rotas
   // ficavam abertas a qualquer anônimo (IDOR: baixar proposta trocando o id).
