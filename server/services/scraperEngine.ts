@@ -178,8 +178,8 @@ export class ScraperEngine {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--single-process",
-        "--no-zygote",
+        // --single-process/--no-zygote foram removidos: causam crash do
+        // renderer do Chromium em páginas pesadas (fonte comum de "não captura").
       ],
     });
     this.addLog("Navegador iniciado.");
@@ -500,13 +500,20 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
   const scraperType = config.scraperType.toLowerCase();
   const cfg = FORNECEDOR_CONFIGS[scraperType] ?? FORNECEDOR_CONFIGS.generico;
 
-  // Descriptografar credenciais
+  // Credenciais. O e-mail é armazenado em TEXTO PURO (não é segredo) — algumas
+  // telas gravavam sem criptografar e o motor tentava descriptografar, quebrando
+  // 100% das capturas. Aqui toleramos ambos: se já parece e-mail, usa direto;
+  // senão tenta descriptografar (registros antigos). Só a SENHA é criptografada.
   let email: string, password: string;
+  if (config.email && config.email.includes("@")) {
+    email = config.email;
+  } else {
+    try { email = decryptPassword(config.email); } catch { email = config.email ?? ""; }
+  }
   try {
-    email = decryptPassword(config.email);
     password = decryptPassword(config.passwordHash);
   } catch {
-    throw new Error("Falha ao descriptografar credenciais do fornecedor");
+    throw new Error("Falha ao descriptografar a senha do fornecedor");
   }
 
   // Determinar URL de login
