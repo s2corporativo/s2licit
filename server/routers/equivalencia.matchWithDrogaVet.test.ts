@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getDb } from "../db";
-import { reference_drogavet_formulas } from "../../drizzle/schema";
 
 /**
  * Testes para o endpoint equivalencia.matchWithDrogaVet

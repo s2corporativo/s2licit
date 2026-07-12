@@ -1,14 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import {
-  ChevronDown,
-  ChevronUp,
   Edit2,
-  ExternalLink,
   FileText,
-  Minus,
   Plus,
-  Printer,
   Trash2,
   Workflow,
   X,

@@ -7,7 +7,7 @@
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
-import { scraperConfigs, scraperLogs, suppliers } from "../../drizzle/schema";
+import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
 import { executarScraper, FORNECEDOR_CONFIGS } from "../services/scraperEngine";

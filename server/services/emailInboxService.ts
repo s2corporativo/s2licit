@@ -1,6 +1,5 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
-import { ENV } from "../_core/env";
 
 /**
  * Conector IMAP para buscar e-mails de pedido de cotação.

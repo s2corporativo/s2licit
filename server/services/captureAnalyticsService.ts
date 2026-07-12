@@ -4,7 +4,7 @@ import {
   captureErrors,
   supplierCaptureConfigs,
 } from "../../drizzle/schema";
-import { eq, gte, lte, and, sql } from "drizzle-orm";
+import { eq, gte, lte, and } from "drizzle-orm";
 
 /**
  * Interface para estatísticas de captura

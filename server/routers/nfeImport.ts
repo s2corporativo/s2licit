@@ -5,15 +5,14 @@ import { parseNfeXml, validateNfeData } from "../services/nfeParserService";
 import {
   validateSupplierData,
   detectPriceAnomalies,
-  generateSupplierStats,
   type PriceUpdate,
 } from "../services/nfeSupplierService";
-import { processNfeForImport, validateProductsForImport } from "../services/nfeImportService";
+import { validateProductsForImport } from "../services/nfeImportService";
 import { summarizeBatchImportResults, summarizeBatchPreview } from "../services/nfeBatchImportUtils";
 import { createOrGetSupplier, createProductsFromNfe } from "../services/nfeProductImportService";
 import { getDb } from "../db";
 import { eq, and } from "drizzle-orm";
-import { products, suppliers, supplierImports, nfeImports } from "../../drizzle/schema";
+import { nfeImports } from "../../drizzle/schema";
 
 const batchXmlFileSchema = z.object({
   fileName: z.string().min(1, "Nome do arquivo obrigatório"),

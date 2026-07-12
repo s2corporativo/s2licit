@@ -1,6 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { eq, inArray } from "drizzle-orm";
-import { productCaptureHistory, products, suppliers, users } from "../../drizzle/schema";
+import { describe, it, expect } from "vitest";
 
 /**
  * Testes para o router captureReview

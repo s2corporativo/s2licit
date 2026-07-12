@@ -2,7 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  Bot, Play, RefreshCw, Plus, Trash2, Settings, CheckCircle2,
+  Bot, Play, RefreshCw, Plus, CheckCircle2,
   XCircle, Clock, AlertTriangle, Eye, EyeOff, Loader2,
   Globe, Key, Calendar, BarChart3, Shield, Zap,
 } from "lucide-react";

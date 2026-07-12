@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { asc, desc, eq, or } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { auditLogs, documentosHabilitacao } from "../../drizzle/schema";

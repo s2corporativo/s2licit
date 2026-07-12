@@ -63,7 +63,6 @@ import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 import { invokeLLM } from "./_core/llm";
-import { notifyOwner } from "./_core/notification";
 import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
 
 
@@ -72,23 +71,13 @@ import { z } from "zod";
 import {
   addEquivalenceMember,
   addProposalItem,
-  addQuotationItem,
-  bulkInsertProducts,
-  bulkUpdateProducts,
-  compareByActiveIngredient,
   createCategory,
-  createProduct,
   createEquivalenceGroup,
-  createImportLog,
   createProposal,
-  createQuotation,
   createSupplier,
-  deactivateProductsByBatch,
   deleteCategory,
   deleteEquivalenceGroup,
-  deleteProduct,
   deleteProposal,
-  deleteQuotation,
   deleteRequestingOrg,
   deleteSupplier,
   getDashboardStats,
@@ -97,32 +86,19 @@ import {
   getProductById,
   getProductsPerCategory,
   getProposalWithItems,
-  getQuotationWithItems,
   getRequestingOrgById,
   getSupplierById,
   listCategories,
   listCategoriesHierarchy,
   listEquivalenceGroups,
-  listImportLogs,
-  listProducts,
   listProposals,
-  listQuotations,
   listRequestingOrgs,
   listSuppliers,
   removeEquivalenceMember,
   removeProposalItem,
-  removeQuotationItem,
-  autocompleteSearch,
-  searchProductsByName,
-  applyImageByName,
-  smartSearch,
   updateCategory,
-  updateImportLog,
-  updateProduct,
   updateProposal,
   updateProposalItem,
-  updateQuotation,
-  updateQuotationItem,
   updateRequestingOrg,
   updateSupplier,
   upsertCompanySettings,
@@ -158,15 +134,12 @@ import {
   getProductPriceHistory,
   getProductsWithPriceAlert,
   listProductsWithLandedCost,
-  autoLinkImageUrls,
-  bulkApplyImageUrls,
   previewEquivalenceGroups,
   applyEquivalenceGroups,
   getEquivalenceStats,
   suggestProductsFromList,
   getDb,
   checkDuplicatesInRows,
-  mergeProductFromRow,
   // Synonyms
   listSynonyms,
   createSynonym,
@@ -184,20 +157,13 @@ import {
   getDefaultProposalTemplate,
   loadFeedbackMap,
   recordFeedback,
-  listFeedbacks,
-  deleteFeedback,
-  bulkDeleteFeedback,
   normalizeEditalTerm,
-  findDuplicateGroups,
-  mergeProductGroup,
 } from "./db";
 import {
   products, categories, suppliers, proposals,
   declarationTemplates, proposalDeclarations,
-  productSupplierPrices,
-  importLogs,
 } from "../drizzle/schema";
-import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc, lt, gt, gte } from "drizzle-orm";
+import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc } from "drizzle-orm";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, editorProcedure, router } from "./_core/trpc";

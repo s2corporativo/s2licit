@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   findOrCreateSupplier,
-  associateProductsWithSupplier,
   calculatePriceUpdates,
   generateSupplierImportSummary,
   validateSupplierData,

@@ -4,9 +4,6 @@ import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import {
   supplierCredentials,
-  supplierSessions,
-  SupplierCredential,
-  SupplierSession,
 } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { credentialEncryptionService } from "../services/credentialEncryptionService";

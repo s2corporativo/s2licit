@@ -15,17 +15,13 @@ import {
   listProducts,
   listSuppliers,
   listProposals,
-  listCategories,
   getFinancialSummary,
   getExpiringProposals,
   listFinancialEntries,
-  searchMasterProducts,
-  autocompleteSearch,
   smartSearch,
   compareByActiveIngredient,
   listImportLogs,
   getProductsPerCategory,
-  listProposalsAdmin,
   getProposalFinancialStats,
 } from "../db";
 

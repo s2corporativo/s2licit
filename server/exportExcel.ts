@@ -5,7 +5,7 @@
 import { readSheetAsObjects, writeSheetsToBuffer } from "./utils/spreadsheet";
 import { getDb } from "./db";
 import { products, categories, suppliers } from "../drizzle/schema";
-import { eq, and, inArray, like, or, isNull, isNotNull, asc } from "drizzle-orm";
+import { eq, and, like, or, isNull, asc } from "drizzle-orm";
 
 // ─── Cabeçalhos da planilha ────────────────────────────────────────────────────
 export const PRODUCT_EXCEL_HEADERS = [

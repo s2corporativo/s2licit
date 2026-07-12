@@ -1,5 +1,5 @@
 import { getDb } from "../db";
-import { supplierCaptureConfigs, suppliers } from "../../drizzle/schema";
+import { supplierCaptureConfigs } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
 import { parsePrecoBR } from "../utils/number";

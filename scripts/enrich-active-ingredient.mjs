@@ -8,7 +8,6 @@
 
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
-import { readFileSync } from "fs";
 
 // Carregar variáveis de ambiente
 dotenv.config({ path: ".env" });

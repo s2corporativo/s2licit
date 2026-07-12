@@ -2,7 +2,7 @@ import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
-import { eq, like, and, or, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 /**
  * Algoritmo de similaridade Jaro-Winkler simplificado

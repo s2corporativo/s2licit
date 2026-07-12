@@ -1,15 +1,11 @@
-import { and, count, desc, eq, or } from "drizzle-orm";
+import { desc, eq, or } from "drizzle-orm";
 import {
-  capturedProducts,
-  diligenciaWorkflows,
   documentosHabilitacao,
-  equivalenceMembers,
   executiveDecisionFactors,
   executiveDecisions,
   orgHistoryEvents,
   proposalItems,
   proposals,
-  requestingOrgs,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
 

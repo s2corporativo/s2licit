@@ -27,10 +27,6 @@ import {
   Square,
   Trash2,
   X,
-  FlaskConical,
-  Brain,
-  CheckCircle,
-  AlertCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";

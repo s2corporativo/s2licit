@@ -1,10 +1,9 @@
 import { trpc } from "@/lib/trpc";
 import { AlertCircle, AlertTriangle, CheckCircle2, FileSpreadsheet, GitMerge, Image as ImageIcon, Loader2, RefreshCw, Sparkles, Upload, X, XCircle } from "lucide-react";
 import Papa from "papaparse";
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { readObjects } from "@/lib/spreadsheet";
-import { ImportProgressDialog } from "@/components/ImportProgressDialog";
 import { ImportDuplicatesReviewModal } from "@/components/ImportDuplicatesReviewModal";
 
 // ParsedRow V2: campos exatos conforme especificação

@@ -8,7 +8,7 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { eq, desc } from "drizzle-orm";
 import { scraperConfigs, scraperLogs, suppliers } from "../../drizzle/schema";
-import { encryptPassword, decryptPassword } from "../utils/encryption";
+import { encryptPassword } from "../utils/encryption";
 import { executarScraper, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
 
 export const scraperMultiRouter = router({

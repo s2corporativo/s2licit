@@ -1,12 +1,9 @@
 import { getDb } from "../db";
 import {
   supplierSessions,
-  supplierCredentials,
   SupplierSession,
-  InsertSupplierSession,
 } from "../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
-import { credentialEncryptionService } from "./credentialEncryptionService";
 
 export interface SessionData {
   cookies?: Record<string, string>;

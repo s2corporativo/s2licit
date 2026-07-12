@@ -3,8 +3,6 @@ import { trpc } from "@/lib/trpc";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  BarChart,
-  Bar,
   LineChart,
   Line,
   PieChart,
@@ -18,8 +16,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import {
-  TrendingUp,
-  TrendingDown,
   Activity,
   AlertCircle,
   CheckCircle,

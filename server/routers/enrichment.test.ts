@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 
 // Mock do banco de dados
 const mockDb = {
