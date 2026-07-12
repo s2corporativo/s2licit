@@ -40,6 +40,8 @@ import {
   Percent,
   Truck,
   PackageCheck,
+  BookOpen,
+  Activity,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -54,6 +56,7 @@ const navGroups: NavGroup[] = [
       { href: "/busca-global", icon: Search, label: "Busca Global" },
       { href: "/agenda", icon: CalendarClock, label: "Agenda" },
       { href: "/desempenho", icon: Trophy, label: "Desempenho" },
+      { href: "/manual", icon: BookOpen, label: "Manual de Uso" },
     ],
   },
   {
@@ -141,6 +144,7 @@ const navGroups: NavGroup[] = [
       { href: "/central-ia", icon: Brain, label: "Central de IA" },
       { href: "/importar", icon: FileSpreadsheet, label: "Importar Planilha" },
       { href: "/importar-nfe", icon: Receipt, label: "Importar NF-e" },
+      { href: "/diagnostico", icon: Activity, label: "Central de Diagnóstico" },
       { href: "/configuracao", icon: Settings, label: "Configurações" },
     ],
   },

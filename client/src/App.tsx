@@ -70,6 +70,8 @@ const PostAwardContractsCenter = lazy(() => import("./pages/PostAwardContractsCe
 const IntelligentCaptureCenter = lazy(() => import("./pages/IntelligentCaptureCenter"));
 const DatabaseIntegrityCheck = lazy(() => named(import("./pages/DatabaseIntegrityCheck"), "DatabaseIntegrityCheck"));
 const Login = lazy(() => import("./pages/Login"));
+const Manual = lazy(() => import("./pages/Manual"));
+const Diagnostico = lazy(() => import("./pages/Diagnostico"));
 
 function PageLoading() {
   return (
@@ -100,6 +102,12 @@ function Router() {
         <Route path="/custo-total" component={CustoTotal} />
         <Route path="/pos-venda" component={PosVenda} />
         <Route path="/busca-global" component={BuscaGlobal} />
+        <Route path="/manual" component={Manual} />
+        <Route path="/diagnostico">
+          <RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor">
+            <Diagnostico />
+          </RequireAuth>
+        </Route>
         <Route path="/busca" component={BuscaRapida} />
         <Route path="/comparacao" component={Comparacao} />
         <Route path="/categorias" component={Categorias} />

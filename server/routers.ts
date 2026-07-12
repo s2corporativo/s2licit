@@ -58,6 +58,7 @@ import { taxRulesRouter } from "./routers/taxRules";
 import { fretesRouter } from "./routers/fretes";
 import { posVendaRouter } from "./routers/posVenda";
 import { buscaGlobalRouter } from "./routers/buscaGlobal";
+import { diagnosticoRouter } from "./routers/diagnostico";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
@@ -250,6 +251,7 @@ export const appRouter = router({
   fretes: fretesRouter,
   posVenda: posVendaRouter,
   buscaGlobal: buscaGlobalRouter,
+  diagnostico: diagnosticoRouter,
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
