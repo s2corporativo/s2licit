@@ -9,14 +9,14 @@ set -euo pipefail
 APP_DIR=/opt/s2licit
 cd "$APP_DIR"
 
-echo "==> [1/5] Docker"
+echo "==> [1/6] Docker"
 if ! command -v docker >/dev/null 2>&1; then
   echo "Instalando Docker..."
   curl -fsSL https://get.docker.com | sh
 fi
 docker --version
 
-echo "==> [2/5] Arquivo .env"
+echo "==> [2/6] Arquivo .env"
 if [ ! -f .env ]; then
   echo "Primeira instalação: gerando segredos..."
   MYSQL_ROOT_PASSWORD=$(openssl rand -hex 24)
@@ -94,7 +94,31 @@ else
   echo ".env já existe — mantendo segredos atuais."
 fi
 
-echo "==> [3/5] Build e subida dos containers"
+echo "==> [3/6] Domínio (HTTPS automático)"
+# DOMAIN chega como variável de ambiente só quando o workflow "Deploy VPS" é
+# disparado manualmente com o campo "domain" preenchido. Uma vez salvo no
+# .env, os deploys seguintes (inclusive automáticos, sem o campo) reaproveitam
+# o valor sem precisar informá-lo de novo.
+if [ -n "${DOMAIN:-}" ]; then
+  case "$DOMAIN" in
+    *[!A-Za-z0-9.-]*)
+      echo "⚠️  DOMAIN inválido (\"$DOMAIN\") — ignorando." >&2
+      DOMAIN=""
+      ;;
+  esac
+fi
+if [ -n "${DOMAIN:-}" ]; then
+  if grep -q '^DOMAIN=' .env; then
+    sed -i "s|^DOMAIN=.*|DOMAIN=${DOMAIN}|" .env
+  else
+    echo "DOMAIN=${DOMAIN}" >> .env
+  fi
+  echo "Domínio configurado: ${DOMAIN}"
+fi
+DOMAIN_ATUAL=$(grep '^DOMAIN=' .env 2>/dev/null | head -1 | cut -d= -f2 || true)
+[ -n "$DOMAIN_ATUAL" ] && echo "Domínio ativo: ${DOMAIN_ATUAL}" || echo "Nenhum domínio configurado (acesso só por IP)."
+
+echo "==> [4/6] Build e subida dos containers"
 # A VPS pode ter outros serviços/containers ocupando portas (Apache na 80,
 # outro app na 3000, algo em 127.0.0.1:8080...). Escolhemos portas livres
 # sem derrubar nada — e REVALIDAMOS a cada deploy: o que estava livre ontem
@@ -131,14 +155,25 @@ garantir_porta() {
   fi
   return 0
 }
-garantir_porta APP_HTTP_PORT 80 8080 8088 8090 8181
+if [ -n "$DOMAIN_ATUAL" ]; then
+  # 80/443 ficam reservados para o Caddy (proxy reverso com HTTPS
+  # automático). Se um deploy anterior (sem domínio) já tinha fixado a porta
+  # pública em 80, força a re-escolha para liberar a 80 para o Caddy.
+  atual_http=$(grep '^APP_HTTP_PORT=' .env 2>/dev/null | cut -d= -f2 || true)
+  if [ "$atual_http" = "80" ]; then
+    sed -i '/^APP_HTTP_PORT=/d' .env
+  fi
+  garantir_porta APP_HTTP_PORT 8080 8088 8090 8181
+else
+  garantir_porta APP_HTTP_PORT 80 8080 8088 8090 8181
+fi
 garantir_porta APP_LOCAL_PORT 3000 3001 3002 3010
 HTTP_PORT=$(grep '^APP_HTTP_PORT=' .env | cut -d= -f2)
 LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
 echo "Portas: pública :${HTTP_PORT} · local :${LOCAL_PORT}"
 docker compose up -d --build
 
-echo "==> [4/5] Aguardando o app ficar saudável (porta local ${LOCAL_PORT})"
+echo "==> [5/6] Aguardando o app ficar saudável (porta local ${LOCAL_PORT})"
 ok=0
 for i in $(seq 1 60); do
   if curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>/dev/null; then
@@ -155,13 +190,44 @@ else
   exit 1
 fi
 
-echo "==> [5/5] Estado final"
+if [ -n "$DOMAIN_ATUAL" ]; then
+  echo "==> [Extra] HTTPS via Caddy (${DOMAIN_ATUAL})"
+  if ! command -v caddy >/dev/null 2>&1; then
+    echo "Instalando Caddy..."
+    apt-get update -qq
+    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+      | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+      > /etc/apt/sources.list.d/caddy-stable.list
+    apt-get update -qq
+    apt-get install -y -qq caddy
+  fi
+  cat > /etc/caddy/Caddyfile <<EOF
+${DOMAIN_ATUAL} {
+    reverse_proxy 127.0.0.1:${LOCAL_PORT}
+}
+EOF
+  systemctl enable --now caddy >/dev/null 2>&1 || true
+  systemctl reload caddy 2>/dev/null || systemctl restart caddy
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+    ufw allow 80/tcp >/dev/null 2>&1 || true
+    ufw allow 443/tcp >/dev/null 2>&1 || true
+  fi
+  echo "Caddy configurado. O certificado HTTPS é emitido automaticamente (Let's Encrypt) assim que o DNS de ${DOMAIN_ATUAL} apontar para este servidor."
+fi
+
+echo "==> [6/6] Estado final"
 docker compose ps
 docker image prune -f >/dev/null 2>&1 || true
-sufixo=""
-[ "$HTTP_PORT" != "80" ] && sufixo=":${HTTP_PORT}"
-URL_FINAL="http://$(hostname -I | awk '{print $1}')${sufixo}/"
-# Mantém o arquivo de acesso com a URL correta (a porta pode ter mudado)
+if [ -n "$DOMAIN_ATUAL" ]; then
+  URL_FINAL="https://${DOMAIN_ATUAL}/"
+else
+  sufixo=""
+  [ "$HTTP_PORT" != "80" ] && sufixo=":${HTTP_PORT}"
+  URL_FINAL="http://$(hostname -I | awk '{print $1}')${sufixo}/"
+fi
+# Mantém o arquivo de acesso com a URL correta (a porta/domínio pode ter mudado)
 if [ -f /root/s2licit-acesso.txt ]; then
   sed -i "s|^URL:.*|URL:    ${URL_FINAL}|" /root/s2licit-acesso.txt || true
 fi

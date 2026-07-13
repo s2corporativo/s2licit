@@ -24,10 +24,15 @@ on:
         description: "Senha SSH (deixe vazio para usar o secret VPS_PASSWORD)"
         required: false
         default: ""
+      domain:
+        description: "Domínio para HTTPS automático via Caddy (ex.: s2.s2corporativo.com.br). Deixe vazio para não mexer. Uma vez configurado, fica salvo no .env da VPS e não precisa ser repetido nos próximos deploys."
+        required: false
+        default: ""
 
 env:
   DEPLOY_HOST: ${{ inputs.host || '13.140.167.153' }}
   DEPLOY_USER: ${{ inputs.ssh_user || 'root' }}
+  DEPLOY_DOMAIN: ${{ inputs.domain || '' }}
 
 concurrency:
   group: deploy-vps
@@ -71,7 +76,7 @@ jobs:
         run: |
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "bash /opt/s2licit/scripts/vps-bootstrap.sh"
+            "DOMAIN='${DEPLOY_DOMAIN}' bash /opt/s2licit/scripts/vps-bootstrap.sh"
 
       # Configurações opcionais vindas dos secrets do repositório — aplicadas
       # no .env da VPS a cada deploy (só as que existirem):
@@ -129,5 +134,9 @@ jobs:
         run: |
           echo "### Deploy concluído ✅" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- URL: http://$DEPLOY_HOST/" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$DEPLOY_DOMAIN" ]; then
+            echo "- URL: https://$DEPLOY_DOMAIN/ (Caddy emite o certificado automaticamente após o DNS apontar para $DEPLOY_HOST)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- URL: http://$DEPLOY_HOST/" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "- Login inicial: veja /root/s2licit-acesso.txt na VPS (gerado só na 1ª instalação)" >> "$GITHUB_STEP_SUMMARY"
