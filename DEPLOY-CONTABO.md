@@ -108,12 +108,18 @@ docker compose exec app node scripts/import-catalog-xlsx.mjs CONSOLIDADO_FINAL.x
 **Jeito automático:** aponte o DNS do seu domínio (registro **A**) para o IP
 do VPS — **sem** proxy/CDN na frente (Cloudflare, se usado, precisa ficar em
 modo "somente DNS"/nuvem cinza, porque quem emite o certificado é o próprio
-Caddy na VPS via HTTP-01). Depois, GitHub → **Actions** → **Deploy VPS** →
+servidor via HTTP-01). Depois, GitHub → **Actions** → **Deploy VPS** →
 *Run workflow* → preencha o campo **domain** (ex.: `s2.s2corporativo.com.br`)
-e rode. O `vps-bootstrap.sh` instala o Caddy, libera a porta 80/443 para ele
-(a porta pública do app muda para uma alternativa, ex. 8080) e emite o
-certificado automaticamente. Fica salvo no `.env` — não precisa repetir o
-campo nos próximos deploys.
+e rode. Fica salvo no `.env` — não precisa repetir o campo nos próximos
+deploys. O `vps-bootstrap.sh` detecta o cenário certo:
+
+- **VPS "limpa"** (nada nas portas 80/443): instala o **Caddy**, que assume
+  as portas (a porta pública do app muda para uma alternativa, ex. 8080) e
+  emite o certificado automaticamente.
+- **VPS que já tem um Nginx hospedando outro site**: em vez de brigar pela
+  porta com o Caddy, adiciona um **vhost novo no próprio Nginx** só para o
+  domínio do S2 (`/etc/nginx/sites-available/s2licit.conf`) e emite o
+  certificado com **certbot** — sem tocar nos demais sites já configurados.
 
 <details>
 <summary>Jeito manual (referência, sem o workflow)</summary>
