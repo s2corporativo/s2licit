@@ -192,6 +192,17 @@ fi
 
 if [ -n "$DOMAIN_ATUAL" ]; then
   echo "==> [Extra] HTTPS via Caddy (${DOMAIN_ATUAL})"
+  # Se já existe algo (não-Caddy) ocupando 80/443, o Caddy não vai conseguir
+  # subir e o Nginx/Apache/etc. que já estava lá continua respondendo no
+  # domínio — avisamos ANTES de tentar, para não mascarar o problema.
+  ocupante_80=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/')
+  ocupante_443=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:443$/')
+  if { [ -n "$ocupante_80" ] || [ -n "$ocupante_443" ]; } && ! command -v caddy >/dev/null 2>&1; then
+    echo "⚠️  Porta 80 e/ou 443 já em uso por outro processo ANTES de instalar o Caddy:" >&2
+    [ -n "$ocupante_80" ] && echo "  :80  -> ${ocupante_80}" >&2
+    [ -n "$ocupante_443" ] && echo "  :443 -> ${ocupante_443}" >&2
+    echo "  O Caddy pode falhar ao subir e o serviço acima continuará respondendo no domínio." >&2
+  fi
   if ! command -v caddy >/dev/null 2>&1; then
     echo "Instalando Caddy..."
     apt-get update -qq
@@ -208,13 +219,22 @@ ${DOMAIN_ATUAL} {
     reverse_proxy 127.0.0.1:${LOCAL_PORT}
 }
 EOF
-  systemctl enable --now caddy >/dev/null 2>&1 || true
-  systemctl reload caddy 2>/dev/null || systemctl restart caddy
+  systemctl enable caddy >/dev/null 2>&1 || true
+  systemctl restart caddy || true
+  sleep 2
+  if systemctl is-active --quiet caddy; then
+    echo "Caddy configurado e rodando. O certificado HTTPS é emitido automaticamente (Let's Encrypt) assim que o DNS de ${DOMAIN_ATUAL} apontar para este servidor."
+  else
+    echo "❌ Caddy NÃO subiu. journalctl -u caddy (últimas linhas):" >&2
+    journalctl -u caddy --no-pager -n 40 >&2 || true
+    echo "❌ Estado das portas 80/443 agora:" >&2
+    ss -ltnp 2>/dev/null | grep -E ':80 |:443 ' >&2 || true
+    exit 1
+  fi
   if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
     ufw allow 80/tcp >/dev/null 2>&1 || true
     ufw allow 443/tcp >/dev/null 2>&1 || true
   fi
-  echo "Caddy configurado. O certificado HTTPS é emitido automaticamente (Let's Encrypt) assim que o DNS de ${DOMAIN_ATUAL} apontar para este servidor."
 fi
 
 echo "==> [6/6] Estado final"
