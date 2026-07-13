@@ -339,27 +339,33 @@ export class SupplierCredentialsService {
   }
 
   /**
-   * Test connection to supplier website
+   * Testa a conexão com o site do fornecedor fazendo um login REAL (Puppeteer),
+   * sem raspar produtos nem gravar nada. Retorna se as credenciais autenticam.
+   *
+   * O `scraperType` define qual configuração de seletores/URL será usada. Sem
+   * ele, cai na configuração genérica (validação de credencial limitada).
    */
-  static async testConnection(email: string, password: string): Promise<{ success: boolean; message: string }> {
-    try {
-      // For now, just validate that credentials are not empty
-      if (!email || !password) {
-        return {
-          success: false,
-          message: "Email e senha são obrigatórios",
-        };
-      }
-
-      // In a real scenario, you would test login here
+  static async testConnection(
+    email: string,
+    password: string,
+    scraperType?: string,
+  ): Promise<{ success: boolean; message: string }> {
+    if (!email || !password) {
       return {
-        success: true,
-        message: "Credenciais validadas",
+        success: false,
+        message: "Email e senha são obrigatórios",
       };
+    }
+
+    try {
+      // Import dinâmico: o Puppeteer é pesado e só é carregado ao testar.
+      const { testarLoginFornecedor } = await import("./scraperEngine");
+      const result = await testarLoginFornecedor(scraperType ?? "generico", email, password);
+      return { success: result.success, message: result.message };
     } catch (error) {
       return {
         success: false,
-        message: `Erro ao validar credenciais: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Erro ao testar conexão: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }

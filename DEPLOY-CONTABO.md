@@ -105,8 +105,18 @@ docker compose exec app node scripts/import-catalog-xlsx.mjs CONSOLIDADO_FINAL.x
 
 ## HTTPS e domínio (recomendado)
 
-Para acessar por `https://seudominio.com.br` em vez de `IP:3000`, instale um
-proxy reverso com certificado automático (Caddy é o mais simples):
+**Jeito automático:** aponte o DNS do seu domínio (registro **A**) para o IP
+do VPS — **sem** proxy/CDN na frente (Cloudflare, se usado, precisa ficar em
+modo "somente DNS"/nuvem cinza, porque quem emite o certificado é o próprio
+Caddy na VPS via HTTP-01). Depois, GitHub → **Actions** → **Deploy VPS** →
+*Run workflow* → preencha o campo **domain** (ex.: `s2.s2corporativo.com.br`)
+e rode. O `vps-bootstrap.sh` instala o Caddy, libera a porta 80/443 para ele
+(a porta pública do app muda para uma alternativa, ex. 8080) e emite o
+certificado automaticamente. Fica salvo no `.env` — não precisa repetir o
+campo nos próximos deploys.
+
+<details>
+<summary>Jeito manual (referência, sem o workflow)</summary>
 
 ```bash
 apt install -y caddy
@@ -116,12 +126,15 @@ Edite `/etc/caddy/Caddyfile`:
 
 ```
 seudominio.com.br {
-    reverse_proxy localhost:3000
+    reverse_proxy 127.0.0.1:3000
 }
 ```
 
 E reinicie: `systemctl restart caddy`. O Caddy emite o certificado HTTPS
-sozinho. (Depois disso, feche a porta 3000 no firewall e acesse só pelo domínio.)
+sozinho. (Depois disso, feche a porta pública do app no firewall e acesse só
+pelo domínio.)
+
+</details>
 
 ---
 

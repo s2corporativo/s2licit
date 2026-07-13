@@ -16,6 +16,14 @@ import { normalizeText } from "../matching/productMatcher";
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface SelectorConfig {
+  /** URL da página de login (opcional). Se ausente, deriva origin+"/login". */
+  loginUrl?: string;
+  /**
+   * Seletor de um gatilho que ABRE o modal de login (opcional). Em plataformas
+   * como F1 Soluções o formulário fica num modal que só existe no DOM após
+   * clicar no link "Entrar". Clicado antes de procurar os campos de login.
+   */
+  loginTrigger?: string;
   /** Seletor do campo email/usuário no formulário de login */
   loginEmail: string;
   /** Seletor do campo senha no formulário de login */
@@ -26,6 +34,19 @@ export interface SelectorConfig {
   loginSuccessUrl?: string;
   /** Texto na página que confirma login (alternativa a loginSuccessUrl) */
   loginSuccessText?: string;
+  /**
+   * Seletor cuja PRESENÇA confirma o login (ex.: ".f1-client-info--logged").
+   * Mais confiável que URL/texto em SPAs e sites com modal.
+   */
+  loginSuccessSelector?: string;
+  /**
+   * Extrai produtos dos dados estruturados da página (JSON-LD schema.org e
+   * `F1SOLUCOES...pushProducts([...])` / camada de dados) em vez de depender de
+   * seletores de grade CSS. Muito mais robusto em lojas F1 Soluções, onde o
+   * markup da grade muda mas os dados estruturados carregam nome/código/preço/
+   * estoque de forma estável.
+   */
+  useStructuredData?: boolean;
   /** URLs das categorias a raspar (lista) */
   categoryUrls: string[];
   /** Seletor de cada card/item de produto na listagem */
@@ -79,24 +100,40 @@ export interface ScraperRunResult {
 // Novos fornecedores são adicionados apenas neste mapa.
 
 export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
+  // Tambasa roda na plataforma "F1 Soluções". Login por MODAL (campo é
+  // `username`, não `email`) e preços só aparecem logado. A extração usa os
+  // dados estruturados da página (JSON-LD + camada F1SOLUCOES.pushProducts),
+  // que carregam nome/código/EAN/preço/estoque de forma estável — os seletores
+  // de grade CSS abaixo ficam como fallback.
   tambasa: {
-    loginEmail: 'input[name="email"], input[type="email"], #email',
-    loginPassword: 'input[name="password"], input[type="password"], #password',
-    loginSubmit: 'button[type="submit"], .login-btn, [data-login-submit]',
-    loginSuccessUrl: "/minha-conta",
+    loginUrl: "https://tambasa.com/",
+    // O modal de login é injetado ao clicar no atalho de conta no cabeçalho.
+    loginTrigger:
+      '.js-modal-login-open, [data-target=".js-modal-login"], a[href="#modal-login"], .header-account__login, .js-open-login',
+    loginEmail: '#username, input[name="username"]',
+    loginPassword: '#password, input[name="password"]',
+    loginSubmit: '.f1-modal-login__submit, #formLogin button[type="submit"]',
+    loginSuccessSelector: '.f1-client-info--logged, .f1-client-info__identity-name',
+    useStructuredData: true,
     categoryUrls: [
       "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios",
-      "https://tambasa.com/categoria/pet-e-vet-e-agro/medicamentos-veterinarios",
+      "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios/medicamentos",
+      "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios/carrapaticidas",
+      "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios/pomadas",
+      "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios/fungicidas",
+      "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios/seringas",
     ],
-    productItem: '[data-product-item], .product-card, .produto-item',
-    productName: '[data-product-name], .product-name, .produto-nome, h2, h3',
-    productPrice: '[data-product-price], .product-price, .preco, .price',
-    productCode: '[data-product-code], .product-code',
-    productEan: '[data-product-ean], .ean',
-    productImage: 'img[data-product-image], img.product-img, img.produto-img',
-    productLink: 'a[data-product-link], a.product-link, a.produto-link',
-    nextPage: '[data-next-page]:not([disabled]), .pagination-next:not(.disabled), a[rel="next"]',
-    waitForSelector: '[data-product-item], .product-card, .produto-item',
+    // Fallback de grade CSS (usado apenas se useStructuredData falhar).
+    // Seletores reais confirmados na plataforma F1 Soluções (tambasa.com).
+    productItem: '.f1-product-item, .products-lists__list-item',
+    productName: '.f1-product-item__name-title, .f1-product-item__name-link',
+    productPrice: '.f1-box-price__price',
+    // Texto vem como "Código: NNNNNN"; o prefixo é removido em extractPageProducts.
+    productCode: '.f1-product-item__code-text',
+    productEan: '[data-ean], .ean',
+    productImage: 'img',
+    productLink: '.f1-product-item__name-link, a',
+    nextPage: '.f1-pagination__list-item-link--next',
     navigationWait: 2500,
   },
 
@@ -208,11 +245,26 @@ export class ScraperEngine {
     this.addLog(`Acessando ${loginUrl}...`);
     await this.page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
-    // Aguardar campo de email aparecer
+    // Alguns sites (ex.: plataforma F1 Soluções) só injetam o formulário de
+    // login num modal após clicar num atalho no cabeçalho. Se o campo ainda não
+    // está presente e há um gatilho configurado, clica nele primeiro.
+    const emailAlreadyVisible = await this.page.$(cfg.loginEmail);
+    if (!emailAlreadyVisible && cfg.loginTrigger) {
+      const trigger = await this.page.$(cfg.loginTrigger);
+      if (trigger) {
+        this.addLog("Abrindo modal de login...");
+        try {
+          await trigger.click();
+          await new Promise(r => setTimeout(r, 800));
+        } catch { /* segue tentando localizar o campo */ }
+      }
+    }
+
+    // Aguardar campo de email/usuário aparecer
     try {
-      await this.page.waitForSelector(cfg.loginEmail, { timeout: 10000 });
+      await this.page.waitForSelector(cfg.loginEmail, { timeout: 10000, visible: true });
     } catch {
-      throw new Error(`Campo de email não encontrado com seletor: ${cfg.loginEmail}`);
+      throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail}`);
     }
 
     // Preencher formulário com delay humano
@@ -234,25 +286,37 @@ export class ScraperEngine {
     // Verificar sucesso
     const currentUrl = this.page.url();
     const pageText = await this.page.evaluate(() => document.body?.innerText ?? "");
-    // Sinal positivo: se ainda há campo de senha na tela, o login NÃO passou.
+    // Sinal positivo por presença de elemento (ex.: área do cliente logado).
+    const hasSuccessSelector = cfg.loginSuccessSelector
+      ? await this.page.evaluate(
+          (sel) => !!document.querySelector(sel),
+          cfg.loginSuccessSelector,
+        )
+      : false;
+    // Sinal negativo: se ainda há campo de senha visível, o login NÃO passou.
     const stillHasPasswordField = await this.page.evaluate(
-      () => !!document.querySelector('input[type="password"]'),
+      () => Array.from(document.querySelectorAll('input[type="password"]'))
+        .some((el) => (el as HTMLElement).offsetParent !== null),
     );
 
     const hasErrorText =
       pageText.toLowerCase().includes("senha incorreta") ||
       pageText.toLowerCase().includes("usuário não encontrado") ||
-      pageText.toLowerCase().includes("credenciais inválidas");
+      pageText.toLowerCase().includes("credenciais inválidas") ||
+      pageText.toLowerCase().includes("e-mail ou senha");
+
+    const hasPositiveCriterion =
+      !!cfg.loginSuccessUrl || !!cfg.loginSuccessText || !!cfg.loginSuccessSelector;
 
     const loginFailed =
       (cfg.loginSuccessUrl && !currentUrl.includes(cfg.loginSuccessUrl)) ||
       (cfg.loginSuccessText && !pageText.includes(cfg.loginSuccessText)) ||
-      currentUrl.includes("login") ||
+      (cfg.loginSuccessSelector && !hasSuccessSelector) ||
       hasErrorText ||
       // Sem critério configurado, exige sinal positivo: página sem campo de
-      // senha. Antes assumia sucesso só por não ver "senha incorreta", raspando
-      // páginas deslogadas e gravando preços errados como oficiais.
-      (!cfg.loginSuccessUrl && !cfg.loginSuccessText && stillHasPasswordField);
+      // senha visível. Antes assumia sucesso só por não ver "senha incorreta",
+      // raspando páginas deslogadas e gravando preços errados como oficiais.
+      (!hasPositiveCriterion && stillHasPasswordField);
 
     if (loginFailed) {
       throw new Error(`Login falhou ou não pôde ser confirmado. URL atual: ${currentUrl}`);
@@ -283,7 +347,13 @@ export class ScraperEngine {
     }
 
     while (pagina <= MAX_PAGES) {
-      const produtos = await this.extractPageProducts(cfg);
+      let produtos = cfg.useStructuredData
+        ? await this.extractStructuredProducts()
+        : await this.extractPageProducts(cfg);
+      // Se os dados estruturados vierem vazios, cai para os seletores de grade.
+      if (cfg.useStructuredData && produtos.length === 0) {
+        produtos = await this.extractPageProducts(cfg);
+      }
       this.addLog(`  Página ${pagina}: ${produtos.length} produtos extraídos`);
       todos.push(...produtos);
 
@@ -327,6 +397,12 @@ export class ScraperEngine {
           const name = getText(c.productName);
           const priceRaw = getText(c.productPrice);
 
+          // Código vem como "Código: 123456" na F1 Soluções — remove o rótulo.
+          const codeRaw = c.productCode ? getText(c.productCode) : "";
+          const code = codeRaw
+            .replace(/c[oó]digo\s*:?/i, "")
+            .trim() || undefined;
+
           // Parse de preço BR: R$ 1.234,56 → 1234.56
           const priceClean = priceRaw
             .replace(/[^\d,.-]/g, "")
@@ -337,7 +413,7 @@ export class ScraperEngine {
           return {
             name,
             price: isNaN(price) ? 0 : price,
-            code: c.productCode ? getText(c.productCode) : undefined,
+            code,
             ean: c.productEan ? getText(c.productEan) : undefined,
             imageUrl: c.productImage ? getAttr(c.productImage, "src") : undefined,
             productUrl: c.productLink ? getAttr(c.productLink, "href") : undefined,
@@ -346,6 +422,154 @@ export class ScraperEngine {
       },
       cfg as any
     );
+  }
+
+  /**
+   * Extrai produtos dos DADOS ESTRUTURADOS da página, sem depender de seletores
+   * de grade CSS. Combina duas fontes que a plataforma F1 Soluções (Tambasa)
+   * emite tanto em páginas de listagem quanto de detalhe:
+   *
+   *  1. `F1SOLUCOES...pushProducts([...])` na camada de dados — traz preço,
+   *     estoque, código e SKU de forma confiável (preço só existe logado).
+   *  2. JSON-LD schema.org (`@type: Product` / `ItemList`) — nome, SKU, marca,
+   *     EAN e imagem (normalmente sem preço).
+   *
+   * Casa as duas por código/SKU para montar o produto mais completo possível.
+   */
+  private async extractStructuredProducts(): Promise<ScrapedProduct[]> {
+    return this.page!.evaluate(() => {
+      const toNumber = (v: unknown): number => {
+        if (typeof v === "number") return isFinite(v) ? v : 0;
+        if (typeof v === "string") {
+          // Aceita "361,36", "1.234,56" e "1234.56".
+          const s = v.replace(/[^\d,.-]/g, "");
+          const norm = s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s;
+          const n = parseFloat(norm);
+          return isNaN(n) ? 0 : n;
+        }
+        return 0;
+      };
+
+      // ── Fonte 1: chamadas pushProducts([...]) em scripts inline ────────────
+      const fromDataLayer: any[] = [];
+      const scripts = Array.from(document.querySelectorAll("script:not([src])"));
+      for (const sc of scripts) {
+        const text = sc.textContent ?? "";
+        let idx = text.indexOf("pushProducts(");
+        while (idx !== -1) {
+          // Localiza o "[" do argumento e casa os colchetes respeitando strings.
+          const start = text.indexOf("[", idx);
+          if (start === -1) break;
+          let depth = 0, end = -1, inStr = false, quote = "";
+          for (let i = start; i < text.length; i++) {
+            const ch = text[i];
+            if (inStr) {
+              if (ch === "\\") { i++; continue; }
+              if (ch === quote) inStr = false;
+            } else if (ch === '"' || ch === "'") {
+              inStr = true; quote = ch;
+            } else if (ch === "[") {
+              depth++;
+            } else if (ch === "]") {
+              depth--;
+              if (depth === 0) { end = i; break; }
+            }
+          }
+          if (end === -1) break;
+          try {
+            const arr = JSON.parse(text.slice(start, end + 1));
+            if (Array.isArray(arr)) fromDataLayer.push(...arr);
+          } catch { /* argumento não era JSON puro; ignora */ }
+          idx = text.indexOf("pushProducts(", end);
+        }
+      }
+
+      // ── Fonte 2: blocos JSON-LD schema.org ─────────────────────────────────
+      const jsonLdProducts: any[] = [];
+      const ldNodes = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+      const collectProducts = (node: any) => {
+        if (!node || typeof node !== "object") return;
+        if (Array.isArray(node)) { node.forEach(collectProducts); return; }
+        const type = node["@type"];
+        if (type === "Product" || (Array.isArray(type) && type.includes("Product"))) {
+          jsonLdProducts.push(node);
+        }
+        if (node.itemListElement) collectProducts(node.itemListElement);
+        if (node.item) collectProducts(node.item);
+        if (node["@graph"]) collectProducts(node["@graph"]);
+      };
+      for (const n of ldNodes) {
+        try { collectProducts(JSON.parse(n.textContent ?? "null")); } catch { /* ignora */ }
+      }
+
+      // ── Índice de metadados do JSON-LD por SKU para enriquecer preços ──────
+      const ldBySku = new Map<string, any>();
+      for (const p of jsonLdProducts) {
+        const sku = String(p.sku ?? p.mpn ?? p.gtin13 ?? p.productID ?? "").trim();
+        if (sku) ldBySku.set(sku, p);
+      }
+
+      const eanOf = (p: any): string | undefined => {
+        const raw = p.gtin13 ?? p.gtin14 ?? p.gtin ?? p.ean ?? (p.specs && p.specs.ean);
+        const s = raw != null ? String(raw).trim() : "";
+        return s && /^\d{8,14}$/.test(s) ? s : undefined;
+      };
+      const imageOf = (p: any): string | undefined => {
+        const img = Array.isArray(p.image) ? p.image[0] : p.image;
+        return typeof img === "string" && img ? img : undefined;
+      };
+
+      const out: ScrapedProduct[] = [];
+      const seen = new Set<string>();
+
+      // Prioriza a camada de dados (tem preço/estoque).
+      for (const d of fromDataLayer) {
+        const code = String(d.code ?? d.sku ?? d.id ?? "").trim();
+        const price = toNumber(d.spot_price ?? d.price ?? d.old_price);
+        const name = String(d.name ?? "").trim();
+        if (!name || price <= 0) continue;
+        const key = code || name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const ld = code ? ldBySku.get(code) : undefined;
+        out.push({
+          name,
+          price,
+          code: code || undefined,
+          ean: eanOf(d) ?? (ld ? eanOf(ld) : undefined),
+          imageUrl: (d.image && String(d.image)) || (ld ? imageOf(ld) : undefined),
+          productUrl: d.url ? String(d.url) : (ld && ld.url ? String(ld.url) : undefined),
+          availability:
+            typeof d.stock !== "undefined" && toNumber(d.stock) > 0 ? "disponivel" : undefined,
+        });
+      }
+
+      // JSON-LD que traga preço em offers e ainda não tenha sido coberto.
+      for (const p of jsonLdProducts) {
+        const offers = Array.isArray(p.offers) ? p.offers[0] : p.offers;
+        const price = offers ? toNumber(offers.price ?? offers.lowPrice) : 0;
+        const name = String(p.name ?? "").trim();
+        if (!name || price <= 0) continue;
+        const code = String(p.sku ?? p.mpn ?? "").trim();
+        const key = code || name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          name,
+          price,
+          code: code || undefined,
+          ean: eanOf(p),
+          imageUrl: imageOf(p),
+          productUrl: typeof p.url === "string" ? p.url : undefined,
+          availability:
+            offers && typeof offers.availability === "string" && /InStock/i.test(offers.availability)
+              ? "disponivel"
+              : undefined,
+        });
+      }
+
+      return out;
+    });
   }
 
   /** Faz match dos produtos extraídos com o catálogo e atualiza preços */
@@ -461,6 +685,59 @@ export class ScraperEngine {
   }
 }
 
+// ─── Teste de conexão (login real, sem raspar) ────────────────────────────────
+
+export interface TestLoginResult {
+  success: boolean;
+  message: string;
+  log: string[];
+}
+
+/**
+ * Faz APENAS o login no site do fornecedor para validar as credenciais, sem
+ * raspar produtos. Usado pela tela "Configurador de Fornecedores" antes de
+ * salvar/agendar uma captura, para dar um retorno imediato de credencial válida.
+ *
+ * Não persiste nada no banco e sempre fecha o navegador ao final.
+ */
+export async function testarLoginFornecedor(
+  scraperType: string,
+  email: string,
+  password: string,
+): Promise<TestLoginResult> {
+  if (!email || !password) {
+    return { success: false, message: "E-mail e senha são obrigatórios", log: [] };
+  }
+
+  const tipo = scraperType?.toLowerCase() ?? "generico";
+  const cfg = FORNECEDOR_CONFIGS[tipo] ?? FORNECEDOR_CONFIGS.generico;
+
+  // Mesma derivação de URL de login usada em executarScraper.
+  const loginUrl =
+    cfg.loginUrl ??
+    (cfg.categoryUrls[0]
+      ? new URL(cfg.categoryUrls[0]).origin + "/login"
+      : `https://${tipo}.com.br/login`);
+
+  const engine = new ScraperEngine();
+  try {
+    await engine.login(loginUrl, email, password, cfg);
+    return {
+      success: true,
+      message: "Login confirmado no site do fornecedor. Credenciais válidas.",
+      log: (engine as any).log ?? [],
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message ?? "Falha ao autenticar no site do fornecedor",
+      log: (engine as any).log ?? [],
+    };
+  } finally {
+    await engine.close();
+  }
+}
+
 // ─── Função principal de execução ─────────────────────────────────────────────
 
 export async function executarScraper(scraperConfigId: number): Promise<ScraperRunResult> {
@@ -516,10 +793,13 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
     throw new Error("Falha ao descriptografar a senha do fornecedor");
   }
 
-  // Determinar URL de login
-  const loginUrl = cfg.categoryUrls[0]
-    ? new URL(cfg.categoryUrls[0]).origin + "/login"
-    : `https://${scraperType}.com.br/login`;
+  // Determinar URL de login: usa a configurada; senão deriva do origin da
+  // primeira categoria; por fim cai no padrão "<tipo>.com.br/login".
+  const loginUrl =
+    cfg.loginUrl ??
+    (cfg.categoryUrls[0]
+      ? new URL(cfg.categoryUrls[0]).origin + "/login"
+      : `https://${scraperType}.com.br/login`);
 
   try {
     // Login

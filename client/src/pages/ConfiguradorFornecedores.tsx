@@ -124,6 +124,7 @@ export default function ConfiguradorFornecedores() {
     testMutation.mutate({
       email: formData.email,
       password: formData.password,
+      scraperType: formData.scraperType,
     });
   };
 
