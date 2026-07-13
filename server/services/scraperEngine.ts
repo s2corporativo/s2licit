@@ -685,6 +685,59 @@ export class ScraperEngine {
   }
 }
 
+// ─── Teste de conexão (login real, sem raspar) ────────────────────────────────
+
+export interface TestLoginResult {
+  success: boolean;
+  message: string;
+  log: string[];
+}
+
+/**
+ * Faz APENAS o login no site do fornecedor para validar as credenciais, sem
+ * raspar produtos. Usado pela tela "Configurador de Fornecedores" antes de
+ * salvar/agendar uma captura, para dar um retorno imediato de credencial válida.
+ *
+ * Não persiste nada no banco e sempre fecha o navegador ao final.
+ */
+export async function testarLoginFornecedor(
+  scraperType: string,
+  email: string,
+  password: string,
+): Promise<TestLoginResult> {
+  if (!email || !password) {
+    return { success: false, message: "E-mail e senha são obrigatórios", log: [] };
+  }
+
+  const tipo = scraperType?.toLowerCase() ?? "generico";
+  const cfg = FORNECEDOR_CONFIGS[tipo] ?? FORNECEDOR_CONFIGS.generico;
+
+  // Mesma derivação de URL de login usada em executarScraper.
+  const loginUrl =
+    cfg.loginUrl ??
+    (cfg.categoryUrls[0]
+      ? new URL(cfg.categoryUrls[0]).origin + "/login"
+      : `https://${tipo}.com.br/login`);
+
+  const engine = new ScraperEngine();
+  try {
+    await engine.login(loginUrl, email, password, cfg);
+    return {
+      success: true,
+      message: "Login confirmado no site do fornecedor. Credenciais válidas.",
+      log: (engine as any).log ?? [],
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message ?? "Falha ao autenticar no site do fornecedor",
+      log: (engine as any).log ?? [],
+    };
+  } finally {
+    await engine.close();
+  }
+}
+
 // ─── Função principal de execução ─────────────────────────────────────────────
 
 export async function executarScraper(scraperConfigId: number): Promise<ScraperRunResult> {

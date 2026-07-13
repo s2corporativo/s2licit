@@ -26,6 +26,7 @@ const deleteCredentialSchema = z.object({ id: z.number() });
 const testConnectionSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  scraperType: z.string().optional(),
 });
 
 const getCredentialSchema = z.object({ id: z.number() });
@@ -164,7 +165,11 @@ export const supplierCredentialsRouter = router({
     .input(testConnectionSchema)
     .mutation(async ({ input }: { input: z.infer<typeof testConnectionSchema> }) => {
       try {
-        const result = await SupplierCredentialsService.testConnection(input.email, input.password);
+        const result = await SupplierCredentialsService.testConnection(
+          input.email,
+          input.password,
+          input.scraperType,
+        );
         return result;
       } catch (error) {
         throw new TRPCError({
