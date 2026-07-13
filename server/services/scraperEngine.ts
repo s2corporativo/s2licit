@@ -124,14 +124,16 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
       "https://tambasa.com/categoria/pet-e-vet-e-agro/produtos-veterinarios/seringas",
     ],
     // Fallback de grade CSS (usado apenas se useStructuredData falhar).
-    productItem: '.product-item, .js-product, [data-product], .product-card',
-    productName: '.product-item__name, .js-product-name, .product-name, h2, h3',
-    productPrice: '.product-item__price, .price-new-price, .js-product-price, .price',
-    productCode: '.product-item__code, .product-code, [data-product-code]',
+    // Seletores reais confirmados na plataforma F1 Soluções (tambasa.com).
+    productItem: '.f1-product-item, .products-lists__list-item',
+    productName: '.f1-product-item__name-title, .f1-product-item__name-link',
+    productPrice: '.f1-box-price__price',
+    // Texto vem como "Código: NNNNNN"; o prefixo é removido em extractPageProducts.
+    productCode: '.f1-product-item__code-text',
     productEan: '[data-ean], .ean',
     productImage: 'img',
-    productLink: 'a',
-    nextPage: 'a[rel="next"], .pagination__next a, .pagination-next:not(.disabled)',
+    productLink: '.f1-product-item__name-link, a',
+    nextPage: '.f1-pagination__list-item-link--next',
     navigationWait: 2500,
   },
 
@@ -395,6 +397,12 @@ export class ScraperEngine {
           const name = getText(c.productName);
           const priceRaw = getText(c.productPrice);
 
+          // Código vem como "Código: 123456" na F1 Soluções — remove o rótulo.
+          const codeRaw = c.productCode ? getText(c.productCode) : "";
+          const code = codeRaw
+            .replace(/c[oó]digo\s*:?/i, "")
+            .trim() || undefined;
+
           // Parse de preço BR: R$ 1.234,56 → 1234.56
           const priceClean = priceRaw
             .replace(/[^\d,.-]/g, "")
@@ -405,7 +413,7 @@ export class ScraperEngine {
           return {
             name,
             price: isNaN(price) ? 0 : price,
-            code: c.productCode ? getText(c.productCode) : undefined,
+            code,
             ean: c.productEan ? getText(c.productEan) : undefined,
             imageUrl: c.productImage ? getAttr(c.productImage, "src") : undefined,
             productUrl: c.productLink ? getAttr(c.productLink, "href") : undefined,
