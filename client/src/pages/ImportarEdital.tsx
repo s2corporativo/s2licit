@@ -377,13 +377,13 @@ function SimilaresPanel({
   activeIngredient,
   currentProductId,
   currentPrice,
-  markup,
+  marginPercent,
   onSelect,
 }: {
   activeIngredient: string;
   currentProductId: number | null;
   currentPrice: number | null;
-  markup: number;
+  marginPercent: number;
   onSelect: (product: any) => void;
 }) {
   const { data: similares = [], isLoading } = trpc.products.compareByActiveIngredient.useQuery(
@@ -396,7 +396,7 @@ function SimilaresPanel({
     <div className="grid grid-cols-2 gap-2 mt-2">
       {(similares as any[]).map((s) => {
         const sPrice = s.price ? parseFloat(String(s.price)) : null;
-        const salePrice = sPrice ? sPrice * (1 + markup / 100) : null;
+        const salePrice = sPrice ? sPrice / (1 - Math.min(marginPercent, 99.99) / 100) : null;
         const isCheaper = sPrice !== null && currentPrice !== null && sPrice < currentPrice;
         const diffPct = sPrice && currentPrice ? ((currentPrice - sPrice) / currentPrice * 100).toFixed(1) : null;
         const isCurrent = s.id === currentProductId;
@@ -470,9 +470,11 @@ export default function ImportarEdital() {
   const [processo, setProcesso] = useState<Processo | null>(null);
   const [itens, setItens] = useState<ItemEdital[]>([]);
   const [matches, setMatches] = useState<MatchedItem[]>([]);
-  const [markup, setMarkup] = useState(30);
+  const [marginPercent, setMarginPercent] = useState(30);
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
   const [createdProposalId, setCreatedProposalId] = useState<number | null>(null);
+  const [createdItemCount, setCreatedItemCount] = useState(0);
+  const [reviewConfirmed, setReviewConfirmed] = useState(false);
   const [truncated, setTruncated] = useState(false);
 
   const extractMutation = trpc.edital.extract.useMutation();
@@ -549,6 +551,7 @@ export default function ImportarEdital() {
       setProcesso(proc);
       setItens(editalItens);
       setMatches(preMatches);
+      setReviewConfirmed(false);
       setStage("ready");
       toast.success(`Licitação importada!`, {
         description: `${govData.totalItems} itens carregados, ${govData.matchedCount} vinculados ao catálogo.`,
@@ -578,6 +581,8 @@ export default function ImportarEdital() {
     setProcesso(null);
     setItens([]);
     setMatches([]);
+    setReviewConfirmed(false);
+    setCreatedItemCount(0);
 
     try {
       // Convert to base64
@@ -614,6 +619,7 @@ export default function ImportarEdital() {
       setStage("matching");
       const matched = await matchMutation.mutateAsync({ itens: extracted.itens.map((i) => ({ ...i, precoUnitario: i.precoUnitario ?? null, precoTotal: i.precoTotal ?? null })) });
       setMatches(matched.matches);
+      setReviewConfirmed(false);
 
       const withMatch = matched.matches.filter((m) => m.productId !== null).length;
       toast.success(`${withMatch} de ${matched.matches.length} itens vinculados ao catálogo`);
@@ -644,6 +650,21 @@ export default function ImportarEdital() {
   const handleCreateProposal = async (skipValidation = false) => {
     if (!processo || matches.length === 0) return;
 
+    const incompleteItems = matches.filter((item) => {
+      const cost = Number(item.productPrice);
+      return item.productId == null || !Number.isFinite(cost) || cost <= 0;
+    });
+    if (incompleteItems.length > 0) {
+      toast.error(
+        `Proposta bloqueada: resolva o match e o custo de ${incompleteItems.length} item(ns).`,
+      );
+      return;
+    }
+    if (!reviewConfirmed) {
+      toast.error("Confirme a revisão humana dos matches, quantidades e custos.");
+      return;
+    }
+
     // Validação de integridade (a menos que o usuário já confirmou os avisos)
     if (!skipValidation) {
       try {
@@ -661,8 +682,10 @@ export default function ImportarEdital() {
           setShowValidationWarnings(true);
           return;
         }
-      } catch {
-        // Se validação falhar, continua mesmo assim
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "falha desconhecida";
+        toast.error(`Não foi possível validar os itens: ${message}`);
+        return;
       }
     }
 
@@ -687,12 +710,19 @@ export default function ImportarEdital() {
           itemPrecoUnitario: m.itemPrecoUnitario ?? null,
           itemPrecoTotal: m.itemPrecoTotal ?? null,
         })),
-        markup,
+        marginPercent,
+        reviewConfirmed: true,
         templateId: selectedTemplateId,
       });
+      if (result.addedCount !== matches.length) {
+        throw new Error(
+          `A criação foi interrompida: o servidor confirmou ${result.addedCount} de ${matches.length} itens.`,
+        );
+      }
       setCreatedProposalId(result.proposalId);
+      setCreatedItemCount(result.addedCount);
       setStage("done");
-      toast.success("Proposta criada com sucesso!");
+      toast.success(`Proposta criada com ${result.addedCount} itens.`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error("Erro ao criar proposta: " + msg);
@@ -703,11 +733,16 @@ export default function ImportarEdital() {
   // ─── Derived ──────────────────────────────────────────────────────────────
 
   const matchedCount = matches.filter((m) => m.productId !== null).length;
+  const incompleteCount = matches.filter((m) => {
+    const cost = Number(m.productPrice);
+    return m.productId == null || !Number.isFinite(cost) || cost <= 0;
+  }).length;
+  const allItemsReady = matches.length > 0 && incompleteCount === 0;
   const noMatchCount = matches.filter((m) => m.confidence === "none").length;
   const feedbackCount = matches.filter((m) => m.usedFeedback).length;
   const totalValue = matches.reduce((sum, m) => {
     if (!m.productPrice) return sum;
-    const salePrice = parseFloat(m.productPrice) * (1 + markup / 100);
+    const salePrice = parseFloat(m.productPrice) / (1 - Math.min(marginPercent, 99.99) / 100);
     return sum + salePrice * m.itemQuantidade;
   }, 0);
 
@@ -784,7 +819,7 @@ export default function ImportarEdital() {
               </p>
             </div>
             <button
-              onClick={(e) => { e.stopPropagation(); setStage("idle"); setMatches([]); setFileName(null); }}
+              onClick={(e) => { e.stopPropagation(); setStage("idle"); setMatches([]); setReviewConfirmed(false); setFileName(null); }}
               className="ml-4 text-gray-400 hover:text-gray-600"
             >
               <X size={16} />
@@ -868,19 +903,22 @@ export default function ImportarEdital() {
         <div className="bg-white border border-gray-200 p-4 flex items-center gap-6">
           <div className="flex items-center gap-3">
             <label className="text-xs font-bold text-gray-700 uppercase tracking-widest whitespace-nowrap">
-              Markup (%)
+              Margem s/ venda (%)
             </label>
             <input
               type="number"
               min={0}
-              max={500}
+              max={99}
               step={5}
-              value={markup}
-              onChange={(e) => setMarkup(Number(e.target.value))}
+              value={marginPercent}
+              onChange={(e) => {
+                setMarginPercent(Number(e.target.value));
+                setReviewConfirmed(false);
+              }}
               className="w-20 border border-gray-300 px-2 py-1.5 text-sm font-bold text-center focus:outline-none focus:border-blue-500"
             />
             <span className="text-xs text-gray-500">
-              Preço de custo × {(1 + markup / 100).toFixed(2)} = preço de venda
+              Preço = custo ÷ (1 − margem); não confundir com markup
             </span>
           </div>
           {/* Seletor de Template */}
@@ -902,15 +940,25 @@ export default function ImportarEdital() {
             </select>
           </div>
           <div className="flex-1" />
+          <label className="flex items-center gap-2 max-w-[250px] text-[11px] font-semibold text-gray-700">
+            <input
+              type="checkbox"
+              checked={reviewConfirmed}
+              onChange={(e) => setReviewConfirmed(e.target.checked)}
+              disabled={!allItemsReady || stage === "creating"}
+              className="accent-blue-900"
+            />
+            Revisei matches, quantidades e custos de todos os itens
+          </label>
           <button
             onClick={() => handleCreateProposal(false)}
-            disabled={stage === "creating" || matchedCount === 0}
+            disabled={stage === "creating" || !allItemsReady || !reviewConfirmed}
             className="flex items-center gap-2 bg-blue-900 text-white px-5 py-2.5 text-sm font-black hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {stage === "creating" ? (
               <><Loader2 size={14} className="animate-spin" /> Criando proposta...</>
             ) : (
-              <><ArrowRight size={14} /> Criar Proposta ({matchedCount} itens)</>
+              <><ArrowRight size={14} /> Criar Proposta ({matches.length} itens)</>
             )}
           </button>
         </div>
@@ -923,7 +971,7 @@ export default function ImportarEdital() {
             <CheckCircle2 size={20} className="text-green-600" />
             <div>
               <p className="text-sm font-black text-green-900">Proposta criada com sucesso!</p>
-              <p className="text-xs text-green-700">{matchedCount} itens adicionados com markup de {markup}%</p>
+              <p className="text-xs text-green-700">{createdItemCount} itens adicionados com margem de {marginPercent}% sobre a venda</p>
             </div>
           </div>
           <button
@@ -963,7 +1011,7 @@ export default function ImportarEdital() {
               // Usar chave composta para garantir unicidade: itemNumero + productId + índice
               const isExpanded = expandedItem === m.itemNumero;
               const salePrice = m.productPrice
-                ? parseFloat(m.productPrice) * (1 + markup / 100)
+                ? parseFloat(m.productPrice) / (1 - Math.min(marginPercent, 99.99) / 100)
                 : null;
               const lineTotal = salePrice ? salePrice * m.itemQuantidade : null;
 
@@ -1071,7 +1119,7 @@ export default function ImportarEdital() {
                               <p className="text-gray-500">
                                 Custo: R$ {parseFloat(m.productPrice!).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} →
                                 Venda: R$ {salePrice!.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
-                                {" "}(+{markup}%)
+                                {" "}(margem {marginPercent}% sobre a venda)
                               </p>
                               {m.productUrl && (
                                 <a
@@ -1101,6 +1149,7 @@ export default function ImportarEdital() {
                           <BuscaManualPanel
                             itemDescricao={m.itemDescricao}
                             onSelect={(s) => {
+                              setReviewConfirmed(false);
                               setMatches((prev) => prev.map((item) =>
                                 item.itemNumero === m.itemNumero
                                   ? {
@@ -1137,8 +1186,9 @@ export default function ImportarEdital() {
                             activeIngredient={m.productActiveIngredient}
                             currentProductId={m.productId}
                             currentPrice={m.productPrice ? parseFloat(m.productPrice) : null}
-                            markup={markup}
+                            marginPercent={marginPercent}
                             onSelect={(s) => {
+                              setReviewConfirmed(false);
                               setMatches((prev) => prev.map((item) =>
                                 item.itemNumero === m.itemNumero
                                   ? {
@@ -1227,3 +1277,4 @@ export default function ImportarEdital() {
     </div>
   );
 }
+
