@@ -191,49 +191,118 @@ else
 fi
 
 if [ -n "$DOMAIN_ATUAL" ]; then
-  echo "==> [Extra] HTTPS via Caddy (${DOMAIN_ATUAL})"
-  # Se já existe algo (não-Caddy) ocupando 80/443, o Caddy não vai conseguir
-  # subir e o Nginx/Apache/etc. que já estava lá continua respondendo no
-  # domínio — avisamos ANTES de tentar, para não mascarar o problema.
-  ocupante_80=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/')
-  ocupante_443=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:443$/')
-  if { [ -n "$ocupante_80" ] || [ -n "$ocupante_443" ]; } && ! command -v caddy >/dev/null 2>&1; then
-    echo "⚠️  Porta 80 e/ou 443 já em uso por outro processo ANTES de instalar o Caddy:" >&2
-    [ -n "$ocupante_80" ] && echo "  :80  -> ${ocupante_80}" >&2
-    [ -n "$ocupante_443" ] && echo "  :443 -> ${ocupante_443}" >&2
-    echo "  O Caddy pode falhar ao subir e o serviço acima continuará respondendo no domínio." >&2
+  echo "==> [Extra] HTTPS para ${DOMAIN_ATUAL}"
+
+  # Se já existe um Nginx nesta VPS ocupando 80/443 (hospedando outro
+  # site/cliente), NÃO tentamos tirar a porta dele com o Caddy — em vez
+  # disso, adicionamos um vhost novo no próprio Nginx só para o nosso
+  # domínio, sem tocar nos demais sites configurados nele.
+  nginx_ocupa_portas=false
+  if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx \
+     && ss -ltnp 2>/dev/null | grep -q 'nginx'; then
+    nginx_ocupa_portas=true
   fi
-  if ! command -v caddy >/dev/null 2>&1; then
-    echo "Instalando Caddy..."
-    apt-get update -qq
-    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl gnupg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-      | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-      > /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -qq
-    apt-get install -y -qq caddy
-  fi
-  cat > /etc/caddy/Caddyfile <<EOF
+
+  if [ "$nginx_ocupa_portas" = true ]; then
+    echo "Nginx já em uso nesta VPS (outro site) — adicionando um vhost novo para ${DOMAIN_ATUAL}, sem mexer nos demais."
+
+    # Se uma tentativa anterior chegou a instalar o Caddy (e ele ficou
+    # falhando por causa da porta ocupada), desliga para não ficar em loop.
+    if command -v caddy >/dev/null 2>&1; then
+      systemctl stop caddy >/dev/null 2>&1 || true
+      systemctl disable caddy >/dev/null 2>&1 || true
+    fi
+
+    if [ -d /etc/nginx/sites-enabled ]; then
+      NGINX_SITE_PATH=/etc/nginx/sites-available/s2licit.conf
+      NGINX_ENABLED_PATH=/etc/nginx/sites-enabled/s2licit.conf
+    else
+      NGINX_SITE_PATH=/etc/nginx/conf.d/s2licit.conf
+      NGINX_ENABLED_PATH="$NGINX_SITE_PATH"
+    fi
+
+    cat > "$NGINX_SITE_PATH" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN_ATUAL};
+
+    location / {
+        proxy_pass http://127.0.0.1:${LOCAL_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    if [ "$NGINX_SITE_PATH" != "$NGINX_ENABLED_PATH" ]; then
+      ln -sf "$NGINX_SITE_PATH" "$NGINX_ENABLED_PATH"
+    fi
+
+    if nginx -t 2>/tmp/s2licit-nginx-test.log; then
+      systemctl reload nginx
+      echo "Vhost do Nginx para ${DOMAIN_ATUAL} ativo (HTTP)."
+    else
+      echo "❌ Configuração do Nginx ficou inválida ao adicionar o vhost — revertendo para não afetar os outros sites:" >&2
+      cat /tmp/s2licit-nginx-test.log >&2
+      rm -f "$NGINX_ENABLED_PATH"
+      [ "$NGINX_SITE_PATH" != "$NGINX_ENABLED_PATH" ] && rm -f "$NGINX_SITE_PATH"
+      exit 1
+    fi
+
+    if ! command -v certbot >/dev/null 2>&1; then
+      echo "Instalando certbot..."
+      apt-get update -qq
+      apt-get install -y -qq certbot python3-certbot-nginx
+    fi
+    if certbot --nginx -d "${DOMAIN_ATUAL}" --non-interactive --agree-tos -m adm@vetmg.com.br --redirect --quiet; then
+      echo "Certificado HTTPS emitido via certbot para ${DOMAIN_ATUAL}."
+    else
+      echo "⚠️  certbot não conseguiu emitir o certificado agora (o site já responde em HTTP simples em http://${DOMAIN_ATUAL}/). Rode 'certbot --nginx -d ${DOMAIN_ATUAL}' manualmente na VPS para tentar de novo." >&2
+    fi
+  else
+    # VPS "limpa" (sem Nginx ocupando as portas) — Caddy assume 80/443 direto.
+    ocupante_80=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/')
+    ocupante_443=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:443$/')
+    if { [ -n "$ocupante_80" ] || [ -n "$ocupante_443" ]; } && ! command -v caddy >/dev/null 2>&1; then
+      echo "⚠️  Porta 80 e/ou 443 já em uso por outro processo ANTES de instalar o Caddy:" >&2
+      [ -n "$ocupante_80" ] && echo "  :80  -> ${ocupante_80}" >&2
+      [ -n "$ocupante_443" ] && echo "  :443 -> ${ocupante_443}" >&2
+      echo "  O Caddy pode falhar ao subir e o serviço acima continuará respondendo no domínio." >&2
+    fi
+    if ! command -v caddy >/dev/null 2>&1; then
+      echo "Instalando Caddy..."
+      apt-get update -qq
+      apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl gnupg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+        | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+        > /etc/apt/sources.list.d/caddy-stable.list
+      apt-get update -qq
+      apt-get install -y -qq caddy
+    fi
+    cat > /etc/caddy/Caddyfile <<EOF
 ${DOMAIN_ATUAL} {
     reverse_proxy 127.0.0.1:${LOCAL_PORT}
 }
 EOF
-  systemctl enable caddy >/dev/null 2>&1 || true
-  systemctl restart caddy || true
-  sleep 2
-  if systemctl is-active --quiet caddy; then
-    echo "Caddy configurado e rodando. O certificado HTTPS é emitido automaticamente (Let's Encrypt) assim que o DNS de ${DOMAIN_ATUAL} apontar para este servidor."
-  else
-    echo "❌ Caddy NÃO subiu. journalctl -u caddy (últimas linhas):" >&2
-    journalctl -u caddy --no-pager -n 40 >&2 || true
-    echo "❌ Estado das portas 80/443 agora:" >&2
-    ss -ltnp 2>/dev/null | grep -E ':80 |:443 ' >&2 || true
-    exit 1
-  fi
-  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-    ufw allow 80/tcp >/dev/null 2>&1 || true
-    ufw allow 443/tcp >/dev/null 2>&1 || true
+    systemctl enable caddy >/dev/null 2>&1 || true
+    systemctl restart caddy || true
+    sleep 2
+    if systemctl is-active --quiet caddy; then
+      echo "Caddy configurado e rodando. O certificado HTTPS é emitido automaticamente (Let's Encrypt) assim que o DNS de ${DOMAIN_ATUAL} apontar para este servidor."
+    else
+      echo "❌ Caddy NÃO subiu. journalctl -u caddy (últimas linhas):" >&2
+      journalctl -u caddy --no-pager -n 40 >&2 || true
+      echo "❌ Estado das portas 80/443 agora:" >&2
+      ss -ltnp 2>/dev/null | grep -E ':80 |:443 ' >&2 || true
+      exit 1
+    fi
+    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+      ufw allow 80/tcp >/dev/null 2>&1 || true
+      ufw allow 443/tcp >/dev/null 2>&1 || true
+    fi
   fi
 fi
 
