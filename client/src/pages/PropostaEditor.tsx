@@ -8,9 +8,7 @@ import {
     GitMerge,
     Loader2,
     Mail,
-    Percent,
     Plus,
-    Printer,
     Save,
     ScrollText,
     ShoppingCart,
@@ -70,15 +68,15 @@ function ItemRow({
   const hasOtherSimilares = productId
     ? (equivPreview?.totalFound ?? 0) > 0
     : (similaresFallback as any[]).some((s: any) => s.id !== item.productId);
-  // Preço efetivo: sugerido > custo do sistema
-  const effectivePrice = suggestedPrice || price;
+  // A peça comercial usa somente o preço de venda explicitamente informado.
+  const effectivePrice = suggestedPrice;
   const total = effectivePrice && qty ? (parseFloat(effectivePrice) * parseInt(qty)).toFixed(2) : null;
   const costPrice = item.costPrice ? parseFloat(String(item.costPrice)) : null;
   // Preço mínimo de venda = custo ÷ (1 - margem%) × (1 + imposto%)
   const minSalePrice = costPrice != null && costPrice > 0
     ? (costPrice * (1 + taxPct / 100)) / (1 - Math.min(minMarginPct, 99) / 100)
     : null;
-  const suggestedNum = suggestedPrice ? parseFloat(suggestedPrice) : (price ? parseFloat(price) : null);
+  const suggestedNum = suggestedPrice ? parseFloat(suggestedPrice) : null;
   const priceStatus: "ok" | "warn" | "danger" | null =
     minSalePrice != null && suggestedNum != null
       ? suggestedNum >= minSalePrice ? "ok"
@@ -233,7 +231,7 @@ function ItemRow({
         ) : (
           <div>
             <span className="text-sm font-bold text-blue-800">
-              {item.suggestedPrice ? `R$ ${parseFloat(item.suggestedPrice).toFixed(2)}` : item.unitPrice ? `R$ ${parseFloat(item.unitPrice).toFixed(2)}` : "—"}
+              {item.suggestedPrice ? `R$ ${parseFloat(item.suggestedPrice).toFixed(2)}` : "Não definido"}
             </span>
             {priceStatus === "ok" && (
               <div className="flex items-center gap-1 mt-0.5">
@@ -566,16 +564,32 @@ export default function PropostaEditor() {
   };
 
   const totalGeral = (proposal?.items ?? []).reduce((sum, item) => {
-    const t = item.totalPrice ? parseFloat(String(item.totalPrice)) : 0;
-    return sum + t;
+    const salePrice = Number((item as any).suggestedPrice);
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(salePrice) || salePrice <= 0) return sum;
+    if (!Number.isFinite(quantity) || quantity <= 0) return sum;
+    return sum + salePrice * quantity;
   }, 0);
+
+  const exportPricingIssues = (proposal?.items ?? []).flatMap((item, index) => {
+    const issues: string[] = [];
+    const salePrice = Number((item as any).suggestedPrice);
+    const quantity = Number(item.quantity);
+    if (!Number.isFinite(salePrice) || salePrice <= 0) {
+      issues.push(`Item ${index + 1}: preço de venda não definido`);
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      issues.push(`Item ${index + 1}: quantidade inválida`);
+    }
+    return issues;
+  });
+  if ((proposal?.items ?? []).length === 0) {
+    exportPricingIssues.push("A proposta não possui itens");
+  }
+  const canExportPdf = exportPricingIssues.length === 0;
 
   const formatDate = (d: Date | string) =>
     new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
-
-  const handlePrint = () => {
-    window.print();
-  };
 
   // ── Declarações ──────────────────────────────────────────────────────────
   const { data: declaracaoTemplates } = trpc.declarations.listTemplates.useQuery();
@@ -732,12 +746,12 @@ export default function PropostaEditor() {
     const qty = item.quantity ?? 1;
     return sum + price * qty;
   }, 0);
-  // Total baseado no preço sugerido (ou custo se não houver sugerido)
+  // Total comercial: preço de venda explícito; custo nunca é fallback.
   const totalSugerido = (proposal?.items ?? []).reduce((sum, item) => {
-    const price = (item as any).suggestedPrice
-      ? parseFloat(String((item as any).suggestedPrice))
-      : item.unitPrice ? parseFloat(String(item.unitPrice)) : 0;
-    const qty = item.quantity ?? 1;
+    const price = Number((item as any).suggestedPrice);
+    const qty = Number(item.quantity);
+    if (!Number.isFinite(price) || price <= 0) return sum;
+    if (!Number.isFinite(qty) || qty <= 0) return sum;
     return sum + price * qty;
   }, 0);
   const totalImpostosManualPct = panelIcms + panelSt + panelOutrosImpostos;
@@ -750,16 +764,17 @@ export default function PropostaEditor() {
 
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [pdfProgressMsg, setPdfProgressMsg] = useState("");
-  const [showMarkupModal, setShowMarkupModal] = useState(false);
-  const [markupInput, setMarkupInput] = useState("");
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailTo, setEmailTo] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
-  const handleDownloadPdf = async (markupPercent: number = 0) => {
+  const handleDownloadPdf = async () => {
+    if (!canExportPdf) {
+      toast.error(`PDF bloqueado: ${exportPricingIssues.slice(0, 2).join(". ")}.`);
+      return;
+    }
     setDownloadingPdf(true);
     setPdfProgressMsg("Preparando dados...");
-    setShowMarkupModal(false);
     try {
       // Salvar snapshot das declarações selecionadas antes de gerar o PDF
       if (selectedDeclarations.length > 0 && declaracaoTemplates) {
@@ -778,13 +793,15 @@ export default function PropostaEditor() {
         await saveSnapshotMutation.mutateAsync({ proposalId: id, declarations: [] });
       }
       const params = new URLSearchParams();
-      if (markupPercent > 0) params.set("markup", String(markupPercent));
       if (selectedDeclarations.length > 0) params.set("declarations", selectedDeclarations.join(","));
       const qs = params.toString();
       setPdfProgressMsg("Gerando PDF...");
       const url = `/api/proposals/${id}/pdf${qs ? `?${qs}` : ""}`;
       const response = await fetch(url);
-      if (!response.ok) throw new Error("Erro ao gerar PDF");
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || "Erro ao gerar PDF");
+      }
       setPdfProgressMsg("Preparando download...");
       const blob = await response.blob();
       const objUrl = URL.createObjectURL(blob);
@@ -796,9 +813,9 @@ export default function PropostaEditor() {
       document.body.removeChild(a);
       URL.revokeObjectURL(objUrl);
       setPdfProgressMsg("");
-      toast.success(markupPercent > 0 ? `PDF gerado com margem de ${markupPercent}%!` : "PDF baixado com sucesso!");
+      toast.success("PDF baixado com sucesso!");
     } catch (err) {
-      toast.error("Erro ao gerar PDF. Tente novamente.");
+      toast.error(err instanceof Error ? err.message : "Erro ao gerar PDF. Tente novamente.");
     } finally {
       setDownloadingPdf(false);
       setPdfProgressMsg("");
@@ -870,24 +887,16 @@ export default function PropostaEditor() {
             Enviar E-mail
           </button>
           <button
-            onClick={() => handleDownloadPdf(0)}
-            disabled={downloadingPdf}
-            className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 text-xs font-bold hover:bg-blue-900 transition-colors disabled:opacity-60 min-w-[110px] justify-center"
+            onClick={() => handleDownloadPdf()}
+            disabled={downloadingPdf || !canExportPdf}
+            className="flex items-center gap-2 bg-blue-800 text-white px-4 py-2 text-xs font-bold hover:bg-blue-900 transition-colors disabled:opacity-60 disabled:cursor-not-allowed min-w-[110px] justify-center"
+            title={canExportPdf ? "Baixar proposta com preços de venda salvos" : exportPricingIssues.join("; ")}
           >
             {downloadingPdf ? (
               <><Loader2 size={12} className="animate-spin" />{pdfProgressMsg || "Gerando..."}</>
             ) : (
               <><Download size={12} />Baixar PDF</>
             )}
-          </button>
-          <button
-            onClick={() => { setMarkupInput(""); setShowMarkupModal(true); }}
-            disabled={downloadingPdf}
-            className="flex items-center gap-2 border border-blue-800 text-blue-800 px-4 py-2 text-xs font-bold hover:bg-blue-50 transition-colors disabled:opacity-60"
-            title="Gerar PDF com preço de venda (custo + margem %)"
-          >
-            <Percent size={12} />
-            PDF com Margem
           </button>
           <button
             onClick={() => setShowDeclaracoesPanel(true)}
@@ -901,71 +910,17 @@ export default function PropostaEditor() {
               </span>
             )}
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex items-center gap-2 bg-gray-900 text-white px-4 py-2 text-xs font-bold hover:bg-gray-700 transition-colors"
-          >
-            <Printer size={12} />
-            Imprimir
-          </button>
         </div>
       </div>
 
-      {/* Markup / Margem Modal */}
-      {showMarkupModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white w-full max-w-sm shadow-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Gerar PDF com Preço de Venda</h3>
-                <p className="text-xs text-gray-500 mt-0.5">O PDF mostrará custo + venda, mas só imprimirá o preço de venda.</p>
-              </div>
-              <button onClick={() => setShowMarkupModal(false)} className="text-gray-400 hover:text-gray-900">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="mb-4">
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Margem de Lucro (%)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  max="999"
-                  step="0.5"
-                  value={markupInput}
-                  onChange={(e) => setMarkupInput(e.target.value)}
-                  placeholder="Ex: 30"
-                  className="flex-1 border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-blue-800"
-                  autoFocus
-                />
-                <span className="text-sm text-gray-500 font-semibold">%</span>
-              </div>
-              <p className="text-xs text-gray-400 mt-1">
-                {markupInput && !isNaN(parseFloat(markupInput)) && parseFloat(markupInput) > 0
-                  ? `Custo R$ 100,00 → Venda R$ ${(100 * (1 + parseFloat(markupInput) / 100)).toFixed(2).replace('.', ',')}`
-                  : "Digite a margem desejada"}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowMarkupModal(false)}
-                className="flex-1 border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-600 hover:border-gray-900 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => handleDownloadPdf(parseFloat(markupInput) || 0)}
-                disabled={downloadingPdf}
-                className="flex-1 bg-blue-800 text-white px-4 py-2 text-xs font-bold hover:bg-blue-900 transition-colors disabled:opacity-60 flex items-center justify-center gap-1"
-              >
-                {downloadingPdf ? (
-                  <><Loader2 size={12} className="animate-spin" />{pdfProgressMsg || "Gerando..."}</>
-                ) : (
-                  <><Download size={12} />Gerar PDF</>
-                )}
-              </button>
-            </div>
-          </div>
+      {exportPricingIssues.length > 0 && (
+        <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 print:hidden">
+          <span className="font-black">Exportação bloqueada.</span>{" "}
+          Salve o preço de venda de todos os itens antes de baixar o PDF.
+          <span className="ml-1 text-red-600">
+            {exportPricingIssues.slice(0, 3).join("; ")}
+            {exportPricingIssues.length > 3 ? ` (+${exportPricingIssues.length - 3})` : ""}
+          </span>
         </div>
       )}
 
@@ -1893,3 +1848,4 @@ export default function PropostaEditor() {
     </div>
   );
 }
+
