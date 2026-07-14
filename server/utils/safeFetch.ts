@@ -75,7 +75,7 @@ export async function safeFetch<T = unknown>(
       // Detectar HTML em vez de JSON
       if (isHtmlResponse(rawText)) {
         const msg = `[safeFetch] Resposta HTML recebida (status ${res.status}) de ${context}`;
-        console.warn(msg, rawText.slice(0, 100));
+        console.warn(msg);
         return {
           ok: false,
           status: res.status,

@@ -1,6 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { hasMinimumRole, type Role } from "@/lib/access";
-import { ArrowRight, BookOpen, CircleAlert, Wrench } from "lucide-react";
+import { ArrowRight, BookOpen, CheckCircle2, Wrench } from "lucide-react";
 import { Link } from "wouter";
 
 type ManualLink = {
@@ -21,10 +21,10 @@ const FLOW: FlowStep[] = [
     title: "1. Captar a oportunidade",
     objective: "Encontrar a demanda e reunir o documento de origem.",
     instruction:
-      "Consulte o Radar, revise as cotações recebidas ou importe o edital. Antes de avançar, confirme órgão, processo, prazo e itens.",
+      "Consulte o Radar ou as cotações recebidas e envie a opção escolhida ao Funil. O sistema evita duplicar a mesma oportunidade.",
     links: [
-      { href: "/radar-pncp", label: "Radar PNCP", minRole: "editor" },
-      { href: "/cotacoes-recebidas", label: "Cotações", minRole: "editor" },
+      { href: "/radar-pncp", label: "Radar PNCP" },
+      { href: "/cotacoes-recebidas", label: "Cotações" },
       { href: "/edital", label: "Importar edital", minRole: "editor" },
     ],
   },
@@ -32,7 +32,7 @@ const FLOW: FlowStep[] = [
     title: "2. Organizar no Funil",
     objective: "Manter uma única fila de trabalho e um responsável claro.",
     instruction:
-      "Crie ou localize o card no Funil, registre a próxima ação e use o número do processo como referência comum entre as telas.",
+      "Abra o card no Funil e registre GO ou NO-GO com justificativa. Somente um GO libera análise, preço e proposta.",
     links: [
       { href: "/funil", label: "Abrir Funil" },
       { href: "/agenda", label: "Conferir Agenda" },
@@ -42,7 +42,7 @@ const FLOW: FlowStep[] = [
     title: "3. Montar e revisar a proposta",
     objective: "Transformar itens válidos em uma proposta pronta para aprovação.",
     instruction:
-      "Vincule cada item ao catálogo, confirme custo e preço de venda e abra a proposta criada. Não exporte enquanto houver item sem preço.",
+      "No card aprovado, clique em revisar edital. Vincule cada item ao catálogo, confirme custo e preço de venda; o sistema bloqueia itens incompletos.",
     links: [
       { href: "/edital", label: "Importar edital", minRole: "editor" },
       { href: "/propostas", label: "Revisar propostas" },
@@ -121,17 +121,9 @@ const ADVANCED_GROUPS: Array<{ label: string; links: ManualLink[] }> = [
   {
     label: "Módulos paralelos ou especializados",
     links: [
-      { href: "/central-operacional", label: "Central operacional", minRole: "editor" },
-      { href: "/decisao-executiva", label: "Decisão executiva", minRole: "editor" },
-      { href: "/proposta-rapida", label: "Proposta rápida" },
-      { href: "/proposta-automatica", label: "Proposta automática" },
-      { href: "/propostas-admin", label: "Administração de propostas", minRole: "admin" },
       { href: "/agente-proposta", label: "Agente de propostas", minRole: "editor" },
-      { href: "/contratos-pos-licitacao", label: "Painel de contratos", minRole: "editor" },
       { href: "/captura-inteligente", label: "Captura inteligente", minRole: "editor" },
       { href: "/captura-revisao", label: "Revisão de capturas", minRole: "editor" },
-      { href: "/captura-scheduler", label: "Agendador de captura", minRole: "editor" },
-      { href: "/captura-analytics", label: "Analytics de captura", minRole: "editor" },
       { href: "/configurador-fornecedores", label: "Credenciais de fornecedores", minRole: "admin" },
       { href: "/scraper-fornecedores", label: "Agente de preços", minRole: "admin" },
       { href: "/agente", label: "Assistente IA" },
@@ -183,15 +175,14 @@ export default function Manual() {
         </div>
       </div>
 
-      <div className="border-l-4 border-amber-500 bg-amber-50 p-4 mb-6">
+      <div className="border-l-4 border-emerald-600 bg-emerald-50 p-4 mb-6">
         <div className="flex items-start gap-2">
-          <CircleAlert className="w-4 h-4 text-amber-700 mt-0.5 shrink-0" />
+          <CheckCircle2 className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-amber-900">Integração ainda manual</p>
-            <p className="text-sm text-amber-800 mt-1">
-              Radar e Cotações ainda não criam automaticamente um card no Funil. Ao decidir
-              avançar, registre a oportunidade no Funil e repita o número do processo para
-              manter a rastreabilidade.
+            <p className="text-sm font-bold text-emerald-900">Fluxo operacional integrado</p>
+            <p className="text-sm text-emerald-800 mt-1">
+              Radar, Cotações e Edital alimentam o mesmo Funil. A decisão GO/NO-GO, as etapas
+              válidas e a proposta ficam registradas no histórico da oportunidade.
             </p>
           </div>
         </div>

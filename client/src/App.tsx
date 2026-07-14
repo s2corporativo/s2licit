@@ -24,17 +24,14 @@ const Fornecedores = lazy(() => import("./pages/Fornecedores"));
 const ImportarPlanilha = lazy(() => import("./pages/ImportarPlanilha"));
 const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
 const Propostas = lazy(() => import("./pages/Propostas"));
-const PropostasAdmin = lazy(() => import("./pages/PropostasAdmin"));
 const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
 const Produtos = lazy(() => import("./pages/Produtos"));
 const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
-const PropostaRapida = lazy(() => import("./pages/PropostaRapida"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
 const ImportarEdital = lazy(() => import("./pages/ImportarEdital"));
 const Sinonimos = lazy(() => import("./pages/Sinonimos"));
 const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
-const PropostaAutomatica = lazy(() => import("./pages/PropostaAutomatica"));
 const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
 const ImportarNfe = lazy(() => named(import("./pages/ImportarNfe"), "ImportarNfe"));
 const ConfiguradorFornecedores = lazy(() => import("./pages/ConfiguradorFornecedores"));
@@ -45,13 +42,10 @@ const ScraperFornecedores = lazy(() => import("./pages/ScraperFornecedores"));
 const AgenteProposta = lazy(() => import("./pages/AgenteProposta"));
 const Agente = lazy(() => import("./pages/Agente"));
 const CaptureReview = lazy(() => named(import("./pages/CaptureReview"), "CaptureReview"));
-const CaptureSchedulerMonitor = lazy(() => named(import("./pages/CaptureSchedulerMonitor"), "CaptureSchedulerMonitor"));
-const CaptureAnalytics = lazy(() => named(import("./pages/CaptureAnalytics"), "CaptureAnalytics"));
 const NfeEnrichmentPipeline = lazy(() => named(import("./pages/NfeEnrichmentPipeline"), "NfeEnrichmentPipeline"));
 const HistoricoEnriquecimento = lazy(() => import("./pages/HistoricoEnriquecimento"));
 const DiligenciasPage = lazy(() => import("./pages/Diligencias"));
 const DocumentosHabilitacaoPage = lazy(() => import("./pages/DocumentosHabilitacao"));
-const CentralOperacional = lazy(() => import("./pages/CentralOperacional"));
 const CotacoesRecebidas = lazy(() => import("./pages/CotacoesRecebidas"));
 const RadarPncp = lazy(() => import("./pages/RadarPncp"));
 const Certidoes = lazy(() => import("./pages/Certidoes"));
@@ -65,8 +59,6 @@ const MotorTributario = lazy(() => import("./pages/MotorTributario"));
 const CustoTotal = lazy(() => import("./pages/CustoTotal"));
 const PosVenda = lazy(() => import("./pages/PosVenda"));
 const BuscaGlobal = lazy(() => import("./pages/BuscaGlobal"));
-const ExecutiveDecisionCenter = lazy(() => import("./pages/ExecutiveDecisionCenter"));
-const PostAwardContractsCenter = lazy(() => import("./pages/PostAwardContractsCenter"));
 const IntelligentCaptureCenter = lazy(() => import("./pages/IntelligentCaptureCenter"));
 const DatabaseIntegrityCheck = lazy(() => named(import("./pages/DatabaseIntegrityCheck"), "DatabaseIntegrityCheck"));
 const Login = lazy(() => import("./pages/Login"));
@@ -158,28 +150,16 @@ function Router() {
             <CaptureReview />
           </RequireAuth>
         </Route>
-        <Route path="/captura-scheduler">
-          <RequireAuth message="Gerencie agendamentos de captura após fazer login." minRole="editor">
-            <CaptureSchedulerMonitor />
-          </RequireAuth>
-        </Route>
-        <Route path="/captura-analytics">
-          <RequireAuth message="Visualize analytics de captura após fazer login." minRole="editor">
-            <CaptureAnalytics />
-          </RequireAuth>
-        </Route>
-        <Route path="/central-operacional">
-          <RequireAuth message="Acesse a central operacional após fazer login." minRole="editor">
-            <CentralOperacional />
-          </RequireAuth>
-        </Route>
+        <Route path="/captura-scheduler"><Redirect to="/captura-inteligente" /></Route>
+        <Route path="/captura-analytics"><Redirect to="/captura-inteligente" /></Route>
+        <Route path="/central-operacional"><Redirect to="/funil" /></Route>
         <Route path="/cotacoes-recebidas">
-          <RequireAuth message="Acesse as cotações recebidas após fazer login." minRole="editor">
+          <RequireAuth message="Acesse as cotações recebidas após fazer login.">
             <CotacoesRecebidas />
           </RequireAuth>
         </Route>
         <Route path="/radar-pncp">
-          <RequireAuth message="Acesse o radar de oportunidades após fazer login." minRole="editor">
+          <RequireAuth message="Acesse o radar de oportunidades após fazer login.">
             <RadarPncp />
           </RequireAuth>
         </Route>
@@ -223,16 +203,8 @@ function Router() {
             <HistoricoEnriquecimento />
           </RequireAuth>
         </Route>
-        <Route path="/decisao-executiva">
-          <RequireAuth message="Acesse o assistente de decisão executivo após fazer login." minRole="editor">
-            <ExecutiveDecisionCenter />
-          </RequireAuth>
-        </Route>
-        <Route path="/contratos-pos-licitacao">
-          <RequireAuth message="Acesse a gestão de contratos pós-licitação após fazer login." minRole="editor">
-            <PostAwardContractsCenter />
-          </RequireAuth>
-        </Route>
+        <Route path="/decisao-executiva"><Redirect to="/funil" /></Route>
+        <Route path="/contratos-pos-licitacao"><Redirect to="/pos-venda" /></Route>
         <Route path="/captura-inteligente">
           <RequireAuth message="Acesse a captura inteligente multi-origem após fazer login." minRole="editor">
             <IntelligentCaptureCenter />
@@ -249,21 +221,13 @@ function Router() {
             <Propostas />
           </RequireAuth>
         </Route>
-        <Route path="/proposta-rapida">
-          <RequireAuth message="Crie propostas rápidas após fazer login.">
-            <PropostaRapida />
-          </RequireAuth>
-        </Route>
+        <Route path="/proposta-rapida"><Redirect to="/edital" /></Route>
         <Route path="/propostas/:id">
           <RequireAuth message="Edite propostas após fazer login.">
             <PropostaEditor />
           </RequireAuth>
         </Route>
-        <Route path="/propostas-admin">
-          <RequireAuth message="Administre propostas após fazer login." minRole="admin">
-            <PropostasAdmin />
-          </RequireAuth>
-        </Route>
+        <Route path="/propostas-admin"><Redirect to="/propostas" /></Route>
         <Route path="/financeiro">
           <RequireAuth message="Acesse o controle financeiro após fazer login.">
             <ControleFinanceiro />
@@ -306,10 +270,8 @@ function Router() {
           </RequireAuth>
         </Route>
 
-        <Route path="/analisador-edital"><Redirect to="/proposta-automatica" /></Route>
-        <Route path="/proposta-automatica">
-          {() => <PropostaAutomatica />}
-        </Route>
+        <Route path="/analisador-edital"><Redirect to="/edital" /></Route>
+        <Route path="/proposta-automatica"><Redirect to="/edital" /></Route>
         <Route path="/scraper-fornecedores">
           <RequireAuth message="Faça login para acessar o agente de scraping." minRole="admin">
             <ScraperFornecedores />

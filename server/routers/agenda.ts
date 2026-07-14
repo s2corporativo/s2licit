@@ -97,7 +97,7 @@ export const agendaRouter = router({
           data: new Date(a.dueDate).toISOString(),
           diasRestantes: dias,
           urgencia: classificar(dias),
-          link: "/contratos-pos-licitacao",
+          link: "/pos-venda",
         });
       }
     } catch (err) { console.error("[Agenda] Erro ao buscar alertas de contrato:", (err as Error).message); }
@@ -119,7 +119,7 @@ export const agendaRouter = router({
           data: new Date(ct.endDate).toISOString(),
           diasRestantes: dias,
           urgencia: classificar(dias),
-          link: "/contratos-pos-licitacao",
+          link: "/pos-venda",
         });
       }
     } catch (err) { console.error("[Agenda] Erro ao buscar fim de contratos:", (err as Error).message); }

@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { KanbanSquare, Loader2, Plus, X, ChevronRight, History } from "lucide-react";
+import { usePermission } from "@/components/RequireAuth";
+import { KanbanSquare, Loader2, Plus, X, ChevronRight, History, CheckCircle2, Ban, FileSearch } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 /**
  * Funil de Oportunidades — kanban da operação inteira, da triagem ao
@@ -60,9 +62,12 @@ function moeda(v: number | null): string {
 }
 
 export default function Funil() {
+  const canEdit = usePermission("editor");
+  const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const kanban = trpc.funil.kanban.useQuery();
   const [detalheId, setDetalheId] = useState<number | null>(null);
+  const [decisionReason, setDecisionReason] = useState("");
   const [novaAberta, setNovaAberta] = useState(false);
   const [form, setForm] = useState({ titulo: "", orgao: "", numeroProcesso: "", valorEstimado: "", prazoEnvio: "" });
 
@@ -86,10 +91,24 @@ export default function Funil() {
     onError: (e) => toast.error(e.message),
   });
 
+  const decidir = trpc.funil.decidir.useMutation({
+    onSuccess: ({ decision }) => {
+      toast.success(decision.value === "go" ? "Decisão GO registrada." : "Decisão NO-GO registrada.");
+      setDecisionReason("");
+      invalidar();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const detalhe = trpc.funil.detalhe.useQuery(
     { id: detalheId ?? 0 },
     { enabled: detalheId != null },
   );
+
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("oportunidade"));
+    if (Number.isInteger(id) && id > 0) setDetalheId(id);
+  }, []);
 
   const data = kanban.data;
   // Só mostra colunas com cards + as etapas iniciais (para não poluir)
@@ -109,12 +128,14 @@ export default function Funil() {
             <p className="text-sm text-gray-500">Da triagem ao recebimento — toda movimentação fica registrada</p>
           </div>
         </div>
-        <button
-          onClick={() => setNovaAberta(true)}
-          className="flex items-center gap-2 text-sm font-semibold px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded"
-        >
-          <Plus className="w-4 h-4" /> Nova oportunidade
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setNovaAberta(true)}
+            className="flex items-center gap-2 text-sm font-semibold px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded"
+          >
+            <Plus className="w-4 h-4" /> Nova oportunidade
+          </button>
+        )}
       </div>
 
       {kanban.isLoading ? (
@@ -208,7 +229,7 @@ export default function Funil() {
 
       {/* Painel de detalhe */}
       {detalheId != null && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setDetalheId(null)}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => { setDetalheId(null); navigate("/funil"); }}>
           <div className="bg-white w-full max-w-lg max-h-[85vh] overflow-y-auto p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             {detalhe.isLoading || !detalhe.data ? (
               <div className="p-6 text-center text-gray-400"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
@@ -216,7 +237,7 @@ export default function Funil() {
               <>
                 <div className="flex items-start justify-between gap-3 mb-1">
                   <h3 className="font-bold text-gray-900">{detalhe.data.titulo}</h3>
-                  <button onClick={() => setDetalheId(null)}><X className="w-4 h-4 text-gray-400" /></button>
+                  <button onClick={() => { setDetalheId(null); navigate("/funil"); }}><X className="w-4 h-4 text-gray-400" /></button>
                 </div>
                 <div className="text-xs text-gray-500 mb-3">
                   {detalhe.data.orgao && <span>{detalhe.data.orgao} · </span>}
@@ -228,25 +249,77 @@ export default function Funil() {
                   <p className="text-sm text-gray-700 bg-gray-50 border border-gray-100 p-2.5 mb-3 whitespace-pre-wrap">{detalhe.data.objeto}</p>
                 )}
 
-                <div className="mb-4">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Mover para</label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(ETAPA_LABEL).map(([etapa, label]) => (
-                      <button
-                        key={etapa}
-                        disabled={mover.isPending || etapa === detalhe.data!.etapa}
-                        onClick={() => mover.mutate({ id: detalheId, paraEtapa: etapa as any })}
-                        className={`text-[11px] font-semibold px-2 py-1 rounded border transition-colors ${
-                          etapa === detalhe.data!.etapa
-                            ? "bg-blue-600 text-white border-blue-600"
-                            : "border-gray-200 text-gray-600 hover:border-blue-400 hover:text-blue-600"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                {detalhe.data.decisao ? (
+                  <div className={`mb-4 border p-3 ${
+                    detalhe.data.decisao.value === "go"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-gray-200 bg-gray-50"
+                  }`}>
+                    <div className="flex items-center gap-2 text-sm font-bold">
+                      {detalhe.data.decisao.value === "go"
+                        ? <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                        : <Ban className="w-4 h-4 text-gray-600" />}
+                      Decisão {detalhe.data.decisao.value === "go" ? "GO" : "NO-GO"}
+                    </div>
+                    <p className="mt-1 text-xs text-gray-600">{detalhe.data.decisao.reason}</p>
+                    {detalhe.data.decisao.actor && (
+                      <p className="mt-1 text-[10px] text-gray-400">Registrada por {detalhe.data.decisao.actor}</p>
+                    )}
                   </div>
-                </div>
+                ) : canEdit && ["nova", "triagem"].includes(detalhe.data.etapa) ? (
+                  <div className="mb-4 border border-amber-200 bg-amber-50 p-3">
+                    <label className="block text-xs font-bold text-amber-900 mb-1">Decisão obrigatória: GO ou NO-GO</label>
+                    <textarea
+                      value={decisionReason}
+                      onChange={(event) => setDecisionReason(event.target.value)}
+                      placeholder="Registre o motivo da decisão (mínimo 5 caracteres)"
+                      className="w-full min-h-16 border border-amber-200 bg-white px-2 py-1.5 text-sm"
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        disabled={decidir.isPending || decisionReason.trim().length < 5}
+                        onClick={() => decidir.mutate({ id: detalheId, decisao: "go", justificativa: decisionReason.trim() })}
+                        className="flex items-center gap-1 bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" /> GO — analisar
+                      </button>
+                      <button
+                        disabled={decidir.isPending || decisionReason.trim().length < 5}
+                        onClick={() => decidir.mutate({ id: detalheId, decisao: "no_go", justificativa: decisionReason.trim() })}
+                        className="flex items-center gap-1 bg-gray-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        <Ban className="w-3.5 h-3.5" /> NO-GO — encerrar
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {canEdit && ["analise", "precificacao"].includes(detalhe.data.etapa) && (
+                  <button
+                    onClick={() => navigate(`/edital?funilId=${detalheId}`)}
+                    className="mb-4 flex w-full items-center justify-center gap-2 bg-blue-700 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+                  >
+                    <FileSearch className="w-4 h-4" /> Revisar edital e montar proposta
+                  </button>
+                )}
+
+                {canEdit && detalhe.data.proximasEtapas.length > 0 && !["nova", "triagem"].includes(detalhe.data.etapa) && (
+                  <div className="mb-4">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Próxima ação</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {detalhe.data.proximasEtapas.map((etapa) => (
+                        <button
+                          key={etapa}
+                          disabled={mover.isPending}
+                          onClick={() => mover.mutate({ id: detalheId, paraEtapa: etapa })}
+                          className="text-[11px] font-semibold px-2 py-1 rounded border border-gray-200 text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50"
+                        >
+                          {ETAPA_LABEL[etapa] ?? etapa}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">

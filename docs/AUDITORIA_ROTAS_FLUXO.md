@@ -1,157 +1,105 @@
-# Auditoria operacional de rotas e fluxo
+# Auditoria e higienização do sistema S2
 
-Data: 2026-07-13  
-Escopo: frontend, rotas, chamadas tRPC, serviços relacionados, esquema de dados, CI e build do repositório `s2corporativo/s2licit`.
+Data: 2026-07-14  
+Escopo: frontend, rotas, permissões, serviços, dependências, logs, configuração de produção, testes e estrutura de dados do repositório `s2corporativo/s2licit`.
 
-## Resumo executivo
+## Resultado executivo
 
-O sistema tem boa cobertura funcional, mas apresenta ferramentas demais no mesmo nível de navegação e vários fluxos paralelos que não compartilham uma oportunidade canônica.
+O sistema passa a ter um fluxo operacional principal e auditável:
 
-Principais números encontrados:
+1. captar no Radar PNCP, em Cotações ou por Edital;
+2. registrar uma única oportunidade no Funil;
+3. decidir GO/NO-GO com justificativa;
+4. revisar edital, catálogo, custo e preço;
+5. criar uma proposta vinculada à oportunidade;
+6. disputar, habilitar e executar no Pós-venda;
+7. faturar, receber e medir o resultado.
 
-- 58 páginas carregadas por rota;
-- 54 itens na barra lateral, distribuídos em 9 grupos;
-- 80 namespaces no roteador tRPC;
-- 58 namespaces chamados diretamente por páginas roteadas;
-- 3 namespaces usados indiretamente por hooks/componentes;
-- 19 namespaces sem consumidor direto identificado no frontend;
-- múltiplas famílias de tabelas para oportunidade, contrato, auditoria e captura.
+O menu principal caiu de 54 para 17 entradas, em 6 grupos. Ferramentas especializadas continuam disponíveis no Manual quando possuem função real. Rotas redundantes ou incompletas usam redirecionamentos de compatibilidade.
 
-A primeira simplificação reduz a navegação principal para 17 itens em 6 grupos, mantém o Manual no rodapé e preserva todas as rotas existentes. Nenhuma tabela ou dado foi removido.
+## Alterações realizadas
 
-## O que foi confirmado
+### Fluxo e rotas
 
-- Todos os módulos alcançáveis pelo frontend e pelo servidor resolvem no TypeScript.
-- O check `tsc --noEmit` passa.
-- O build Vite do frontend passa.
-- O bundle de produção do servidor passa.
-- As rotas declaradas possuem componente correspondente ou redirecionamento.
-- O repositório usa React com carregamento sob demanda, tRPC, Zod e TypeScript.
-- O histórico recente da branch principal registrava 618 testes aprovados antes desta auditoria.
-- A correção de segurança de preços da PR #25 passou localmente no teste específico, no TypeScript e no build completo.
+- Radar PNCP, Cotações e Edital criam ou reutilizam uma oportunidade canônica no Funil.
+- A deduplicação usa origem e identificador externo persistidos no banco.
+- GO/NO-GO é obrigatório antes de avançar para análise, preço e proposta.
+- O Funil aceita apenas transições previstas; o salto livre entre etapas foi removido.
+- A proposta registra o vínculo com a oportunidade e devolve o usuário ao histórico correto.
+- Links internos do Dashboard, Agenda e Propostas apontam somente para rotas canônicas.
+- O script `pnpm audit:routes` bloqueia rota duplicada, item de menu órfão, destino inexistente e novo uso interno de URL legada.
 
-Essas verificações confirmam estrutura, contratos e compilação. Elas não substituem teste autenticado com banco MySQL e integrações externas reais.
+### Compatibilidade simplificada
 
-## Navegação canônica adotada
-
-| Grupo | Rotas principais |
+| Rota antiga | Destino canônico |
 | --- | --- |
-| Operação | `/`, `/agenda`, `/funil` |
-| Oportunidades | `/radar-pncp`, `/cotacoes-recebidas`, `/edital` |
-| Propostas | `/propostas`, `/documentos-habilitacao`, `/sala-disputa` |
-| Catálogo | `/produtos`, `/fornecedores`, `/importar`, `/equivalencias` |
-| Execução | `/pos-venda`, `/financeiro`, `/desempenho` |
-| Administração | `/configuracao` |
-| Ajuda | `/manual`, no rodapé |
+| `/central-operacional` | `/funil` |
+| `/decisao-executiva` | `/funil` |
+| `/contratos-pos-licitacao` | `/pos-venda` |
+| `/proposta-rapida` | `/edital` |
+| `/propostas-admin` | `/propostas` |
+| `/analisador-edital` | `/edital` |
+| `/proposta-automatica` | `/edital` |
+| `/captura-scheduler` | `/captura-inteligente` |
+| `/captura-analytics` | `/captura-inteligente` |
+| `/dashboard` | `/` |
 
-O menu agora é filtrado pelo perfil do usuário. Rotas de editor e administrador deixam de aparecer para perfis sem acesso.
+Os oito componentes de página substituídos por essas rotas foram removidos. As URLs foram preservadas para favoritos e integrações existentes.
 
-## Inventário das rotas
+### Segurança e permissões
 
-### Fluxo principal
+- Consultas autenticadas aceitam Viewer; toda mutação baseada em `protectedProcedure` exige Editor ou Admin por regra central.
+- Endpoints sensíveis declaram `editorProcedure` ou `adminProcedure` de forma explícita.
+- Upload de logo exige Admin; importação Excel exige Editor.
+- Uploads aceitam apenas JPEG, PNG ou WebP confirmados pela assinatura binária, não apenas pelo nome do arquivo.
+- A geração de PDF, envio de e-mail e criação de proposta validam preço e vínculo da oportunidade antes de produzir saída.
+- Logs deixaram de registrar e-mail administrativo, telefone, conteúdo de notificação e trecho bruto de respostas externas.
+- `pnpm audit:secrets` procura credenciais literais sem exibir possíveis valores.
 
-- `/` e `/dashboard` (redirecionamento): painel geral.
-- `/agenda`: prazos e próximos eventos.
-- `/funil`: quadro operacional.
-- `/radar-pncp`: consulta de oportunidades PNCP.
-- `/cotacoes-recebidas`: triagem e resposta de cotações por e-mail.
-- `/edital`: extração, vínculo ao catálogo e criação de proposta.
-- `/propostas` e `/propostas/:id`: lista e edição de propostas.
-- `/documentos-habilitacao`: acervo de habilitação.
-- `/sala-disputa`: apoio à disputa.
-- `/produtos`, `/fornecedores`, `/importar` e `/equivalencias`: catálogo.
-- `/pos-venda` e `/financeiro`: execução e financeiro.
-- `/desempenho`: indicadores.
-- `/configuracao`: configuração administrativa.
-- `/manual`: fluxo operacional e acesso às ferramentas avançadas.
+### Saúde e produção
 
-### Apoio funcional preservado
+- `/healthz` confirma que o processo está vivo.
+- `/readyz` só responde pronto após inicialização e uma consulta real ao MySQL.
+- O diagnóstico administrativo também executa consulta real ao banco.
+- O `Dockerfile` exige migrations válidas antes de iniciar e usa `/readyz` no health check.
+- O CI executa lint, auditoria de rotas, auditoria de segredos, TypeScript, testes e build.
 
-- Pesquisa e preço: `/busca-global`, `/busca`, `/comparacao`, `/analise-precos`, `/custo-total`, `/tributos`, `/aplicar-precificacao`, `/regras-categoria`.
-- Catálogo e dados: `/categorias`, `/qualidade`, `/importar-nfe`, `/imagens`, `/enriquecimento`, `/reclassificacao`, `/sinonimos`, `/enriquecimento-nfe`, `/historico-enriquecimento`.
-- Documentos: `/certidoes`, `/diligencias`, `/portais-licitacao`, `/templates-proposta`.
-- Assistência: `/agente`.
+### Código morto e dependências
 
-### Módulos implementados, mas paralelos ou desconectados do fluxo principal
+- Removidos 23 componentes de UI gerados e sem nenhuma importação real.
+- Removidos 8 componentes de páginas redundantes ou incompletas.
+- Removidos 24 pacotes de produção e 4 pacotes de desenvolvimento comprovadamente sem consumidor.
+- `csv-parse` foi preservado porque os scripts de carga do repositório o utilizam.
+- O lockfile continua válido com instalação congelada (`--frozen-lockfile`).
 
-- `/central-operacional`: sobrepõe parte de Dashboard, Funil e Propostas.
-- `/decisao-executiva`: exige `proposalId`; portanto avalia depois da criação da proposta, não antes.
-- `/proposta-rapida`, `/proposta-automatica`, `/propostas-admin` e `/agente-proposta`: quatro caminhos adicionais para o mesmo domínio de proposta.
-- `/contratos-pos-licitacao`: painel de leitura paralelo ao módulo transacional `/pos-venda`.
-- `/captura-inteligente`, `/captura-revisao`, `/captura-scheduler`, `/captura-analytics`, `/configurador-fornecedores` e `/scraper-fornecedores`: cadeia de captura fragmentada em várias telas.
-- `/central-ia`: configuração técnica, não operação diária.
-- `/diagnostico` e `/admin/database-health`: diagnóstico técnico.
+### Funcionalidades incompletas encontradas
 
-Essas rotas continuam disponíveis no Manual, dentro de uma seção recolhida de ferramentas avançadas.
+- O antigo scheduler de captura simulava conclusão sem capturar produtos. A interface foi retirada e as mutações antigas retornam indisponibilidade explícita.
+- O antigo analytics de captura expunha métricas ainda não implementadas. A interface foi retirada do fluxo.
+- Os endpoints de status e cancelamento do pipeline NF-e sempre devolviam valores fictícios; foram removidos. O processamento real continua síncrono.
+- Integrações com PNCP, e-mail, IA, WhatsApp, fornecedores e portais dependem de credenciais e disponibilidade externas; compilação local não comprova esses serviços.
 
-### Compatibilidade e erro
+## Estruturas redundantes preservadas com segurança
 
-- `/analisador-edital` redireciona para `/proposta-automatica`.
-- `/404` e a rota final exibem a página de não encontrado.
-- Nenhuma rota antiga foi removida nesta fase.
+Não foram apagadas tabelas de produção sem migração e telemetria. Permanecem sob observação:
 
-## Pontos que ainda não formam um fluxo único
+- oportunidades: `gov_licitations`, `licitacoes_descobertas`, `licitacoes`, `oportunidadesLicitacao`, `radarOpportunities`, `funil_oportunidades` e `email_quotations`;
+- contratos: `contratos` e `post_award_contracts`, além das famílias de reajuste;
+- auditoria: `auditLog` e `audit_logs`;
+- captura: famílias `scrape_*`, `scraper_*`, `supplier_capture_*` e `captured_product_*`.
 
-1. O Radar consulta o PNCP, mas não persiste a oportunidade nem cria um card no Funil.
-2. A deduplicação do Radar é mantida em memória e se perde ao reiniciar o processo.
-3. O backend do Funil possui criação a partir de licitação, mas a interface não chama esse caminho.
-4. Cotações por e-mail podem gerar e enviar resposta sem criar oportunidade ou proposta comercial rastreável.
-5. A decisão executiva está ligada à proposta, invertendo a ordem esperada de GO/NO-GO.
-6. Documentos de habilitação são globais; não existe matriz por oportunidade, cláusula e validade.
-7. Movimentações do Funil não impõem gates de edital, preço, documentação e aprovação.
-8. O health check `/healthz` valida o processo, mas não confirma banco ou dependências.
-9. Há criação de estrutura em runtime convivendo com migrations, o que aumenta divergência entre ambientes.
-10. Muitas mutações usam apenas autenticação; a adoção de `editorProcedure` ainda é parcial.
-11. O CI não executa um fluxo E2E autenticado com MySQL.
+A navegação autenticada agora registra somente rota e usuário no log de auditoria. O relatório administrativo de uso permite decidir uma remoção posterior com evidência, sem registrar conteúdo comercial.
 
-## Redundância de dados identificada
+## Verificações reproduzíveis
 
-### Oportunidades
+```bash
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm audit:routes
+pnpm audit:secrets
+pnpm check
+pnpm test
+pnpm build
+```
 
-As famílias `gov_licitations`, `licitacoes_descobertas`, `licitacoes`, `oportunidadesLicitacao`, `radarOpportunities`, `funil_oportunidades` e `email_quotations` representam partes sobrepostas do mesmo ciclo.
-
-### Contratos
-
-`contratos` e `post_award_contracts`, além de famílias distintas de reajuste, mantêm modelos paralelos.
-
-### Auditoria
-
-`auditLog` e `audit_logs` coexistem.
-
-### Captura
-
-Há famílias paralelas `scrape_*`, `scraper_*`, `supplier_capture_*` e `captured_product_*`.
-
-Não é seguro apagar essas estruturas sem telemetria de uso, migração de dados e testes de regressão.
-
-## Namespaces tRPC sem consumidor direto identificado
-
-Depois de considerar os usos indiretos de `auth`, `priceImport` e `priceSync`, permaneceram sem chamada direta encontrada no frontend:
-
-`alertConfig`, `drogavet`, `duplicateDetection`, `importConsolidated`, `importMatching`, `marginOptimization`, `metadata`, `notificationWebhooks`, `priceAlerts`, `pricing`, `productMatching`, `quotations`, `recognition`, `reports`, `scraperIntegration`, `scraperMulti`, `scraperSync`, `supplierAuth` e `supplierImport`.
-
-Eles podem atender jobs, webhooks ou integrações externas. A recomendação é instrumentar uso antes de descontinuar.
-
-## Fluxo operacional recomendado
-
-1. Captar no Radar, Cotações ou Edital.
-2. Registrar uma oportunidade única no Funil.
-3. Fazer GO/NO-GO antes de criar a proposta.
-4. Extrair edital, vincular catálogo e validar custo/preço.
-5. Verificar habilitação e aprovação.
-6. Gerar e enviar uma proposta única.
-7. Operar a disputa com preço-piso aprovado.
-8. Ao ganhar, criar execução no Pós-venda.
-9. Controlar entrega, nota, recebimento e resultado.
-
-Até a integração Radar/Cotações → Funil ser implementada, o número do processo deve ser repetido manualmente para preservar rastreabilidade.
-
-## Próximas fases sugeridas
-
-1. Criar a entidade canônica de oportunidade e integrar Radar e Cotações ao Funil.
-2. Colocar GO/NO-GO, edital, preços e habilitação como gates do Funil.
-3. Consolidar os caminhos de proposta e contratos.
-4. Instrumentar uso de rotas, namespaces e tabelas antes de remover redundâncias.
-5. Mover autorização de escrita para o servidor com `editorProcedure`/admin.
-6. Adicionar testes E2E autenticados com MySQL e health check de dependências.
-
+Para validar integrações externas de ponta a ponta, ainda é necessário um ambiente de homologação com MySQL, credenciais de teste e endpoints permitidos. Nunca usar dados ou credenciais de produção em testes automatizados.

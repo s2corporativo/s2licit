@@ -5,7 +5,6 @@ import {
   FileText,
   Plus,
   Trash2,
-  Workflow,
   X,
 } from "lucide-react";
 
@@ -330,13 +329,6 @@ export default function Propostas() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigate("/propostas-admin")}
-            className="flex items-center gap-2 border border-gray-200 text-gray-600 px-3 py-2 text-xs font-semibold hover:border-gray-900 transition-colors"
-          >
-            <Workflow size={13} />
-            Administrar
-          </button>
           <button
             onClick={() => setShowNew(true)}
             className="flex items-center gap-2 bg-gray-900 text-white px-4 py-2.5 text-sm font-bold hover:bg-blue-800 transition-colors flex-shrink-0"

@@ -69,10 +69,10 @@ export async function notifyOwner(
   const { title, content } = validatePayload(payload);
 
   // Serviço externo de notificação é opcional (era o serviço da plataforma
-  // Manus). Sem configuração, apenas registra no log do servidor — os
+  // Manus). Sem configuração, registra apenas o estado operacional — os
   // webhooks internos (Slack/e-mail) continuam funcionando por outra via.
   if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
-    console.log(`[Notification] (sem serviço externo configurado) ${title}: ${content.slice(0, 200)}`);
+    console.log("[Notification] Serviço externo não configurado; envio ignorado.");
     return false;
   }
 
@@ -91,12 +91,7 @@ export async function notifyOwner(
     });
 
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.warn(
-        `[Notification] Failed to notify owner (${response.status} ${response.statusText})${
-          detail ? `: ${detail}` : ""
-        }`
-      );
+      console.warn(`[Notification] Serviço externo recusou o envio (${response.status}).`);
       return false;
     }
 

@@ -2,8 +2,8 @@ import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, protectedProcedure, router } from "./trpc";
 import { getDb } from "../db";
-import { importLogs, products, categories } from "../../drizzle/schema";
-import { desc, eq, or, sql, isNull, count } from "drizzle-orm";
+import { auditLog, importLogs, products, categories } from "../../drizzle/schema";
+import { and, desc, eq, or, sql, isNull, count } from "drizzle-orm";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -12,9 +12,16 @@ export const systemRouter = router({
         timestamp: z.number().min(0, "timestamp cannot be negative"),
       })
     )
-    .query(() => ({
-      ok: true,
-    })),
+    .query(async () => {
+      try {
+        const db = await getDb();
+        if (!db) return { ok: false, database: false } as const;
+        await db.execute(sql`SELECT 1 AS ready`);
+        return { ok: true, database: true } as const;
+      } catch {
+        return { ok: false, database: false } as const;
+      }
+    }),
 
   notifyOwner: adminProcedure
     .input(
@@ -44,6 +51,7 @@ export const systemRouter = router({
     try {
       const db = await getDb();
       if (db) {
+        await db.execute(sql`SELECT 1 AS ready`);
         results.push({ check: "Banco de dados", status: "ok", detail: "Conexão ativa" });
       } else {
         results.push({ check: "Banco de dados", status: "error", detail: "getDb() retornou null" });
@@ -89,6 +97,25 @@ export const systemRouter = router({
       checks: results,
     };
   }),
+
+  routeUsage: adminProcedure
+    .input(z.object({ days: z.number().int().min(1).max(365).default(30) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const since = new Date(Date.now() - (input?.days ?? 30) * 86_400_000);
+      return db
+        .select({
+          route: auditLog.endpoint,
+          views: sql<number>`COUNT(*)`,
+          users: sql<number>`COUNT(DISTINCT ${auditLog.userId})`,
+          lastSeen: sql<Date>`MAX(${auditLog.createdAt})`,
+        })
+        .from(auditLog)
+        .where(and(eq(auditLog.source, "ui"), eq(auditLog.action, "route_view"), sql`${auditLog.createdAt} >= ${since}`))
+        .groupBy(auditLog.endpoint)
+        .orderBy(desc(sql`COUNT(*)`));
+    }),
 
   /**
    * Retorna lista de erros recentes do sistema (jobs com erro, importações falhas).

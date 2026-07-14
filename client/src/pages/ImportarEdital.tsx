@@ -462,6 +462,10 @@ function ConfidenceBadge({ confidence }: { confidence: MatchedItem["confidence"]
 export default function ImportarEdital() {
   const [, navigate] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [funilId] = useState<number | undefined>(() => {
+    const parsed = Number(new URLSearchParams(window.location.search).get("funilId"));
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  });
 
   // State machine: idle → extracting → matching → ready → creating → done
   const [stage, setStage] = useState<"idle" | "extracting" | "matching" | "ready" | "creating" | "done">("idle");
@@ -473,6 +477,7 @@ export default function ImportarEdital() {
   const [marginPercent, setMarginPercent] = useState(30);
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
   const [createdProposalId, setCreatedProposalId] = useState<number | null>(null);
+  const [createdFunilId, setCreatedFunilId] = useState<number | null>(null);
   const [createdItemCount, setCreatedItemCount] = useState(0);
   const [reviewConfirmed, setReviewConfirmed] = useState(false);
   const [truncated, setTruncated] = useState(false);
@@ -713,6 +718,7 @@ export default function ImportarEdital() {
         marginPercent,
         reviewConfirmed: true,
         templateId: selectedTemplateId,
+        funilId,
       });
       if (result.addedCount !== matches.length) {
         throw new Error(
@@ -720,6 +726,7 @@ export default function ImportarEdital() {
         );
       }
       setCreatedProposalId(result.proposalId);
+      setCreatedFunilId(result.funilId);
       setCreatedItemCount(result.addedCount);
       setStage("done");
       toast.success(`Proposta criada com ${result.addedCount} itens.`);
@@ -760,6 +767,15 @@ export default function ImportarEdital() {
           Envie um edital de licitação (PDF ou DOCX) e a IA extrai os itens automaticamente.
         </p>
       </div>
+
+      {funilId && (
+        <div className="flex items-center justify-between border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <span><strong>Oportunidade #{funilId}</strong> — a proposta será vinculada e avançará pelo Funil.</span>
+          <button onClick={() => navigate(`/funil?oportunidade=${funilId}`)} className="text-xs font-bold text-blue-700 hover:underline">
+            Voltar ao Funil
+          </button>
+        </div>
+      )}
 
       {/* Drop Zone */}
       <div
@@ -948,7 +964,7 @@ export default function ImportarEdital() {
               disabled={!allItemsReady || stage === "creating"}
               className="accent-blue-900"
             />
-            Revisei matches, quantidades e custos de todos os itens
+            Revisei matches, quantidades e custos e confirmo seguir com a decisão GO
           </label>
           <button
             onClick={() => handleCreateProposal(false)}
@@ -974,12 +990,22 @@ export default function ImportarEdital() {
               <p className="text-xs text-green-700">{createdItemCount} itens adicionados com margem de {marginPercent}% sobre a venda</p>
             </div>
           </div>
-          <button
-            onClick={() => navigate(`/propostas/${createdProposalId}`)}
-            className="flex items-center gap-2 bg-green-700 text-white px-4 py-2 text-sm font-bold hover:bg-green-800 transition-colors"
-          >
-            Abrir Proposta <ArrowRight size={14} />
-          </button>
+          <div className="flex items-center gap-2">
+            {createdFunilId && (
+              <button
+                onClick={() => navigate(`/funil?oportunidade=${createdFunilId}`)}
+                className="px-4 py-2 text-sm font-bold text-green-800 hover:bg-green-100"
+              >
+                Ver no Funil
+              </button>
+            )}
+            <button
+              onClick={() => navigate(`/propostas/${createdProposalId}`)}
+              className="flex items-center gap-2 bg-green-700 text-white px-4 py-2 text-sm font-bold hover:bg-green-800 transition-colors"
+            >
+              Abrir Proposta <ArrowRight size={14} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1277,4 +1303,3 @@ export default function ImportarEdital() {
     </div>
   );
 }
-

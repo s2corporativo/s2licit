@@ -17,8 +17,8 @@ import { generateProposalPdf, type DeclarationTemplate } from "../proposalPdf";
 import { PricingValidationError } from "../services/pricingSafety";
 import { exportProductsToExcel, importProductsFromExcel } from "../exportExcel";
 import { getProposalWithItems, getCompanySettings, upsertCompanySettings, getDb } from "../db";
-import { declarationTemplates } from "../../drizzle/schema";
-import { inArray } from "drizzle-orm";
+import { auditLog, declarationTemplates } from "../../drizzle/schema";
+import { inArray, sql } from "drizzle-orm";
 import { storagePut, localUploadDir } from "../storage";
 import multer from "multer";
 import { apiRateLimiter, authRateLimiter } from "./rateLimit";
@@ -46,6 +46,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  let initializationStatus: "pending" | "ready" | "failed" = "pending";
   // Atrás de proxy reverso (Render, nginx), confiar no primeiro salto para
   // que req.ip reflita o cliente real (necessário para o rate limiter).
   app.set("trust proxy", 1);
@@ -61,7 +62,24 @@ async function startServer() {
   app.use("/api/oauth", authRateLimiter);
   // Health check (usado pelo Render e por monitoramento externo)
   app.get("/healthz", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     res.json({ status: "ok", uptime: process.uptime() });
+  });
+  // Readiness separada da liveness: só recebe tráfego quando banco e ajustes
+  // mínimos de schema responderem de verdade.
+  app.get("/readyz", async (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const db = await getDb();
+      if (!db || initializationStatus !== "ready") {
+        res.status(503).json({ status: "not_ready", database: Boolean(db), initialization: initializationStatus });
+        return;
+      }
+      await db.execute(sql`SELECT 1 AS ready`);
+      res.json({ status: "ready", database: true, initialization: initializationStatus });
+    } catch {
+      res.status(503).json({ status: "not_ready", database: false, initialization: initializationStatus });
+    }
   });
   // Uploads locais (logos etc.) — usado quando não há proxy de storage externo
   app.use("/uploads", express.static(localUploadDir(), { maxAge: "1d" }));
@@ -69,33 +87,80 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Login local (email/senha) — modo padrão fora da plataforma Manus
   registerLocalAuthRoutes(app);
-  ensurePasswordColumn()
-    .then(() => ensureAdminUser())
-    .catch(err => console.error("[LocalAuth] Falha na inicialização:", err));
-  ensureProductColumns().catch(err => console.error("[Schema] Falha na inicialização:", err));
+  Promise.all([ensurePasswordColumn().then(() => ensureAdminUser()), ensureProductColumns()])
+    .then(() => { initializationStatus = "ready"; })
+    .catch(err => {
+      initializationStatus = "failed";
+      console.error("[Startup] Falha na inicialização de banco/schema:", err);
+    });
   // Guarda de autenticação para as rotas REST fora do tRPC (download de PDF,
   // exportação/importação de catálogo, upload de logo). Sem isto, essas rotas
   // ficavam abertas a qualquer anônimo (IDOR: baixar proposta trocando o id).
   const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await sdk.authenticateRequest(req);
+      const user = await sdk.authenticateRequest(req);
+      (req as Request & { authUser?: typeof user }).authUser = user;
       next();
     } catch {
       res.status(401).json({ error: "Não autenticado" });
     }
   };
+  const roleRank: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
+  const requireRole = (minimum: "editor" | "admin") =>
+    (req: Request, res: Response, next: NextFunction) => {
+      const user = (req as Request & { authUser?: { role?: string | null } }).authUser;
+      if (!user || (roleRank[user.role ?? "user"] ?? 0) < roleRank[minimum]) {
+        res.status(403).json({ error: `Requer perfil ${minimum === "admin" ? "Administrador" : "Editor"} ou superior` });
+        return;
+      }
+      next();
+    };
+  const requireEditor = requireRole("editor");
+  const requireAdmin = requireRole("admin");
+
+  // Telemetria sem conteúdo sensível: registra apenas a rota visitada e o
+  // usuário. Ela sustenta a remoção futura de telas legadas com evidência real.
+  app.post("/api/usage/route", requireAuth, async (req: any, res: any) => {
+    const route = String(req.body?.route ?? "").split("?")[0];
+    if (!/^\/[a-z0-9/_-]{0,200}$/i.test(route)) {
+      res.status(400).json({ error: "Rota inválida" });
+      return;
+    }
+    const db = await getDb();
+    if (db) {
+      await db.insert(auditLog).values({
+        source: "ui",
+        action: "route_view",
+        endpoint: route,
+        status: "ok",
+        userId: req.authUser?.openId ?? null,
+      });
+    }
+    res.status(204).end();
+  });
 
   // Logo upload route (multipart/form-data)
   const logoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
-  app.post("/api/upload/logo", requireAuth, logoUpload.single("logo"), async (req: any, res: any) => {
+  app.post("/api/upload/logo", requireAuth, requireAdmin, logoUpload.single("logo"), async (req: any, res: any) => {
     try {
       if (!req.file) {
         res.status(400).json({ error: "Nenhum arquivo enviado" });
         return;
       }
-      const ext = req.file.originalname.split(".").pop()?.toLowerCase() ?? "png";
+      const file: Buffer = req.file.buffer;
+      const isJpeg = file[0] === 0xff && file[1] === 0xd8;
+      const isPng = file[0] === 0x89 && file[1] === 0x50 && file[2] === 0x4e && file[3] === 0x47;
+      const isWebp =
+        file.subarray(0, 4).toString("ascii") === "RIFF" &&
+        file.subarray(8, 12).toString("ascii") === "WEBP";
+      const ext = isJpeg ? "jpg" : isPng ? "png" : isWebp ? "webp" : null;
+      if (!ext) {
+        res.status(400).json({ error: "Imagem inválida. Use JPEG, PNG ou WebP." });
+        return;
+      }
       const key = `logos/company-logo-${Date.now()}.${ext}`;
-      const { url } = await storagePut(key, req.file.buffer, req.file.mimetype);
+      const contentType = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
+      const { url } = await storagePut(key, file, contentType);
       // Persist logo URL to company settings
       await upsertCompanySettings({ logoUrl: url } as any);
       res.json({ url });
@@ -185,7 +250,7 @@ async function startServer() {
 
   // ─── Importação de Excel para atualização em massa ────────────────────────────
   const excelUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-  app.post("/api/products/import-excel-update", requireAuth, excelUpload.single("file"), async (req: any, res: any) => {
+  app.post("/api/products/import-excel-update", requireAuth, requireEditor, excelUpload.single("file"), async (req: any, res: any) => {
     try {
       if (!req.file) {
         res.status(400).json({ error: "Nenhum arquivo enviado" });
@@ -257,4 +322,3 @@ async function startServer() {
 }
 
 startServer().catch(console.error);
-

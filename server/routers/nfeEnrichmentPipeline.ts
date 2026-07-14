@@ -1,4 +1,4 @@
-import { router, protectedProcedure } from "../_core/trpc";
+import { editorProcedure, router } from "../_core/trpc";
 import { z } from "zod";
 import { processNfeEnrichmentPipeline } from "../services/nfeEnrichmentPipelineService";
 
@@ -6,7 +6,7 @@ export const nfeEnrichmentPipelineRouter = router({
   /**
    * Inicia pipeline de enriquecimento para produtos importados de NF-e
    */
-  startEnrichmentPipeline: protectedProcedure
+  startEnrichmentPipeline: editorProcedure
     .input(
       z.object({
         productIds: z.array(z.number()),
@@ -29,28 +29,4 @@ export const nfeEnrichmentPipelineRouter = router({
         };
       }
     }),
-
-  /**
-   * Obtém status do pipeline de enriquecimento
-   */
-  getPipelineStatus: protectedProcedure
-    .input(z.object({ productIds: z.array(z.number()) }))
-    .query(async ({ input }) => {
-      // TODO: Implementar rastreamento de status
-      return {
-        status: "idle",
-        processed: 0,
-        enriched: 0,
-        matched: 0,
-        failed: 0,
-      };
-    }),
-
-  /**
-   * Cancela pipeline em execução
-   */
-  cancelPipeline: protectedProcedure.mutation(async () => {
-    // TODO: Implementar cancelamento
-    return { success: true, message: "Pipeline cancelado" };
-  }),
 });

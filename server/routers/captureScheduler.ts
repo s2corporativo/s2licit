@@ -1,44 +1,44 @@
-import { router, protectedProcedure } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { z } from "zod";
 import {
-  startCaptureForSupplier,
-  scheduleSupplierCapture,
   stopScheduledCapture,
-  reprocessFailedCaptures,
-  cleanupOldCaptureLogs,
   getSchedulerStatus,
   monitorCaptureHealth,
 } from "../services/captureSchedulerService";
+
+function captureUnavailable(): never {
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message:
+      "O agendador legado foi desativado porque não executava captura real. Use Captura Inteligente ou o Agente de Preços.",
+  });
+}
 
 export const captureSchedulerRouter = router({
   /**
    * Inicia captura manual para um fornecedor
    */
-  startCapture: protectedProcedure
+  startCapture: editorProcedure
     .input(z.object({ supplierId: z.number() }))
-    .mutation(async ({ input }) => {
-      return await startCaptureForSupplier(input.supplierId);
-    }),
+    .mutation(captureUnavailable),
 
   /**
    * Agenda captura periódica
    */
-  scheduleCapture: protectedProcedure
+  scheduleCapture: editorProcedure
     .input(
       z.object({
         supplierId: z.number(),
         frequencyHours: z.number().default(24),
       })
     )
-    .mutation(async ({ input }) => {
-      await scheduleSupplierCapture(input.supplierId, input.frequencyHours);
-      return { success: true };
-    }),
+    .mutation(captureUnavailable),
 
   /**
    * Para agendamento de captura
    */
-  stopCapture: protectedProcedure
+  stopCapture: editorProcedure
     .input(z.object({ supplierId: z.number() }))
     .mutation(async ({ input }) => {
       stopScheduledCapture(input.supplierId);
@@ -48,29 +48,21 @@ export const captureSchedulerRouter = router({
   /**
    * Reprocessa capturas falhadas
    */
-  reprocessFailures: protectedProcedure
+  reprocessFailures: editorProcedure
     .input(
       z.object({
         supplierId: z.number().optional(),
         maxRetries: z.number().default(3),
       })
     )
-    .mutation(async ({ input }) => {
-      return await reprocessFailedCaptures(
-        input.supplierId,
-        input.maxRetries
-      );
-    }),
+    .mutation(captureUnavailable),
 
   /**
    * Limpa logs antigos
    */
-  cleanupLogs: protectedProcedure
+  cleanupLogs: editorProcedure
     .input(z.object({ daysToKeep: z.number().default(30) }))
-    .mutation(async ({ input }) => {
-      const cleaned = await cleanupOldCaptureLogs(input.daysToKeep);
-      return { cleaned };
-    }),
+    .mutation(captureUnavailable),
 
   /**
    * Obtém status de agendamentos

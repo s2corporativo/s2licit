@@ -24,6 +24,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useEffect } from "react";
 
 type NavItem = {
   href: string;
@@ -55,8 +56,8 @@ const navGroups: NavGroup[] = [
   {
     label: "Oportunidades",
     items: [
-      { href: "/radar-pncp", icon: Radar, label: "Radar PNCP", minRole: "editor" },
-      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações", minRole: "editor" },
+      { href: "/radar-pncp", icon: Radar, label: "Radar PNCP" },
+      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações" },
       { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
     ],
   },
@@ -101,6 +102,19 @@ const navGroups: NavGroup[] = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user, isAuthenticated, loading, logout } = useAuth();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    void fetch("/api/usage/route", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ route: location }),
+      keepalive: true,
+    }).catch(() => {
+      // Telemetria nunca deve interromper a navegação.
+    });
+  }, [isAuthenticated, location]);
 
   if (loading) {
     return (

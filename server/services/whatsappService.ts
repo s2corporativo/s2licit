@@ -73,9 +73,9 @@ export async function enviarWhatsapp(mensagem: string): Promise<boolean> {
         }),
       });
       if (res.ok) entregue = true;
-      else console.warn(`[WhatsApp] Envio para ${to} falhou (${res.status}).`);
+      else console.warn(`[WhatsApp] Envio falhou (${res.status}).`);
     } catch (err) {
-      console.warn(`[WhatsApp] Erro ao enviar para ${to}:`, (err as Error).message);
+      console.warn("[WhatsApp] Erro ao enviar:", (err as Error).message);
     }
   }
   return entregue;

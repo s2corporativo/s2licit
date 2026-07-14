@@ -31,7 +31,7 @@ const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserI
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
     if (ENV.oAuthServerUrl) {
-      console.log("[OAuth] Habilitado com baseURL:", ENV.oAuthServerUrl);
+      console.log("[OAuth] Integração externa habilitada.");
     } else {
       // OAuth externo é opcional — o modo padrão é o login local (/login).
       console.log("[Auth] OAuth externo não configurado — usando login local por e-mail/senha.");

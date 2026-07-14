@@ -267,11 +267,11 @@ export default function Dashboard() {
           {/* Linha 2: 3 CTAs principais */}
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 backdrop-blur-sm">
             <Link
-              href="/proposta-rapida"
+              href="/funil"
               className="flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-900 shadow-lg shadow-[#08193b]/20 transition-all hover:-translate-y-0.5 hover:bg-blue-50"
             >
               <Sparkles size={15} />
-              Nova Proposta
+              Nova Oportunidade
             </Link>
             <Link
               href="/edital"
@@ -302,7 +302,7 @@ export default function Dashboard() {
               Buscar Produto
             </Link>
             <Link
-              href="/proposta-automatica"
+              href="/edital"
               className="flex items-center gap-2 rounded-xl border border-purple-300/35 bg-purple-600/28 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-600/45"
             >
               <Sparkles size={15} />
@@ -317,7 +317,7 @@ export default function Dashboard() {
             </button>
             {/* Alertas rápidos no header */}
             {(expiringProposals?.length ?? 0) > 0 && (
-              <Link href="/propostas-admin" className="ml-auto flex items-center gap-2 rounded-xl border border-amber-300/35 bg-amber-400/18 px-3 py-2 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-400/28">
+              <Link href="/propostas" className="ml-auto flex items-center gap-2 rounded-xl border border-amber-300/35 bg-amber-400/18 px-3 py-2 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-400/28">
                 <Clock size={12} />
                 {expiringProposals!.length} proposta{expiringProposals!.length > 1 ? "s" : ""} vencendo
               </Link>
@@ -625,7 +625,7 @@ export default function Dashboard() {
         ══════════════════════════════════════════════════════════════════ */}
         <div>
           <SectionHeader icon={<DollarSign size={14} />} title="Operação Comercial" action={
-            <Link href="/propostas-admin" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
+            <Link href="/propostas" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
               Ver todas <ArrowRight size={9} />
             </Link>
           } />
@@ -636,7 +636,7 @@ export default function Dashboard() {
               subtitle={`${fmtBRL(totalPipelineValue)} em carteira`}
               icon={<FileText size={16} className="text-blue-700" />}
               iconBg="bg-blue-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Total de propostas em qualquer estágio do pipeline"
             />
             <KpiCard
@@ -645,7 +645,7 @@ export default function Dashboard() {
               subtitle="status entregue"
               icon={<CheckCircle2 size={16} className="text-emerald-700" />}
               iconBg="bg-emerald-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Propostas com status Entregue"
               status={(extStats?.wonProposals ?? 0) > 0 ? "ok" : "neutral" as any}
             />
@@ -655,7 +655,7 @@ export default function Dashboard() {
               subtitle="pedidos + trânsito + entregues"
               icon={<TrendingUp size={16} className="text-violet-700" />}
               iconBg="bg-violet-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Soma dos valores de propostas em status Pedido, Em Trânsito e Entregue"
             />
             <KpiCard
@@ -664,7 +664,7 @@ export default function Dashboard() {
               subtitle="por proposta ganha"
               icon={<BarChart2 size={16} className="text-orange-700" />}
               iconBg="bg-orange-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Valor médio das propostas com status Entregue"
             />
           </div>
@@ -692,7 +692,7 @@ export default function Dashboard() {
                   icon={<FileText size={28} />}
                   title="Nenhuma proposta cadastrada"
                   desc="Crie sua primeira proposta para visualizar o pipeline"
-                  action={<Link href="/proposta-rapida" className="text-xs font-bold text-blue-700 hover:underline">Criar proposta →</Link>}
+                  action={<Link href="/funil" className="text-xs font-bold text-blue-700 hover:underline">Criar oportunidade →</Link>}
                 />
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -702,7 +702,7 @@ export default function Dashboard() {
                     const count = d?.count ?? 0;
                     const val = d?.totalValue ?? 0;
                     return (
-                      <Link key={stage.status} href="/propostas-admin" className={`p-3 border ${stage.border} ${stage.bg} hover:shadow-sm transition-all block group`}>
+                      <Link key={stage.status} href="/propostas" className={`p-3 border ${stage.border} ${stage.bg} hover:shadow-sm transition-all block group`}>
                         <div className="flex items-center justify-between mb-2">
                           <span className={`text-[10px] font-black uppercase tracking-wider ${stage.text}`}>{stage.label}</span>
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: stage.color }} />
@@ -716,7 +716,7 @@ export default function Dashboard() {
                 </div>
               )}
               <div className="mt-3 flex justify-end">
-                <Link href="/propostas-admin" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
+                <Link href="/propostas" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
                   Administrar propostas <ArrowRight size={9} />
                 </Link>
               </div>
@@ -913,8 +913,8 @@ export default function Dashboard() {
               <div className="text-[10px] font-black tracking-widest uppercase text-blue-700 mb-3 flex items-center gap-1.5"><FileText size={11} /> Propostas</div>
               <div className="space-y-1.5">
                 {[
-                  { href: "/proposta-rapida", label: "Proposta Rápida", desc: "Cole lista ou planilha" },
-                  { href: "/propostas-admin", label: "Adm. Propostas", desc: "Gerenciar todas" },
+                  { href: "/funil", label: "Nova Oportunidade", desc: "Decidir GO/NO-GO" },
+                  { href: "/propostas", label: "Propostas", desc: "Gerenciar todas" },
                   { href: "/templates-proposta", label: "Templates", desc: "Modelos de proposta" },
                 ].map(a => (
                   <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-blue-50 transition-colors group rounded-sm">
@@ -955,7 +955,7 @@ export default function Dashboard() {
               <div className="space-y-1.5">
                 {[
                   { href: "/edital", label: "Importar Edital", desc: "PDF ou DOCX com IA" },
-                  { href: "/proposta-automatica", label: "Proposta Automática", desc: "IA extrai itens" },
+                  { href: "/radar-pncp", label: "Radar PNCP", desc: "Captar oportunidades" },
                 ].map(a => (
                   <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-orange-50 transition-colors group rounded-sm">
                     <div>

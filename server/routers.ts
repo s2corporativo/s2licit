@@ -65,6 +65,11 @@ import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichment
 import { invokeLLM } from "./_core/llm";
 import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
 import { calculateSalePrice } from "./services/pricingSafety";
+import {
+  createOpportunityFromReviewedEdital,
+  finalizeOpportunityProposal,
+  prepareOpportunityForProposal,
+} from "./services/opportunityWorkflowService";
 
 
 import { TRPCError } from "@trpc/server";
@@ -167,7 +172,7 @@ import {
 import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc } from "drizzle-orm";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, editorProcedure, router } from "./_core/trpc";
+import { adminProcedure, editorProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
@@ -240,7 +245,7 @@ export const appRouter = router({
     list: protectedProcedure.query(() => listCategories()),
     listHierarchy: protectedProcedure.query(() => listCategoriesHierarchy()),
 
-    create: protectedProcedure
+    create: editorProcedure
       .input(
         z.object({
           name: z.string().min(1).max(128),
@@ -253,7 +258,7 @@ export const appRouter = router({
       )
       .mutation(({ input }) => createCategory(input)),
 
-    update: protectedProcedure
+    update: editorProcedure
       .input(
         z.object({
           id: z.number(),
@@ -273,7 +278,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteCategory(input.id)),
     // ── Sugestão automática de categoria via LLM ──────────────────────────
-    suggest: protectedProcedure
+    suggest: editorProcedure
       .input(
         z.object({
           productNames: z.array(z.string()).min(1).max(100),
@@ -357,7 +362,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getSupplierById(input.id)),
 
-    create: protectedProcedure
+    create: editorProcedure
       .input(
         z.object({
           name: z.string().min(1).max(256),
@@ -370,7 +375,7 @@ export const appRouter = router({
       )
       .mutation(({ input }) => createSupplier(input)),
 
-    update: protectedProcedure
+    update: editorProcedure
       .input(
         z.object({
           id: z.number(),
@@ -406,7 +411,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getEquivalenceGroupWithMembers(input.id)),
 
-    create: protectedProcedure
+    create: editorProcedure
       .input(
         z.object({
           activeIngredient: z.string().min(1),
@@ -417,11 +422,11 @@ export const appRouter = router({
       )
       .mutation(({ input }) => createEquivalenceGroup(input)),
 
-    addMember: protectedProcedure
+    addMember: editorProcedure
       .input(z.object({ groupId: z.number(), productId: z.number() }))
       .mutation(({ input }) => addEquivalenceMember(input.groupId, input.productId)),
 
-    removeMember: protectedProcedure
+    removeMember: editorProcedure
       .input(z.object({ groupId: z.number(), productId: z.number() }))
       .mutation(({ input }) => removeEquivalenceMember(input.groupId, input.productId)),
 
@@ -430,7 +435,7 @@ export const appRouter = router({
       .mutation(({ input }) => deleteEquivalenceGroup(input.id)),
 
     // Auto-geração de grupos por princípio ativo
-    preview: protectedProcedure
+    preview: editorProcedure
       .input(
         z.object({
           batchId: z.number().optional(),
@@ -446,7 +451,7 @@ export const appRouter = router({
         })
       ),
 
-    applyAuto: protectedProcedure
+    applyAuto: editorProcedure
       .input(
         z.object({
           groups: z.array(
@@ -462,7 +467,7 @@ export const appRouter = router({
 
     stats: protectedProcedure.query(() => getEquivalenceStats()),
     // Geração inicial com 1 clique: preview + apply automático de todos os grupos novos
-    generateAndApplyAll: protectedProcedure
+    generateAndApplyAll: editorProcedure
       .input(
         z.object({
           crossOnly: z.boolean().default(false), // se true, apenas grupos que cruzam categorias
@@ -632,9 +637,9 @@ export const appRouter = router({
       const noFichaCount = Number(noFicha[0]?.count ?? 0);
       const expiringCount = Number(expiring[0]?.count ?? 0);
       const sentCount = Number(sentProposals[0]?.count ?? 0);
-      if (expiringCount > 0) items.push({ type: "proposal", label: `${expiringCount} proposta${expiringCount > 1 ? "s" : ""} vencendo em 7 dias`, detail: "Verificar prazo de entrega", href: "/propostas-admin", priority: "critical" });
-      if (draftCount > 0) items.push({ type: "proposal", label: `${draftCount} proposta${draftCount > 1 ? "s" : ""} em rascunho`, detail: "Continuar montagem", href: "/propostas-admin", priority: "warning" });
-      if (sentCount > 0) items.push({ type: "proposal", label: `${sentCount} proposta${sentCount > 1 ? "s" : ""} aguardando retorno`, detail: "Acompanhar status", href: "/propostas-admin", priority: "info" });
+      if (expiringCount > 0) items.push({ type: "proposal", label: `${expiringCount} proposta${expiringCount > 1 ? "s" : ""} vencendo em 7 dias`, detail: "Verificar prazo de entrega", href: "/propostas", priority: "critical" });
+      if (draftCount > 0) items.push({ type: "proposal", label: `${draftCount} proposta${draftCount > 1 ? "s" : ""} em rascunho`, detail: "Continuar montagem", href: "/propostas", priority: "warning" });
+      if (sentCount > 0) items.push({ type: "proposal", label: `${sentCount} proposta${sentCount > 1 ? "s" : ""} aguardando retorno`, detail: "Acompanhar status", href: "/propostas", priority: "info" });
       if (noCatCount > 0) items.push({ type: "catalog", label: `${noCatCount} produto${noCatCount > 1 ? "s" : ""} sem categoria`, detail: "Reclassificar com IA", href: "/produtos", priority: noCatCount > 100 ? "warning" : "info" });
       if (noFichaCount > 0) items.push({ type: "catalog", label: `${noFichaCount} produto${noFichaCount > 1 ? "s" : ""} sem ficha técnica`, detail: "Enriquecer via IA", href: "/enriquecimento", priority: noFichaCount > 200 ? "warning" : "info" });
       const priorityOrder = { critical: 0, warning: 1, info: 2 };
@@ -646,7 +651,7 @@ export const appRouter = router({
   // ─── Company Settings ────────────────────────────────────────────────────────
   company: router({
     get: protectedProcedure.query(() => getCompanySettings()),
-    upsert: protectedProcedure
+    upsert: adminProcedure
       .input(
         z.object({
           name: z.string().max(256).optional(),
@@ -677,7 +682,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getRequestingOrgById(input.id)),
 
-    upsert: protectedProcedure
+    upsert: editorProcedure
       .input(
         z.object({
           name: z.string().min(1).max(256),
@@ -693,7 +698,7 @@ export const appRouter = router({
       )
       .mutation(({ input }) => upsertRequestingOrg(input as any)),
 
-    update: protectedProcedure
+    update: editorProcedure
       .input(
         z.object({
           id: z.number(),
@@ -725,7 +730,7 @@ export const appRouter = router({
     get: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getProposalWithItems(input.id)),
-    create: protectedProcedure
+    create: editorProcedure
       .input(
         z.object({
           title: z.string().min(1).max(256),
@@ -743,7 +748,7 @@ export const appRouter = router({
       )
       .mutation(({ input }) => createProposal(input as any)),
 
-    update: protectedProcedure
+    update: editorProcedure
       .input(
         z.object({
           id: z.number(),
@@ -768,7 +773,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteProposal(input.id)),
 
-    addItem: protectedProcedure
+    addItem: editorProcedure
       .input(
         z.object({
           proposalId: z.number(),
@@ -790,7 +795,7 @@ export const appRouter = router({
       )
       .mutation(({ input }) => addProposalItem(input as any)),
 
-    updateItem: protectedProcedure
+    updateItem: editorProcedure
       .input(
         z.object({
           id: z.number(),
@@ -819,7 +824,7 @@ export const appRouter = router({
         return updateProposalItem(id, data as any);
       }),
 
-    removeItem: protectedProcedure
+    removeItem: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => removeProposalItem(input.id)),
     // Administration
@@ -831,7 +836,7 @@ export const appRouter = router({
         dateTo: z.date().optional(),
       }).optional())
       .query(({ input }) => listProposalsAdmin(input)),
-    advanceStatus: protectedProcedure
+    advanceStatus: editorProcedure
       .input(z.object({
         id: z.number(),
         newStatus: z.enum(["draft", "sent", "order", "in_transit", "delivered", "cancelled"]),
@@ -893,7 +898,7 @@ export const appRouter = router({
         }
         return { success: true };
       }),
-    updateFreight: protectedProcedure
+    updateFreight: editorProcedure
       .input(z.object({
         id: z.number(),
         freightValue: z.string().optional().nullable(),
@@ -908,12 +913,12 @@ export const appRouter = router({
     getStatusHistory: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getProposalStatusHistory(input.id)),
-    duplicate: protectedProcedure
+    duplicate: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => duplicateProposal(input.id)),
 
     // Sugestão automática de produtos a partir de lista de texto/planilha
-    suggestFromList: protectedProcedure
+    suggestFromList: editorProcedure
       .input(z.object({
         productNames: z.array(z.string().min(1)).min(1).max(200),
       }))
@@ -987,7 +992,7 @@ export const appRouter = router({
 
     // ─── Validação de Equivalência para Itens de Pregão ──────────────────────────
 
-    validateEquivalenceForItems: protectedProcedure
+    validateEquivalenceForItems: editorProcedure
       .input(
         z.object({
           items: z.array(
@@ -1017,7 +1022,7 @@ export const appRouter = router({
         proposalId: z.number().optional(),
       }).optional())
       .query(({ input }) => listFinancialEntries(input)),
-    create: protectedProcedure
+    create: editorProcedure
       .input(z.object({
         type: z.enum(["income", "expense"]),
         category: z.string().max(128).optional().nullable(),
@@ -1030,7 +1035,7 @@ export const appRouter = router({
         notes: z.string().optional().nullable(),
       }))
       .mutation(({ input }) => createFinancialEntry(input as any)),
-    update: protectedProcedure
+    update: editorProcedure
       .input(z.object({
         id: z.number(),
         type: z.enum(["income", "expense"]).optional(),
@@ -1064,7 +1069,7 @@ export const appRouter = router({
         dateTo: z.date().optional(),
       }).optional())
       .query(({ input }) => getFreightReport(input?.dateFrom, input?.dateTo)),
-    createFromProposal: protectedProcedure
+    createFromProposal: editorProcedure
       .input(z.object({
         proposalId: z.number(),
         amount: z.string(),
@@ -1093,13 +1098,13 @@ export const appRouter = router({
       .input(z.object({ query: z.string(), limit: z.number().optional() }))
       .query(({ input }) => searchMasterProducts(input.query, input.limit ?? 20)),
 
-    previewImport: protectedProcedure
+    previewImport: editorProcedure
       .input(z.object({
         rows: z.array(z.record(z.string(), z.string())),
       }))
       .mutation(({ input }) => previewImportRows(input.rows)),
 
-     previewImportFuzzy: protectedProcedure
+     previewImportFuzzy: editorProcedure
       .input(z.object({
         rows: z.array(z.record(z.string(), z.string())),
         supplierId: z.number().optional(),
@@ -1115,7 +1120,7 @@ export const appRouter = router({
           throw new Error(`Erro ao processar preview de importação: ${error?.message || "Erro desconhecido"}`);
         }
       }),
-    previewWithDuplicates: protectedProcedure
+    previewWithDuplicates: editorProcedure
       .input(z.object({
         rows: z.array(z.object({
           name: z.string().optional(),
@@ -1190,7 +1195,7 @@ export const appRouter = router({
       .query(({ input }) => listProductsWithLandedCost(input)),
 
     // Registrar preço manualmente (com frete e impostos)
-    recordPrice: protectedProcedure
+    recordPrice: editorProcedure
       .input(z.object({
         productId: z.number(),
         supplierId: z.number(),
@@ -1222,7 +1227,7 @@ export const appRouter = router({
   // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────────────────────
   edital: router({
     // Extrai texto de PDF ou DOCX (base64) e usa IA para identificar itens do edital
-    extract: protectedProcedure
+    extract: editorProcedure
       .input(
         z.object({
           fileBase64: z.string().min(10),
@@ -1357,7 +1362,7 @@ export const appRouter = router({
       }),
 
     // Para cada item do edital, busca o melhor produto do catálogo
-    matchCatalog: protectedProcedure
+    matchCatalog: editorProcedure
       .input(
         z.object({
           itens: z.array(
@@ -1590,7 +1595,7 @@ export const appRouter = router({
 
     // Valida integridade dos itens antes de criar a proposta
     // Verifica se os productIds ainda existem no banco e retorna divergências
-    validateItems: protectedProcedure
+    validateItems: editorProcedure
       .input(
         z.object({
           itens: z.array(
@@ -1651,7 +1656,7 @@ export const appRouter = router({
       }),
 
     // Cria proposta comercial a partir dos itens do edital com matches do catálogo
-    createProposal: protectedProcedure
+    createProposal: editorProcedure
       .input(
         z.object({
           processo: z.object({
@@ -1663,6 +1668,7 @@ export const appRouter = router({
           marginPercent: z.number().min(0).max(99.99).default(30),
           reviewConfirmed: z.literal(true),
           templateId: z.number().optional(),
+          funilId: z.number().int().positive().optional(),
           itens: z.array(
             z.object({
               itemNumero: z.number(),
@@ -1681,7 +1687,7 @@ export const appRouter = router({
           ).min(1),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
 
@@ -1713,6 +1719,19 @@ export const appRouter = router({
           });
         }
 
+        const opportunity = input.funilId
+          ? await prepareOpportunityForProposal(input.funilId, ctx.user)
+          : await createOpportunityFromReviewedEdital(
+              {
+                title: `${input.processo.modalidade} — ${input.processo.numero}`,
+                orgao: input.processo.orgao,
+                modalidade: input.processo.modalidade,
+                numeroProcesso: input.processo.numero,
+                objeto: input.processo.objeto,
+              },
+              ctx.user,
+            );
+
         // Upsert órgão requisitante
         const orgId = await upsertRequestingOrg({ name: input.processo.orgao });
 
@@ -1728,6 +1747,8 @@ export const appRouter = router({
           orgName: input.processo.orgao,
           title: `${input.processo.modalidade} — ${input.processo.numero}`,
           notes: `${input.processo.objeto}`,
+          origem: "funil",
+          radarOpportunityId: opportunity.id,
           ...(templateData && {
             validityDays: templateData.validityDays ?? 30,
             paymentTerms: templateData.paymentTerms ?? undefined,
@@ -1818,11 +1839,12 @@ export const appRouter = router({
             recordFeedback(item.itemDescricao, item.productId, canonicalName).catch(() => {});
           }
         }
-        return { proposalId, addedCount };
+        await finalizeOpportunityProposal(opportunity.id, proposalId, ctx.user);
+        return { proposalId, addedCount, funilId: opportunity.id };
       }),
   }),
   // ─── (A) Upload seguro de logo ──────────────────────────────────────────────
-  uploadLogo: protectedProcedure
+  uploadLogo: adminProcedure
     .input(z.object({
       base64: z.string().max(8_000_000), // ~6MB base64
       mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
@@ -1852,7 +1874,7 @@ export const appRouter = router({
       const db = await getDb();
       return (db as any).select().from(declarationTemplates).orderBy(asc(declarationTemplates.sortOrder));
     }),
-    upsertTemplate: protectedProcedure
+    upsertTemplate: adminProcedure
       .input(z.object({
         id: z.number().optional(),
         title: z.string().min(1).max(256),
@@ -1879,7 +1901,7 @@ export const appRouter = router({
         });
         return { id: (res as any).insertId };
       }),
-    deleteTemplate: protectedProcedure
+    deleteTemplate: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -1887,7 +1909,7 @@ export const appRouter = router({
         return { ok: true };
       }),
     // Snapshot: gravar declarações na proposta
-    saveSnapshot: protectedProcedure
+    saveSnapshot: editorProcedure
       .input(z.object({
         proposalId: z.number(),
         declarations: z.array(z.object({
@@ -1974,7 +1996,7 @@ export const appRouter = router({
       }),
 
     // Processa um lote de produtos via IA e atualiza o campo solicitado
-    runBatch: protectedProcedure
+    runBatch: editorProcedure
       .input(z.object({
         categoryId: z.number().nullable().optional(),
         supplierId: z.number().nullable().optional(),
@@ -2090,7 +2112,7 @@ export const appRouter = router({
       }),
 
     // ─── Migração V2: preencher fichaTecnica, subcategoria e codigoFornecedor via IA ───
-    migrateV2Fields: protectedProcedure
+    migrateV2Fields: adminProcedure
       .input(z.object({
         batchSize: z.number().min(5).max(50).default(20),
         offset: z.number().min(0).default(0),
@@ -2237,7 +2259,7 @@ export const appRouter = router({
       }).optional())
       .query(({ input }) => listSynonyms(input ?? {})),
 
-    create: protectedProcedure
+    create: editorProcedure
       .input(z.object({
         term: z.string().min(1).max(256),
         canonical: z.string().min(1).max(256),
@@ -2246,7 +2268,7 @@ export const appRouter = router({
       }))
       .mutation(({ input }) => createSynonym(input as any)),
 
-    update: protectedProcedure
+    update: editorProcedure
       .input(z.object({
         id: z.number(),
         term: z.string().min(1).max(256).optional(),
@@ -2263,7 +2285,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteSynonym(input.id)),
 
-    bulkCreate: protectedProcedure
+    bulkCreate: editorProcedure
       .input(z.object({
         items: z.array(z.object({
           term: z.string().min(1).max(256),
@@ -2275,13 +2297,13 @@ export const appRouter = router({
         bulkCreateSynonyms(input.items.map((i) => ({ ...i, isActive: "yes" as const })))
       ),
 
-    bulkToggle: protectedProcedure
+    bulkToggle: editorProcedure
       .input(z.object({
         ids: z.array(z.number()).min(1).max(500),
         isActive: z.enum(["yes", "no"]),
       }))
       .mutation(({ input }) => bulkToggleSynonyms(input.ids, input.isActive)),
-    bulkDelete: protectedProcedure
+    bulkDelete: editorProcedure
       .input(z.object({
         ids: z.array(z.number()).min(1).max(500),
       }))
@@ -2313,7 +2335,7 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .query(({ input }) => getProposalTemplate(input.id)),
 
-    create: protectedProcedure
+    create: editorProcedure
       .input(z.object({
         name: z.string().min(1).max(128),
         orgType: z.enum(["prefeitura", "estado", "federal", "privado", "outro"]).default("outro"),
@@ -2339,7 +2361,7 @@ export const appRouter = router({
         freightPercent: String(input.freightPercent),
       } as any)),
 
-    update: protectedProcedure
+    update: editorProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().min(1).max(128).optional(),
@@ -2372,7 +2394,7 @@ export const appRouter = router({
     delete: editorProcedure
       .input(z.object({ id: z.number() }))
       .mutation(({ input }) => deleteProposalTemplate(input.id)),
-    seedDefaults: protectedProcedure
+    seedDefaults: adminProcedure
       .mutation(async () => {
         const defaults = [
           {
@@ -2436,5 +2458,3 @@ export const appRouter = router({
   recognition: recognitionRouter,
 });
 export type AppRouter = typeof appRouter;
-
-

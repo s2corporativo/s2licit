@@ -6,9 +6,14 @@ on:
   pull_request:
     branches: ["**"]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -17,20 +22,26 @@ jobs:
         with:
           node-version: 22
 
-      # pnpm via Corepack (embutido no Node) — evita depender de actions de
-      # terceiros, que podem ser bloqueadas pela política de Actions da org.
-      # A versão vem do campo "packageManager" do package.json.
-      - name: Habilitar pnpm (corepack)
+      - name: Habilitar pnpm
         run: corepack enable
 
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Verificação de tipos (tsc)
-        run: pnpm run check
+      - name: Lint
+        run: pnpm lint
 
-      - name: Testes (vitest)
+      - name: Auditar rotas
+        run: pnpm audit:routes
+
+      - name: Auditar segredos literais
+        run: pnpm audit:secrets
+
+      - name: Verificar tipos
+        run: pnpm check
+
+      - name: Testar
         run: pnpm test
 
       - name: Build de produção
-        run: pnpm run build
+        run: pnpm build
