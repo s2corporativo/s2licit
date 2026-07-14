@@ -6,13 +6,12 @@ import {
   type QuotationItem,
   type QuotationPdfData,
 } from "./quotationPdfGeneratorService";
+import { calculateSalePrice } from "./pricingSafety";
 
 /**
  * Monta e gera o PDF de orçamento-resposta a partir de uma cotação recebida
- * por e-mail, aplicando a margem sobre o preço de cada produto casado.
- *
- * Preço de venda = precoBase * (1 + margem%/100). A margem usada é a
- * informada (override) ou a margem mínima cadastrada na empresa.
+ * por e-mail. Somente itens com match confirmado e custo positivo podem
+ * participar. A margem é calculada sobre a receita, nunca como markup.
  */
 
 export interface BuildResponseResult {
@@ -30,11 +29,7 @@ export interface BuildResponseResult {
  * que daria só 23,1% de margem real). Margem ≥ 100% é inválida.
  */
 export function applyMargin(basePrice: number, marginPercent: number): number {
-  if (marginPercent >= 100) {
-    throw new Error("Margem não pode ser 100% ou superior.");
-  }
-  if (marginPercent <= 0) return basePrice;
-  return basePrice / (1 - marginPercent / 100);
+  return calculateSalePrice({ cost: basePrice, marginPercent });
 }
 
 export async function buildQuotationResponse(
@@ -45,37 +40,50 @@ export async function buildQuotationResponse(
   if (!data) throw new Error("Cotação não encontrada.");
 
   const company = await getCompanySettings();
+  const configuredMargin = Number(company?.minMarginPercent ?? "15");
   const marginPercent =
     options?.marginPercent != null
       ? options.marginPercent
-      : Number(company?.minMarginPercent ?? "15") || 15;
+      : Number.isFinite(configuredMargin)
+        ? configuredMargin
+        : 15;
 
-  // Considera itens com produto associado (confirmado ou sugerido).
-  const usableItems = data.items.filter((i) => i.produtoMatchId != null);
+  if (data.items.length === 0) {
+    throw new Error("A cotação não possui itens para responder.");
+  }
 
-  let itemsSemPreco = 0;
-  const pdfItems: QuotationItem[] = usableItems.map((item) => {
-    const base = item.precoSugerido != null ? Number(item.precoSugerido) : NaN;
-    const quantity = item.quantidade != null ? Number(item.quantidade) : 1;
-    let unitPrice = 0;
-    if (!isNaN(base) && base > 0) {
-      unitPrice = Number(applyMargin(base, marginPercent).toFixed(2));
-    } else {
-      itemsSemPreco++;
-    }
-    return {
-      productName: item.descricao,
-      quantity: quantity > 0 ? quantity : 1,
-      unitPrice,
-      totalPrice: unitPrice * (quantity > 0 ? quantity : 1),
-    };
-  });
-
-  if (pdfItems.length === 0) {
+  const unconfirmedItems = data.items.filter(
+    (item) => item.produtoMatchId == null || item.matchConfirmado !== true,
+  );
+  if (unconfirmedItems.length > 0) {
     throw new Error(
-      "Nenhum item com produto associado. Confirme os matches antes de gerar o orçamento.",
+      `Cotação bloqueada: confirme o match de ${unconfirmedItems.length} item(ns) antes de gerar ou enviar o orçamento.`,
     );
   }
+
+  const invalidPriceItems = data.items.filter((item) => {
+    const price = Number(item.precoSugerido);
+    return !Number.isFinite(price) || price <= 0;
+  });
+  if (invalidPriceItems.length > 0) {
+    throw new Error(
+      `Cotação bloqueada: informe custo positivo para ${invalidPriceItems.length} item(ns).`,
+    );
+  }
+
+  const pdfItems: QuotationItem[] = data.items.map((item) => {
+    const base = Number(item.precoSugerido);
+    const quantity = item.quantidade != null ? Number(item.quantidade) : 1;
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+    const unitPrice = Number(applyMargin(base, marginPercent).toFixed(2));
+
+    return {
+      productName: item.descricao,
+      quantity: safeQuantity,
+      unitPrice,
+      totalPrice: unitPrice * safeQuantity,
+    };
+  });
 
   const { subtotal } = calculateQuotationTotals(pdfItems);
   const validDays = options?.validDays ?? 30;
@@ -109,7 +117,7 @@ export async function buildQuotationResponse(
     pdfBase64: pdfBuffer.toString("base64"),
     total: subtotal,
     itemCount: pdfItems.length,
-    itemsSemPreco,
+    itemsSemPreco: 0,
     marginPercent,
   };
 }
