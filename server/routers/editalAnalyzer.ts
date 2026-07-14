@@ -253,6 +253,10 @@ REGRAS:
           unit: item.unidade,
           supplierName: input.cabecalho?.fornecedor?.razaoSocial || null,
           unitPrice: null,
+          suggestedPrice:
+            Number.isFinite(Number(item.precoUnitario)) && Number(item.precoUnitario) > 0
+              ? String(item.precoUnitario)
+              : null,
           quantity: Math.max(1, Math.round(parseQuantidadeBR(item.quantidade) ?? 1)),
           notes: item.pendente ? "⚠ Produto não localizado no catálogo" : null,
           imageUrl: null,
@@ -279,7 +283,7 @@ REGRAS:
         defaultNotes: companyData?.notes || null,
       };
 
-      const pdfBuffer = await generateProposalPdf(proposalFake as any, company, 0, []);
+      const pdfBuffer = await generateProposalPdf(proposalFake as any, company, []);
       return { pdfBase64: pdfBuffer.toString("base64") };
     }),
 
