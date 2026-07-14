@@ -83,7 +83,7 @@ export const emailQuotationsRouter = router({
     .input(
       z.object({
         id: z.number().int().positive(),
-        marginPercent: z.number().min(0).max(1000).optional(),
+        marginPercent: z.number().min(0).max(99.99).optional(),
         validDays: z.number().int().positive().max(365).optional(),
       }),
     )
@@ -108,7 +108,7 @@ export const emailQuotationsRouter = router({
       z.object({
         id: z.number().int().positive(),
         to: z.string().email().optional(),
-        marginPercent: z.number().min(0).max(1000).optional(),
+        marginPercent: z.number().min(0).max(99.99).optional(),
         validDays: z.number().int().positive().max(365).optional(),
         mensagem: z.string().max(4000).optional(),
       }),
