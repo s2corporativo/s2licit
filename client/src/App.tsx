@@ -280,7 +280,9 @@ function Router() {
           </RequireAuth>
         </Route>
         <Route path="/edital">
-          <ImportarEdital />
+          <RequireAuth message="Importe editais após fazer login." minRole="editor">
+            <ImportarEdital />
+          </RequireAuth>
         </Route>
         <Route path="/imagens">
           <RequireAuth message="Gerencie imagens de produtos após fazer login.">
