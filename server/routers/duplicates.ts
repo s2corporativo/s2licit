@@ -1,8 +1,18 @@
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
-import { products } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { products, duplicateExceptions } from "../../drizzle/schema";
+import { eq, or, and } from "drizzle-orm";
+
+function pairKey(id1: number, id2: number): string {
+  return id1 < id2 ? `${id1}:${id2}` : `${id2}:${id1}`;
+}
+
+/** Carrega os pares marcados como "não duplicados" como um Set para checagem O(1). */
+async function loadExceptionPairs(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<Set<string>> {
+  const rows = await db.select({ productId1: duplicateExceptions.productId1, productId2: duplicateExceptions.productId2 }).from(duplicateExceptions);
+  return new Set(rows.map((r) => pairKey(r.productId1, r.productId2)));
+}
 
 /**
  * Algoritmo de similaridade Jaro-Winkler simplificado
@@ -81,6 +91,8 @@ export const duplicatesRouter = router({
         .where(eq(products.isActive, "yes"))
         .limit(1000);
 
+      const exceptions = await loadExceptionPairs(db);
+
       const duplicateGroups: Array<{
         groupId: string;
         products: Array<{
@@ -104,6 +116,7 @@ export const duplicatesRouter = router({
 
         for (let j = i + 1; j < allProducts.length; j++) {
           if (processed.has(allProducts[j].id)) continue;
+          if (exceptions.has(pairKey(allProducts[i].id, allProducts[j].id))) continue;
 
           const nameSimilarity = jaroWinklerSimilarity(
             allProducts[i].name,
@@ -284,7 +297,31 @@ export const duplicatesRouter = router({
       productId2: z.number(),
     }))
     .mutation(async ({ input }) => {
-      // TODO: Criar tabela duplicate_exceptions e registrar
+      const db = await getDb();
+      if (!db) throw new Error("DB indisponível");
+
+      if (input.productId1 === input.productId2) {
+        throw new Error("Não é possível marcar um produto como não duplicado dele mesmo");
+      }
+
+      const existing = await db
+        .select({ id: duplicateExceptions.id })
+        .from(duplicateExceptions)
+        .where(
+          or(
+            and(eq(duplicateExceptions.productId1, input.productId1), eq(duplicateExceptions.productId2, input.productId2)),
+            and(eq(duplicateExceptions.productId1, input.productId2), eq(duplicateExceptions.productId2, input.productId1))
+          )
+        )
+        .limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(duplicateExceptions).values({
+          productId1: input.productId1,
+          productId2: input.productId2,
+        });
+      }
+
       return {
         success: true,
         message: "Marcado como não duplicado",
@@ -311,6 +348,8 @@ export const duplicatesRouter = router({
         .from(products)
         .where(eq(products.isActive, "yes"));
 
+      const exceptions = await loadExceptionPairs(db);
+
       const duplicateGroups: Array<{
         groupId: string;
         count: number;
@@ -332,6 +371,7 @@ export const duplicatesRouter = router({
 
         for (let j = i + 1; j < allProducts.length; j++) {
           if (processed.has(allProducts[j].id)) continue;
+          if (exceptions.has(pairKey(allProducts[i].id, allProducts[j].id))) continue;
 
           const nameSimilarity = jaroWinklerSimilarity(
             allProducts[i].name,
