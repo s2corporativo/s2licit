@@ -1,151 +1,99 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
+import { getRoleLabel, hasMinimumRole, type Role } from "@/lib/access";
 import {
-  Bot,
-  BarChart3,
+  BookOpen,
   Building2,
-  CheckCircle2,
+  CalendarClock,
   DollarSign,
+  FileScan,
   FileSpreadsheet,
   FileText,
-  FolderOpen,
   GitMerge,
-  Image,
+  Gavel,
+  KanbanSquare,
   LayoutGrid,
   LogIn,
   LogOut,
-  Package,
-  Search,
-  Settings,
-  Sparkles,
-  Workflow,
-  FileScan,
-  Receipt,
-  BookMarked,
-  Sparkle,
-  Zap,
-  Globe,
-  ShieldAlert,
-  ShieldCheck,
-  FolderClock,
-  ClipboardList,
   MailCheck,
-  Radar,
-  Brain,
-  Gavel,
-  KeyRound,
-  CalendarClock,
-  Trophy,
-  KanbanSquare,
-  Percent,
-  Truck,
+  Package,
   PackageCheck,
-  BookOpen,
-  Activity,
+  Radar,
+  Settings,
+  ShieldCheck,
+  Trophy,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
-type NavItem = { href: string; icon: React.ElementType; label: string };
-type NavGroup = { label: string; items: NavItem[] };
+type NavItem = {
+  href: string;
+  icon: React.ElementType;
+  label: string;
+  minRole?: Role;
+};
 
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+/**
+ * Navegação principal deliberadamente curta.
+ *
+ * As telas especializadas continuam acessíveis por URL e pelo Manual, mas não
+ * competem com o fluxo operacional diário na barra lateral.
+ */
 const navGroups: NavGroup[] = [
   {
-    label: "Geral",
+    label: "Operação",
     items: [
       { href: "/", icon: LayoutGrid, label: "Dashboard" },
-      { href: "/busca-global", icon: Search, label: "Busca Global" },
       { href: "/agenda", icon: CalendarClock, label: "Agenda" },
-      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
-      { href: "/manual", icon: BookOpen, label: "Manual de Uso" },
+      { href: "/funil", icon: KanbanSquare, label: "Funil" },
     ],
   },
   {
     label: "Oportunidades",
     items: [
-      { href: "/funil", icon: KanbanSquare, label: "Funil de Oportunidades" },
-      { href: "/radar-pncp", icon: Radar, label: "Radar de Oportunidades" },
-      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações Recebidas" },
-      { href: "/central-operacional", icon: ClipboardList, label: "Central Operacional" },
-      { href: "/edital", icon: FileScan, label: "Importar Edital" },
-      { href: "/decisao-executiva", icon: Zap, label: "Decisão Executiva" },
-    ],
-  },
-  {
-    label: "Preços & Precificação",
-    items: [
-      { href: "/busca", icon: Search, label: "Busca Rápida" },
-      { href: "/comparacao", icon: BarChart3, label: "Comparação de Preços" },
-      { href: "/analise-precos", icon: BarChart3, label: "Análise de Preços" },
-      { href: "/sala-disputa", icon: Gavel, label: "Sala de Disputa" },
-      { href: "/custo-total", icon: Truck, label: "Custo Total & Fretes" },
-      { href: "/tributos", icon: Percent, label: "Motor Tributário" },
-      { href: "/aplicar-precificacao", icon: DollarSign, label: "Precificação em Massa" },
-      { href: "/regras-categoria", icon: FolderOpen, label: "Regras por Categoria" },
+      { href: "/radar-pncp", icon: Radar, label: "Radar PNCP", minRole: "editor" },
+      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações", minRole: "editor" },
+      { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
     ],
   },
   {
     label: "Propostas",
     items: [
-      { href: "/proposta-rapida", icon: Sparkles, label: "Proposta Rápida" },
-      { href: "/proposta-automatica", icon: Sparkle, label: "Proposta Automática" },
-      { href: "/propostas", icon: FileText, label: "Propostas Comerciais" },
-      { href: "/templates-proposta", icon: Receipt, label: "Templates de Proposta" },
-      { href: "/propostas-admin", icon: Workflow, label: "Adm. Propostas" },
-      { href: "/agente-proposta", icon: Zap, label: "Agente de Propostas" },
-    ],
-  },
-  {
-    label: "Habilitação & Disputa",
-    items: [
-      { href: "/certidoes", icon: ShieldCheck, label: "Certidões" },
-      { href: "/documentos-habilitacao", icon: FolderClock, label: "Documentos" },
-      { href: "/diligencias", icon: ShieldAlert, label: "Diligências" },
-      { href: "/portais-licitacao", icon: KeyRound, label: "Portais de Licitação" },
-    ],
-  },
-  {
-    label: "Pós-venda & Financeiro",
-    items: [
-      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
-      { href: "/contratos-pos-licitacao", icon: FileText, label: "Contratos Pós-Licitação" },
-      { href: "/financeiro", icon: DollarSign, label: "Controle Financeiro" },
+      { href: "/propostas", icon: FileText, label: "Propostas" },
+      {
+        href: "/documentos-habilitacao",
+        icon: ShieldCheck,
+        label: "Habilitação",
+        minRole: "editor",
+      },
+      { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
     ],
   },
   {
     label: "Catálogo",
     items: [
-      { href: "/categorias", icon: FolderOpen, label: "Categorias" },
       { href: "/produtos", icon: Package, label: "Produtos" },
+      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
+      { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
       { href: "/equivalencias", icon: GitMerge, label: "Equivalências" },
-      { href: "/imagens", icon: Image, label: "Imagens" },
-      { href: "/qualidade", icon: CheckCircle2, label: "Qualidade de Dados" },
-      { href: "/enriquecimento", icon: Sparkles, label: "Enriquecimento IA" },
-      { href: "/reclassificacao", icon: GitMerge, label: "Reclassificação IA" },
-      { href: "/sinonimos", icon: BookMarked, label: "Sinônimos" },
     ],
   },
   {
-    label: "Fornecedores & Captura",
+    label: "Execução",
     items: [
-      { href: "/fornecedores", icon: Building2, label: "Fornecedores" },
-      { href: "/configurador-fornecedores", icon: KeyRound, label: "Credenciais de Fornecedores" },
-      { href: "/scraper-fornecedores", icon: Globe, label: "Agente de Preços" },
-      { href: "/captura-inteligente", icon: Globe, label: "Captura Inteligente" },
-      { href: "/captura-scheduler", icon: CalendarClock, label: "Agendador de Captura" },
-      { href: "/captura-analytics", icon: BarChart3, label: "Analytics de Captura" },
-      { href: "/enriquecimento-nfe", icon: FileScan, label: "Pipeline NF-e" },
-      { href: "/historico-enriquecimento", icon: FolderClock, label: "Histórico de Enriquecimento" },
+      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
+      { href: "/financeiro", icon: DollarSign, label: "Financeiro" },
+      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
     ],
   },
   {
-    label: "IA & Sistema",
+    label: "Administração",
     items: [
-      { href: "/agente", icon: Bot, label: "Assistente IA" },
-      { href: "/central-ia", icon: Brain, label: "Central de IA" },
-      { href: "/importar", icon: FileSpreadsheet, label: "Importar Planilha" },
-      { href: "/importar-nfe", icon: Receipt, label: "Importar NF-e" },
-      { href: "/diagnostico", icon: Activity, label: "Central de Diagnóstico" },
-      { href: "/configuracao", icon: Settings, label: "Configurações" },
+      { href: "/configuracao", icon: Settings, label: "Configurações", minRole: "admin" },
     ],
   },
 ];
@@ -154,7 +102,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user, isAuthenticated, loading, logout } = useAuth();
 
-  // Mostra um loading mínimo apenas enquanto verifica a sessão
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -168,12 +115,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Sistema acessível sem login — apenas exibe botão de login na sidebar
+  const visibleNavGroups = isAuthenticated
+    ? navGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => hasMinimumRole(user?.role, item.minRole)),
+        }))
+        .filter((group) => group.items.length > 0)
+    : [];
+
   return (
     <div className="min-h-screen flex bg-white">
-      {/* Sidebar */}
       <aside className="w-56 flex-shrink-0 border-r border-gray-200 flex flex-col">
-        {/* Logo */}
         <div className="px-4 py-4 border-b border-gray-200 bg-gradient-to-br from-[#0f2557] to-[#1A3F8F]">
           <div className="flex flex-col items-center gap-2">
             <img
@@ -189,21 +142,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 py-3 overflow-y-auto">
-          {navGroups.map((group) => (
+        <nav className="flex-1 py-3 overflow-y-auto" aria-label="Navegação principal">
+          {visibleNavGroups.map((group) => (
             <div key={group.label} className="mb-1">
               <div className="px-3 pt-3 pb-1">
-                <span className="text-[9px] font-bold tracking-widest uppercase text-gray-400">{group.label}</span>
+                <span className="text-[9px] font-bold tracking-widest uppercase text-gray-400">
+                  {group.label}
+                </span>
               </div>
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const isActive =
-                  item.href === "/"
-                    ? location === "/"
-                    : location.startsWith(item.href);
+                  item.href === "/" ? location === "/" : location.startsWith(item.href);
+
                 return (
-                  <Link key={item.href} href={item.href} className={`nav-item ${isActive ? "active" : ""}`}>
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`nav-item ${isActive ? "active" : ""}`}
+                  >
                     <Icon size={14} strokeWidth={isActive ? 2.5 : 2} />
                     <span>{item.label}</span>
                   </Link>
@@ -213,10 +170,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* User area */}
         <div className="border-t border-gray-200 p-3">
           {isAuthenticated ? (
             <>
+              <Link
+                href="/manual"
+                className={`nav-item mb-2 ${location === "/manual" ? "active" : ""}`}
+              >
+                <BookOpen size={13} />
+                <span>Como operar</span>
+              </Link>
               <div className="flex items-center gap-2 px-1 mb-2">
                 <div className="w-6 h-6 bg-gray-900 flex items-center justify-center flex-shrink-0">
                   <span className="text-white text-[10px] font-bold">
@@ -228,14 +191,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {user?.name ?? "Usuário"}
                   </div>
                   <div className="text-[10px] text-gray-400 truncate">
-                    {user?.email ?? ""}
+                    {getRoleLabel(user?.role)}
                   </div>
                 </div>
               </div>
-              <button
-                onClick={() => logout()}
-                className="nav-item w-full text-left"
-              >
+              <button onClick={() => logout()} className="nav-item w-full text-left">
                 <LogOut size={13} />
                 <span>Sair</span>
               </button>
@@ -252,7 +212,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 min-w-0 overflow-auto">{children}</main>
     </div>
   );
