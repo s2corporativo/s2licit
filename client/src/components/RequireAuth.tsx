@@ -1,23 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
+import { getRoleLabel, hasMinimumRole, normalizeRole, type Role } from "@/lib/access";
 import { Lock, LogIn, ShieldAlert } from "lucide-react";
-
-type Role = "user" | "viewer" | "editor" | "admin";
-
-// Hierarquia: admin > editor > viewer > user
-const ROLE_RANK: Record<Role, number> = {
-  user: 0,
-  viewer: 1,
-  editor: 2,
-  admin: 3,
-};
-
-const ROLE_LABELS: Record<Role, string> = {
-  user: "Usuário",
-  viewer: "Visualizador",
-  editor: "Editor",
-  admin: "Administrador",
-};
 
 interface RequireAuthProps {
   children: React.ReactNode;
@@ -68,11 +52,9 @@ export default function RequireAuth({ children, message, minRole }: RequireAuthP
 
   // Verificação de papel mínimo
   if (minRole) {
-    const userRole = (user?.role as Role | undefined) ?? "user";
-    const userRank = ROLE_RANK[userRole] ?? 0;
-    const requiredRank = ROLE_RANK[minRole] ?? 0;
+    const userRole = normalizeRole(user?.role);
 
-    if (userRank < requiredRank) {
+    if (!hasMinimumRole(userRole, minRole)) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 px-4">
           <div className="w-14 h-14 bg-amber-50 flex items-center justify-center">
@@ -83,8 +65,8 @@ export default function RequireAuth({ children, message, minRole }: RequireAuthP
               Permissão insuficiente
             </h2>
             <p className="text-sm text-gray-500">
-              Esta área requer o perfil <strong>{ROLE_LABELS[minRole]}</strong> ou superior.
-              Seu perfil atual é <strong>{ROLE_LABELS[userRole]}</strong>.
+              Esta área requer o perfil <strong>{getRoleLabel(minRole)}</strong> ou superior.
+              Seu perfil atual é <strong>{getRoleLabel(userRole)}</strong>.
             </p>
             <p className="text-xs text-gray-400 mt-2">
               Entre em contato com o administrador do sistema para solicitar acesso.
@@ -102,6 +84,5 @@ export default function RequireAuth({ children, message, minRole }: RequireAuthP
 export function usePermission(minRole: Role): boolean {
   const { isAuthenticated, user } = useAuth();
   if (!isAuthenticated) return false;
-  const userRole = (user?.role as Role | undefined) ?? "user";
-  return (ROLE_RANK[userRole] ?? 0) >= (ROLE_RANK[minRole] ?? 0);
+  return hasMinimumRole(user?.role, minRole);
 }
