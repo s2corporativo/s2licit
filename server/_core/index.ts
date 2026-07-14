@@ -14,6 +14,7 @@ import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
 import type { Request, Response, NextFunction } from "express";
 import { generateProposalPdf, type DeclarationTemplate } from "../proposalPdf";
+import { PricingValidationError } from "../services/pricingSafety";
 import { exportProductsToExcel, importProductsFromExcel } from "../exportExcel";
 import { getProposalWithItems, getCompanySettings, upsertCompanySettings, getDb } from "../db";
 import { declarationTemplates } from "../../drizzle/schema";
@@ -112,13 +113,20 @@ async function startServer() {
         res.status(400).json({ error: "ID inválido" });
         return;
       }
+      if (req.query.markup !== undefined) {
+        res.status(400).json({
+          error:
+            "Ajuste de margem no download foi desativado. Salve o preço de venda de cada item antes de gerar o PDF.",
+        });
+        return;
+      }
+
       const proposal = await getProposalWithItems(id);
       if (!proposal) {
         res.status(404).json({ error: "Proposta não encontrada" });
         return;
       }
       const company = await getCompanySettings();
-      const markupPercent = parseFloat(String(req.query.markup ?? "0")) || 0;
       // Parse selected declaration IDs from query param (comma-separated)
       let declarations: DeclarationTemplate[] = [];
       const declParam = String(req.query.declarations ?? "");
@@ -136,13 +144,17 @@ async function startServer() {
           }
         }
       }
-      const pdfBuffer = await generateProposalPdf(proposal as any, company as any, markupPercent, declarations);
+      const pdfBuffer = await generateProposalPdf(proposal as any, company as any, declarations);
       const filename = `proposta-${proposal.id}-${(proposal.title ?? 'proposta').replace(/[^a-z0-9]/gi, '-').toLowerCase()}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Length", pdfBuffer.length);
       res.send(pdfBuffer);
     } catch (err) {
+      if (err instanceof PricingValidationError) {
+        res.status(422).json({ error: err.message, issues: err.issues });
+        return;
+      }
       console.error("[PDF] Error generating proposal PDF:", err);
       res.status(500).json({ error: "Erro ao gerar PDF" });
     }
