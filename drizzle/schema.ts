@@ -2045,11 +2045,36 @@ export const scraperConfigs = mysqlTable("scraper_configs", {
   supplierId: int("supplierId")
     .notNull()
     .references(() => suppliers.id, { onDelete: "cascade" }),
-  scraperType: varchar("scraperType", { length: 64 }).notNull(), // "tambasa", "cristalia", "ourofino", etc
+  scraperType: varchar("scraperType", { length: 64 }).notNull(), // "tambasa", "cristalia", "ourofino", "custom", etc
   enabled: mysqlEnum("enabled", ["yes", "no"]).default("yes").notNull(),
   email: text("email").notNull(), // Encrypted
   passwordHash: text("passwordHash").notNull(), // Encrypted
   scheduleTime: varchar("scheduleTime", { length: 8 }).default("02:00"), // HH:mm format
+  // Seletores CSS/URLs definidos pelo usuário para fornecedores sem config
+  // embutida em FORNECEDOR_CONFIGS (scraperEngine.ts). Quando presente, o motor
+  // usa este objeto no lugar da config fixa por tipo — permite cadastrar
+  // qualquer fornecedor pela UI sem alterar código.
+  customSelectors: json("customSelectors").$type<{
+    loginUrl?: string;
+    loginTrigger?: string;
+    loginEmail: string;
+    loginPassword: string;
+    loginSubmit: string;
+    loginSuccessUrl?: string;
+    loginSuccessText?: string;
+    loginSuccessSelector?: string;
+    categoryUrls: string[];
+    productItem: string;
+    productName: string;
+    productPrice: string;
+    productCode?: string;
+    productEan?: string;
+    productImage?: string;
+    productLink?: string;
+    nextPage?: string;
+    waitForSelector?: string;
+    navigationWait?: number;
+  }>(),
   lastRunAt: timestamp("lastRunAt"),
   nextRunAt: timestamp("nextRunAt"),
   lastRunStatus: mysqlEnum("lastRunStatus", ["success", "failed", "pending"]).default("pending"),

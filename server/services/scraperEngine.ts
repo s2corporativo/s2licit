@@ -704,13 +704,14 @@ export async function testarLoginFornecedor(
   scraperType: string,
   email: string,
   password: string,
+  customSelectors?: SelectorConfig,
 ): Promise<TestLoginResult> {
   if (!email || !password) {
     return { success: false, message: "E-mail e senha são obrigatórios", log: [] };
   }
 
   const tipo = scraperType?.toLowerCase() ?? "generico";
-  const cfg = FORNECEDOR_CONFIGS[tipo] ?? FORNECEDOR_CONFIGS.generico;
+  const cfg = customSelectors ?? FORNECEDOR_CONFIGS[tipo] ?? FORNECEDOR_CONFIGS.generico;
 
   // Mesma derivação de URL de login usada em executarScraper.
   const loginUrl =
@@ -740,7 +741,28 @@ export async function testarLoginFornecedor(
 
 // ─── Função principal de execução ─────────────────────────────────────────────
 
+// Guarda em memória para impedir que o mesmo fornecedor seja raspado duas vezes
+// ao mesmo tempo (ex.: clique manual em "Atualizar Agora" coincidindo com o
+// disparo automático agendado). Compartilhada por qualquer chamador do módulo.
+const runningConfigIds = new Set<number>();
+
+export function isScraperRunning(scraperConfigId: number): boolean {
+  return runningConfigIds.has(scraperConfigId);
+}
+
 export async function executarScraper(scraperConfigId: number): Promise<ScraperRunResult> {
+  if (runningConfigIds.has(scraperConfigId)) {
+    throw new Error(`Scraper #${scraperConfigId} já está em execução.`);
+  }
+  runningConfigIds.add(scraperConfigId);
+  try {
+    return await executarScraperInternal(scraperConfigId);
+  } finally {
+    runningConfigIds.delete(scraperConfigId);
+  }
+}
+
+async function executarScraperInternal(scraperConfigId: number): Promise<ScraperRunResult> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível");
 
@@ -773,9 +795,13 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
     log: [],
   };
 
-  // Buscar seletores do fornecedor
+  // Buscar seletores do fornecedor: seletores customizados cadastrados pelo
+  // usuário têm prioridade sobre a config fixa por tipo.
   const scraperType = config.scraperType.toLowerCase();
-  const cfg = FORNECEDOR_CONFIGS[scraperType] ?? FORNECEDOR_CONFIGS.generico;
+  const cfg: SelectorConfig =
+    (config.customSelectors as SelectorConfig | null) ??
+    FORNECEDOR_CONFIGS[scraperType] ??
+    FORNECEDOR_CONFIGS.generico;
 
   // Credenciais. O e-mail é armazenado em TEXTO PURO (não é segredo) — algumas
   // telas gravavam sem criptografar e o motor tentava descriptografar, quebrando

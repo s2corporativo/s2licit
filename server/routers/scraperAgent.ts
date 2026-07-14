@@ -10,12 +10,37 @@ import { getDb } from "../db";
 import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
-import { executarScraper, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
+import { executarScraper, testarLoginFornecedor, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
 
 // Jobs em execução (em memória — suficiente para UI de progresso)
 const runningJobs = new Map<number, { status: string; log: string[]; startedAt: Date }>();
 
 // ─── Schemas ──────────────────────────────────────────────────────────────
+
+// Seletores CSS/URLs para um fornecedor sem config embutida em
+// FORNECEDOR_CONFIGS. Preenchido quando o usuário escolhe "Fornecedor
+// personalizado" na tela de cadastro.
+const customSelectorsSchema = z.object({
+  loginUrl: z.string().url().optional(),
+  loginTrigger: z.string().optional(),
+  loginEmail: z.string().min(1),
+  loginPassword: z.string().min(1),
+  loginSubmit: z.string().min(1),
+  loginSuccessUrl: z.string().optional(),
+  loginSuccessText: z.string().optional(),
+  loginSuccessSelector: z.string().optional(),
+  categoryUrls: z.array(z.string().url()).min(1),
+  productItem: z.string().min(1),
+  productName: z.string().min(1),
+  productPrice: z.string().min(1),
+  productCode: z.string().optional(),
+  productEan: z.string().optional(),
+  productImage: z.string().optional(),
+  productLink: z.string().optional(),
+  nextPage: z.string().optional(),
+  waitForSelector: z.string().optional(),
+  navigationWait: z.number().optional(),
+});
 
 const cadastrarSchema = z.object({
   supplierId: z.number(),
@@ -24,6 +49,7 @@ const cadastrarSchema = z.object({
   password: z.string().min(4),
   scheduleTime: z.string().regex(/^\d{2}:\d{2}$/).default("02:00"),
   enabled: z.enum(["yes", "no"]).default("yes"),
+  customSelectors: customSelectorsSchema.optional(),
 });
 
 const atualizarCredenciaisSchema = z.object({
@@ -32,6 +58,14 @@ const atualizarCredenciaisSchema = z.object({
   password: z.string().min(4).optional(),
   scheduleTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   enabled: z.enum(["yes", "no"]).optional(),
+  customSelectors: customSelectorsSchema.optional(),
+});
+
+const testarConexaoSchema = z.object({
+  scraperType: z.string().min(1),
+  email: z.string().email(),
+  password: z.string().min(1),
+  customSelectors: customSelectorsSchema.optional(),
 });
 
 const executarSchema = z.object({ scraperConfigId: z.number() });
@@ -97,6 +131,7 @@ export const scraperAgentRouter = router({
         passwordHash: encryptPassword(input.password),
         scheduleTime: input.scheduleTime,
         enabled: input.enabled,
+        customSelectors: input.customSelectors ?? null,
       });
 
       return { id: (result as any).insertId, message: "Fornecedor configurado com sucesso" };
@@ -114,9 +149,17 @@ export const scraperAgentRouter = router({
       if (input.password) updates.passwordHash = encryptPassword(input.password);
       if (input.scheduleTime) updates.scheduleTime = input.scheduleTime;
       if (input.enabled) updates.enabled = input.enabled;
+      if (input.customSelectors) updates.customSelectors = input.customSelectors;
 
       await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, input.id));
       return { message: "Credenciais atualizadas com sucesso" };
+    }),
+
+  /** Testa login no site do fornecedor (sem raspar nem salvar nada) */
+  testarConexao: adminProcedure
+    .input(testarConexaoSchema)
+    .mutation(async ({ input }: { input: z.infer<typeof testarConexaoSchema> }) => {
+      return testarLoginFornecedor(input.scraperType, input.email, input.password, input.customSelectors);
     }),
 
   /** Deletar configuração de um scraper */

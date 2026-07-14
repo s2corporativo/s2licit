@@ -4,8 +4,52 @@ import { toast } from "sonner";
 import {
   Bot, Play, RefreshCw, Plus, CheckCircle2,
   XCircle, Clock, AlertTriangle, Eye, EyeOff, Loader2,
-  Globe, Key, Calendar, BarChart3, Shield, Zap,
+  Globe, Key, Calendar, BarChart3, Shield, Zap, Wand2, PlugZap, ChevronDown,
 } from "lucide-react";
+
+// ─── Seletores personalizados (fornecedor sem config embutida) ────────────────
+const CAMPOS_OBRIGATORIOS = {
+  loginEmail: "Seletor do campo de e-mail/usuário no formulário de login",
+  loginPassword: "Seletor do campo de senha no formulário de login",
+  loginSubmit: "Seletor do botão de entrar/login",
+  productItem: "Seletor de cada card/item de produto na listagem",
+  productName: "Seletor do nome do produto (dentro do card)",
+  productPrice: "Seletor do preço (dentro do card)",
+} as const;
+
+const CAMPOS_OPCIONAIS = {
+  loginUrl: "URL da página de login (em branco = página inicial do site)",
+  loginTrigger: "Seletor de um botão/link que abre o login (se for um modal)",
+  loginSuccessSelector: "Seletor que só aparece quando o login deu certo",
+  productCode: "Seletor do código do produto no fornecedor",
+  productEan: "Seletor do EAN/código de barras",
+  productImage: "Seletor da imagem (tag <img>)",
+  productLink: "Seletor do link do produto",
+  nextPage: "Seletor do botão/link \"próxima página\"",
+} as const;
+
+type SeletoresForm = Record<keyof typeof CAMPOS_OBRIGATORIOS | keyof typeof CAMPOS_OPCIONAIS, string>;
+
+const SELETORES_VAZIOS: SeletoresForm = {
+  loginEmail: "", loginPassword: "", loginSubmit: "",
+  productItem: "", productName: "", productPrice: "",
+  loginUrl: "", loginTrigger: "", loginSuccessSelector: "",
+  productCode: "", productEan: "", productImage: "", productLink: "", nextPage: "",
+};
+
+/** Monta o objeto customSelectors a partir do form, ou null se algo obrigatório faltar. */
+function montarCustomSelectors(sel: SeletoresForm, categoryUrlsRaw: string) {
+  const categoryUrls = categoryUrlsRaw.split("\n").map(s => s.trim()).filter(Boolean);
+  const faltando = Object.keys(CAMPOS_OBRIGATORIOS).filter(k => !sel[k as keyof typeof CAMPOS_OBRIGATORIOS]?.trim());
+  if (categoryUrls.length === 0) faltando.push("categoryUrls");
+  if (faltando.length > 0) return { erro: `Preencha os campos obrigatórios: ${faltando.join(", ")}` };
+
+  const out: Record<string, any> = { categoryUrls };
+  for (const [k, v] of Object.entries(sel)) {
+    if (v && v.trim()) out[k] = v.trim();
+  }
+  return { customSelectors: out };
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string | null }) {
@@ -22,6 +66,12 @@ function StatusBadge({ status }: { status: string | null }) {
 function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({ supplierId: "", scraperType: "tambasa", email: "", password: "", scheduleTime: "02:00" });
   const [showPass, setShowPass] = useState(false);
+  const [personalizado, setPersonalizado] = useState(false);
+  const [customNome, setCustomNome] = useState("");
+  const [categoryUrlsRaw, setCategoryUrlsRaw] = useState("");
+  const [sel, setSel] = useState<SeletoresForm>(SELETORES_VAZIOS);
+  const [showAvancado, setShowAvancado] = useState(false);
+  const [testeResultado, setTesteResultado] = useState<{ success: boolean; message: string; log: string[] } | null>(null);
 
   const { data: suppliers = [] } = trpc.suppliers.list.useQuery();
   const { data: tipos = [] } = trpc.scraperAgent.tiposDisponiveis.useQuery();
@@ -29,6 +79,44 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     onSuccess: () => { toast.success("Fornecedor configurado!"); onSaved(); onClose(); },
     onError: (e) => toast.error(e.message),
   });
+  const testarConexao = trpc.scraperAgent.testarConexao.useMutation({
+    onSuccess: (r) => { setTesteResultado(r); r.success ? toast.success(r.message) : toast.error(r.message); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const scraperType = personalizado
+    ? (customNome.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "personalizado")
+    : form.scraperType;
+
+  function handleTestar() {
+    setTesteResultado(null);
+    if (!form.email || !form.password) { toast.error("Preencha e-mail e senha para testar"); return; }
+    if (personalizado) {
+      const montado = montarCustomSelectors(sel, categoryUrlsRaw);
+      if ("erro" in montado) { toast.error(montado.erro); return; }
+      testarConexao.mutate({ scraperType, email: form.email, password: form.password, customSelectors: montado.customSelectors as any });
+    } else {
+      testarConexao.mutate({ scraperType, email: form.email, password: form.password });
+    }
+  }
+
+  function handleSalvar() {
+    if (!form.supplierId || !form.email || !form.password) {
+      toast.error("Preencha todos os campos obrigatórios");
+      return;
+    }
+    if (personalizado) {
+      if (!customNome.trim()) { toast.error("Informe um nome para o fornecedor personalizado"); return; }
+      const montado = montarCustomSelectors(sel, categoryUrlsRaw);
+      if ("erro" in montado) { toast.error(montado.erro); return; }
+      cadastrar.mutate({
+        supplierId: parseInt(form.supplierId), scraperType, email: form.email, password: form.password,
+        scheduleTime: form.scheduleTime, customSelectors: montado.customSelectors as any,
+      });
+    } else {
+      cadastrar.mutate({ ...form, supplierId: parseInt(form.supplierId) });
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -51,19 +139,92 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           </div>
 
           <div>
-            <label className="text-[10px] font-bold uppercase text-gray-500 mb-1 block">Tipo de Scraper</label>
-            <select
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              value={form.scraperType}
-              onChange={e => setForm(f => ({ ...f, scraperType: e.target.value }))}
-            >
-              {tipos.map((t: any) => (
-                <option key={t.tipo} value={t.tipo}>{t.tipo.charAt(0).toUpperCase() + t.tipo.slice(1)}</option>
-              ))}
-            </select>
-            <p className="text-[10px] text-gray-400 mt-1">
-              {tipos.find((t: any) => t.tipo === form.scraperType)?.categorias?.length ?? 0} categorias configuradas
-            </p>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-bold uppercase text-gray-500 block">Tipo de Scraper</label>
+              <button
+                type="button"
+                onClick={() => { setPersonalizado(v => !v); setTesteResultado(null); }}
+                className={`text-[10px] font-semibold flex items-center gap-1 px-2 py-0.5 rounded-full ${personalizado ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-500"}`}
+              >
+                <Wand2 size={9} /> Fornecedor personalizado
+              </button>
+            </div>
+
+            {!personalizado ? (
+              <>
+                <select
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  value={form.scraperType}
+                  onChange={e => setForm(f => ({ ...f, scraperType: e.target.value }))}
+                >
+                  {tipos.map((t: any) => (
+                    <option key={t.tipo} value={t.tipo}>{t.tipo.charAt(0).toUpperCase() + t.tipo.slice(1)}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-400 mt-1">
+                  {tipos.find((t: any) => t.tipo === form.scraperType)?.categorias?.length ?? 0} categorias configuradas
+                </p>
+              </>
+            ) : (
+              <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  Cadastre qualquer site de fornecedor informando a URL e os seletores CSS dos campos
+                  (nome, preço, login). Se não souber onde achar os seletores, peça ajuda a alguém que
+                  consiga inspecionar o site do fornecedor (botão direito → Inspecionar).
+                </p>
+                <input
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  placeholder="Nome do fornecedor (ex: Vetnil)"
+                  value={customNome}
+                  onChange={e => setCustomNome(e.target.value)}
+                />
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 mb-1 block">URLs das páginas de produtos (uma por linha)</label>
+                  <textarea
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    rows={2}
+                    placeholder={"https://fornecedor.com/categoria/produtos"}
+                    value={categoryUrlsRaw}
+                    onChange={e => setCategoryUrlsRaw(e.target.value)}
+                  />
+                </div>
+                {(Object.keys(CAMPOS_OBRIGATORIOS) as (keyof typeof CAMPOS_OBRIGATORIOS)[]).map(campo => (
+                  <div key={campo}>
+                    <label className="text-[10px] font-bold text-gray-500 mb-1 block">{CAMPOS_OBRIGATORIOS[campo]}</label>
+                    <input
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+                      placeholder="seletor CSS"
+                      value={sel[campo]}
+                      onChange={e => setSel(s => ({ ...s, [campo]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setShowAvancado(v => !v)}
+                  className="text-[10px] text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                >
+                  <ChevronDown size={10} className={`transition-transform ${showAvancado ? "rotate-180" : ""}`} />
+                  Campos avançados (opcionais)
+                </button>
+                {showAvancado && (
+                  <div className="space-y-3 pt-1">
+                    {(Object.keys(CAMPOS_OPCIONAIS) as (keyof typeof CAMPOS_OPCIONAIS)[]).map(campo => (
+                      <div key={campo}>
+                        <label className="text-[10px] font-bold text-gray-500 mb-1 block">{CAMPOS_OPCIONAIS[campo]}</label>
+                        <input
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+                          placeholder="seletor CSS ou URL"
+                          value={sel[campo]}
+                          onChange={e => setSel(s => ({ ...s, [campo]: e.target.value }))}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -111,6 +272,30 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
             />
             <p className="text-[10px] text-gray-400 mt-1">O sistema atualizará os preços automaticamente neste horário</p>
           </div>
+
+          {testeResultado && (
+            <div className={`p-3 rounded-lg border text-[11px] ${testeResultado.success ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-red-50 border-red-200 text-red-700"}`}>
+              <div className="flex items-center gap-1 font-semibold">
+                {testeResultado.success ? <CheckCircle2 size={11} /> : <XCircle size={11} />}
+                {testeResultado.message}
+              </div>
+              {testeResultado.log.length > 0 && (
+                <div className="mt-2 bg-gray-900 rounded-lg p-2 font-mono text-[10px] text-emerald-400 max-h-24 overflow-y-auto">
+                  {testeResultado.log.map((l, i) => <div key={i}>{l}</div>)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleTestar}
+            disabled={testarConexao.isPending}
+            className="w-full flex items-center justify-center gap-2 border border-gray-300 text-gray-700 rounded-lg py-2 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50"
+          >
+            {testarConexao.isPending ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
+            Testar Conexão
+          </button>
         </div>
 
         <div className="px-6 pb-6 flex gap-3">
@@ -121,13 +306,7 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
             Cancelar
           </button>
           <button
-            onClick={() => {
-              if (!form.supplierId || !form.email || !form.password) {
-                toast.error("Preencha todos os campos obrigatórios");
-                return;
-              }
-              cadastrar.mutate({ ...form, supplierId: parseInt(form.supplierId) });
-            }}
+            onClick={handleSalvar}
             disabled={cadastrar.isPending}
             className="flex-1 bg-gray-900 text-white rounded-lg py-2 text-sm font-semibold hover:bg-gray-700 disabled:opacity-50 flex items-center justify-center gap-2"
           >
