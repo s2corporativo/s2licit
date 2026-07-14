@@ -5,12 +5,16 @@ import {
   captureLogs,
   captureErrors,
   suppliers,
+  scraperConfigs,
 } from "../../drizzle/schema";
 import { eq, and, lt } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
+import { executarScraper } from "./scraperEngine";
 import {
   createCaptureLog,
   finalizeCaptureLog,
+  logCaptureError,
+  markErrorAsReprocessed,
 } from "./captureLogService";
 
 interface ScheduledJob {
@@ -40,45 +44,19 @@ export async function startCaptureForSupplier(
     };
   }
 
-  try {
-    // Criar log de captura
-    const logId = await createCaptureLog(supplierId);
+  // Criar log de captura
+  const logId = await createCaptureLog(supplierId);
 
-    // Buscar configuração do fornecedor
-    const config = await db
-      .select()
-      .from(supplierCaptureConfigs)
-      .where(eq(supplierCaptureConfigs.supplierId, supplierId))
-      .limit(1);
+  // Buscar credenciais reais de scraper deste fornecedor (mesma tabela usada
+  // pela captura manual em "Fornecedores" — supplierCaptureConfigs nunca é
+  // populada por nenhuma tela, então não é uma fonte válida de configuração).
+  const scraperConfigRows = await db
+    .select({ id: scraperConfigs.id })
+    .from(scraperConfigs)
+    .where(and(eq(scraperConfigs.supplierId, supplierId), eq(scraperConfigs.enabled, "yes")))
+    .limit(1);
 
-    if (config.length === 0) {
-      await finalizeCaptureLog(
-        logId,
-        {
-          totalPages: 0,
-          totalProductsFound: 0,
-          newProductsCreated: 0,
-          productsUpdated: 0,
-          productsWithErrors: 0,
-          productsIgnored: 0,
-        },
-        "failed",
-        "Configuração de captura não encontrada"
-      );
-
-      return {
-        logId,
-        status: "config_not_found",
-      };
-    }
-
-    // Marcar como em execução
-    if (job) {
-      job.isRunning = true;
-    }
-
-    // TODO: Implementar lógica de captura real
-    // Por enquanto, apenas simular sucesso
+  if (scraperConfigRows.length === 0) {
     await finalizeCaptureLog(
       logId,
       {
@@ -89,23 +67,81 @@ export async function startCaptureForSupplier(
         productsWithErrors: 0,
         productsIgnored: 0,
       },
-      "completed"
+      "failed",
+      "Nenhum scraper configurado para este fornecedor (cadastre as credenciais em Fornecedores)."
     );
 
     return {
       logId,
-      status: "started",
+      status: "config_not_found",
+    };
+  }
+
+  if (job) {
+    job.isRunning = true;
+  }
+
+  try {
+    const result = await executarScraper(scraperConfigRows[0].id);
+
+    await finalizeCaptureLog(
+      logId,
+      {
+        totalPages: 0,
+        totalProductsFound: result.productsScraped,
+        newProductsCreated: result.productsNew,
+        productsUpdated: result.productsUpdated,
+        productsWithErrors: result.errors.length,
+        productsIgnored: Math.max(0, result.productsScraped - result.productsMatched),
+      },
+      result.success ? "completed" : "failed",
+      result.errors[0]
+    );
+
+    for (const errorMessage of result.errors) {
+      await logCaptureError({
+        captureLogId: logId,
+        supplierId,
+        errorType: "scraper",
+        errorMessage,
+        canReprocess: true,
+      });
+    }
+
+    return {
+      logId,
+      status: result.success ? "completed" : "failed",
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    await finalizeCaptureLog(
+      logId,
+      {
+        totalPages: 0,
+        totalProductsFound: 0,
+        newProductsCreated: 0,
+        productsUpdated: 0,
+        productsWithErrors: 0,
+        productsIgnored: 0,
+      },
+      "failed",
+      errorMessage
+    );
+
     await notifyOwner({
       title: "Erro ao iniciar captura",
-      content: `Erro ao iniciar captura para fornecedor #${supplierId}: ${String(error)}`,
+      content: `Erro ao iniciar captura para fornecedor #${supplierId}: ${errorMessage}`,
     });
 
     return {
-      logId: 0,
+      logId,
       status: "error",
     };
+  } finally {
+    if (job) {
+      job.isRunning = false;
+    }
   }
 }
 
@@ -195,17 +231,38 @@ export async function reprocessFailedCaptures(
     .from(captureErrors)
     .where(whereConditions);
 
-  for (const error of errors) {
+  // Reprocessar não faz sentido por erro individual — o erro é um sintoma de
+  // uma captura que falhou para o fornecedor; reprocessar significa rodar a
+  // captura de novo e, se der certo, marcar os erros daquele fornecedor como
+  // resolvidos.
+  const supplierIdsWithErrors = Array.from(new Set(errors.map((e) => e.supplierId)));
+
+  for (const sId of supplierIdsWithErrors) {
+    const supplierErrors = errors.filter((e) => e.supplierId === sId);
     try {
-      // Simular reprocessamento
-      // TODO: Implementar lógica real de reprocessamento
-      results.reprocessed++;
+      const outcome = await startCaptureForSupplier(sId);
+      if (outcome.status === "completed") {
+        for (const err of supplierErrors) {
+          await markErrorAsReprocessed(err.id);
+          results.reprocessed++;
+        }
+      } else {
+        for (const err of supplierErrors) {
+          results.failed++;
+          results.errors.push({
+            errorId: err.id,
+            error: `Reprocessamento não teve sucesso (status: ${outcome.status})`,
+          });
+        }
+      }
     } catch (err) {
-      results.failed++;
-      results.errors.push({
-        errorId: error.id,
-        error: String(err),
-      });
+      for (const supplierErr of supplierErrors) {
+        results.failed++;
+        results.errors.push({
+          errorId: supplierErr.id,
+          error: String(err),
+        });
+      }
     }
   }
 
