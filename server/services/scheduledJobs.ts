@@ -1,12 +1,13 @@
 import cron from "node-cron";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { certidoes, emailQuotations } from "../../drizzle/schema";
+import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
+import { executarScraper } from "./scraperEngine";
 
 /**
  * Agendador central de jobs recorrentes.
@@ -19,6 +20,8 @@ import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
 
 const DEFAULT_EMAIL_SYNC_CRON = "*/15 * * * *"; // a cada 15 min
 const DEFAULT_ALERTS_CRON = "0 8 * * *"; // todo dia às 8h
+const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
+const SCRAPER_TIMEZONE = "America/Sao_Paulo";
 const ALERT_DAYS = 30; // certidões
 const DEADLINE_DAYS = 3; // prazos de cotação
 
@@ -98,6 +101,48 @@ export async function runDailyAlerts(): Promise<void> {
   }
 }
 
+/**
+ * Dispara os scrapers de fornecedores cujo `scheduleTime` (HH:mm, horário de
+ * Brasília) coincide com o minuto atual. Chamado a cada minuto; como o
+ * horário só bate uma vez por dia, cada config roda no máximo uma vez por
+ * verificação. A proteção contra execução concorrente do mesmo fornecedor
+ * (ex.: clique manual coincidindo com o horário agendado) vive em
+ * `executarScraper` (scraperEngine.ts), não aqui.
+ */
+async function runScheduledScrapers(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  const agora = new Date(
+    new Date().toLocaleString("en-US", { timeZone: SCRAPER_TIMEZONE }),
+  );
+  const hhmm = `${String(agora.getHours()).padStart(2, "0")}:${String(agora.getMinutes()).padStart(2, "0")}`;
+
+  try {
+    const ativos = await db.select({ id: scraperConfigs.id, scheduleTime: scraperConfigs.scheduleTime })
+      .from(scraperConfigs)
+      .where(eq(scraperConfigs.enabled, "yes"));
+
+    for (const cfg of ativos) {
+      if (cfg.scheduleTime !== hhmm) continue;
+
+      executarScraper(cfg.id)
+        .then((r) => {
+          console.log(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
+        })
+        .catch((err) => {
+          console.error(`[Scheduler] Scraper #${cfg.id} falhou:`, (err as Error).message);
+        });
+
+      // Pequeno intervalo entre disparos para não sobrecarregar caso vários
+      // fornecedores compartilhem o mesmo horário configurado.
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  } catch (err) {
+    console.error("[Scheduler] Falha ao verificar agendamentos de scraper:", (err as Error).message);
+  }
+}
+
 /** Registra os jobs recorrentes. Chamado uma vez no boot. */
 export function initScheduledJobs(): void {
   // 1. Sincronização de cotações por e-mail
@@ -119,6 +164,17 @@ export function initScheduledJobs(): void {
       console.log(`[Scheduler] Alertas diários agendados (${expr}).`);
     } else {
       console.warn(`[Scheduler] ALERTS_CRON inválido: "${expr}" — alertas diários desativados.`);
+    }
+  }
+
+  // 3. Execução automática dos scrapers de fornecedores no horário configurado
+  if (enabled(process.env.SCRAPER_SCHEDULE_ENABLED, true)) {
+    const expr = process.env.SCRAPER_SCHEDULE_CRON || DEFAULT_SCRAPER_SCHEDULE_CRON;
+    if (cron.validate(expr)) {
+      cron.schedule(expr, runScheduledScrapers, { timezone: SCRAPER_TIMEZONE });
+      console.log(`[Scheduler] Execução automática de fornecedores agendada (verificação ${expr}, horário de Brasília).`);
+    } else {
+      console.warn(`[Scheduler] SCRAPER_SCHEDULE_CRON inválido: "${expr}" — agendamento automático de fornecedores desativado.`);
     }
   }
 }

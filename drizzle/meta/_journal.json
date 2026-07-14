@@ -36,6 +36,13 @@
       "when": 1783801276704,
       "tag": "0004_pos_venda",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1784036967082,
+      "tag": "0005_tense_hex",
+      "breakpoints": true
     }
   ]
 }
