@@ -2678,6 +2678,24 @@ export const duplicateMergeHistory = mysqlTable(
 export type DuplicateMergeHistory = typeof duplicateMergeHistory.$inferSelect;
 export type InsertDuplicateMergeHistory = typeof duplicateMergeHistory.$inferInsert;
 
+// Pares de produtos marcados manualmente como "não duplicados" (router
+// duplicates.ts, detecção simples por similaridade de nome) — evita que o
+// mesmo par volte a aparecer agrupado nas próximas detecções.
+export const duplicateExceptions = mysqlTable(
+  "duplicate_exceptions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    productId1: int("productId1").notNull().references(() => products.id, { onDelete: "cascade" }),
+    productId2: int("productId2").notNull().references(() => products.id, { onDelete: "cascade" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_duplicate_exceptions_pair").on(table.productId1, table.productId2),
+  ]
+);
+export type DuplicateException = typeof duplicateExceptions.$inferSelect;
+export type InsertDuplicateException = typeof duplicateExceptions.$inferInsert;
+
 export const executiveDecisions = mysqlTable(
   "executive_decisions",
   {

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Bot, Play, RefreshCw, Plus, CheckCircle2,
   XCircle, Clock, AlertTriangle, Eye, EyeOff, Loader2,
-  Globe, Key, Calendar, BarChart3, Shield, Zap, Wand2, PlugZap, ChevronDown,
+  Globe, Key, Calendar, BarChart3, Shield, Zap, Wand2, PlugZap, ChevronDown, Trash2,
 } from "lucide-react";
 
 // ─── Seletores personalizados (fornecedor sem config embutida) ────────────────
@@ -328,7 +328,10 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
     onError: (e) => toast.error(e.message),
   });
 
-  // Método remover não implementado no router
+  const deletar = trpc.scraperAgent.deletar.useMutation({
+    onSuccess: () => { toast.success("Configuração removida"); onRefresh(); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const { data: statusJob } = trpc.scraperAgent.status.useQuery(
     { scraperConfigId: config.id },
@@ -429,7 +432,18 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
           {isRunning ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {isRunning ? "Executando..." : "Atualizar Agora"}
         </button>
-        {/* Botão remover desabilitado - método não implementado no router */}
+        <button
+          onClick={() => {
+            if (confirm(`Remover a configuração de scraping de "${config.scraperType}"? As credenciais salvas serão apagadas.`)) {
+              deletar.mutate({ id: config.id });
+            }
+          }}
+          disabled={isRunning || deletar.isPending}
+          title="Remover fornecedor"
+          className="flex items-center justify-center gap-2 border border-red-200 text-red-600 rounded-lg px-3 py-2 text-xs font-semibold hover:bg-red-50 disabled:opacity-40 transition"
+        >
+          {deletar.isPending ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+        </button>
       </div>
     </div>
   );
