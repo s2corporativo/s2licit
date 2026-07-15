@@ -1,10 +1,8 @@
 # Deploy do Sistema S2 na VPS via SSH.
 #
-# Dois jeitos de disparar:
-#  1. Automático: todo push/merge no main (exige o secret VPS_PASSWORD em
-#     Settings → Secrets and variables → Actions).
-#  2. Manual: GitHub → Actions → "Deploy VPS" → Run workflow (a senha pode
-#     ser colada no campo "password" se o secret não existir).
+# O workflow preserva o .env da VPS, aplica somente secrets/variables não vazios,
+# reconstrói os containers e só conclui quando aplicação + MySQL respondem em
+# /readyz. Nenhum valor sensível é escrito nos logs.
 name: Deploy VPS
 
 on:
@@ -25,7 +23,7 @@ on:
         required: false
         default: ""
       domain:
-        description: "Domínio para HTTPS automático via Caddy (ex.: s2.s2corporativo.com.br). Deixe vazio para não mexer. Uma vez configurado, fica salvo no .env da VPS e não precisa ser repetido nos próximos deploys."
+        description: "Domínio para HTTPS automático. Deixe vazio para manter o domínio já salvo na VPS."
         required: false
         default: ""
 
@@ -57,7 +55,7 @@ jobs:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
         run: |
           if [ -z "$SSHPASS" ]; then
-            echo "::error::Configure o secret VPS_PASSWORD (Settings → Secrets and variables → Actions) ou informe a senha no Run workflow."
+            echo "::error::Configure o secret VPS_PASSWORD ou informe a senha no Run workflow."
             exit 1
           fi
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
@@ -70,7 +68,7 @@ jobs:
             -e "sshpass -e ssh $SSH_OPTS" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/s2licit/"
 
-      - name: Instalar e subir (docker compose)
+      - name: Instalar, migrar e subir
         env:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
         run: |
@@ -78,55 +76,175 @@ jobs:
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
             "DOMAIN='${DEPLOY_DOMAIN}' bash /opt/s2licit/scripts/vps-bootstrap.sh"
 
-      # Configurações opcionais vindas dos secrets do repositório — aplicadas
-      # no .env da VPS a cada deploy (só as que existirem):
-      #   GROQ_API_KEY   → IA gratuita (Groq)
-      #   EMAIL_PASSWORD → senha de APP do Gmail (IMAP + SMTP)
-      #   EMAIL_USER     → e-mail da caixa (padrão adm@vetmg.com.br)
-      #   ADMIN_PASSWORD → senha de login do sistema (sincronizada no boot)
-      - name: Aplicar configurações opcionais (secrets)
+      - name: Validar aplicação e MySQL
         env:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
+        run: |
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /opt/s2licit
+          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
+          LOCAL_PORT=${LOCAL_PORT:-3000}
+          for i in $(seq 1 45); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null; then
+              echo "Aplicação e MySQL prontos ✅"
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "Aplicação não ficou pronta" >&2
+          docker compose ps >&2 || true
+          docker compose logs --tail=80 app db >&2 || true
+          exit 1
+          REMOTE
+
+      # Secrets aceitos. Valores ausentes são ignorados e nunca apagam o .env:
+      # Segurança/login: ADMIN_PASSWORD
+      # IA: GROQ_API_KEY, ANTHROPIC_API_KEY, BUILT_IN_FORGE_API_KEY/URL
+      # E-mail legado: EMAIL_USER, EMAIL_PASSWORD
+      # E-mail avançado: IMAP_* e SMTP_*
+      # WhatsApp: WHATSAPP_PHONE_ID/TOKEN/WEBHOOK_URL/TO
+      # Integrações futuras: PRODEMGE_API_KEY
+      # Ajustes não sensíveis podem ser Repository Variables ou Secrets.
+      - name: Aplicar integrações cadastradas no GitHub
+        env:
+          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUILT_IN_FORGE_API_URL: ${{ secrets.BUILT_IN_FORGE_API_URL }}
+          BUILT_IN_FORGE_API_KEY: ${{ secrets.BUILT_IN_FORGE_API_KEY }}
+          PRODEMGE_API_KEY: ${{ secrets.PRODEMGE_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_PORT: ${{ secrets.IMAP_PORT }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+          IMAP_TLS: ${{ secrets.IMAP_TLS }}
+          IMAP_MAILBOX: ${{ secrets.IMAP_MAILBOX }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
+          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
+          WHATSAPP_WEBHOOK_URL: ${{ secrets.WHATSAPP_WEBHOOK_URL }}
+          WHATSAPP_TO: ${{ secrets.WHATSAPP_TO }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || secrets.AI_PROVIDER }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || secrets.GROQ_MODEL }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || secrets.ANTHROPIC_MODEL }}
+          LLM_TIMEOUT_MS: ${{ vars.LLM_TIMEOUT_MS || secrets.LLM_TIMEOUT_MS }}
+          WHATSAPP_API_VERSION: ${{ vars.WHATSAPP_API_VERSION || secrets.WHATSAPP_API_VERSION }}
+          EMAIL_SYNC_ENABLED: ${{ vars.EMAIL_SYNC_ENABLED || secrets.EMAIL_SYNC_ENABLED }}
+          EMAIL_SYNC_CRON: ${{ vars.EMAIL_SYNC_CRON || secrets.EMAIL_SYNC_CRON }}
+          ALERTS_ENABLED: ${{ vars.ALERTS_ENABLED || secrets.ALERTS_ENABLED }}
+          ALERTS_CRON: ${{ vars.ALERTS_CRON || secrets.ALERTS_CRON }}
+          SCRAPER_SCHEDULE_ENABLED: ${{ vars.SCRAPER_SCHEDULE_ENABLED || secrets.SCRAPER_SCHEDULE_ENABLED }}
+          SCRAPER_SCHEDULE_CRON: ${{ vars.SCRAPER_SCHEDULE_CRON || secrets.SCRAPER_SCHEDULE_CRON }}
         run: |
-          if [ -z "${GROQ_API_KEY}${EMAIL_PASSWORD}${ADMIN_PASSWORD}" ]; then
-            echo "Nenhum secret opcional configurado — pulando."
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+
+          # Compatibilidade com os secrets antigos EMAIL_USER/EMAIL_PASSWORD.
+          EMAIL_USER="${EMAIL_USER:-adm@vetmg.com.br}"
+          if [ -n "${EMAIL_PASSWORD:-}" ]; then
+            IMAP_HOST="${IMAP_HOST:-imap.gmail.com}"
+            IMAP_PORT="${IMAP_PORT:-993}"
+            IMAP_USER="${IMAP_USER:-$EMAIL_USER}"
+            IMAP_PASSWORD="${IMAP_PASSWORD:-$EMAIL_PASSWORD}"
+            IMAP_TLS="${IMAP_TLS:-true}"
+            IMAP_MAILBOX="${IMAP_MAILBOX:-INBOX}"
+            SMTP_HOST="${SMTP_HOST:-smtp.gmail.com}"
+            SMTP_PORT="${SMTP_PORT:-587}"
+            SMTP_USER="${SMTP_USER:-$EMAIL_USER}"
+            SMTP_PASSWORD="${SMTP_PASSWORD:-$EMAIL_PASSWORD}"
+            SMTP_SECURE="${SMTP_SECURE:-false}"
+            SMTP_FROM="${SMTP_FROM:-$EMAIL_USER}"
+          fi
+
+          cat > /tmp/remote-config.sh <<'REMOTE'
+          set -euo pipefail
+          cd /opt/s2licit
+          set_kv_b64() {
+            KEY="$1" VALUE_B64="$2" python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+
+          key = os.environ["KEY"]
+          value = base64.b64decode(os.environ["VALUE_B64"]).decode("utf-8")
+          if "\n" in value or "\r" in value:
+              raise SystemExit(f"Valor multilinha não permitido para {key}")
+          path = Path(".env")
+          lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+          replacement = f"{key}={value}"
+          updated = False
+          output = []
+          for line in lines:
+              if line.startswith(f"{key}="):
+                  if not updated:
+                      output.append(replacement)
+                      updated = True
+              else:
+                  output.append(line)
+          if not updated:
+              output.append(replacement)
+          tmp = path.with_suffix(".env.tmp")
+          tmp.write_text("\n".join(output) + "\n", encoding="utf-8")
+          os.chmod(tmp, 0o600)
+          os.replace(tmp, path)
+          PY
+          }
+          REMOTE
+
+          applied=0
+          append_value() {
+            key="$1"
+            value="${!key:-}"
+            [ -n "$value" ] || return 0
+            encoded=$(printf %s "$value" | base64 -w0)
+            printf "set_kv_b64 '%s' '%s'\n" "$key" "$encoded" >> /tmp/remote-config.sh
+            echo "Configurando ${key}"
+            applied=$((applied + 1))
+          }
+
+          for key in \
+            ADMIN_PASSWORD GROQ_API_KEY ANTHROPIC_API_KEY \
+            BUILT_IN_FORGE_API_URL BUILT_IN_FORGE_API_KEY PRODEMGE_API_KEY \
+            AI_PROVIDER GROQ_MODEL ANTHROPIC_MODEL LLM_TIMEOUT_MS \
+            IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_TLS IMAP_MAILBOX \
+            SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_SECURE SMTP_FROM \
+            EMAIL_SYNC_ENABLED EMAIL_SYNC_CRON ALERTS_ENABLED ALERTS_CRON \
+            SCRAPER_SCHEDULE_ENABLED SCRAPER_SCHEDULE_CRON \
+            WHATSAPP_PHONE_ID WHATSAPP_TOKEN WHATSAPP_API_VERSION \
+            WHATSAPP_WEBHOOK_URL WHATSAPP_TO; do
+            append_value "$key"
+          done
+
+          if [ "$applied" -eq 0 ]; then
+            echo "Nenhuma configuração nova informada; mantendo o .env atual."
             exit 0
           fi
-          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
-          EMAIL_USER="${EMAIL_USER:-adm@vetmg.com.br}"
 
-          # Monta o script remoto com valores em base64 (à prova de caracteres especiais)
-          {
-            echo 'cd /opt/s2licit'
-            echo 'set_kv() { k="$1"; v=$(echo "$2" | base64 -d); if grep -q "^${k}=" .env; then sed -i "s|^${k}=.*|${k}=${v}|" .env; else echo "${k}=${v}" >> .env; fi; }'
-            if [ -n "$GROQ_API_KEY" ]; then
-              echo "set_kv GROQ_API_KEY $(printf %s "$GROQ_API_KEY" | base64 -w0)"
-            fi
-            if [ -n "$ADMIN_PASSWORD" ]; then
-              echo "set_kv ADMIN_PASSWORD $(printf %s "$ADMIN_PASSWORD" | base64 -w0)"
-              echo "sed -i 's|^Senha:.*|Senha:  (definida via secret ADMIN_PASSWORD do GitHub)|' /root/s2licit-acesso.txt 2>/dev/null || true"
-            fi
-            if [ -n "$EMAIL_PASSWORD" ]; then
-              echo "set_kv IMAP_HOST $(printf %s 'imap.gmail.com' | base64 -w0)"
-              echo "set_kv IMAP_PORT $(printf %s '993' | base64 -w0)"
-              echo "set_kv IMAP_USER $(printf %s "$EMAIL_USER" | base64 -w0)"
-              echo "set_kv IMAP_PASSWORD $(printf %s "$EMAIL_PASSWORD" | base64 -w0)"
-              echo "set_kv SMTP_HOST $(printf %s 'smtp.gmail.com' | base64 -w0)"
-              echo "set_kv SMTP_PORT $(printf %s '587' | base64 -w0)"
-              echo "set_kv SMTP_SECURE $(printf %s 'false' | base64 -w0)"
-              echo "set_kv SMTP_USER $(printf %s "$EMAIL_USER" | base64 -w0)"
-              echo "set_kv SMTP_PASSWORD $(printf %s "$EMAIL_PASSWORD" | base64 -w0)"
-              echo "set_kv SMTP_FROM $(printf %s "$EMAIL_USER" | base64 -w0)"
-            fi
-            echo 'docker compose up -d --force-recreate app >/dev/null 2>&1'
-            echo 'LOCAL_PORT=$(grep "^APP_LOCAL_PORT=" .env | cut -d= -f2); LOCAL_PORT=${LOCAL_PORT:-3000}'
-            echo 'for i in $(seq 1 30); do curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null && { echo "Configurações aplicadas e aplicação pronta ✅"; exit 0; }; sleep 4; done'
-            echo 'echo "Aplicação não ficou pronta após aplicar configs" >&2; docker compose logs --tail=40 app >&2; exit 1'
-          } > /tmp/remote-config.sh
+          cat >> /tmp/remote-config.sh <<'REMOTE'
+          docker compose up -d --force-recreate app >/dev/null
+          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
+          LOCAL_PORT=${LOCAL_PORT:-3000}
+          for i in $(seq 1 45); do
+            curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null && {
+              echo "Integrações aplicadas e aplicação pronta ✅"
+              exit 0
+            }
+            sleep 4
+          done
+          echo "Aplicação não ficou pronta após aplicar integrações" >&2
+          docker compose logs --tail=80 app >&2 || true
+          exit 1
+          REMOTE
+
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < /tmp/remote-config.sh
 
       - name: Resumo
@@ -138,5 +256,6 @@ jobs:
           else
             echo "- URL: http://$DEPLOY_HOST/" >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "- Código, migrações e integrações sincronizados" >> "$GITHUB_STEP_SUMMARY"
           echo "- Readiness validada em /readyz (aplicação + MySQL)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Login inicial: veja /root/s2licit-acesso.txt na VPS (gerado só na 1ª instalação)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Nenhum valor de secret foi exibido nos logs" >> "$GITHUB_STEP_SUMMARY"
