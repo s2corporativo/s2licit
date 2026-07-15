@@ -1,5 +1,6 @@
+import cron from "node-cron";
 import { count } from "drizzle-orm";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   certidoes,
@@ -48,8 +49,69 @@ function resumir(itens: ItemDiagnostico[]) {
   };
 }
 
+function enabled(flag: string | undefined, defaultOn = true): boolean {
+  if (flag == null || flag.trim() === "") return defaultOn;
+  return flag !== "false" && flag !== "0";
+}
+
+function schedulerDiagnostic(input: {
+  item: string;
+  code: string;
+  envEnabled: string | undefined;
+  envCron: string | undefined;
+  defaultCron: string;
+  dependencyConfigured?: boolean;
+  dependencyMessage?: string;
+}): ItemDiagnostico {
+  const isEnabled = enabled(input.envEnabled);
+  const expression = input.envCron || input.defaultCron;
+
+  if (!isEnabled) {
+    return {
+      categoria: "Automação",
+      item: input.item,
+      status: "atencao",
+      detalhe: "Desativada por configuração.",
+      acao: "Ative a automação no GitHub e execute novamente o Deploy VPS.",
+      codigo: input.code,
+    };
+  }
+
+  if (!cron.validate(expression)) {
+    return {
+      categoria: "Automação",
+      item: input.item,
+      status: "erro",
+      detalhe: `Expressão cron inválida: ${expression}.`,
+      acao: "Corrija a expressão cron cadastrada no GitHub antes do próximo deploy.",
+      codigo: input.code,
+    };
+  }
+
+  if (input.dependencyConfigured === false) {
+    return {
+      categoria: "Automação",
+      item: input.item,
+      status: "atencao",
+      detalhe: input.dependencyMessage || "A automação está ligada, mas falta uma integração obrigatória.",
+      acao: "Configure a integração obrigatória e execute novamente o Deploy VPS.",
+      codigo: input.code,
+    };
+  }
+
+  return {
+    categoria: "Automação",
+    item: input.item,
+    status: "ok",
+    detalhe: `Agendada por ${expression}.`,
+    codigo: input.code,
+  };
+}
+
 export const diagnosticoRouter = router({
-  verificar: protectedProcedure.query(async () => {
+  // O frontend já restringe a tela a Editor, mas a autorização precisa existir
+  // também no backend para impedir acesso direto ao endpoint por Viewer/User.
+  verificar: editorProcedure.query(async () => {
     const itens: ItemDiagnostico[] = [];
     const db = await getDb();
 
@@ -160,16 +222,20 @@ export const diagnosticoRouter = router({
         codigo: "certificates",
       });
     } catch (error) {
+      console.error("[Diagnóstico] Falha ao consultar certidões:", error);
       itens.push({
         categoria: "Dados essenciais",
         item: "Certidões de habilitação",
         status: "erro",
-        detalhe: `Falha ao consultar certidões: ${(error as Error).message}`,
+        detalhe: "Falha ao consultar as certidões no banco de dados.",
         codigo: "certificates",
       });
     }
 
-    for (const integration of getIntegrationStatuses()) {
+    const integrations = getIntegrationStatuses();
+    const integrationByCode = new Map(integrations.map((integration) => [integration.code, integration]));
+
+    for (const integration of integrations) {
       itens.push({
         categoria: "Integrações",
         item: integration.label,
@@ -207,36 +273,35 @@ export const diagnosticoRouter = router({
       codigo: "jwt",
     });
 
-    const emailSyncOn = process.env.EMAIL_SYNC_ENABLED !== "false";
-    const alertsOn = process.env.ALERTS_ENABLED !== "false";
-    const scraperOn = process.env.SCRAPER_SCHEDULE_ENABLED !== "false";
-    itens.push({
-      categoria: "Automação",
-      item: "Sincronização de e-mails",
-      status: emailSyncOn ? "ok" : "atencao",
-      detalhe: emailSyncOn
-        ? `Agendada por ${process.env.EMAIL_SYNC_CRON || "*/15 * * * *"}.`
-        : "Desativada por configuração.",
-      codigo: "email-scheduler",
-    });
-    itens.push({
-      categoria: "Automação",
-      item: "Alertas diários",
-      status: alertsOn ? "ok" : "atencao",
-      detalhe: alertsOn
-        ? `Agendados por ${process.env.ALERTS_CRON || "0 8 * * *"}.`
-        : "Desativados por configuração.",
-      codigo: "alerts-scheduler",
-    });
-    itens.push({
-      categoria: "Automação",
-      item: "Captura programada de fornecedores",
-      status: scraperOn ? "ok" : "atencao",
-      detalhe: scraperOn
-        ? `Verificação agendada por ${process.env.SCRAPER_SCHEDULE_CRON || "* * * * *"}.`
-        : "Desativada por configuração.",
-      codigo: "scraper-scheduler",
-    });
+    itens.push(
+      schedulerDiagnostic({
+        item: "Sincronização de e-mails",
+        code: "email-scheduler",
+        envEnabled: process.env.EMAIL_SYNC_ENABLED,
+        envCron: process.env.EMAIL_SYNC_CRON,
+        defaultCron: "*/15 * * * *",
+        dependencyConfigured: integrationByCode.get("imap")?.configured ?? false,
+        dependencyMessage: "A sincronização está ligada, mas o recebimento IMAP não está configurado.",
+      }),
+    );
+    itens.push(
+      schedulerDiagnostic({
+        item: "Alertas diários",
+        code: "alerts-scheduler",
+        envEnabled: process.env.ALERTS_ENABLED,
+        envCron: process.env.ALERTS_CRON,
+        defaultCron: "0 8 * * *",
+      }),
+    );
+    itens.push(
+      schedulerDiagnostic({
+        item: "Captura programada de fornecedores",
+        code: "scraper-scheduler",
+        envEnabled: process.env.SCRAPER_SCHEDULE_ENABLED,
+        envCron: process.env.SCRAPER_SCHEDULE_CRON,
+        defaultCron: "* * * * *",
+      }),
+    );
 
     try {
       const cotacoes = await db.select().from(emailQuotations);
@@ -258,11 +323,12 @@ export const diagnosticoRouter = router({
         codigo: "quotations",
       });
     } catch (error) {
+      console.error("[Diagnóstico] Falha ao consultar cotações:", error);
       itens.push({
         categoria: "Operação",
         item: "Cotações pendentes",
         status: "erro",
-        detalhe: `Falha ao consultar cotações: ${(error as Error).message}`,
+        detalhe: "Falha ao consultar as cotações no banco de dados.",
         codigo: "quotations",
       });
     }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { protectedProcedure, router } from "./trpc";
+import { editorProcedure, protectedProcedure, router } from "./trpc";
 
 const testRouter = router({
   read: protectedProcedure.query(() => "ok"),
   write: protectedProcedure.mutation(() => "saved"),
+  editorRead: editorProcedure.query(() => "editor-ok"),
 });
 
 function caller(role: "user" | "viewer" | "editor" | "admin" | null) {
@@ -36,4 +37,18 @@ describe("RBAC global do tRPC", () => {
   it.each(["editor", "admin"] as const)("permite mutação para perfil %s", async (role) => {
     await expect(caller(role).write()).resolves.toBe("saved");
   });
+
+  it.each(["user", "viewer"] as const)(
+    "nega consulta sensível de editor para perfil %s",
+    async (role) => {
+      await expect(caller(role).editorRead()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    },
+  );
+
+  it.each(["editor", "admin"] as const)(
+    "permite consulta sensível para perfil %s",
+    async (role) => {
+      await expect(caller(role).editorRead()).resolves.toBe("editor-ok");
+    },
+  );
 });
