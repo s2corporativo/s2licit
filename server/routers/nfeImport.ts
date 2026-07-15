@@ -1,43 +1,34 @@
-import { router, protectedProcedure } from "../_core/trpc";
-import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { parseNfeXml, validateNfeData } from "../services/nfeParserService";
-import {
-  validateSupplierData,
-  detectPriceAnomalies,
-  type PriceUpdate,
-} from "../services/nfeSupplierService";
-import { validateProductsForImport } from "../services/nfeImportService";
-import { summarizeBatchImportResults, summarizeBatchPreview } from "../services/nfeBatchImportUtils";
-import { createOrGetSupplier, createProductsFromNfe } from "../services/nfeProductImportService";
-import { getDb } from "../db";
-import { eq, and } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
+import { z } from "zod";
 import { nfeImports } from "../../drizzle/schema";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
+import { getDb } from "../db";
+import { summarizeBatchImportResults, summarizeBatchPreview } from "../services/nfeBatchImportUtils";
+import { validateProductsForImport } from "../services/nfeImportService";
+import { parseNfeXml, validateNfeData } from "../services/nfeParserService";
+import { createOrGetSupplier, createProductsFromNfe } from "../services/nfeProductImportService";
+import { validateSupplierData } from "../services/nfeSupplierService";
 
 const batchXmlFileSchema = z.object({
-  fileName: z.string().min(1, "Nome do arquivo obrigatório"),
-  xmlContent: z.string().min(1, "Conteúdo XML obrigatório"),
-  supplierId: z.number().optional(),
+  fileName: z.string().min(1, "Nome do arquivo obrigatório").max(255),
+  xmlContent: z.string().min(1, "Conteúdo XML obrigatório").max(15_000_000),
+  supplierId: z.number().int().positive().optional(),
 });
 
 function buildNfePreview(nfeData: any) {
-  const prices = nfeData.products.map((product: any) => product.unitPrice);
-  const totalValue = nfeData.products.reduce((sum: number, product: any) => sum + product.totalPrice, 0);
-
-  const stats = {
-    totalProducts: nfeData.products.length,
-    totalValue,
-    averagePrice: prices.length > 0 ? prices.reduce((sum: number, price: number) => sum + price, 0) / prices.length : 0,
-    priceRangeMin: prices.length > 0 ? Math.min(...prices) : 0,
-    priceRangeMax: prices.length > 0 ? Math.max(...prices) : 0,
-  };
+  const prices = nfeData.products.map((product: any) => Number(product.unitPrice) || 0);
+  const totalValue = nfeData.products.reduce(
+    (sum: number, product: any) => sum + (Number(product.totalPrice) || 0),
+    0,
+  );
 
   return {
     nfeNumber: nfeData.nfeNumber,
     supplierName: nfeData.supplierName,
     supplierCnpj: nfeData.supplierCnpj,
-    products: nfeData.products.map((product: any) => ({
-      id: `${product.productName}-${product.ean || ""}`,
+    products: nfeData.products.map((product: any, index: number) => ({
+      id: `${index}:${product.ean || "sem-ean"}:${product.productName}`,
       productName: product.productName,
       ean: product.ean,
       quantity: product.quantity,
@@ -45,333 +36,276 @@ function buildNfePreview(nfeData: any) {
       totalPrice: product.totalPrice,
       unit: product.unit,
     })),
-    stats,
+    stats: {
+      totalProducts: nfeData.products.length,
+      totalValue,
+      averagePrice: prices.length > 0 ? prices.reduce((sum: number, price: number) => sum + price, 0) / prices.length : 0,
+      priceRangeMin: prices.length > 0 ? Math.min(...prices) : 0,
+      priceRangeMax: prices.length > 0 ? Math.max(...prices) : 0,
+    },
     totalValue,
   };
 }
 
-function validateBatchNfe(nfeData: any) {
+function validateParsedNfe(nfeData: any) {
   const validation = validateNfeData(nfeData);
   const supplierValidation = validateSupplierData(nfeData.supplierName, nfeData.supplierCnpj);
-
-  return {
-    valid: validation.valid && supplierValidation.valid,
-    errors: [...validation.errors, ...supplierValidation.errors],
-  };
+  const errors = [...validation.errors, ...supplierValidation.errors];
+  return { valid: errors.length === 0, errors };
 }
 
-async function upsertNfeImportRecord(db: any, payload: {
-  nfeNumber: string;
-  supplierName: string;
-  supplierCnpj: string;
-  supplierId?: number | null;
-  totalProducts: number;
-  importedProducts: number;
-  status: "pending" | "processing" | "completed" | "failed";
-  xmlContent?: string;
-  importDate: Date;
-  notes?: string;
+async function upsertImportRecord(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  payload: {
+    nfeNumber: string;
+    supplierName: string;
+    supplierCnpj: string;
+    supplierId?: number | null;
+    totalProducts: number;
+    importedProducts: number;
+    status: "pending" | "processing" | "completed" | "failed";
+    xmlContent?: string;
+    notes?: string;
+  },
+): Promise<number> {
+  const [existing] = await db
+    .select({ id: nfeImports.id })
+    .from(nfeImports)
+    .where(
+      and(
+        eq(nfeImports.nfeNumber, payload.nfeNumber),
+        eq(nfeImports.supplierCnpj, payload.supplierCnpj),
+      ),
+    )
+    .limit(1);
+
+  const values = {
+    supplierName: payload.supplierName,
+    supplierCnpj: payload.supplierCnpj,
+    supplierId: payload.supplierId ?? null,
+    totalProducts: payload.totalProducts,
+    importedProducts: payload.importedProducts,
+    status: payload.status,
+    xmlContent: payload.xmlContent,
+    importDate: new Date(),
+    notes: payload.notes,
+  };
+
+  if (existing) {
+    await db.update(nfeImports).set(values).where(eq(nfeImports.id, existing.id));
+    return existing.id;
+  }
+
+  const [result] = await db.insert(nfeImports).values({
+    nfeNumber: payload.nfeNumber,
+    ...values,
+  });
+  const id = Number((result as { insertId?: number }).insertId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Falha ao registrar histórico da NF-e");
+  return id;
+}
+
+async function importParsedNfe(options: {
+  xmlContent: string;
+  supplierId?: number;
+  selectedProductIds?: string[];
 }) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+
+  const nfeData = await parseNfeXml(options.xmlContent);
+  const nfeValidation = validateParsedNfe(nfeData);
+  if (!nfeValidation.valid) throw new Error(`NF-e inválida: ${nfeValidation.errors.join(", ")}`);
+
+  const preview = buildNfePreview(nfeData);
+  const selectedSet = options.selectedProductIds?.length
+    ? new Set(options.selectedProductIds)
+    : null;
+  const productsToImport = nfeData.products.filter((product: any, index: number) => {
+    if (!selectedSet) return true;
+    const id = `${index}:${product.ean || "sem-ean"}:${product.productName}`;
+    return selectedSet.has(id);
+  });
+
+  if (productsToImport.length === 0) throw new Error("Nenhum produto selecionado para importação");
+
+  const productValidation = validateProductsForImport(
+    productsToImport.map((product: any) => ({ ...product, matchStatus: "new" as const })),
+  );
+  if (!productValidation.valid) {
+    throw new Error(`Produtos inválidos: ${productValidation.errors.join(", ")}`);
+  }
+
+  let importRecordId: number | undefined;
   try {
-    // Chave composta: mesmo número de NFe pode existir para fornecedores diferentes
-    const existing = await db
-      .select({ id: nfeImports.id })
-      .from(nfeImports)
-      .where(
-        and(
-          eq(nfeImports.nfeNumber, payload.nfeNumber),
-          eq(nfeImports.supplierCnpj, payload.supplierCnpj)
-        )
-      )
-      .limit(1);
-
-    if (existing.length > 0) {
-      await db
-        .update(nfeImports)
-        .set({
-          supplierName: payload.supplierName,
-          supplierCnpj: payload.supplierCnpj,
-          supplierId: payload.supplierId ?? null,
-          totalProducts: payload.totalProducts,
-          importedProducts: payload.importedProducts,
-          status: payload.status,
-          xmlContent: payload.xmlContent,
-          importDate: payload.importDate,
-          notes: payload.notes,
-        })
-        .where(eq(nfeImports.id, existing[0].id));
-
-      return { reusedExisting: true };
-    }
-
-    await db.insert(nfeImports).values({
-      nfeNumber: payload.nfeNumber,
-      supplierName: payload.supplierName,
-      supplierCnpj: payload.supplierCnpj,
-      supplierId: payload.supplierId ?? null,
-      totalProducts: payload.totalProducts,
-      importedProducts: payload.importedProducts,
-      status: payload.status,
-      xmlContent: payload.xmlContent,
-      importDate: payload.importDate,
-      notes: payload.notes,
+    importRecordId = await upsertImportRecord(db, {
+      nfeNumber: nfeData.nfeNumber,
+      supplierName: nfeData.supplierName,
+      supplierCnpj: nfeData.supplierCnpj,
+      supplierId: options.supplierId ?? null,
+      totalProducts: productsToImport.length,
+      importedProducts: 0,
+      status: "processing",
+      xmlContent: nfeData.rawXml ?? options.xmlContent,
+      notes: "Importação iniciada",
     });
 
-    return { reusedExisting: false };
+    const supplier = options.supplierId
+      ? { id: options.supplierId, isNew: false }
+      : await createOrGetSupplier(nfeData.supplierName);
+
+    const importedProducts = await createProductsFromNfe(
+      supplier.id,
+      productsToImport.map((product: any) => ({
+        productName: product.productName,
+        ean: product.ean,
+        quantity: product.quantity,
+        unitPrice: product.unitPrice,
+        totalPrice: product.totalPrice,
+        unit: product.unit,
+      })),
+    );
+
+    if (importedProducts.length !== productsToImport.length) {
+      throw new Error(`Importação incompleta: ${importedProducts.length} de ${productsToImport.length} produtos`);
+    }
+
+    await upsertImportRecord(db, {
+      nfeNumber: nfeData.nfeNumber,
+      supplierName: nfeData.supplierName,
+      supplierCnpj: nfeData.supplierCnpj,
+      supplierId: supplier.id,
+      totalProducts: productsToImport.length,
+      importedProducts: importedProducts.length,
+      status: "completed",
+      xmlContent: nfeData.rawXml ?? options.xmlContent,
+      notes: `Fornecedor: ${supplier.isNew ? "criado" : "existente"}; produtos: ${importedProducts.length}`,
+    });
+
+    return {
+      importRecordId,
+      nfeNumber: nfeData.nfeNumber,
+      supplierName: nfeData.supplierName,
+      supplierCnpj: nfeData.supplierCnpj,
+      supplierId: supplier.id,
+      supplierCreated: supplier.isNew,
+      productsImported: importedProducts.length,
+      totalValue: productsToImport.reduce(
+        (sum: number, product: any) => sum + (Number(product.totalPrice) || 0),
+        0,
+      ),
+      warnings: productValidation.warnings,
+      preview,
+    };
   } catch (error) {
-    console.warn(`[upsertNfeImportRecord] Tabela nfe_imports não disponível, continuando sem persistência:`, error instanceof Error ? error.message : String(error));
-    return { reusedExisting: false, skipped: true };
+    try {
+      await upsertImportRecord(db, {
+        nfeNumber: nfeData.nfeNumber,
+        supplierName: nfeData.supplierName,
+        supplierCnpj: nfeData.supplierCnpj,
+        supplierId: options.supplierId ?? null,
+        totalProducts: productsToImport.length,
+        importedProducts: 0,
+        status: "failed",
+        xmlContent: nfeData.rawXml ?? options.xmlContent,
+        notes: error instanceof Error ? error.message : "Falha desconhecida",
+      });
+    } catch (historyError) {
+      console.error("[NFe] Falha adicional ao registrar erro no histórico:", historyError);
+    }
+    throw error;
   }
 }
 
 export const nfeImportRouter = router({
-  /**
-   * Preview NFe import without saving
-   */
-  previewNfeImport: protectedProcedure
-    .input(
-      z.object({
-        xmlContent: z.string().min(1, "XML content required"),
-      })
-    )
-    .mutation(async ({ input }: { input: { xmlContent: string } }) => {
+  previewNfeImport: editorProcedure
+    .input(z.object({ xmlContent: z.string().min(1).max(15_000_000) }))
+    .mutation(async ({ input }) => {
       try {
-        // Parse XML
         const nfeData = await parseNfeXml(input.xmlContent);
-
-        // Validate NFe data
-        const validation = validateNfeData(nfeData);
+        const validation = validateParsedNfe(nfeData);
         if (!validation.valid) {
-          return {
-            success: false,
-            error: `Validação falhou: ${validation.errors.join(", ")}`,
-          };
+          return { success: false as const, error: validation.errors.join(", ") };
         }
-
-        // Validate supplier data
-        const supplierValidation = validateSupplierData(
-          nfeData.supplierName,
-          nfeData.supplierCnpj
-        );
-        if (!supplierValidation.valid) {
-          return {
-            success: false,
-            error: `Fornecedor inválido: ${supplierValidation.errors.join(", ")}`,
-          };
-        }
-
-        const preview = buildNfePreview(nfeData);
-
-        return {
-          success: true,
-          preview,
-        };
+        return { success: true as const, preview: buildNfePreview(nfeData) };
       } catch (error) {
         return {
-          success: false,
-          error: `Erro ao processar NFe: ${error instanceof Error ? error.message : "Unknown error"}`,
+          success: false as const,
+          error: error instanceof Error ? error.message : "Erro ao processar NF-e",
         };
       }
     }),
 
-  /**
-   * Import NFe with supplier and save to database
-   */
-  importNfeWithSupplier: protectedProcedure
+  importNfeWithSupplier: editorProcedure
     .input(
       z.object({
-        xmlContent: z.string().min(1, "XML content required"),
-        supplierId: z.number().optional(),
-        selectedProductIds: z.array(z.string()).optional(),
-      })
+        xmlContent: z.string().min(1).max(15_000_000),
+        supplierId: z.number().int().positive().optional(),
+        selectedProductIds: z.array(z.string()).max(10_000).optional(),
+      }),
     )
-    .mutation(async ({ input }: { input: { xmlContent: string; supplierId?: number; selectedProductIds?: string[] } }) => {
-      const db = await getDb();
-      if (!db) return { success: false, error: "Database unavailable" };
-
+    .mutation(async ({ input }) => {
       try {
-        // Parse XML
-        const nfeData = await parseNfeXml(input.xmlContent);
-
-        // Validate data
-        const validation = validateNfeData(nfeData);
-        if (!validation.valid) {
-          return {
-            success: false,
-            error: `Validação falhou: ${validation.errors.join(", ")}`,
-          };
-        }
-
-        const supplierValidation = validateSupplierData(
-          nfeData.supplierName,
-          nfeData.supplierCnpj
-        );
-        if (!supplierValidation.valid) {
-          return {
-            success: false,
-            error: `Fornecedor inválido: ${supplierValidation.errors.join(", ")}`,
-          };
-        }
-
-        // Filter selected products
-        const productsToImport =
-          input.selectedProductIds && input.selectedProductIds.length > 0
-            ? nfeData.products.filter(p =>
-                input.selectedProductIds?.includes(`${p.productName}-${p.ean || ""}`)
-              )
-            : nfeData.products;
-
-        // Validate products for import
-        const productValidation = validateProductsForImport(
-          productsToImport.map(p => ({
-            ...p,
-            matchStatus: "new" as const,
-          }))
-        );
-
-        let supplierId = input.supplierId;
-        let supplierCreated = false;
-        if (!supplierId) {
-          try {
-            const supplierResult = await createOrGetSupplier(nfeData.supplierName);
-            supplierId = supplierResult.id;
-            supplierCreated = supplierResult.isNew;
-          } catch (err) {
-            console.warn("[importNfeWithSupplier] Erro ao criar fornecedor:", err instanceof Error ? err.message : String(err));
-          }
-        }
-
-        let createdProducts = [];
-        if (supplierId && productsToImport.length > 0) {
-          try {
-            createdProducts = await createProductsFromNfe(supplierId, productsToImport.map(p => ({
-              productName: p.productName,
-              ean: p.ean,
-              quantity: p.quantity,
-              unitPrice: p.unitPrice,
-              totalPrice: p.totalPrice,
-              unit: p.unit,
-            })));
-          } catch (err) {
-            console.warn("[importNfeWithSupplier] Erro ao criar produtos:", err instanceof Error ? err.message : String(err));
-          }
-        }
-
-        const persistResult = await upsertNfeImportRecord(db, {
-          nfeNumber: nfeData.nfeNumber,
-          supplierName: nfeData.supplierName,
-          supplierCnpj: nfeData.supplierCnpj,
-          supplierId: supplierId || null,
-          totalProducts: productsToImport.length,
-          importedProducts: createdProducts.length,
-          status: "completed",
-          xmlContent: nfeData.rawXml ?? input.xmlContent,
-          importDate: new Date(),
-          notes: `Fornecedor: ${supplierCreated ? "criado" : "existente"} | Produtos: ${createdProducts.length}`,
-        });
-
-        return {
-          success: true,
-          message: persistResult.reusedExisting ? "NFe atualizada com sucesso" : "NFe importada com sucesso",
-          nfeNumber: nfeData.nfeNumber,
-          supplierName: nfeData.supplierName,
-          supplierCnpj: nfeData.supplierCnpj,
-          supplierId,
-          supplierCreated,
-          productsImported: createdProducts.length,
-          totalValue: productsToImport.reduce((sum, p) => sum + p.totalPrice, 0),
-          warnings: productValidation.warnings,
-        };
+        const result = await importParsedNfe(input);
+        return { success: true as const, message: "NF-e importada integralmente", ...result };
       } catch (error) {
         return {
-          success: false,
-          error: `Erro ao importar NFe: ${error instanceof Error ? error.message : "Unknown error"}`,
+          success: false as const,
+          error: error instanceof Error ? error.message : "Erro ao importar NF-e",
         };
       }
     }),
 
-  previewBatchXmlImport: protectedProcedure
-    .input(
-      z.object({
-        files: z.array(batchXmlFileSchema).min(1, "Selecione ao menos um XML").max(30, "Limite de 30 arquivos por lote"),
-      })
-    )
-    .mutation(async ({ input }: { input: { files: Array<{ fileName: string; xmlContent: string; supplierId?: number }> } }) => {
-      const files = [] as Array<{
-        index: number;
-        fileName: string;
-        status: "ready" | "error";
-        nfeNumber?: string;
-        supplierName?: string;
-        supplierCnpj?: string;
-        productsCount: number;
-        totalValue: number;
-        errors: string[];
-      }>;
-
-      for (const [index, file] of input.files.entries()) {
-        try {
-          const nfeData = await parseNfeXml(file.xmlContent);
-          const validation = validateBatchNfe(nfeData);
-
-          if (!validation.valid) {
-            files.push({
+  previewBatchXmlImport: editorProcedure
+    .input(z.object({ files: z.array(batchXmlFileSchema).min(1).max(30) }))
+    .mutation(async ({ input }) => {
+      const files = await Promise.all(
+        input.files.map(async (file, index) => {
+          try {
+            const nfeData = await parseNfeXml(file.xmlContent);
+            const validation = validateParsedNfe(nfeData);
+            if (!validation.valid) throw new Error(validation.errors.join(", "));
+            const preview = buildNfePreview(nfeData);
+            return {
               index,
               fileName: file.fileName,
-              status: "error",
+              status: "ready" as const,
+              nfeNumber: preview.nfeNumber,
+              supplierName: preview.supplierName,
+              supplierCnpj: preview.supplierCnpj,
+              productsCount: preview.products.length,
+              totalValue: preview.totalValue,
+              errors: [] as string[],
+            };
+          } catch (error) {
+            return {
+              index,
+              fileName: file.fileName,
+              status: "error" as const,
               productsCount: 0,
               totalValue: 0,
-              errors: validation.errors,
-            });
-            continue;
+              errors: [error instanceof Error ? error.message : "Erro ao processar XML"],
+            };
           }
-
-          const preview = buildNfePreview(nfeData);
-          files.push({
-            index,
-            fileName: file.fileName,
-            status: "ready",
-            nfeNumber: preview.nfeNumber,
-            supplierName: preview.supplierName,
-            supplierCnpj: preview.supplierCnpj,
-            productsCount: preview.products.length,
-            totalValue: preview.totalValue,
-            errors: [],
-          });
-        } catch (error) {
-          files.push({
-            index,
-            fileName: file.fileName,
-            status: "error",
-            productsCount: 0,
-            totalValue: 0,
-            errors: [error instanceof Error ? error.message : "Erro desconhecido ao processar XML"],
-          });
-        }
-      }
-
-      return {
-        success: true,
-        files,
-        summary: summarizeBatchPreview(files),
-      };
+        }),
+      );
+      return { success: true as const, files, summary: summarizeBatchPreview(files) };
     }),
 
-  importBatchXml: protectedProcedure
+  importBatchXml: editorProcedure
     .input(
       z.object({
-        files: z.array(batchXmlFileSchema).min(1, "Selecione ao menos um XML").max(30, "Limite de 30 arquivos por lote"),
+        files: z.array(batchXmlFileSchema).min(1).max(30),
         selectedIndexes: z.array(z.number().int().nonnegative()).optional(),
-      })
+      }),
     )
-    .mutation(async ({ input }: { input: { files: Array<{ fileName: string; xmlContent: string; supplierId?: number }>; selectedIndexes?: number[] } }) => {
-      const db = await getDb();
-      if (!db) return { success: false, error: "Database unavailable" };
-
-      const indexedFiles = input.files.map((file, index) => ({ ...file, index }));
-      const filesToImport = input.selectedIndexes && input.selectedIndexes.length > 0
-        ? indexedFiles.filter((file) => input.selectedIndexes?.includes(file.index))
-        : indexedFiles;
+    .mutation(async ({ input }) => {
+      const selected = input.selectedIndexes?.length
+        ? new Set(input.selectedIndexes)
+        : null;
+      const files = input.files
+        .map((file, index) => ({ ...file, index }))
+        .filter((file) => !selected || selected.has(file.index));
 
       const results = [] as Array<{
         index: number;
@@ -386,85 +320,22 @@ export const nfeImportRouter = router({
         error?: string;
       }>;
 
-      for (const file of filesToImport) {
+      for (const file of files) {
         try {
-          const nfeData = await parseNfeXml(file.xmlContent);
-          const validation = validateBatchNfe(nfeData);
-
-          if (!validation.valid) {
-            results.push({
-              index: file.index,
-              fileName: file.fileName,
-              status: "failed",
-              importedProducts: 0,
-              totalValue: 0,
-              warnings: [],
-              error: validation.errors.join(", "),
-            });
-            continue;
-          }
-
-          const productsToImport = nfeData.products;
-          const productValidation = validateProductsForImport(
-            productsToImport.map((product: any) => ({
-              ...product,
-              matchStatus: "new" as const,
-            }))
-          );
-
-          // Criar ou obter fornecedor
-          let supplierId = file.supplierId;
-          let supplierCreated = false;
-          if (!supplierId) {
-            try {
-              const supplierResult = await createOrGetSupplier(nfeData.supplierName);
-              supplierId = supplierResult.id;
-              supplierCreated = supplierResult.isNew;
-            } catch (err) {
-              console.warn("[importBatchXml] Erro ao criar fornecedor:", err instanceof Error ? err.message : String(err));
-            }
-          }
-
-          // Criar produtos
-          let createdProducts = [];
-          if (supplierId && productsToImport.length > 0) {
-            try {
-              createdProducts = await createProductsFromNfe(supplierId, productsToImport.map((p: any) => ({
-                productName: p.productName,
-                ean: p.ean,
-                quantity: p.quantity,
-                unitPrice: p.unitPrice,
-                totalPrice: p.totalPrice,
-                unit: p.unit,
-              })));
-            } catch (err) {
-              console.warn("[importBatchXml] Erro ao criar produtos:", err instanceof Error ? err.message : String(err));
-            }
-          }
-
-          await upsertNfeImportRecord(db, {
-            nfeNumber: nfeData.nfeNumber,
-            supplierName: nfeData.supplierName,
-            supplierCnpj: nfeData.supplierCnpj,
-            supplierId: supplierId || null,
-            totalProducts: productsToImport.length,
-            importedProducts: createdProducts.length,
-            status: "completed",
-            xmlContent: nfeData.rawXml ?? file.xmlContent,
-            importDate: new Date(),
-            notes: `Fornecedor: ${supplierCreated ? "criado" : "existente"} | Produtos: ${createdProducts.length} | ${productValidation.warnings.join("; ")}`,
+          const imported = await importParsedNfe({
+            xmlContent: file.xmlContent,
+            supplierId: file.supplierId,
           });
-
           results.push({
             index: file.index,
             fileName: file.fileName,
             status: "imported",
-            nfeNumber: nfeData.nfeNumber,
-            supplierName: nfeData.supplierName,
-            supplierCnpj: nfeData.supplierCnpj,
-            importedProducts: createdProducts.length,
-            totalValue: productsToImport.reduce((sum: number, product: any) => sum + product.totalPrice, 0),
-            warnings: productValidation.warnings,
+            nfeNumber: imported.nfeNumber,
+            supplierName: imported.supplierName,
+            supplierCnpj: imported.supplierCnpj,
+            importedProducts: imported.productsImported,
+            totalValue: imported.totalValue,
+            warnings: imported.warnings,
           });
         } catch (error) {
           results.push({
@@ -474,245 +345,103 @@ export const nfeImportRouter = router({
             importedProducts: 0,
             totalValue: 0,
             warnings: [],
-            error: error instanceof Error ? error.message : "Erro desconhecido ao importar XML",
+            error: error instanceof Error ? error.message : "Erro ao importar XML",
           });
         }
       }
 
-      const summary = summarizeBatchImportResults(results.map((result) => ({
-        status: result.status,
-        importedProducts: result.importedProducts,
-      })));
-
+      const summary = summarizeBatchImportResults(results);
+      const success = summary.processedFiles > 0 && summary.failedFiles === 0;
       return {
-        success: summary.importedFiles > 0,
+        success,
         summary,
         results,
+        error: success ? undefined : `${summary.failedFiles} arquivo(s) falharam; consulte o detalhamento.`,
       };
     }),
 
-  /**
-   * Link NFe products with existing master products
-   */
-  linkNfeProductsWithMaster: protectedProcedure
+  linkNfeProductsWithMaster: editorProcedure
     .input(
       z.object({
         nfeNumber: z.string(),
-        productMappings: z.array(
-          z.object({
-            nfeProductId: z.string(),
-            masterId: z.number(),
-          })
-        ),
-      })
+        productMappings: z.array(z.object({ nfeProductId: z.string(), masterId: z.number() })),
+      }),
     )
-    .mutation(async ({ input }: { input: { nfeNumber: string; productMappings: Array<{ nfeProductId: string; masterId: number }> } }) => {
-      const db = await getDb();
-      if (!db) return { success: false, error: "Database unavailable" };
-
-      try {
-        // Get NFe import record
-        const nfeImport = await db
-          .select()
-          .from(nfeImports)
-          .where(eq(nfeImports.nfeNumber, input.nfeNumber))
-          .limit(1);
-
-        if (!nfeImport || nfeImport.length === 0) {
-          return { success: false, error: "NFe import not found" };
-        }
-
-        // O vínculo exigiria um campo nfeProductId na tabela de produtos,
-        // que não existe no schema — não fingir sucesso.
-        throw new TRPCError({
-          code: "METHOD_NOT_SUPPORTED",
-          message: "Funcionalidade ainda não implementada: o vínculo de produtos da NFe com master products não está disponível.",
-        });
-      } catch (error) {
-        if (error instanceof TRPCError) throw error;
-        return {
-          success: false,
-          error: `Erro ao vincular produtos: ${error instanceof Error ? error.message : "Unknown error"}`,
-        };
-      }
+    .mutation(() => {
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "Vínculo manual com master products será disponibilizado somente após existir chave persistente por item da NF-e.",
+      });
     }),
 
-  /**
-   * Get NFe import history
-   */
   getImportHistory: protectedProcedure
     .input(
       z.object({
-        limit: z.number().default(10),
-        offset: z.number().default(0),
-        supplierId: z.number().optional(),
-      })
+        limit: z.number().int().min(1).max(200).default(10),
+        offset: z.number().int().nonnegative().default(0),
+        supplierId: z.number().int().positive().optional(),
+      }),
     )
-    .query(async ({ input }: { input: { limit: number; offset: number; supplierId?: number } }) => {
+    .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) return { imports: [], total: 0, limit: input.limit, offset: input.offset };
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const query = db.select().from(nfeImports);
+      const imports = await (input.supplierId
+        ? query.where(eq(nfeImports.supplierId, input.supplierId))
+        : query)
+        .limit(input.limit)
+        .offset(input.offset);
+      const [totalRow] = await db.select({ total: count() }).from(nfeImports);
 
-      try {
-        const baseQuery = db.select().from(nfeImports);
-
-        const imports = await (input.supplierId
-          ? baseQuery.where(eq(nfeImports.supplierId, input.supplierId))
-          : baseQuery)
-          .limit(input.limit)
-          .offset(input.offset)
-          .execute();
-        const countResult = await db.select().from(nfeImports).execute();
-
-        return {
-          imports: imports.map(imp => ({
-            id: imp.id,
-            nfeNumber: imp.nfeNumber,
-            supplierName: imp.supplierName,
-            supplierCnpj: imp.supplierCnpj,
-            totalProducts: imp.totalProducts,
-            importedProducts: imp.importedProducts,
-            status: imp.status,
-            importDate: imp.importDate,
-          })),
-          total: countResult.length,
-          limit: input.limit,
-          offset: input.offset,
-        };
-      } catch (error) {
-        return {
-          imports: [],
-          total: 0,
-          limit: input.limit,
-          offset: input.offset,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
+      return {
+        imports: imports.map((item) => ({
+          id: item.id,
+          nfeNumber: item.nfeNumber,
+          supplierName: item.supplierName,
+          supplierCnpj: item.supplierCnpj,
+          totalProducts: item.totalProducts,
+          importedProducts: item.importedProducts,
+          productsImported: item.importedProducts,
+          status: item.status,
+          importDate: item.importDate,
+          importedAt: item.importDate,
+          fileName: `NFe-${item.nfeNumber}.xml`,
+          notes: item.notes,
+        })),
+        total: Number(totalRow?.total ?? 0),
+        limit: input.limit,
+        offset: input.offset,
+      };
     }),
 
-  /**
-   * Get NFe import details
-   */
   getImportDetails: protectedProcedure
-    .input(z.object({ importId: z.number() }))
-    .query(async ({ input }: { input: { importId: number } }) => {
+    .input(z.object({ importId: z.number().int().positive() }))
+    .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) return { importId: input.importId, details: null };
-
-      try {
-        const importRecord = await db
-          .select()
-          .from(nfeImports)
-          .where(eq(nfeImports.id, input.importId))
-          .limit(1);
-
-        if (!importRecord || importRecord.length === 0) {
-          return { importId: input.importId, details: null };
-        }
-
-        const imp = importRecord[0];
-        return {
-          importId: input.importId,
-          details: {
-            id: imp.id,
-            nfeNumber: imp.nfeNumber,
-            supplierName: imp.supplierName,
-            supplierCnpj: imp.supplierCnpj,
-            totalProducts: imp.totalProducts,
-            importedProducts: imp.importedProducts,
-            status: imp.status,
-            importDate: imp.importDate,
-            notes: imp.notes,
-            xmlContent: imp.xmlContent,
-          },
-        };
-      } catch (error) {
-        return {
-          importId: input.importId,
-          details: null,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const [details] = await db
+        .select()
+        .from(nfeImports)
+        .where(eq(nfeImports.id, input.importId))
+        .limit(1);
+      return { importId: input.importId, details: details ?? null };
     }),
 
-  /**
-   * Delete NFe import record
-   */
-  deleteImport: protectedProcedure
-    .input(z.object({ importId: z.number() }))
-    .mutation(async ({ input }: { input: { importId: number } }) => {
+  deleteImport: editorProcedure
+    .input(z.object({ importId: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
       const db = await getDb();
-      if (!db) return { success: false, error: "Database unavailable" };
-
-      try {
-        await db.delete(nfeImports).where(eq(nfeImports.id, input.importId));
-
-        return {
-          success: true,
-          message: "NFe import deleted successfully",
-        };
-      } catch (error) {
-        return {
-          success: false,
-          error: `Erro ao deletar importação: ${error instanceof Error ? error.message : "Unknown error"}`,
-        };
-      }
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      await db.delete(nfeImports).where(eq(nfeImports.id, input.importId));
+      return { success: true as const, message: "Registro de importação removido" };
     }),
 
-  /**
-   * Get price anomalies from NFe import
-   */
   getPriceAnomalies: protectedProcedure
-    .input(z.object({ importId: z.number() }))
-    .query(async ({ input }: { input: { importId: number } }) => {
-      const db = await getDb();
-      if (!db) return { anomalies: [], total: 0 };
-
-      try {
-        const importRecord = await db
-          .select()
-          .from(nfeImports)
-          .where(eq(nfeImports.id, input.importId))
-          .limit(1);
-
-        if (!importRecord || importRecord.length === 0) {
-          return { anomalies: [], total: 0 };
-        }
-
-        const imp = importRecord[0];
-        if (!imp.xmlContent) {
-          return { anomalies: [], total: 0 };
-        }
-
-        // Parse XML to get products
-        const nfeData = await parseNfeXml(imp.xmlContent);
-
-        // Convert products to PriceUpdate format for anomaly detection
-        const priceUpdates: PriceUpdate[] = nfeData.products.map((p: any) => ({
-          productId: p.id || '',
-          supplierId: imp.supplierId?.toString() || '',
-          oldPrice: 0,
-          newPrice: p.unitPrice || 0,
-          priceChange: p.unitPrice || 0,
-          priceChangePercentage: 0,
-        }));
-
-        // Detect price anomalies
-        const anomalies = detectPriceAnomalies(priceUpdates);
-
-        return {
-          anomalies: anomalies.map(a => ({
-            productId: a.productId,
-            type: a.type,
-            percentage: a.percentage,
-          })),
-          total: anomalies.length,
-        };
-      } catch (error) {
-        return {
-          anomalies: [],
-          total: 0,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-      }
+    .input(z.object({ importId: z.number().int().positive() }))
+    .query(() => {
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "Use Análise de Preços; a NF-e isolada não possui preço anterior confiável para calcular anomalias.",
+      });
     }),
 });
