@@ -64,6 +64,7 @@ import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 import { invokeLLM } from "./_core/llm";
 import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
+import { calculateSalePrice } from "./services/pricingSafety";
 
 
 import { TRPCError } from "@trpc/server";
@@ -1659,7 +1660,8 @@ export const appRouter = router({
             orgao: z.string(),
             objeto: z.string(),
           }),
-          markup: z.number().min(0).max(500).default(30),
+          marginPercent: z.number().min(0).max(99.99).default(30),
+          reviewConfirmed: z.literal(true),
           templateId: z.number().optional(),
           itens: z.array(
             z.object({
@@ -1682,6 +1684,34 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+
+        // Pré-validação autoritativa antes de criar o cabeçalho. Assim uma
+        // falha de match/preço não deixa proposta órfã ou parcial.
+        const preflightErrors: string[] = [];
+        for (const item of input.itens) {
+          if (!item.productId) {
+            preflightErrors.push(`item ${item.itemNumero}: produto não confirmado`);
+            continue;
+          }
+          const dbProduct = await getProductById(item.productId);
+          const dbPrice = Number(dbProduct?.price);
+          if (!dbProduct) {
+            preflightErrors.push(`item ${item.itemNumero}: produto não encontrado`);
+          } else if (dbProduct.isActive !== "yes") {
+            preflightErrors.push(`item ${item.itemNumero}: produto inativo`);
+          } else if (!Number.isFinite(dbPrice) || dbPrice <= 0) {
+            preflightErrors.push(`item ${item.itemNumero}: custo não informado ou inválido`);
+          }
+          if (!Number.isFinite(item.itemQuantidade) || item.itemQuantidade <= 0) {
+            preflightErrors.push(`item ${item.itemNumero}: quantidade inválida`);
+          }
+        }
+        if (preflightErrors.length > 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Proposta bloqueada. ${preflightErrors.slice(0, 5).join("; ")}${preflightErrors.length > 5 ? ` (+${preflightErrors.length - 5})` : ""}`,
+          });
+        }
 
         // Upsert órgão requisitante
         const orgId = await upsertRequestingOrg({ name: input.processo.orgao });
@@ -1747,11 +1777,19 @@ export const appRouter = router({
             costPrice = item.productPrice ? parseFloat(item.productPrice) : null;
           }
 
-           if (costPrice === null || isNaN(costPrice)) continue; // pula itens sem preço
-          const salePrice = costPrice * (1 + input.markup / 100);
+           if (costPrice === null || !Number.isFinite(costPrice) || costPrice <= 0) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Item ${item.itemNumero} ficou sem custo durante a criação.`,
+            });
+          }
+          const salePrice = calculateSalePrice({
+            cost: costPrice,
+            marginPercent: input.marginPercent,
+          });
           // Preço de referência do edital (extraído pela IA ou null)
           const editalRefPrice = item.itemPrecoUnitario ?? null;
-          // Preço sugerido inicial = custo com markup (editado pelo usuário depois)
+          // Preço sugerido inicial = margem sobre a receita (editável depois)
           const suggestedPrice = salePrice;
           await addProposalItem({
             proposalId,
@@ -1764,8 +1802,8 @@ export const appRouter = router({
             unit: canonicalUnit ?? item.itemUnidade,
             supplierName: canonicalSupplier,
             quantity: item.itemQuantidade,
-            unitPrice: String(salePrice.toFixed(2)) as any,
-            costPrice: costPrice !== null ? String(costPrice.toFixed(2)) as any : null,
+            unitPrice: String(costPrice.toFixed(2)) as any,
+            costPrice: String(costPrice.toFixed(2)) as any,
             editalRefPrice: editalRefPrice !== null ? String(editalRefPrice.toFixed(2)) as any : null,
             suggestedPrice: String(suggestedPrice.toFixed(2)) as any,
             notes: `Item ${item.itemNumero}: ${item.itemDescricao}`,

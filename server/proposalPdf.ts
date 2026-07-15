@@ -2,6 +2,10 @@ import PDFDocument from "pdfkit";
 import https from "https";
 import http from "http";
 import { valorPorExtenso } from "./utils/extenso";
+import {
+  assertProposalPricingReady,
+  getExplicitSalePrice,
+} from "./services/pricingSafety";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanySettings {
@@ -33,6 +37,7 @@ interface ProposalItem {
   unit: string | null;
   supplierName: string | null;
   unitPrice: string | null;
+  suggestedPrice?: string | null;
   quantity: number;
   notes: string | null;
   imageUrl?: string | null;
@@ -159,9 +164,12 @@ function formatDate(date: Date): string {
 export async function generateProposalPdf(
   proposal: Proposal,
   company: CompanySettings | null,
-  markupPercent: number = 0,
   declarations: DeclarationTemplate[] = []
 ): Promise<Buffer> {
+  // O PDF é uma peça comercial vinculante. Nunca converte custo em venda e
+  // nunca usa unitPrice como fallback: cada item precisa de suggestedPrice.
+  assertProposalPricingReady(proposal.items);
+
   return new Promise(async (resolve, reject) => {
     // Identificação da empresa: o banco (company_settings) vence o fallback de
     // env. Antes só o cabeçalho usava o banco; rodapé, assinatura e declarações
@@ -396,7 +404,7 @@ export async function generateProposalPdf(
       .lineWidth(1)
       .stroke();
 
-    // Column layout (PDF sempre usa preço sugerido, sem mostrar custo ou markup):
+    // Column layout (PDF usa somente o preço de venda persistido):
     // [IMG 40] [# 20] [PRODUTO 175] [FABRICANTE 70] [REG.MAPA 55] [QTD 25] [PRECO 55] [TOTAL 80]
     const COL = {
       img:       { x: 50,  w: 40 },
@@ -449,13 +457,9 @@ export async function generateProposalPdf(
 
     for (let i = 0; i < sortedItems.length; i++) {
       const item = sortedItems[i];
-      // Usa preço sugerido se disponível, senão usa o preço unitário (custo)
-      const salePriceUnit = (item as any).suggestedPrice
-        ? parseFloat(String((item as any).suggestedPrice))
-        : item.unitPrice ? parseFloat(item.unitPrice) : null;
-      const rowTotal =
-        salePriceUnit !== null ? salePriceUnit * item.quantity : null;
-      if (rowTotal !== null) grandTotal += rowTotal;
+      const salePriceUnit = getExplicitSalePrice(item);
+      const rowTotal = salePriceUnit * item.quantity;
+      grandTotal += rowTotal;
 
       const specParts: string[] = [];
       if (item.activeIngredient) specParts.push(item.activeIngredient);
@@ -599,13 +603,13 @@ export async function generateProposalPdf(
           align: "center",
         });
 
-       // Preço unitário (sempre usa salePriceUnit = preço sugerido ou custo)
+      // Preço unitário: somente preço de venda explicitamente persistido
       doc
         .font("Helvetica-Bold")
         .fontSize(8)
         .fillColor(BLACK)
         .text(
-          salePriceUnit !== null ? formatCurrency(salePriceUnit.toFixed(2)) : "—",
+          formatCurrency(salePriceUnit.toFixed(2)),
           COL.price.x,
           textY,
           { width: COL.price.w, align: "right" }
@@ -615,9 +619,9 @@ export async function generateProposalPdf(
       doc
         .font("Helvetica-Bold")
         .fontSize(8)
-        .fillColor(rowTotal !== null ? BLACK : GRAY)
+        .fillColor(BLACK)
         .text(
-          rowTotal !== null ? formatCurrency(rowTotal.toFixed(2)) : "—",
+          formatCurrency(rowTotal.toFixed(2)),
           COL.total.x,
           textY,
           { width: COL.total.w, align: "right" }

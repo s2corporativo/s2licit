@@ -34,6 +34,6 @@ RUN pnpm run build
 # A porta efetiva vem da variável PORT (padrão 3000)
 EXPOSE 3000
 
-# Aplica migrações (schema.ts é a fonte de verdade) e inicia o servidor.
-# Se a migração falhar, loga o aviso mas ainda tenta subir com o schema atual.
-CMD ["sh", "-c", "pnpm db:push || echo '[boot] aviso: db:push falhou — seguindo com o schema existente'; exec node dist/index.js"]
+# Aplica migrações (schema.ts é a fonte de verdade) antes do servidor.
+# Falha de migração impede o boot: subir com schema antigo corromperia o fluxo.
+CMD ["sh", "-c", "pnpm db:push && exec node dist/index.js"]

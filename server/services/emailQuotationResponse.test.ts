@@ -9,9 +9,9 @@ describe("applyMargin (margem sobre venda)", () => {
     expect(applyMargin(100, 30)).not.toBeCloseTo(130, 1);
   });
 
-  it("margem 0 (ou menor) retorna o custo", () => {
+  it("margem 0 retorna o custo e margem negativa é rejeitada", () => {
     expect(applyMargin(100, 0)).toBe(100);
-    expect(applyMargin(50, -5)).toBe(50);
+    expect(() => applyMargin(50, -5)).toThrow();
   });
 
   it("rejeita margem >= 100%", () => {
