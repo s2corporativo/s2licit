@@ -51,7 +51,23 @@ jobs:
         run: pnpm lint
 
       - name: Testes (vitest)
-        run: pnpm test
+        id: tests
+        continue-on-error: true
+        run: pnpm test -- --reporter=verbose > tests.log 2>&1
+
+      - name: Publicar diagnóstico dos testes
+        if: steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-errors
+          path: tests.log
+          retention-days: 3
+
+      - name: Interromper em falha de testes
+        if: steps.tests.outcome == 'failure'
+        run: |
+          tail -n 250 tests.log
+          exit 1
 
       - name: Build de produção
         run: pnpm build
