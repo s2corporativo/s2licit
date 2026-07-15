@@ -58,12 +58,10 @@ async function startServer() {
   app.use("/api/auth", authRateLimiter);
   app.use("/api/oauth", authRateLimiter);
 
-  // Liveness: processo HTTP está respondendo.
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok", uptime: process.uptime() });
   });
 
-  // Readiness: banco e schema básico estão acessíveis.
   app.get("/readyz", async (_req, res) => {
     try {
       const db = await getDb();
@@ -108,7 +106,11 @@ async function startServer() {
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       const allowed = new Set(["image/png", "image/jpeg", "image/webp"]);
-      cb(allowed.has(file.mimetype) ? null : new Error("Formato de imagem não permitido"), allowed.has(file.mimetype));
+      if (!allowed.has(file.mimetype)) {
+        cb(new Error("Formato de imagem não permitido"));
+        return;
+      }
+      cb(null, true);
     },
   });
   app.post("/api/upload/logo", requireAdmin, logoUpload.single("logo"), async (req: any, res: any) => {
@@ -211,7 +213,11 @@ async function startServer() {
     limits: { fileSize: 50 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       const allowed = file.mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-      cb(allowed ? null : new Error("Envie um arquivo XLSX válido"), allowed);
+      if (!allowed) {
+        cb(new Error("Envie um arquivo XLSX válido"));
+        return;
+      }
+      cb(null, true);
     },
   });
   app.post("/api/products/import-excel-update", requireEditor, excelUpload.single("file"), async (req: any, res: any) => {
@@ -267,7 +273,6 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 
-  // A inicialização dos jobs também faz parte da prontidão operacional.
   initScheduledJobs();
 }
 
