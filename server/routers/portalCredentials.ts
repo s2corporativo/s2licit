@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
-import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, editorProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { portalCredentials } from "../../drizzle/schema";
 import { credentialEncryptionService } from "../services/credentialEncryptionService";
@@ -25,7 +25,7 @@ const CredencialInput = z.object({
 
 export const portalCredentialsRouter = router({
   /** Lista os portais suportados (com URL e notas). */
-  portais: protectedProcedure.query(() =>
+  portais: editorProcedure.query(() =>
     PORTAIS.map((p) => ({
       portal: p,
       nome: PORTAL_CONFIGS[p].nome,
@@ -35,7 +35,7 @@ export const portalCredentialsRouter = router({
   ),
 
   /** Lista credenciais salvas (sem a senha). */
-  list: protectedProcedure.query(async () => {
+  list: editorProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
     const rows = await db.select().from(portalCredentials).where(eq(portalCredentials.ativo, true));
