@@ -2,7 +2,10 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { getRoleLabel, hasMinimumRole, type Role } from "@/lib/access";
 import {
+  Activity,
   BookOpen,
+  Bot,
+  Brain,
   Building2,
   CalendarClock,
   DollarSign,
@@ -12,6 +15,7 @@ import {
   GitMerge,
   Gavel,
   KanbanSquare,
+  KeyRound,
   LayoutGrid,
   LogIn,
   LogOut,
@@ -38,10 +42,9 @@ type NavGroup = {
 };
 
 /**
- * Navegação principal deliberadamente curta.
- *
- * As telas especializadas continuam acessíveis por URL e pelo Manual, mas não
- * competem com o fluxo operacional diário na barra lateral.
+ * O menu segue o fluxo real da licitação: entrada da oportunidade, análise,
+ * proposta, catálogo, automações e execução. Telas técnicas ficam concentradas
+ * em Integrações, sem misturar configurações com a operação diária.
  */
 const navGroups: NavGroup[] = [
   {
@@ -78,12 +81,37 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/produtos", icon: Package, label: "Produtos" },
       { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
-      { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
       { href: "/equivalencias", icon: GitMerge, label: "Equivalências" },
+      { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
     ],
   },
   {
-    label: "Execução",
+    label: "Automação e integrações",
+    items: [
+      {
+        href: "/captura-inteligente",
+        icon: Bot,
+        label: "Captura automática",
+        minRole: "editor",
+      },
+      {
+        href: "/portais-licitacao",
+        icon: KeyRound,
+        label: "Acessos aos portais",
+        minRole: "editor",
+      },
+      {
+        href: "/configurador-fornecedores",
+        icon: Building2,
+        label: "Acessos fornecedores",
+        minRole: "admin",
+      },
+      { href: "/central-ia", icon: Brain, label: "Inteligência artificial", minRole: "admin" },
+      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
+    ],
+  },
+  {
+    label: "Execução e resultados",
     items: [
       { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
       { href: "/financeiro", icon: DollarSign, label: "Financeiro" },
@@ -93,7 +121,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Administração",
     items: [
-      { href: "/configuracao", icon: Settings, label: "Configurações", minRole: "admin" },
+      { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
     ],
   },
 ];
@@ -126,7 +154,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen flex bg-white">
-      <aside className="w-56 flex-shrink-0 border-r border-gray-200 flex flex-col">
+      <aside className="w-60 flex-shrink-0 border-r border-gray-200 flex flex-col">
         <div className="px-4 py-4 border-b border-gray-200 bg-gradient-to-br from-[#0f2557] to-[#1A3F8F]">
           <div className="flex flex-col items-center gap-2">
             <img
@@ -136,7 +164,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             />
             <div className="text-center">
               <div className="text-[9px] font-bold tracking-widest text-blue-200 uppercase leading-none">
-                Orçamentos & Fornecedores
+                Licitações & Fornecedores
               </div>
             </div>
           </div>
