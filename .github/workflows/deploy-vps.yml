@@ -108,7 +108,6 @@ jobs:
             fi
             if [ -n "$ADMIN_PASSWORD" ]; then
               echo "set_kv ADMIN_PASSWORD $(printf %s "$ADMIN_PASSWORD" | base64 -w0)"
-              # Atualiza o arquivo de acesso na VPS com a nova senha
               echo "sed -i 's|^Senha:.*|Senha:  (definida via secret ADMIN_PASSWORD do GitHub)|' /root/s2licit-acesso.txt 2>/dev/null || true"
             fi
             if [ -n "$EMAIL_PASSWORD" ]; then
@@ -125,8 +124,8 @@ jobs:
             fi
             echo 'docker compose up -d --force-recreate app >/dev/null 2>&1'
             echo 'LOCAL_PORT=$(grep "^APP_LOCAL_PORT=" .env | cut -d= -f2); LOCAL_PORT=${LOCAL_PORT:-3000}'
-            echo 'for i in $(seq 1 30); do curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>/dev/null && { echo "Configurações aplicadas e app saudável ✅"; exit 0; }; sleep 4; done'
-            echo 'echo "App não voltou saudável após aplicar configs" >&2; docker compose logs --tail=40 app >&2; exit 1'
+            echo 'for i in $(seq 1 30); do curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null && { echo "Configurações aplicadas e aplicação pronta ✅"; exit 0; }; sleep 4; done'
+            echo 'echo "Aplicação não ficou pronta após aplicar configs" >&2; docker compose logs --tail=40 app >&2; exit 1'
           } > /tmp/remote-config.sh
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < /tmp/remote-config.sh
 
@@ -135,8 +134,9 @@ jobs:
           echo "### Deploy concluído ✅" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$DEPLOY_DOMAIN" ]; then
-            echo "- URL: https://$DEPLOY_DOMAIN/ (Caddy emite o certificado automaticamente após o DNS apontar para $DEPLOY_HOST)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- URL: http://$DEPLOY_HOST/" >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "- Readiness validada em /readyz (aplicação + MySQL)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Login inicial: veja /root/s2licit-acesso.txt na VPS (gerado só na 1ª instalação)" >> "$GITHUB_STEP_SUMMARY"
