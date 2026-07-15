@@ -1,159 +1,200 @@
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { notificationWebhooks, notificationHistory } from "../../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { notificationHistory, notificationWebhooks } from "../../drizzle/schema";
+import { isSmtpConfigured, sendEmail } from "./emailSenderService";
 
 export interface NotificationPayload {
   type: "nfe_import" | "capture_complete" | "enrichment_complete" | "error";
   title: string;
   message: string;
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
   severity?: "info" | "warning" | "error";
 }
 
+export type NotificationChannel = "slack" | "email";
+
+const SLACK_HOSTS = new Set(["hooks.slack.com", "hooks.slack-gov.com"]);
+
 /**
- * Envia notificação via webhook (Slack/Email)
+ * Valida e normaliza o destino sem permitir que um webhook seja usado para
+ * acessar localhost, metadados de nuvem ou serviços internos da VPS.
  */
+export function validateNotificationDestination(
+  type: NotificationChannel,
+  destination: string,
+): string {
+  const value = destination.trim();
+
+  if (type === "email") {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      throw new Error("Endereço de e-mail inválido");
+    }
+    return value.toLowerCase();
+  }
+
+  const url = new URL(value);
+  if (url.protocol !== "https:") {
+    throw new Error("O webhook do Slack deve usar HTTPS");
+  }
+  if (!SLACK_HOSTS.has(url.hostname.toLowerCase())) {
+    throw new Error("Use um webhook oficial do Slack (hooks.slack.com)");
+  }
+  return url.toString();
+}
+
+/** Nunca devolve o token secreto embutido na URL do Slack. */
+export function maskNotificationDestination(type: NotificationChannel, destination: string): string {
+  if (type === "email") return destination;
+  try {
+    const url = new URL(destination);
+    return `${url.origin}/••••••••`;
+  } catch {
+    return "Webhook configurado";
+  }
+}
+
+function notificationText(payload: NotificationPayload): string {
+  const details = payload.data
+    ? Object.entries(payload.data)
+        .map(([key, value]) => `${key}: ${String(value)}`)
+        .join("\n")
+    : "";
+
+  return [
+    payload.message,
+    "",
+    "---",
+    `Tipo: ${payload.type}`,
+    `Severidade: ${payload.severity || "info"}`,
+    `Data: ${new Date().toLocaleString("pt-BR")}`,
+    details,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function slackPayload(payload: NotificationPayload) {
+  const blocks: Array<Record<string, unknown>> = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: payload.title.slice(0, 150) },
+    },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: payload.message.slice(0, 3000) },
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `*Tipo:* ${payload.type} | *Severidade:* ${payload.severity || "info"}`,
+        },
+      ],
+    },
+  ];
+
+  if (payload.data) {
+    const dataText = Object.entries(payload.data)
+      .map(([key, value]) => `*${key}:* ${String(value)}`)
+      .join("\n")
+      .slice(0, 3000);
+    if (dataText) {
+      blocks.push({
+        type: "section",
+        text: { type: "mrkdwn", text: dataText },
+      });
+    }
+  }
+
+  return { text: payload.title.slice(0, 200), blocks };
+}
+
+async function recordNotification(
+  db: any,
+  input: {
+    supplierId: number;
+    webhookId: number;
+    payload: NotificationPayload;
+    status: "sent" | "failed";
+    errorMessage?: string;
+  },
+): Promise<void> {
+  await db.insert(notificationHistory).values({
+    supplierId: input.supplierId,
+    webhookId: input.webhookId,
+    type: input.payload.type,
+    title: input.payload.title,
+    message: input.payload.message,
+    status: input.status,
+    errorMessage: input.errorMessage?.slice(0, 1000),
+    sentAt: new Date(),
+  });
+}
+
+/** Envia notificações pelos canais ativos do fornecedor. */
 export async function sendNotification(
   supplierId: number,
-  payload: NotificationPayload
+  payload: NotificationPayload,
 ): Promise<boolean> {
   try {
     const db = await getDb();
     if (!db) throw new Error("Database connection failed");
 
-    // Buscar webhooks configurados para este fornecedor
     const webhooks = await db
       .select()
       .from(notificationWebhooks)
       .where(
         and(
           eq(notificationWebhooks.supplierId, supplierId),
-          eq(notificationWebhooks.isActive, true)
-        )
+          eq(notificationWebhooks.isActive, true),
+        ),
       );
 
     let notificationSent = false;
 
     for (const webhook of webhooks) {
       try {
-        // Preparar payload baseado no tipo de webhook
-        let webhookPayload: any;
+        const type = webhook.type as NotificationChannel;
+        const destination = validateNotificationDestination(type, webhook.webhookUrl);
 
-        if (webhook.type === "slack") {
-          webhookPayload = {
-            text: payload.title,
-            blocks: [
-              {
-                type: "header",
-                text: {
-                  type: "plain_text",
-                  text: payload.title,
-                },
-              },
-              {
-                type: "section",
-                text: {
-                  type: "mrkdwn",
-                  text: payload.message,
-                },
-              },
-              {
-                type: "context",
-                elements: [
-                  {
-                    type: "mrkdwn",
-                    text: `*Tipo:* ${payload.type} | *Severidade:* ${payload.severity || "info"}`,
-                  },
-                ],
-              },
-            ],
-          };
-
-          if (payload.data) {
-            const dataText = Object.entries(payload.data)
-              .map(([key, value]) => `*${key}:* ${value}`)
-              .join("\n");
-
-            webhookPayload.blocks.push({
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: dataText,
-              },
-            });
+        if (type === "email") {
+          if (!isSmtpConfigured()) {
+            throw new Error("SMTP não configurado");
           }
-        } else if (webhook.type === "email") {
-          // Para email, usar o serviço de notificação built-in
-          webhookPayload = {
-            to: webhook.webhookUrl, // URL contém o email
-            subject: payload.title,
-            body: `
-${payload.message}
-
----
-Tipo: ${payload.type}
-Severidade: ${payload.severity || "info"}
-Data: ${new Date().toLocaleString("pt-BR")}
-
-${
-  payload.data
-    ? Object.entries(payload.data)
-        .map(([key, value]) => `${key}: ${value}`)
-        .join("\n")
-    : ""
-}
-            `,
-          };
-        }
-
-        // Enviar webhook
-        const response = await fetch(webhook.webhookUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(webhookPayload),
-        });
-
-        if (response.ok) {
-          notificationSent = true;
-
-          // Registrar no histórico
-          await db.insert(notificationHistory).values({
-            supplierId,
-            webhookId: webhook.id,
-            type: payload.type,
-            title: payload.title,
-            message: payload.message,
-            status: "sent",
-            sentAt: new Date(),
+          await sendEmail({
+            to: destination,
+            subject: payload.title.slice(0, 200),
+            text: notificationText(payload),
           });
         } else {
-          // Registrar erro
-          await db.insert(notificationHistory).values({
-            supplierId,
-            webhookId: webhook.id,
-            type: payload.type,
-            title: payload.title,
-            message: payload.message,
-            status: "failed",
-            errorMessage: `HTTP ${response.status}: ${response.statusText}`,
-            sentAt: new Date(),
+          const response = await fetch(destination, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(slackPayload(payload)),
+            signal: AbortSignal.timeout(15_000),
+            redirect: "error",
           });
+          if (!response.ok) {
+            throw new Error(`Slack respondeu HTTP ${response.status}`);
+          }
         }
-      } catch (error) {
-        console.error("[Notification] Erro ao enviar webhook:", error);
 
-        // Registrar erro
-        await db.insert(notificationHistory).values({
+        notificationSent = true;
+        await recordNotification(db, {
           supplierId,
           webhookId: webhook.id,
-          type: payload.type,
-          title: payload.title,
-          message: payload.message,
+          payload,
+          status: "sent",
+        });
+      } catch (error) {
+        console.error("[Notification] Erro ao enviar notificação:", error);
+        await recordNotification(db, {
+          supplierId,
+          webhookId: webhook.id,
+          payload,
           status: "failed",
-          errorMessage: error instanceof Error ? error.message : "Unknown error",
-          sentAt: new Date(),
+          errorMessage: error instanceof Error ? error.message : "Erro desconhecido",
         });
       }
     }
@@ -165,47 +206,35 @@ ${
   }
 }
 
-/**
- * Registra webhook para fornecedor
- */
+/** Registra um canal de notificação para o fornecedor. */
 export async function registerWebhook(
   supplierId: number,
-  type: "slack" | "email",
-  webhookUrl: string,
-  name?: string
+  type: NotificationChannel,
+  destination: string,
+  name?: string,
 ): Promise<boolean> {
   try {
     const db = await getDb();
     if (!db) throw new Error("Database connection failed");
+    const normalized = validateNotificationDestination(type, destination);
 
-    // Validar URL
-    try {
-      new URL(webhookUrl);
-    } catch {
-      throw new Error("URL inválida");
-    }
-
-    // Verificar se webhook já existe
     const existing = await db
       .select()
       .from(notificationWebhooks)
       .where(
         and(
           eq(notificationWebhooks.supplierId, supplierId),
-          eq(notificationWebhooks.webhookUrl, webhookUrl)
-        )
+          eq(notificationWebhooks.webhookUrl, normalized),
+        ),
       )
       .limit(1);
 
-    if (existing.length > 0) {
-      throw new Error("Webhook já registrado");
-    }
+    if (existing.length > 0) throw new Error("Canal já registrado");
 
-    // Registrar webhook
     await db.insert(notificationWebhooks).values({
       supplierId,
       type,
-      webhookUrl,
+      webhookUrl: normalized,
       name: name || `${type} - ${new Date().toLocaleString("pt-BR")}`,
       isActive: true,
       createdAt: new Date(),
@@ -213,52 +242,39 @@ export async function registerWebhook(
 
     return true;
   } catch (error) {
-    console.error("[Notification] Erro ao registrar webhook:", error);
+    console.error("[Notification] Erro ao registrar canal:", error);
     return false;
   }
 }
 
-/**
- * Desativa webhook
- */
-export async function deactivateWebhook(
-  webhookId: number
-): Promise<boolean> {
+export async function deactivateWebhook(webhookId: number): Promise<boolean> {
   try {
     const db = await getDb();
     if (!db) throw new Error("Database connection failed");
-
     await db
       .update(notificationWebhooks)
       .set({ isActive: false })
       .where(eq(notificationWebhooks.id, webhookId));
-
     return true;
   } catch (error) {
-    console.error("[Notification] Erro ao desativar webhook:", error);
+    console.error("[Notification] Erro ao desativar canal:", error);
     return false;
   }
 }
 
-/**
- * Obtém histórico de notificações
- */
 export async function getNotificationHistory(
   supplierId: number,
-  limit: number = 50
+  limit = 50,
 ): Promise<any[]> {
   try {
     const db = await getDb();
     if (!db) throw new Error("Database connection failed");
-
-    const history = await db
+    return db
       .select()
       .from(notificationHistory)
       .where(eq(notificationHistory.supplierId, supplierId))
-      .orderBy((t) => t.sentAt)
-      .limit(limit);
-
-    return history;
+      .orderBy(desc(notificationHistory.sentAt))
+      .limit(Math.min(Math.max(limit, 1), 200));
   } catch (error) {
     console.error("[Notification] Erro ao obter histórico:", error);
     return [];
