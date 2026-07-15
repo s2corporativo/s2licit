@@ -1,96 +1,102 @@
-import { router, protectedProcedure } from "../_core/trpc";
+import { editorProcedure, router } from "../_core/trpc";
 import { z } from "zod";
 import {
-  sendNotification,
-  registerWebhook,
   deactivateWebhook,
   getNotificationHistory,
+  maskNotificationDestination,
+  registerWebhook,
+  sendNotification,
+  validateNotificationDestination,
+  type NotificationChannel,
 } from "../services/notificationService";
 import { getDb } from "../db";
 import { notificationWebhooks } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 
+const registerInput = z.discriminatedUnion("type", [
+  z.object({
+    supplierId: z.number().int().positive(),
+    type: z.literal("slack"),
+    webhookUrl: z.string().url(),
+    name: z.string().max(128).optional(),
+  }),
+  z.object({
+    supplierId: z.number().int().positive(),
+    type: z.literal("email"),
+    webhookUrl: z.string().email(),
+    name: z.string().max(128).optional(),
+  }),
+]);
+
 export const notificationWebhooksRouter = router({
-  /**
-   * Registrar novo webhook
-   */
-  register: protectedProcedure
-    .input(
-      z.object({
-        supplierId: z.number(),
-        type: z.enum(["slack", "email"]),
-        webhookUrl: z.string().url(),
-        name: z.string().optional(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const success = await registerWebhook(
-        input.supplierId,
-        input.type,
-        input.webhookUrl,
-        input.name
-      );
+  register: editorProcedure.input(registerInput).mutation(async ({ input }) => {
+    // Validação duplicada na borda e no serviço: o serviço também pode ser
+    // chamado por jobs internos sem passar pelo tRPC.
+    validateNotificationDestination(input.type, input.webhookUrl);
+    const success = await registerWebhook(
+      input.supplierId,
+      input.type,
+      input.webhookUrl,
+      input.name,
+    );
 
-      return {
-        success,
-        message: success
-          ? "Webhook registrado com sucesso"
-          : "Erro ao registrar webhook",
-      };
-    }),
+    return {
+      success,
+      message: success
+        ? "Canal de notificação registrado com sucesso"
+        : "Não foi possível registrar o canal de notificação",
+    };
+  }),
 
-  /**
-   * Listar webhooks de um fornecedor
-   */
-  list: protectedProcedure
-    .input(z.object({ supplierId: z.number() }))
+  /** Lista canais sem expor o token secreto presente na URL do Slack. */
+  list: editorProcedure
+    .input(z.object({ supplierId: z.number().int().positive() }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
+      if (!db) return [];
 
-      const webhooks = await db
+      const rows = await db
         .select()
         .from(notificationWebhooks)
         .where(eq(notificationWebhooks.supplierId, input.supplierId));
 
-      return webhooks;
+      return rows.map((row) => ({
+        id: row.id,
+        supplierId: row.supplierId,
+        type: row.type,
+        name: row.name,
+        isActive: row.isActive,
+        createdAt: row.createdAt,
+        webhookUrl: maskNotificationDestination(
+          row.type as NotificationChannel,
+          row.webhookUrl,
+        ),
+      }));
     }),
 
-  /**
-   * Desativar webhook
-   */
-  deactivate: protectedProcedure
-    .input(z.object({ webhookId: z.number() }))
+  deactivate: editorProcedure
+    .input(z.object({ webhookId: z.number().int().positive() }))
     .mutation(async ({ input }) => {
       const success = await deactivateWebhook(input.webhookId);
-
       return {
         success,
         message: success
-          ? "Webhook desativado com sucesso"
-          : "Erro ao desativar webhook",
+          ? "Canal de notificação desativado"
+          : "Não foi possível desativar o canal",
       };
     }),
 
-  /**
-   * Obter histórico de notificações
-   */
-  history: protectedProcedure
-    .input(z.object({ supplierId: z.number(), limit: z.number().optional() }))
-    .query(async ({ input }) => {
-      const history = await getNotificationHistory(
-        input.supplierId,
-        input.limit || 50
-      );
+  history: editorProcedure
+    .input(
+      z.object({
+        supplierId: z.number().int().positive(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .query(({ input }) => getNotificationHistory(input.supplierId, input.limit ?? 50)),
 
-      return history;
-    }),
-
-  /**
-   * Enviar notificação de teste
-   */
-  test: protectedProcedure
-    .input(z.object({ supplierId: z.number() }))
+  test: editorProcedure
+    .input(z.object({ supplierId: z.number().int().positive() }))
     .mutation(async ({ input }) => {
       const success = await sendNotification(input.supplierId, {
         type: "error",
@@ -107,7 +113,7 @@ export const notificationWebhooksRouter = router({
         success,
         message: success
           ? "Notificação de teste enviada"
-          : "Erro ao enviar notificação de teste",
+          : "Nenhum canal conseguiu entregar a notificação de teste",
       };
     }),
 });
