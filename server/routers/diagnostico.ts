@@ -1,24 +1,19 @@
-import { count } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   certidoes,
   emailQuotations,
-  funilOportunidades,
   products,
   suppliers,
   taxRules,
 } from "../../drizzle/schema";
-import { isImapConfigured } from "../services/emailInboxService";
-import { isSmtpConfigured } from "../services/emailSenderService";
-import { isWhatsappConfigured } from "../services/whatsappService";
-import { listConfiguredProviders } from "../_core/llm";
+import { getIntegrationStatuses, configuredEnvironmentNames } from "../services/integrationStatusService";
 
 /**
- * Central de Diagnóstico ("central eletrônica"): roda verificações reais e
- * READ-ONLY sobre o sistema — banco, integrações, dados, segurança e
- * agendador — e devolve o estado de cada uma com o que fazer quando há
- * problema. Nada aqui altera dados; é um painel de saúde.
+ * Central de Diagnóstico: verificações reais e somente leitura sobre banco,
+ * integrações, dados, segurança e agendadores. Valores sensíveis nunca são
+ * devolvidos; somente os nomes das configurações presentes no container.
  */
 
 export type StatusCheck = "ok" | "atencao" | "erro";
@@ -28,16 +23,26 @@ export interface ItemDiagnostico {
   item: string;
   status: StatusCheck;
   detalhe: string;
-  acao?: string; // o que o operador deve fazer
+  acao?: string;
+  codigo?: string;
 }
 
 async function contar(db: any, tabela: any): Promise<number> {
   try {
-    const [r] = await db.select({ n: count() }).from(tabela);
-    return Number(r?.n ?? 0);
+    const [resultado] = await db.select({ n: count() }).from(tabela);
+    return Number(resultado?.n ?? 0);
   } catch {
     return -1;
   }
+}
+
+function resumir(itens: ItemDiagnostico[]) {
+  return {
+    total: itens.length,
+    ok: itens.filter((item) => item.status === "ok").length,
+    atencao: itens.filter((item) => item.status === "atencao").length,
+    erro: itens.filter((item) => item.status === "erro").length,
+  };
 }
 
 export const diagnosticoRouter = router({
@@ -45,195 +50,216 @@ export const diagnosticoRouter = router({
     const itens: ItemDiagnostico[] = [];
     const db = await getDb();
 
-    // ── Banco de dados ────────────────────────────────────────────────────
     if (!db) {
       itens.push({
         categoria: "Banco de Dados",
-        item: "Conexão",
+        item: "Conexão MySQL",
         status: "erro",
         detalhe: "Não foi possível conectar ao banco de dados.",
-        acao: "Verifique a variável DATABASE_URL e se o container do MySQL está no ar.",
+        acao: "Confira o container sistema-s2-db e a variável DATABASE_URL.",
+        codigo: "database",
       });
-      // Sem banco, o resto não roda — devolve o que temos
-      return { itens, resumo: resumir(itens) };
+      return {
+        itens,
+        resumo: resumir(itens),
+        ambiente: { configurados: configuredEnvironmentNames(), total: 0 },
+      };
     }
+
     itens.push({
       categoria: "Banco de Dados",
-      item: "Conexão",
+      item: "Conexão MySQL",
       status: "ok",
-      detalhe: "Conectado e respondendo.",
+      detalhe: "Banco conectado e respondendo.",
+      codigo: "database",
     });
 
-    // ── Dados & Conteúdo ──────────────────────────────────────────────────
     const nProdutos = await contar(db, products);
     itens.push({
-      categoria: "Dados & Conteúdo",
+      categoria: "Dados essenciais",
       item: "Catálogo de produtos",
-      status: nProdutos > 0 ? "ok" : "atencao",
-      detalhe: nProdutos > 0 ? `${nProdutos} produtos cadastrados.` : "Nenhum produto no catálogo.",
-      acao: nProdutos > 0 ? undefined : "Importe seu catálogo em Importar Planilha (menu IA & Sistema).",
+      status: nProdutos > 0 ? "ok" : nProdutos === 0 ? "atencao" : "erro",
+      detalhe:
+        nProdutos > 0
+          ? `${nProdutos} produtos cadastrados.`
+          : nProdutos === 0
+            ? "Nenhum produto no catálogo."
+            : "Não foi possível consultar o catálogo.",
+      acao: nProdutos === 0 ? "Importe o catálogo em Catálogo → Importar planilha." : undefined,
+      codigo: "products",
     });
 
     const nFornecedores = await contar(db, suppliers);
     itens.push({
-      categoria: "Dados & Conteúdo",
+      categoria: "Dados essenciais",
       item: "Fornecedores",
-      status: nFornecedores > 0 ? "ok" : "atencao",
-      detalhe: nFornecedores > 0 ? `${nFornecedores} fornecedores cadastrados.` : "Nenhum fornecedor cadastrado.",
-      acao: nFornecedores > 0 ? undefined : "Cadastre fornecedores em Fornecedores & Captura → Fornecedores.",
+      status: nFornecedores > 0 ? "ok" : nFornecedores === 0 ? "atencao" : "erro",
+      detalhe:
+        nFornecedores > 0
+          ? `${nFornecedores} fornecedores cadastrados.`
+          : nFornecedores === 0
+            ? "Nenhum fornecedor cadastrado."
+            : "Não foi possível consultar os fornecedores.",
+      acao: nFornecedores === 0 ? "Cadastre os fornecedores no módulo Catálogo → Fornecedores." : undefined,
+      codigo: "suppliers",
     });
 
     const nRegrasTributarias = await contar(db, taxRules);
     itens.push({
-      categoria: "Dados & Conteúdo",
+      categoria: "Dados essenciais",
       item: "Regras tributárias",
-      status: nRegrasTributarias > 0 ? "ok" : "atencao",
-      detalhe: nRegrasTributarias > 0 ? `${nRegrasTributarias} regras cadastradas.` : "Nenhuma regra tributária.",
-      acao: nRegrasTributarias > 0 ? undefined : "Cadastre a alíquota do Simples e o DIFAL em Preços → Motor Tributário — sem elas o preço-piso não desconta imposto.",
+      status: nRegrasTributarias > 0 ? "ok" : nRegrasTributarias === 0 ? "atencao" : "erro",
+      detalhe:
+        nRegrasTributarias > 0
+          ? `${nRegrasTributarias} regras cadastradas.`
+          : nRegrasTributarias === 0
+            ? "Nenhuma regra tributária cadastrada."
+            : "Não foi possível consultar as regras tributárias.",
+      acao:
+        nRegrasTributarias === 0
+          ? "Cadastre Simples Nacional, DIFAL e demais incidências antes de calcular preços mínimos."
+          : undefined,
+      codigo: "taxes",
     });
 
-    // Certidões vencidas (risco de perder habilitação)
     try {
-      const certs = await db.select().from(certidoes);
+      const registros = await db.select().from(certidoes);
       const hoje = new Date();
-      const ativas = certs.filter((c: any) => c.ativa);
-      const vencidas = ativas.filter((c: any) => c.dataValidade && new Date(c.dataValidade) < hoje);
+      const ativas = registros.filter((registro: any) => registro.ativa);
+      const vencidas = ativas.filter(
+        (registro: any) => registro.dataValidade && new Date(registro.dataValidade) < hoje,
+      );
       itens.push({
-        categoria: "Dados & Conteúdo",
-        item: "Certidões",
+        categoria: "Dados essenciais",
+        item: "Certidões de habilitação",
         status: vencidas.length > 0 ? "erro" : ativas.length > 0 ? "ok" : "atencao",
         detalhe:
           vencidas.length > 0
-            ? `${vencidas.length} certidão(ões) VENCIDA(S) de ${ativas.length} ativas.`
+            ? `${vencidas.length} certidão(ões) vencida(s) entre ${ativas.length} ativas.`
             : ativas.length > 0
-              ? `${ativas.length} certidões ativas, todas válidas.`
+              ? `${ativas.length} certidões ativas e válidas.`
               : "Nenhuma certidão cadastrada.",
         acao:
           vencidas.length > 0
-            ? "Renove as certidões vencidas em Habilitação → Certidões (perder habilitação por certidão vencida é o erro mais caro)."
-            : ativas.length > 0
-              ? undefined
-              : "Cadastre suas certidões em Habilitação → Certidões para receber alertas de vencimento.",
+            ? "Renove as certidões vencidas antes de participar de novas disputas."
+            : ativas.length === 0
+              ? "Cadastre as certidões em Propostas → Habilitação."
+              : undefined,
+        codigo: "certificates",
       });
-    } catch {
-      /* ignora */
+    } catch (error) {
+      itens.push({
+        categoria: "Dados essenciais",
+        item: "Certidões de habilitação",
+        status: "erro",
+        detalhe: `Falha ao consultar certidões: ${(error as Error).message}`,
+        codigo: "certificates",
+      });
     }
 
-    // ── Integrações ───────────────────────────────────────────────────────
-    const provedores = listConfiguredProviders();
-    itens.push({
-      categoria: "Integrações",
-      item: "Inteligência Artificial",
-      status: provedores.length > 0 ? "ok" : "atencao",
-      detalhe:
-        provedores.length > 0
-          ? `Ativa: ${provedores.map((p) => p.kind).join(", ")}.`
-          : "Nenhum provedor de IA configurado.",
-      acao: provedores.length > 0 ? undefined : "Cadastre o secret GROQ_API_KEY (chave gratuita) ou ANTHROPIC_API_KEY.",
-    });
+    for (const integration of getIntegrationStatuses()) {
+      itens.push({
+        categoria: "Integrações",
+        item: integration.label,
+        status: integration.configured ? "ok" : "atencao",
+        detalhe: integration.detail,
+        acao: integration.configured
+          ? undefined
+          : `Cadastre no GitHub: ${integration.expectedConfiguration.join(", ")}; depois execute o Deploy VPS.`,
+        codigo: integration.code,
+      });
+    }
 
-    const imap = isImapConfigured();
-    itens.push({
-      categoria: "Integrações",
-      item: "Recebimento de cotações (e-mail)",
-      status: imap ? "ok" : "atencao",
-      detalhe: imap ? "IMAP configurado — cotações entram sozinhas." : "IMAP não configurado.",
-      acao: imap ? undefined : "Configure IMAP_* (senha de app do Gmail) para as cotações entrarem automaticamente.",
-    });
-
-    const smtp = isSmtpConfigured();
-    itens.push({
-      categoria: "Integrações",
-      item: "Envio de respostas (e-mail)",
-      status: smtp ? "ok" : "atencao",
-      detalhe: smtp ? "SMTP configurado — respostas saem com PDF anexo." : "SMTP não configurado.",
-      acao: smtp ? undefined : "Configure SMTP_* para responder cotações por e-mail com o orçamento em PDF.",
-    });
-
-    itens.push({
-      categoria: "Integrações",
-      item: "Alertas por WhatsApp",
-      status: isWhatsappConfigured() ? "ok" : "atencao",
-      detalhe: isWhatsappConfigured() ? "WhatsApp configurado." : "WhatsApp não configurado (opcional).",
-      acao: isWhatsappConfigured() ? undefined : "Opcional: configure WHATSAPP_* para receber os alertas diários no celular.",
-    });
-
-    // ── Segurança ─────────────────────────────────────────────────────────
-    const temEnc = Boolean(process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length >= 16);
-    const temJwt = Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16);
+    const encryptionKeyOk = Boolean(process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length >= 32);
+    const jwtOk = Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32);
     itens.push({
       categoria: "Segurança",
-      item: "Chave de criptografia",
-      status: temEnc ? "ok" : temJwt ? "atencao" : "erro",
-      detalhe: temEnc
-        ? "ENCRYPTION_KEY definida — credenciais de portais protegidas."
-        : temJwt
-          ? "Usando JWT_SECRET como fallback (funciona, mas defina ENCRYPTION_KEY)."
-          : "Nenhuma chave de criptografia definida.",
-      acao: temEnc ? undefined : "Defina ENCRYPTION_KEY (openssl rand -base64 48) para proteger as senhas dos portais.",
+      item: "Criptografia de credenciais",
+      status: encryptionKeyOk ? "ok" : "erro",
+      detalhe: encryptionKeyOk
+        ? "ENCRYPTION_KEY válida; acessos de portais e fornecedores são protegidos."
+        : "ENCRYPTION_KEY ausente ou curta.",
+      acao: encryptionKeyOk ? undefined : "Restaure a chave original do .env da VPS; não gere outra se já houver credenciais salvas.",
+      codigo: "encryption",
     });
     itens.push({
       categoria: "Segurança",
-      item: "Segredo de sessão (JWT)",
-      status: temJwt ? "ok" : "erro",
-      detalhe: temJwt ? "JWT_SECRET definido." : "JWT_SECRET ausente — sessões expiram a cada reinício.",
-      acao: temJwt ? undefined : "Defina JWT_SECRET no .env da VPS.",
+      item: "Sessões e autenticação",
+      status: jwtOk ? "ok" : "erro",
+      detalhe: jwtOk ? "JWT_SECRET válida." : "JWT_SECRET ausente ou curta.",
+      acao: jwtOk ? undefined : "Confira o .env gerado pelo bootstrap da VPS.",
+      codigo: "jwt",
     });
 
-    // ── Agendador ─────────────────────────────────────────────────────────
-    const emailSyncOn = imap && process.env.EMAIL_SYNC_ENABLED !== "false";
+    const emailSyncOn = process.env.EMAIL_SYNC_ENABLED !== "false";
+    const alertsOn = process.env.ALERTS_ENABLED !== "false";
+    const scraperOn = process.env.SCRAPER_SCHEDULE_ENABLED !== "false";
     itens.push({
-      categoria: "Agendador",
-      item: "Sincronização de cotações",
+      categoria: "Automação",
+      item: "Sincronização de e-mails",
       status: emailSyncOn ? "ok" : "atencao",
       detalhe: emailSyncOn
-        ? "Rodando a cada 15 min."
-        : imap
-          ? "Desativada (EMAIL_SYNC_ENABLED=false)."
-          : "Depende do IMAP, que não está configurado.",
+        ? `Agendada por ${process.env.EMAIL_SYNC_CRON || "*/15 * * * *"}.`
+        : "Desativada por configuração.",
+      codigo: "email-scheduler",
     });
-    const alertsOn = process.env.ALERTS_ENABLED !== "false";
     itens.push({
-      categoria: "Agendador",
+      categoria: "Automação",
       item: "Alertas diários",
       status: alertsOn ? "ok" : "atencao",
-      detalhe: alertsOn ? "Alertas de certidões e prazos ativos (8h)." : "Desativados (ALERTS_ENABLED=false).",
+      detalhe: alertsOn
+        ? `Agendados por ${process.env.ALERTS_CRON || "0 8 * * *"}.`
+        : "Desativados por configuração.",
+      codigo: "alerts-scheduler",
+    });
+    itens.push({
+      categoria: "Automação",
+      item: "Captura programada de fornecedores",
+      status: scraperOn ? "ok" : "atencao",
+      detalhe: scraperOn
+        ? `Verificação agendada por ${process.env.SCRAPER_SCHEDULE_CRON || "* * * * *"}.`
+        : "Desativada por configuração.",
+      codigo: "scraper-scheduler",
     });
 
-    // ── Operação (pendências) ─────────────────────────────────────────────
     try {
-      const cots = await db.select().from(emailQuotations);
-      const pendentes = cots.filter((q: any) => q.status !== "respondida" && q.status !== "descartada");
-      const vencidas = pendentes.filter(
-        (q: any) => q.prazoResposta && new Date(q.prazoResposta) < new Date(),
+      const cotacoes = await db.select().from(emailQuotations);
+      const pendentes = cotacoes.filter(
+        (cotacao: any) => cotacao.status !== "respondida" && cotacao.status !== "descartada",
       );
-      if (cots.length > 0) {
-        itens.push({
-          categoria: "Operação",
-          item: "Cotações a responder",
-          status: vencidas.length > 0 ? "erro" : pendentes.length > 0 ? "atencao" : "ok",
-          detalhe:
-            vencidas.length > 0
-              ? `${vencidas.length} com prazo VENCIDO sem resposta.`
-              : `${pendentes.length} pendentes de resposta.`,
-          acao: pendentes.length > 0 ? "Veja em Oportunidades → Cotações Recebidas." : undefined,
-        });
-      }
-    } catch {
-      /* ignora */
+      const vencidas = pendentes.filter(
+        (cotacao: any) => cotacao.prazoResposta && new Date(cotacao.prazoResposta) < new Date(),
+      );
+      itens.push({
+        categoria: "Operação",
+        item: "Cotações pendentes",
+        status: vencidas.length > 0 ? "erro" : pendentes.length > 0 ? "atencao" : "ok",
+        detalhe:
+          vencidas.length > 0
+            ? `${vencidas.length} cotação(ões) vencida(s) sem resposta.`
+            : `${pendentes.length} cotação(ões) pendente(s).`,
+        acao: pendentes.length > 0 ? "Abra Oportunidades → Cotações." : undefined,
+        codigo: "quotations",
+      });
+    } catch (error) {
+      itens.push({
+        categoria: "Operação",
+        item: "Cotações pendentes",
+        status: "erro",
+        detalhe: `Falha ao consultar cotações: ${(error as Error).message}`,
+        codigo: "quotations",
+      });
     }
 
-    void funilOportunidades; // reservado para métricas futuras do funil
-
-    return { itens, resumo: resumir(itens) };
+    const configurados = configuredEnvironmentNames();
+    return {
+      itens,
+      resumo: resumir(itens),
+      ambiente: {
+        configurados,
+        total: configurados.length,
+        observacao: "Somente os nomes são exibidos; os valores permanecem ocultos.",
+      },
+    };
   }),
 });
-
-function resumir(itens: ItemDiagnostico[]) {
-  return {
-    total: itens.length,
-    ok: itens.filter((i) => i.status === "ok").length,
-    atencao: itens.filter((i) => i.status === "atencao").length,
-    erro: itens.filter((i) => i.status === "erro").length,
-  };
-}
