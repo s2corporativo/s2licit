@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { usePermission } from "@/components/RequireAuth";
-import { MailCheck, RefreshCw, AlertCircle, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { MailCheck, RefreshCw, AlertCircle, CheckCircle2, XCircle, Loader2, KanbanSquare } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   nova: { label: "Nova", className: "bg-blue-100 text-blue-800" },
@@ -15,6 +16,7 @@ const STATUS_LABELS: Record<string, { label: string; className: string }> = {
 
 export default function CotacoesRecebidas() {
   const isAdmin = usePermission("admin");
+  const canEdit = usePermission("editor");
   const utils = trpc.useUtils();
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
@@ -138,6 +140,7 @@ export default function CotacoesRecebidas() {
           ) : detailQuery.data ? (
             <QuotationDetail
               data={detailQuery.data}
+              canEdit={canEdit}
               onChanged={() => {
                 utils.emailQuotations.get.invalidate({ id: selectedId });
                 utils.emailQuotations.list.invalidate();
@@ -167,7 +170,16 @@ type DetailData = {
   }>;
 };
 
-function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () => void }) {
+function QuotationDetail({
+  data,
+  canEdit,
+  onChanged,
+}: {
+  data: DetailData;
+  canEdit: boolean;
+  onChanged: () => void;
+}) {
+  const [, navigate] = useLocation();
   const confirmMutation = trpc.emailQuotations.setItemMatch.useMutation({
     onSuccess: () => { toast.success("Item atualizado."); onChanged(); },
     onError: (e) => toast.error(e.message),
@@ -196,6 +208,13 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
     onSuccess: (res) => { toast.success(`Proposta enviada para ${res.to}.`); onChanged(); },
     onError: (e) => toast.error(e.message),
   });
+  const funnelMutation = trpc.funil.criarDeCotacao.useMutation({
+    onSuccess: ({ id, jaExistia }) => {
+      toast.success(jaExistia ? "Cotação já estava no Funil." : "Cotação enviada ao Funil.");
+      navigate(`/funil?oportunidade=${id}`);
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const { quotation, items } = data;
 
@@ -210,10 +229,19 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
             type="date"
             defaultValue={quotation.prazoResposta ? String(quotation.prazoResposta).slice(0, 10) : ""}
             onChange={(e) => prazoMutation.mutate({ id: quotation.id, prazoResposta: e.target.value || null })}
+            disabled={!canEdit}
             className="border border-gray-300 px-2 py-1 text-xs"
           />
         </div>
-        <div className="flex flex-wrap gap-2 mt-3">
+        {canEdit && <div className="flex flex-wrap gap-2 mt-3">
+          <button
+            onClick={() => funnelMutation.mutate({ quotationId: quotation.id })}
+            disabled={funnelMutation.isPending}
+            className="flex items-center gap-1 text-xs font-semibold text-white bg-gray-900 hover:bg-blue-700 px-3 py-1 disabled:opacity-60"
+          >
+            {funnelMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <KanbanSquare className="w-3 h-3" />}
+            Abrir no Funil
+          </button>
           <button
             onClick={() => orcamentoMutation.mutate({ id: quotation.id })}
             disabled={orcamentoMutation.isPending}
@@ -245,7 +273,7 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
           >
             Descartar
           </button>
-        </div>
+        </div>}
       </div>
 
       <table className="w-full text-xs">
@@ -295,7 +323,7 @@ function QuotationDetail({ data, onChanged }: { data: DetailData; onChanged: () 
                 )}
               </td>
               <td className="px-3 py-2 align-top text-right">
-                {item.produtoMatchId && !item.matchConfirmado && (
+                {canEdit && item.produtoMatchId && !item.matchConfirmado && (
                   <button
                     onClick={() =>
                       confirmMutation.mutate({
