@@ -64,9 +64,10 @@ export function NfeUploadComponent({ onSuccess, onError }: NfeUploadComponentPro
       if (!result.success || !result.preview) {
         throw new Error(result.error || "Não foi possível validar a NF-e");
       }
+      const parsedPreview = result.preview as NfePreview;
       setXmlContent(content);
-      setPreview(result.preview as NfePreview);
-      setSelectedProducts(new Set(result.preview.products.map((product) => product.id)));
+      setPreview(parsedPreview);
+      setSelectedProducts(new Set(parsedPreview.products.map((product) => product.id)));
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Erro ao ler o XML";
       setError(message);
