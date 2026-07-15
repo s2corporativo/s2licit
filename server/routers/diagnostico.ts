@@ -1,4 +1,4 @@
-import { count, eq } from "drizzle-orm";
+import { count } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
@@ -8,7 +8,10 @@ import {
   suppliers,
   taxRules,
 } from "../../drizzle/schema";
-import { getIntegrationStatuses, configuredEnvironmentNames } from "../services/integrationStatusService";
+import {
+  configuredEnvironmentNames,
+  getIntegrationStatuses,
+} from "../services/integrationStatusService";
 
 /**
  * Central de Diagnóstico: verificações reais e somente leitura sobre banco,
@@ -59,10 +62,15 @@ export const diagnosticoRouter = router({
         acao: "Confira o container sistema-s2-db e a variável DATABASE_URL.",
         codigo: "database",
       });
+      const configurados = configuredEnvironmentNames();
       return {
         itens,
         resumo: resumir(itens),
-        ambiente: { configurados: configuredEnvironmentNames(), total: 0 },
+        ambiente: {
+          configurados,
+          total: configurados.length,
+          observacao: "Somente os nomes são exibidos; os valores permanecem ocultos.",
+        },
       };
     }
 
@@ -100,7 +108,10 @@ export const diagnosticoRouter = router({
           : nFornecedores === 0
             ? "Nenhum fornecedor cadastrado."
             : "Não foi possível consultar os fornecedores.",
-      acao: nFornecedores === 0 ? "Cadastre os fornecedores no módulo Catálogo → Fornecedores." : undefined,
+      acao:
+        nFornecedores === 0
+          ? "Cadastre os fornecedores no módulo Catálogo → Fornecedores."
+          : undefined,
       codigo: "suppliers",
     });
 
@@ -108,7 +119,8 @@ export const diagnosticoRouter = router({
     itens.push({
       categoria: "Dados essenciais",
       item: "Regras tributárias",
-      status: nRegrasTributarias > 0 ? "ok" : nRegrasTributarias === 0 ? "atencao" : "erro",
+      status:
+        nRegrasTributarias > 0 ? "ok" : nRegrasTributarias === 0 ? "atencao" : "erro",
       detalhe:
         nRegrasTributarias > 0
           ? `${nRegrasTributarias} regras cadastradas.`
@@ -170,7 +182,9 @@ export const diagnosticoRouter = router({
       });
     }
 
-    const encryptionKeyOk = Boolean(process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length >= 32);
+    const encryptionKeyOk = Boolean(
+      process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.length >= 32,
+    );
     const jwtOk = Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32);
     itens.push({
       categoria: "Segurança",
@@ -179,7 +193,9 @@ export const diagnosticoRouter = router({
       detalhe: encryptionKeyOk
         ? "ENCRYPTION_KEY válida; acessos de portais e fornecedores são protegidos."
         : "ENCRYPTION_KEY ausente ou curta.",
-      acao: encryptionKeyOk ? undefined : "Restaure a chave original do .env da VPS; não gere outra se já houver credenciais salvas.",
+      acao: encryptionKeyOk
+        ? undefined
+        : "Restaure a chave original do .env da VPS; não gere outra se já houver credenciais salvas.",
       codigo: "encryption",
     });
     itens.push({
