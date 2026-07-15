@@ -1,6 +1,12 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
-import { reclassificationRouter } from "./reclassification";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "../db";
+import { reclassificationRouter } from "./reclassification";
+
+function caller() {
+  return reclassificationRouter.createCaller({
+    user: { id: "test", role: "editor" },
+  } as any);
+}
 
 describe("reclassificationRouter", () => {
   let db: any;
@@ -11,14 +17,11 @@ describe("reclassificationRouter", () => {
 
   describe("listProductsNeedingReclassification", () => {
     it("deve retornar lista vazia quando db é null", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-      
-      // Mock getDb para retornar null
       vi.mock("../db", () => ({
         getDb: vi.fn().mockResolvedValue(null),
       }));
 
-      const result = await caller.listProductsNeedingReclassification({
+      const result = await caller().listProductsNeedingReclassification({
         limit: 50,
         offset: 0,
       });
@@ -31,9 +34,7 @@ describe("reclassificationRouter", () => {
     it("deve retornar produtos sem categoria", async () => {
       if (!db) return;
 
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.listProductsNeedingReclassification({
+      const result = await caller().listProductsNeedingReclassification({
         limit: 50,
         offset: 0,
       });
@@ -46,17 +47,8 @@ describe("reclassificationRouter", () => {
     it("deve respeitar limit e offset", async () => {
       if (!db) return;
 
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result1 = await caller.listProductsNeedingReclassification({
-        limit: 10,
-        offset: 0,
-      });
-
-      const result2 = await caller.listProductsNeedingReclassification({
-        limit: 10,
-        offset: 10,
-      });
+      const result1 = await caller().listProductsNeedingReclassification({ limit: 10, offset: 0 });
+      const result2 = await caller().listProductsNeedingReclassification({ limit: 10, offset: 10 });
 
       expect(result1.products.length).toBeLessThanOrEqual(10);
       expect(result2.products.length).toBeLessThanOrEqual(10);
@@ -65,11 +57,7 @@ describe("reclassificationRouter", () => {
 
   describe("reclassifyBatch", () => {
     it("deve retornar erro quando db é null", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.suggestReclassification({
-        productIds: [1, 2, 3],
-      });
+      const result = await caller().suggestReclassification({ productIds: [1, 2, 3] });
 
       expect(result.suggestions).toEqual({});
       expect(result.errors[0]).toBe("Database connection failed");
@@ -78,37 +66,18 @@ describe("reclassificationRouter", () => {
     });
 
     it("deve validar tamanho máximo de batch", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
       const largeArray = Array.from({ length: 51 }, (_, i) => i + 1);
-
-      try {
-        await caller.reclassifyBatch({
-          productIds: largeArray,
-        });
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(caller().reclassifyBatch({ productIds: largeArray })).rejects.toBeDefined();
     });
 
     it("deve validar tamanho mínimo de batch", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      try {
-        await caller.reclassifyBatch({
-          productIds: [],
-        });
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(caller().reclassifyBatch({ productIds: [] })).rejects.toBeDefined();
     });
   });
 
   describe("applySuggestions", () => {
     it("deve retornar 0 quando db é null", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.applySuggestions({
+      const result = await caller().applySuggestions({
         suggestions: {
           "1": "Medicamentos Veterinários",
           "2": "Medicamentos Humanos",
@@ -120,25 +89,20 @@ describe("reclassificationRouter", () => {
     });
 
     it("deve validar categorias válidas", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.applySuggestions({
+      const result = await caller().applySuggestions({
         suggestions: {
           "1": "Categoria Inválida",
           "2": "Medicamentos Humanos",
         },
       });
 
-      // Apenas categoria válida deve ser processada
       expect(result.total).toBeLessThanOrEqual(1);
     });
   });
 
   describe("getReclassificationStats", () => {
     it("deve retornar stats quando db é null", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.getReclassificationStats();
+      const result = await caller().getReclassificationStats();
 
       expect(result.needsReclassification).toBe(0);
       expect(result.byCategory).toEqual({});
@@ -147,10 +111,7 @@ describe("reclassificationRouter", () => {
     });
 
     it("deve incluir todas as 5 categorias estratégicas", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.getReclassificationStats();
-
+      const result = await caller().getReclassificationStats();
       const expectedCategories = [
         "Medicamentos Veterinários",
         "Medicamentos Humanos",
@@ -159,15 +120,13 @@ describe("reclassificationRouter", () => {
         "Materiais Diversos",
       ];
 
-      for (const cat of expectedCategories) {
-        expect(result.categories).toContain(cat);
+      for (const category of expectedCategories) {
+        expect(result.categories).toContain(category);
       }
     });
 
     it("deve retornar byCategory como Record<string, number>", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.getReclassificationStats();
+      const result = await caller().getReclassificationStats();
 
       expect(typeof result.byCategory).toBe("object");
       for (const [key, value] of Object.entries(result.byCategory)) {
@@ -179,9 +138,7 @@ describe("reclassificationRouter", () => {
 
   describe("Validações de entrada", () => {
     it("listProductsNeedingReclassification deve aceitar limit e offset opcionais", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.listProductsNeedingReclassification({});
+      const result = await caller().listProductsNeedingReclassification({});
 
       expect(result).toBeDefined();
       expect(result.products).toBeDefined();
@@ -189,20 +146,11 @@ describe("reclassificationRouter", () => {
     });
 
     it("reclassifyBatch deve rejeitar array vazio", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      try {
-        await caller.reclassifyBatch({ productIds: [] });
-        expect.fail("Deveria ter lançado erro");
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await expect(caller().reclassifyBatch({ productIds: [] })).rejects.toBeDefined();
     });
 
     it("applySuggestions deve aceitar suggestions vazio", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.applySuggestions({ suggestions: {} });
+      const result = await caller().applySuggestions({ suggestions: {} });
 
       expect(result.applied).toBe(0);
       expect(result.total).toBe(0);
@@ -211,12 +159,7 @@ describe("reclassificationRouter", () => {
 
   describe("Tipos de retorno", () => {
     it("listProductsNeedingReclassification deve retornar tipo correto", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.listProductsNeedingReclassification({
-        limit: 50,
-        offset: 0,
-      });
+      const result = await caller().listProductsNeedingReclassification({ limit: 50, offset: 0 });
 
       expect(result).toHaveProperty("products");
       expect(result).toHaveProperty("total");
@@ -226,9 +169,7 @@ describe("reclassificationRouter", () => {
     });
 
     it("reclassifyBatch deve retornar suggestions e errors", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.suggestReclassification({ productIds: [1] });
+      const result = await caller().suggestReclassification({ productIds: [1] });
 
       expect(result).toHaveProperty("suggestions");
       expect(result).toHaveProperty("errors");
@@ -239,9 +180,7 @@ describe("reclassificationRouter", () => {
     });
 
     it("applySuggestions deve retornar applied e total", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.applySuggestions({
+      const result = await caller().applySuggestions({
         suggestions: { "1": "Medicamentos Veterinários" },
       });
 
@@ -252,9 +191,7 @@ describe("reclassificationRouter", () => {
     });
 
     it("getReclassificationStats deve retornar stats completo", async () => {
-      const caller = reclassificationRouter.createCaller({ user: { id: "test" } } as any);
-
-      const result = await caller.getReclassificationStats();
+      const result = await caller().getReclassificationStats();
 
       expect(result).toHaveProperty("needsReclassification");
       expect(result).toHaveProperty("byCategory");

@@ -17,23 +17,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-mysql-client \
   && rm -rf /var/lib/apt/lists/*
 
-# Instalar pnpm
 RUN npm install -g pnpm@10.4.1
 
 WORKDIR /app
 
-# Dependências primeiro (camada cacheável)
 COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
-# Código e build (frontend + backend)
 COPY . .
 RUN pnpm run build
 
-# A porta efetiva vem da variável PORT (padrão 3000)
 EXPOSE 3000
 
-# Aplica migrações (schema.ts é a fonte de verdade) antes do servidor.
-# Falha de migração impede o boot: subir com schema antigo corromperia o fluxo.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl --fail --silent "http://127.0.0.1:${PORT:-3000}/readyz" > /dev/null || exit 1
+
+# Nunca inicia a aplicação com migrations pendentes ou inválidas.
 CMD ["sh", "-c", "pnpm db:push && exec node dist/index.js"]

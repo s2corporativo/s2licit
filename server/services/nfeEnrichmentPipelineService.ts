@@ -1,6 +1,7 @@
+import { z } from "zod";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
-import { eq, and, like } from "drizzle-orm";
+import { eq, and, like, ne } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
 
@@ -23,20 +24,24 @@ export interface EnrichmentResult {
   contraindications: string[];
   dosage: string;
   administrationForm: string;
-  confidence: number; // 0-100
+  confidence: number;
   source: "ai_extraction" | "catalog_match" | "manual";
+  requiresReview: boolean;
 }
 
-/**
- * Pipeline completo: NF-e → Enriquecimento → Catálogo
- * 1. Recebe produtos importados de NF-e
- * 2. Enriquece com IA (extrai ingrediente ativo, indicações, etc)
- * 3. Faz matching com catálogo existente
- * 4. Mescla dados e atualiza banco
- */
+const enrichmentSchema = z.object({
+  activeIngredient: z.string().trim(),
+  concentration: z.string().trim(),
+  indications: z.array(z.string()),
+  contraindications: z.array(z.string()),
+  dosage: z.string(),
+  administrationForm: z.string(),
+  confidence: z.number().min(0).max(100),
+});
+
 export async function processNfeEnrichmentPipeline(
   productIds: number[],
-  supplierId: number
+  supplierId: number,
 ): Promise<{
   processed: number;
   enriched: number;
@@ -47,69 +52,46 @@ export async function processNfeEnrichmentPipeline(
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  const uniqueIds = [...new Set(productIds)];
   const results: EnrichmentTask[] = [];
   let enriched = 0;
   let matched = 0;
   let failed = 0;
 
-  for (const productId of productIds) {
+  for (const productId of uniqueIds) {
     try {
-      // Busca produto
       const [product] = await db
         .select()
         .from(products)
         .where(eq(products.id, productId))
         .limit(1);
 
-      if (!product) {
-        results.push({
-          productId,
-          productName: "Unknown",
-          supplierId,
-          status: "failed",
-          error: "Product not found",
-        });
-        failed++;
-        continue;
-      }
+      if (!product) throw new Error("Produto não encontrado");
 
-      // Fase 1: Enriquecimento com IA
       const enrichmentResult = await enrichProductWithAI(product);
-
-      if (!enrichmentResult) {
-        results.push({
-          productId,
-          productName: product.name,
-          supplierId,
-          status: "failed",
-          error: "AI enrichment failed",
-        });
-        failed++;
-        continue;
+      if (!enrichmentResult) throw new Error("A IA não devolveu dados estruturados válidos");
+      if (enrichmentResult.requiresReview) {
+        throw new Error(`Enriquecimento exige revisão humana (confiança ${enrichmentResult.confidence}%)`);
       }
 
+      const currentUpdate: Record<string, unknown> = { updatedAt: new Date() };
+      if (!product.activeIngredient && enrichmentResult.activeIngredient) {
+        currentUpdate.activeIngredient = enrichmentResult.activeIngredient;
+      }
+      if (!product.concentration && enrichmentResult.concentration) {
+        currentUpdate.concentration = enrichmentResult.concentration;
+      }
+
+      // Não substitui descrição, indicações, contraindicações ou posologia por texto
+      // gerado por IA sem fonte documental verificável.
+      await db.update(products).set(currentUpdate).where(eq(products.id, productId));
       enriched++;
 
-      // Fase 2: Matching com catálogo
       const catalogMatch = await matchWithCatalog(db, product, enrichmentResult);
-
       if (catalogMatch) {
-        matched++;
-
-        // Fase 3: Mescla dados
         await mergeWithCatalogProduct(db, product, catalogMatch, enrichmentResult);
+        matched++;
       }
-
-      // Atualiza produto com dados enriquecidos
-      await db
-        .update(products)
-        .set({
-          activeIngredient: enrichmentResult.activeIngredient,
-          concentration: enrichmentResult.concentration,
-          description: enrichmentResult.indications.join("; "),
-          updatedAt: new Date(),
-        })
-        .where(eq(products.id, productId));
 
       results.push({
         productId,
@@ -119,26 +101,28 @@ export async function processNfeEnrichmentPipeline(
         result: enrichmentResult,
       });
     } catch (error) {
-      console.error(`[EnrichmentPipeline] Erro ao processar produto ${productId}:`, error);
       failed++;
       results.push({
         productId,
-        productName: "Unknown",
+        productName: "Não processado",
         supplierId,
         status: "failed",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
     }
   }
 
-  // Notifica usuário
-  await notifyOwner({
-    title: "Pipeline de Enriquecimento Concluído",
-    content: `${enriched} produto(s) enriquecido(s), ${matched} match(es) com catálogo, ${failed} erro(s)`,
-  });
+  try {
+    await notifyOwner({
+      title: "Pipeline de Enriquecimento Concluído",
+      content: `${enriched} produto(s) enriquecido(s), ${matched} match(es) com catálogo, ${failed} erro(s)`,
+    });
+  } catch (error) {
+    console.warn("[EnrichmentPipeline] Falha ao enviar notificação:", error);
+  }
 
   return {
-    processed: productIds.length,
+    processed: uniqueIds.length,
     enriched,
     matched,
     failed,
@@ -146,38 +130,22 @@ export async function processNfeEnrichmentPipeline(
   };
 }
 
-/**
- * Fase 1: Enriquecimento com IA
- * Extrai automaticamente: ingrediente ativo, indicações, contraindicações, dosagem
- */
 async function enrichProductWithAI(product: any): Promise<EnrichmentResult | null> {
   try {
-    const prompt = `Analise o seguinte produto veterinário e extraia as informações solicitadas em formato JSON:
+    const prompt = `Analise o produto veterinário abaixo e extraia somente os dados expressamente identificáveis.
 
 Produto: ${product.name}
 Descrição: ${product.description || ""}
-Ingrediente Ativo Atual: ${product.activeIngredient || "não informado"}
-Concentração Atual: ${product.concentration || "não informado"}
+Ingrediente ativo atual: ${product.activeIngredient || "não informado"}
+Concentração atual: ${product.concentration || "não informado"}
 
-Retorne um JSON com:
-{
-  "activeIngredient": "princípio ativo principal",
-  "concentration": "concentração (ex: 10%, 500mg/ml)",
-  "indications": ["indicação 1", "indicação 2"],
-  "contraindications": ["contraindicação 1"],
-  "dosage": "dosagem recomendada",
-  "administrationForm": "forma de administração (injetável, comprimido, etc)",
-  "confidence": 85
-}
-
-Se não conseguir extrair com certeza, use 0 para confidence.`;
+Não presuma composição, indicação, contraindicação ou dose. Quando não houver base suficiente, deixe o campo vazio e reduza confidence.`;
 
     const response = await invokeLLM({
       messages: [
         {
           role: "system",
-          content:
-            "Você é um especialista em medicamentos veterinários. Extraia informações de produtos de forma precisa e estruturada.",
+          content: "Extraia dados estruturados de produtos veterinários sem inventar informações. Dados incertos devem ficar vazios e exigir revisão humana.",
         },
         { role: "user", content: prompt },
       ],
@@ -214,12 +182,16 @@ Se não conseguir extrair com certeza, use 0 para confidence.`;
 
     const content = response.choices[0]?.message?.content;
     if (!content) return null;
+    const contentStr = typeof content === "string" ? content : JSON.stringify(content);
+    const parsed = enrichmentSchema.parse(JSON.parse(contentStr));
 
-    const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
-    const parsed = JSON.parse(contentStr);
     return {
       ...parsed,
       source: "ai_extraction",
+      requiresReview:
+        parsed.confidence < 80 ||
+        !parsed.activeIngredient ||
+        !parsed.concentration,
     };
   } catch (error) {
     console.error("[EnrichmentPipeline] Erro ao enriquecer com IA:", error);
@@ -227,119 +199,88 @@ Se não conseguir extrair com certeza, use 0 para confidence.`;
   }
 }
 
-/**
- * Fase 2: Matching com catálogo
- * Identifica se o produto já existe no catálogo capturado
- */
 async function matchWithCatalog(
   db: any,
   product: any,
-  enrichmentResult: EnrichmentResult
+  enrichmentResult: EnrichmentResult,
 ): Promise<any | null> {
-  try {
-    // Busca por EAN
-    if (product.barcode) {
-      const [match] = await db
-        .select()
-        .from(products)
-        .where(and(eq(products.barcode, product.barcode), eq(products.id, product.id)))
-        .limit(1);
-
-      if (match) return match;
-    }
-
-    // Busca por ingrediente ativo + concentração
-    if (enrichmentResult.activeIngredient && enrichmentResult.concentration) {
-      const [match] = await db
-        .select()
-        .from(products)
-        .where(
-          and(
-            like(products.activeIngredient, `%${enrichmentResult.activeIngredient}%`),
-            like(products.concentration, `%${enrichmentResult.concentration}%`)
-          )
-        )
-        .limit(1);
-
-      if (match) return match;
-    }
-
-    // Busca por nome similar
-    const normalizedName = normalizeString(product.name);
+  // EAN é o identificador preferencial, sempre excluindo o próprio registro.
+  if (product.barcode) {
     const [match] = await db
       .select()
       .from(products)
-      .where(like(products.name, `%${normalizedName}%`))
+      .where(and(eq(products.barcode, product.barcode), ne(products.id, product.id)))
       .limit(1);
-
     if (match) return match;
-  } catch (error) {
-    console.error("[EnrichmentPipeline] Erro ao fazer matching:", error);
+  }
+
+  // Matching por composição só é permitido com alta confiança e campos completos.
+  if (
+    enrichmentResult.confidence >= 90 &&
+    enrichmentResult.activeIngredient &&
+    enrichmentResult.concentration
+  ) {
+    const [match] = await db
+      .select()
+      .from(products)
+      .where(
+        and(
+          like(products.activeIngredient, `%${enrichmentResult.activeIngredient}%`),
+          like(products.concentration, `%${enrichmentResult.concentration}%`),
+          ne(products.id, product.id),
+        ),
+      )
+      .limit(1);
+    if (match) return match;
+  }
+
+  // Nome é apenas fallback conservador e também exclui o próprio produto.
+  const name = String(product.name ?? "").trim();
+  if (name.length >= 8) {
+    const [match] = await db
+      .select()
+      .from(products)
+      .where(and(like(products.name, `%${name}%`), ne(products.id, product.id)))
+      .limit(1);
+    if (match) return match;
   }
 
   return null;
 }
 
-/**
- * Fase 3: Mescla dados
- * Combina dados do NF-e com dados do catálogo
- */
 async function mergeWithCatalogProduct(
   db: any,
   nfeProduct: any,
   catalogProduct: any,
-  enrichmentResult: EnrichmentResult
+  enrichmentResult: EnrichmentResult,
 ): Promise<void> {
-  try {
-    // Atualiza produto do catálogo com dados enriquecidos
-    const mergedData = {
-      // Mantém dados do catálogo, preenche com dados enriquecidos
-      activeIngredient: catalogProduct.activeIngredient || enrichmentResult.activeIngredient,
-      concentration: catalogProduct.concentration || enrichmentResult.concentration,
-      description: enrichmentResult.indications.join("; "),
-      // Atualiza preço com dados do NF-e
-      price: nfeProduct.price,
-      updatedAt: new Date(),
-    };
-
-    await db.update(products).set(mergedData).where(eq(products.id, catalogProduct.id));
-
-    // Registra match no histórico (tabela não existe, apenas log)
-    console.log("[EnrichmentPipeline] Match registrado:", {
-      nfeProductId: nfeProduct.id,
-      catalogProductId: catalogProduct.id,
-      matchConfidence: enrichmentResult.confidence,
-    });
-  } catch (error) {
-    console.error("[EnrichmentPipeline] Erro ao mesclar dados:", error);
+  if (catalogProduct.id === nfeProduct.id) {
+    throw new Error("Matching inválido: o produto foi associado a ele mesmo");
   }
+
+  const mergedData: Record<string, unknown> = { updatedAt: new Date() };
+  if (!catalogProduct.activeIngredient && enrichmentResult.activeIngredient) {
+    mergedData.activeIngredient = enrichmentResult.activeIngredient;
+  }
+  if (!catalogProduct.concentration && enrichmentResult.concentration) {
+    mergedData.concentration = enrichmentResult.concentration;
+  }
+
+  const sourcePrice = Number(nfeProduct.price ?? nfeProduct.costPrice);
+  if (Number.isFinite(sourcePrice) && sourcePrice > 0) mergedData.price = sourcePrice.toFixed(2);
+
+  await db.update(products).set(mergedData).where(eq(products.id, catalogProduct.id));
+  console.info("[EnrichmentPipeline] Match confirmado", {
+    nfeProductId: nfeProduct.id,
+    catalogProductId: catalogProduct.id,
+    matchConfidence: enrichmentResult.confidence,
+  });
 }
 
 /**
- * Normaliza string para comparação
- */
-function normalizeString(str: string): string {
-  return str
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * Processa fila de enriquecimento em background
+ * Mantido apenas por compatibilidade de importação. Não existe fila persistente;
+ * chamar esta função agora falha explicitamente, em vez de fingir processamento.
  */
 export async function processEnrichmentQueue(): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-
-  try {
-    // Busca produtos pendentes de enriquecimento
-    // TODO: Implementar tabela de fila de enriquecimento
-    console.log("[EnrichmentPipeline] Processando fila de enriquecimento...");
-  } catch (error) {
-    console.error("[EnrichmentPipeline] Erro ao processar fila:", error);
-  }
+  throw new Error("Fila de enriquecimento ainda não implantada; use o pipeline síncrono.");
 }

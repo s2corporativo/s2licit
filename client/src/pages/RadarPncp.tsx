@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
-import { Radar, Search, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
+import { usePermission } from "@/components/RequireAuth";
+import { Radar, Search, Loader2, ExternalLink, AlertTriangle, KanbanSquare } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 type Fonte = "pncp" | "comprasgov" | "fiemg";
 
@@ -23,6 +25,8 @@ const FONTES_DISPONIVEIS: { id: Fonte; label: string }[] = [
  * (PNCP, Compras.gov.br e Sistema S / FIEMG) por palavra-chave.
  */
 export default function RadarPncp() {
+  const canEdit = usePermission("editor");
+  const [, navigate] = useLocation();
   const [keywordsInput, setKeywordsInput] = useState("");
   const [uf, setUf] = useState("");
   const [dias, setDias] = useState(7);
@@ -43,6 +47,14 @@ export default function RadarPncp() {
     },
     { enabled: params != null, retry: false },
   );
+
+  const funnelMutation = trpc.funil.criarDeRadar.useMutation({
+    onSuccess: ({ id, jaExistia }) => {
+      toast.success(jaExistia ? "Oportunidade já estava no Funil." : "Oportunidade enviada ao Funil.");
+      navigate(`/funil?oportunidade=${id}`);
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const toggleFonte = (id: Fonte) => {
     setFontes((atual) =>
@@ -176,7 +188,7 @@ export default function RadarPncp() {
       {query.data && query.data.oportunidades.length > 0 ? (
         <div className="space-y-3">
           {query.data.oportunidades.map((op) => (
-            <div key={op.sourceId} className="border border-gray-200 p-4 hover:border-blue-300 transition-colors">
+            <div key={`${op.source}:${op.sourceId}`} className="border border-gray-200 p-4 hover:border-blue-300 transition-colors">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-semibold text-gray-900">{op.orgao}</div>
@@ -190,15 +202,47 @@ export default function RadarPncp() {
                 </div>
               </div>
               <p className="text-sm text-gray-700 mt-2 line-clamp-3">{op.objeto}</p>
-              <div className="flex items-center justify-between mt-3 text-xs text-gray-500">
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-xs text-gray-500">
                 <span>
                   {op.valorEstimado > 0 ? `R$ ${op.valorEstimado.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "valor não informado"}
                 </span>
-                {op.links[0] && (
-                  <a href={op.links[0]} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-700 hover:text-blue-900 font-semibold">
-                    Abrir no portal <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
+                <div className="flex items-center gap-3">
+                  {op.links[0] && (
+                    <a href={op.links[0]} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-700 hover:text-blue-900 font-semibold">
+                      Abrir no portal <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => funnelMutation.mutate({
+                        source: op.source as Fonte,
+                        sourceId: op.sourceId,
+                        orgao: op.orgao,
+                        modalidade: op.modalidade,
+                        numeroProcesso: op.numeroProcesso,
+                        objeto: op.objeto,
+                        descricaoDetalhada: op.descricaoDetalhada || undefined,
+                        uf: op.uf || undefined,
+                        municipio: op.municipio || undefined,
+                        dataPublicacao: op.dataPublicacao?.toISOString() ?? null,
+                        dataAbertura: op.dataAbertura?.toISOString() ?? null,
+                        dataEncerramento: op.dataEncerramento?.toISOString() ?? null,
+                        valorEstimado: op.valorEstimado,
+                        status: op.status,
+                        links: op.links,
+                        dedupeKey: op.dedupeKey,
+                      })}
+                      disabled={funnelMutation.isPending}
+                      className="flex items-center gap-1 bg-gray-900 px-2.5 py-1.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {funnelMutation.isPending && funnelMutation.variables?.sourceId === op.sourceId
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : <KanbanSquare className="w-3 h-3" />}
+                      Enviar ao Funil
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}

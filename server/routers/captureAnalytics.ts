@@ -1,89 +1,78 @@
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import {
   getCaptureStats,
   getSupplierMetrics,
   getCaptureHistory,
-  getMostChangedProducts,
-  getPriceTrends,
   getSuccessRateByPeriod,
   getStatusDistribution,
 } from "../services/captureAnalyticsService";
 
 export const captureAnalyticsRouter = router({
-  /**
-   * Obtém estatísticas gerais
-   */
   getStats: protectedProcedure
     .input(
       z.object({
         startDate: z.date().optional(),
         endDate: z.date().optional(),
-      })
+      }),
     )
     .query(async ({ input }) => {
-      return await getCaptureStats(input.startDate, input.endDate);
+      const stats = await getCaptureStats(input.startDate, input.endDate);
+      return {
+        totalCaptures: stats.totalCaptures,
+        successfulCaptures: stats.successfulCaptures,
+        failedCaptures: stats.failedCaptures,
+        successRate: stats.successRate,
+        averageDuration: stats.averageDuration,
+        totalProductsCaptured: stats.totalProductsCaptured,
+        unavailableMetrics: [
+          "totalProductsEnriched",
+          "totalProductsApproved",
+          "totalProductsRejected",
+        ],
+      };
     }),
 
-  /**
-   * Obtém métricas por fornecedor
-   */
   getSupplierMetrics: protectedProcedure
     .input(
       z.object({
         supplierId: z.number().optional(),
-        limit: z.number().default(10),
-      })
+        limit: z.number().int().min(1).max(100).default(10),
+      }),
     )
-    .query(async ({ input }) => {
-      return await getSupplierMetrics(input.supplierId, input.limit);
-    }),
+    .query(({ input }) => getSupplierMetrics(input.supplierId, input.limit)),
 
-  /**
-   * Obtém histórico de capturas
-   */
   getHistory: protectedProcedure
     .input(
       z.object({
         supplierId: z.number().optional(),
-        limit: z.number().default(50),
-      })
+        limit: z.number().int().min(1).max(500).default(50),
+      }),
     )
-    .query(async ({ input }) => {
-      return await getCaptureHistory(input.supplierId, input.limit);
-    }),
+    .query(({ input }) => getCaptureHistory(input.supplierId, input.limit)),
 
-  /**
-   * Obtém produtos mais alterados
-   */
   getMostChanged: protectedProcedure
-    .input(z.object({ limit: z.number().default(20) }))
-    .query(async ({ input }) => {
-      return await getMostChangedProducts(input.limit);
+    .input(z.object({ limit: z.number().optional() }).optional())
+    .query(() => {
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "Métrica indisponível: ainda não existe histórico auditável de alterações por captura.",
+      });
     }),
 
-  /**
-   * Obtém tendências de preço
-   */
   getPriceTrends: protectedProcedure
-    .input(z.object({ limit: z.number().default(20) }))
-    .query(async ({ input }) => {
-      return await getPriceTrends(input.limit);
+    .input(z.object({ limit: z.number().optional() }).optional())
+    .query(() => {
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "Use o módulo Análise de Preços, que consulta a tabela real de histórico de preços.",
+      });
     }),
 
-  /**
-   * Obtém taxa de sucesso por período
-   */
   getSuccessRate: protectedProcedure
-    .input(z.object({ periodDays: z.number().default(7) }))
-    .query(async ({ input }) => {
-      return await getSuccessRateByPeriod(input.periodDays);
-    }),
+    .input(z.object({ periodDays: z.number().int().min(1).max(365).default(7) }))
+    .query(({ input }) => getSuccessRateByPeriod(input.periodDays)),
 
-  /**
-   * Obtém distribuição de status
-   */
-  getStatusDistribution: protectedProcedure.query(async () => {
-    return await getStatusDistribution();
-  }),
+  getStatusDistribution: protectedProcedure.query(() => getStatusDistribution()),
 });

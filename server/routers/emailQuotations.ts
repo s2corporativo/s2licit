@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
-import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { emailQuotationItems, emailQuotations } from "../../drizzle/schema";
 import { isImapConfigured } from "../services/emailInboxService";
@@ -12,6 +12,7 @@ import {
 } from "../services/emailQuotationSyncService";
 import { buildQuotationResponse } from "../services/emailQuotationResponseService";
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
+import { ensureOpportunityFromQuotation } from "../services/opportunityWorkflowService";
 
 /**
  * Cotações recebidas por e-mail (COTEP/Compras MG, FUNARB, COPASA, Cemig...).
@@ -55,7 +56,7 @@ export const emailQuotationsRouter = router({
     }),
 
   /** Confirma (ou corrige) o produto associado a um item. */
-  setItemMatch: protectedProcedure
+  setItemMatch: editorProcedure
     .input(
       z.object({
         itemId: z.number().int().positive(),
@@ -79,7 +80,7 @@ export const emailQuotationsRouter = router({
     }),
 
   /** Gera o PDF do orçamento-resposta (aplica margem sobre os itens casados). */
-  gerarOrcamento: protectedProcedure
+  gerarOrcamento: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
@@ -87,11 +88,12 @@ export const emailQuotationsRouter = router({
         validDays: z.number().int().positive().max(365).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const result = await buildQuotationResponse(input.id, {
         marginPercent: input.marginPercent,
         validDays: input.validDays,
       });
+      const opportunity = await ensureOpportunityFromQuotation(input.id, ctx.user);
       return {
         success: true as const,
         pdfUrl: `data:application/pdf;base64,${result.pdfBase64}`,
@@ -99,11 +101,12 @@ export const emailQuotationsRouter = router({
         itemCount: result.itemCount,
         itemsSemPreco: result.itemsSemPreco,
         marginPercent: result.marginPercent,
+        funilId: opportunity.id,
       };
     }),
 
   /** Gera o orçamento e envia por e-mail ao remetente, marcando como respondida. */
-  responderPorEmail: protectedProcedure
+  responderPorEmail: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
@@ -113,7 +116,7 @@ export const emailQuotationsRouter = router({
         mensagem: z.string().max(4000).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       if (!isSmtpConfigured()) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
@@ -136,6 +139,9 @@ export const emailQuotationsRouter = router({
         marginPercent: input.marginPercent,
         validDays: input.validDays,
       });
+      // A validação do orçamento e a criação idempotente da oportunidade ocorrem
+      // antes do envio: nenhuma proposta sai sem rastreabilidade no fluxo central.
+      const opportunity = await ensureOpportunityFromQuotation(input.id, ctx.user);
       const pdfBuffer = Buffer.from(response.pdfBase64, "base64");
 
       await sendEmail({
@@ -157,11 +163,16 @@ export const emailQuotationsRouter = router({
           .where(eq(emailQuotations.id, input.id));
       }
 
-      return { success: true as const, to: destinatario, itemCount: response.itemCount };
+      return {
+        success: true as const,
+        to: destinatario,
+        itemCount: response.itemCount,
+        funilId: opportunity.id,
+      };
     }),
 
   /** Define o prazo de resposta de uma cotação. */
-  setPrazo: protectedProcedure
+  setPrazo: editorProcedure
     .input(z.object({ id: z.number().int().positive(), prazoResposta: z.string().nullable() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -195,7 +206,7 @@ export const emailQuotationsRouter = router({
     }),
 
   /** Atualiza o status de uma cotação (ex.: marcar como respondida/descartada). */
-  setStatus: protectedProcedure
+  setStatus: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive(),

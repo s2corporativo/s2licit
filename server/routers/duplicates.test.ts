@@ -32,7 +32,7 @@ vi.mock("../db", () => ({
 import { duplicatesRouter } from "./duplicates";
 
 function caller() {
-  return duplicatesRouter.createCaller({ user: { id: "test" } } as any);
+  return duplicatesRouter.createCaller({ user: { id: "test", role: "editor" } } as any);
 }
 
 describe("duplicatesRouter", () => {

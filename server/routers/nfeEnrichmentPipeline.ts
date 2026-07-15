@@ -1,56 +1,50 @@
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { processNfeEnrichmentPipeline } from "../services/nfeEnrichmentPipelineService";
 
 export const nfeEnrichmentPipelineRouter = router({
   /**
-   * Inicia pipeline de enriquecimento para produtos importados de NF-e
+   * O pipeline atual é síncrono: a chamada só retorna quando todos os produtos
+   * terminaram. Portanto, não há job em segundo plano para consultar/cancelar.
    */
   startEnrichmentPipeline: protectedProcedure
     .input(
       z.object({
-        productIds: z.array(z.number()),
-        supplierId: z.number(),
-      })
+        productIds: z.array(z.number().int().positive()).min(1).max(300),
+        supplierId: z.number().int().positive(),
+      }),
     )
     .mutation(async ({ input }) => {
       try {
         const result = await processNfeEnrichmentPipeline(input.productIds, input.supplierId);
-
         return {
-          success: true,
+          success: result.failed === 0,
+          partial: result.failed > 0 && result.enriched > 0,
           message: `Pipeline concluído: ${result.enriched} enriquecido(s), ${result.matched} match(es), ${result.failed} erro(s)`,
           ...result,
         };
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Erro ao iniciar pipeline",
-        };
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error instanceof Error ? error.message : "Erro ao executar pipeline",
+        });
       }
     }),
 
-  /**
-   * Obtém status do pipeline de enriquecimento
-   */
   getPipelineStatus: protectedProcedure
-    .input(z.object({ productIds: z.array(z.number()) }))
-    .query(async ({ input }) => {
-      // TODO: Implementar rastreamento de status
-      return {
-        status: "idle",
-        processed: 0,
-        enriched: 0,
-        matched: 0,
-        failed: 0,
-      };
+    .input(z.object({ productIds: z.array(z.number()).optional() }).optional())
+    .query(() => {
+      throw new TRPCError({
+        code: "METHOD_NOT_SUPPORTED",
+        message: "O pipeline é síncrono e não possui execução pendente para consulta. O resultado é devolvido pela própria chamada de início.",
+      });
     }),
 
-  /**
-   * Cancela pipeline em execução
-   */
-  cancelPipeline: protectedProcedure.mutation(async () => {
-    // TODO: Implementar cancelamento
-    return { success: true, message: "Pipeline cancelado" };
+  cancelPipeline: protectedProcedure.mutation(() => {
+    throw new TRPCError({
+      code: "METHOD_NOT_SUPPORTED",
+      message: "Não há job em segundo plano para cancelar. A opção será reativada somente após implantação de fila persistente.",
+    });
   }),
 });

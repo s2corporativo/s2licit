@@ -1,65 +1,41 @@
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
-import {
-  scrapeSupplierCatalog,
-  testScraper,
-  validateScraperConfig,
-  type ScraperConfig,
-} from "../services/scraperIntegrationService";
 
+function legacyScraperDisabled(): never {
+  throw new TRPCError({
+    code: "METHOD_NOT_SUPPORTED",
+    message: "Integração legada desativada. Use Fornecedores → Agente de Preços, que executa o scraperEngine real com credenciais criptografadas.",
+  });
+}
+
+/**
+ * Namespace mantido temporariamente apenas para compatibilidade de clientes
+ * antigos. O motor legado usava regex fixa e devolvia listas vazias para
+ * JavaScript/Selenium; por segurança, não executa mais operações.
+ */
 export const scraperIntegrationRouter = router({
-  /**
-   * Executa scraper para fornecedor
-   */
   scrapeSupplier: protectedProcedure
-    .input(z.object({ supplierId: z.number() }))
-    .mutation(async ({ input }) => {
-      return await scrapeSupplierCatalog(input.supplierId);
-    }),
+    .input(z.object({ supplierId: z.number().int().positive() }))
+    .mutation(() => legacyScraperDisabled()),
 
-  /**
-   * Testa configuração de scraper
-   */
   testScraper: protectedProcedure
     .input(
       z.object({
-        baseUrl: z.string(),
-        catalogUrl: z.string().optional(),
+        baseUrl: z.string().url(),
+        catalogUrl: z.string().url().optional(),
         scraperType: z.enum(["http", "javascript", "selenium"]).default("http"),
-      })
+      }),
     )
-    .mutation(async ({ input }) => {
-      const config: ScraperConfig = {
-        supplierId: 0,
-        scraperType: input.scraperType,
-        baseUrl: input.baseUrl,
-        catalogUrl: input.catalogUrl,
-        isActive: true,
-      };
+    .mutation(() => legacyScraperDisabled()),
 
-      return await testScraper(config);
-    }),
-
-  /**
-   * Valida configuração de scraper
-   */
   validateConfig: protectedProcedure
     .input(
       z.object({
-        baseUrl: z.string(),
-        catalogUrl: z.string().optional(),
+        baseUrl: z.string().url(),
+        catalogUrl: z.string().url().optional(),
         scraperType: z.enum(["http", "javascript", "selenium"]).default("http"),
-      })
+      }),
     )
-    .mutation(async ({ input }) => {
-      const config: ScraperConfig = {
-        supplierId: 0,
-        scraperType: input.scraperType,
-        baseUrl: input.baseUrl,
-        catalogUrl: input.catalogUrl,
-        isActive: true,
-      };
-
-      return await validateScraperConfig(config);
-    }),
+    .mutation(() => legacyScraperDisabled()),
 });
