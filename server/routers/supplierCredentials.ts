@@ -5,6 +5,30 @@ import { TRPCError } from "@trpc/server";
 
 // ─── Schemas ──────────────────────────────────────────────────────────────
 
+export const MASKED_CREDENTIAL_VALUE = "••••••••";
+
+/**
+ * Nunca devolve a senha descriptografada ao navegador. A descriptografia fica
+ * restrita aos serviços internos que executam o scraper.
+ */
+export function sanitizeSupplierCredential<T extends { password: string }>(credential: T): T {
+  return {
+    ...credential,
+    password: credential.password ? MASKED_CREDENTIAL_VALUE : "",
+  };
+}
+
+/**
+ * A máscara exibida pela UI representa "manter a senha atual". Ignorá-la evita
+ * substituir a credencial real por oito marcadores ao editar apenas e-mail ou
+ * horário de sincronização.
+ */
+export function normalizeSupplierPasswordUpdate(password?: string): string | undefined {
+  const normalized = password?.trim();
+  if (!normalized || normalized === MASKED_CREDENTIAL_VALUE) return undefined;
+  return normalized;
+}
+
 const createCredentialSchema = z.object({
   supplierId: z.number(),
   scraperType: z.string(),
@@ -25,7 +49,12 @@ const deleteCredentialSchema = z.object({ id: z.number() });
 
 const testConnectionSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(1),
+  password: z
+    .string()
+    .min(1)
+    .refine((password) => password !== MASKED_CREDENTIAL_VALUE, {
+      message: "Digite a senha real para testar a conexão",
+    }),
   scraperType: z.string().optional(),
 });
 
@@ -42,7 +71,7 @@ export const supplierCredentialsRouter = router({
   listCredentials: adminProcedure.query(async () => {
     try {
       const credentials = await SupplierCredentialsService.listCredentials();
-      return credentials;
+      return credentials.map(sanitizeSupplierCredential);
     } catch (error) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
@@ -65,7 +94,7 @@ export const supplierCredentialsRouter = router({
             message: "Credencial não encontrada",
           });
         }
-        return credential;
+        return sanitizeSupplierCredential(credential);
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         throw new TRPCError({
@@ -83,7 +112,7 @@ export const supplierCredentialsRouter = router({
     .query(async ({ input }: { input: z.infer<typeof getCredentialBySupplierSchema> }) => {
       try {
         const credential = await SupplierCredentialsService.getCredentialBySupplier(input.supplierId);
-        return credential;
+        return credential ? sanitizeSupplierCredential(credential) : null;
       } catch (error) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -106,7 +135,7 @@ export const supplierCredentialsRouter = router({
           password: input.password,
           scheduleTime: input.scheduleTime,
         });
-        return credential;
+        return sanitizeSupplierCredential(credential);
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         throw new TRPCError({
@@ -126,11 +155,11 @@ export const supplierCredentialsRouter = router({
         const credential = await SupplierCredentialsService.updateCredential({
           id: input.id,
           email: input.email,
-          password: input.password,
+          password: normalizeSupplierPasswordUpdate(input.password),
           scheduleTime: input.scheduleTime,
           enabled: input.enabled,
         });
-        return credential;
+        return sanitizeSupplierCredential(credential);
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         throw new TRPCError({
