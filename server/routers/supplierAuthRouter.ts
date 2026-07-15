@@ -1,17 +1,24 @@
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { adminProcedure, router } from "../_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
-import {
-  supplierCredentials,
-} from "../../drizzle/schema";
+import { supplierCredentials } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { credentialEncryptionService } from "../services/credentialEncryptionService";
 import { supplierSessionService } from "../services/supplierSessionService";
 
+function internalError(operation: string, error: unknown): TRPCError {
+  console.error(`[SupplierAuth] ${operation}:`, error);
+  return new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: `Não foi possível ${operation}.`,
+  });
+}
+
 export const supplierAuthRouter = router({
   /**
-   * Store supplier credentials securely
+   * Store supplier credentials securely. Campos sensíveis omitidos em uma
+   * atualização preservam o valor atual em vez de apagá-lo.
    */
   storeCredentials: adminProcedure
     .input(
@@ -23,29 +30,13 @@ export const supplierAuthRouter = router({
         apiKey: z.string().optional(),
         sessionToken: z.string().optional(),
         notes: z.string().optional(),
-      })
+      }),
     )
     .mutation(async ({ input }) => {
       try {
         const db = await getDb();
         if (!db) throw new Error("Database connection failed");
 
-        let passwordEncrypted: string | null = null;
-        let apiKeyEncrypted: string | null = null;
-        let sessionTokenEncrypted: string | null = null;
-
-        // Encrypt sensitive fields
-        if (input.password) {
-          passwordEncrypted = credentialEncryptionService.encrypt(input.password);
-        }
-        if (input.apiKey) {
-          apiKeyEncrypted = credentialEncryptionService.encrypt(input.apiKey);
-        }
-        if (input.sessionToken) {
-          sessionTokenEncrypted = credentialEncryptionService.encrypt(input.sessionToken);
-        }
-
-        // Check if credentials exist
         const existing = await db
           .select()
           .from(supplierCredentials)
@@ -53,143 +44,110 @@ export const supplierAuthRouter = router({
           .limit(1);
 
         if (existing.length > 0) {
-          // Update
+          const updateData: Record<string, unknown> = {
+            authType: input.authType,
+            updatedAt: new Date(),
+          };
+
+          if (input.username !== undefined) updateData.username = input.username;
+          if (input.notes !== undefined) updateData.notes = input.notes;
+          if (input.password !== undefined) {
+            updateData.passwordEncrypted = input.password
+              ? credentialEncryptionService.encrypt(input.password)
+              : null;
+          }
+          if (input.apiKey !== undefined) {
+            updateData.apiKey = input.apiKey
+              ? credentialEncryptionService.encrypt(input.apiKey)
+              : null;
+          }
+          if (input.sessionToken !== undefined) {
+            updateData.sessionToken = input.sessionToken
+              ? credentialEncryptionService.encrypt(input.sessionToken)
+              : null;
+          }
+
           await db
             .update(supplierCredentials)
-            .set({
-              authType: input.authType,
-              username: input.username,
-              passwordEncrypted,
-              apiKey: apiKeyEncrypted,
-              sessionToken: sessionTokenEncrypted,
-              notes: input.notes,
-              updatedAt: new Date(),
-            })
+            .set(updateData)
             .where(eq(supplierCredentials.supplierId, input.supplierId));
         } else {
-          // Create
           await db.insert(supplierCredentials).values({
             supplierId: input.supplierId,
             authType: input.authType,
             username: input.username,
-            passwordEncrypted,
-            apiKey: apiKeyEncrypted,
-            sessionToken: sessionTokenEncrypted,
+            passwordEncrypted: input.password
+              ? credentialEncryptionService.encrypt(input.password)
+              : null,
+            apiKey: input.apiKey ? credentialEncryptionService.encrypt(input.apiKey) : null,
+            sessionToken: input.sessionToken
+              ? credentialEncryptionService.encrypt(input.sessionToken)
+              : null,
             notes: input.notes,
           });
         }
 
         return { success: true };
       } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to store credentials: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
+        throw internalError("salvar as credenciais do fornecedor", error);
       }
     }),
 
   /**
-   * Get decrypted credentials for a supplier
+   * Retorna somente metadados e indicadores. Senha, API key e token nunca são
+   * descriptografados por uma rota HTTP/tRPC.
    */
   getCredentials: adminProcedure
-    .input(
-      z.object({
-        supplierId: z.number().int().positive(),
-      })
-    )
+    .input(z.object({ supplierId: z.number().int().positive() }))
     .query(async ({ input }) => {
       try {
         const db = await getDb();
         if (!db) throw new Error("Database connection failed");
 
-        const creds = await db
+        const rows = await db
           .select()
           .from(supplierCredentials)
           .where(eq(supplierCredentials.supplierId, input.supplierId))
           .limit(1);
 
-        if (creds.length === 0) {
-          return null;
-        }
+        const cred = rows[0];
+        if (!cred) return null;
 
-        const cred = creds[0];
-
-        // Decrypt sensitive fields
-        const decrypted: any = {
+        return {
           id: cred.id,
           supplierId: cred.supplierId,
           authType: cred.authType,
           username: cred.username,
           notes: cred.notes,
+          hasPassword: Boolean(cred.passwordEncrypted),
+          hasApiKey: Boolean(cred.apiKey),
+          hasSessionToken: Boolean(cred.sessionToken),
           lastUsedAt: cred.lastUsedAt,
           createdAt: cred.createdAt,
           updatedAt: cred.updatedAt,
         };
-
-        if (cred.passwordEncrypted) {
-          try {
-            decrypted.password = credentialEncryptionService.decrypt(cred.passwordEncrypted);
-          } catch {
-            decrypted.password = null;
-          }
-        }
-
-        if (cred.apiKey) {
-          try {
-            decrypted.apiKey = credentialEncryptionService.decrypt(cred.apiKey);
-          } catch {
-            decrypted.apiKey = null;
-          }
-        }
-
-        if (cred.sessionToken) {
-          try {
-            decrypted.sessionToken = credentialEncryptionService.decrypt(cred.sessionToken);
-          } catch {
-            decrypted.sessionToken = null;
-          }
-        }
-
-        return decrypted;
       } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to get credentials: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
+        throw internalError("consultar as credenciais do fornecedor", error);
       }
     }),
 
-  /**
-   * Delete credentials for a supplier
-   */
   deleteCredentials: adminProcedure
-    .input(
-      z.object({
-        supplierId: z.number().int().positive(),
-      })
-    )
+    .input(z.object({ supplierId: z.number().int().positive() }))
     .mutation(async ({ input }) => {
       try {
         const db = await getDb();
         if (!db) throw new Error("Database connection failed");
-
         await db
           .delete(supplierCredentials)
           .where(eq(supplierCredentials.supplierId, input.supplierId));
-
         return { success: true };
       } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to delete credentials: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
+        throw internalError("excluir as credenciais do fornecedor", error);
       }
     }),
 
-  /**
-   * Create or update a session
-   */
-  upsertSession: protectedProcedure
+  /** Sessões de fornecedor são dados administrativos e nunca são devolvidas. */
+  upsertSession: adminProcedure
     .input(
       z.object({
         supplierId: z.number().int().positive(),
@@ -198,7 +156,7 @@ export const supplierAuthRouter = router({
         authHeader: z.string().optional(),
         expiresAt: z.date().optional(),
         status: z.enum(["active", "expired", "invalid", "pending"]).default("active"),
-      })
+      }),
     )
     .mutation(async ({ input }) => {
       try {
@@ -210,104 +168,54 @@ export const supplierAuthRouter = router({
             authHeader: input.authHeader,
             expiresAt: input.expiresAt,
           },
-          input.status
+          input.status,
         );
-
         return { success: true, sessionId: session.id };
       } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to upsert session: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
+        throw internalError("salvar a sessão do fornecedor", error);
       }
     }),
 
-  /**
-   * Get active session for a supplier
-   */
-  getActiveSession: protectedProcedure
-    .input(
-      z.object({
-        supplierId: z.number().int().positive(),
-      })
-    )
+  /** Retorna apenas estado e validade, sem cookies, token ou Authorization. */
+  getActiveSession: adminProcedure
+    .input(z.object({ supplierId: z.number().int().positive() }))
     .query(async ({ input }) => {
       try {
         const session = await supplierSessionService.getActiveSession(input.supplierId);
-
-        if (!session) {
-          return null;
-        }
-
-        // Parse cookies
-        const cookies = supplierSessionService.parseCookies(session) as Record<string, string>;
+        if (!session) return null;
 
         return {
           id: session.id,
           supplierId: session.supplierId,
-          cookies,
-          sessionToken: session.sessionToken,
-          authHeader: session.authHeader,
           status: session.status,
           expiresAt: session.expiresAt,
           lastAuthAt: session.lastAuthAt,
+          hasCookies: Boolean(session.cookies),
+          hasSessionToken: Boolean(session.sessionToken),
+          hasAuthHeader: Boolean(session.authHeader),
         };
       } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to get session: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
+        throw internalError("consultar a sessão do fornecedor", error);
       }
     }),
 
-  /**
-   * Invalidate session
-   */
-  invalidateSession: protectedProcedure
-    .input(
-      z.object({
-        supplierId: z.number().int().positive(),
-      })
-    )
+  invalidateSession: adminProcedure
+    .input(z.object({ supplierId: z.number().int().positive() }))
     .mutation(async ({ input }) => {
       try {
         await supplierSessionService.invalidateSession(input.supplierId);
         return { success: true };
       } catch (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to invalidate session: ${error instanceof Error ? error.message : "Unknown error"}`,
-        });
+        throw internalError("invalidar a sessão do fornecedor", error);
       }
     }),
 
-  /**
-   * Generate new API key
-   */
-  generateApiKey: protectedProcedure.query(async () => {
-    try {
-      const apiKey = credentialEncryptionService.generateApiKey();
-      return { apiKey };
-    } catch (error) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: `Failed to generate API key: ${error instanceof Error ? error.message : "Unknown error"}`,
-      });
-    }
-  }),
+  /** Geração de segredo é alteração administrativa, não consulta de leitura. */
+  generateApiKey: adminProcedure.mutation(() => ({
+    apiKey: credentialEncryptionService.generateApiKey(),
+  })),
 
-  /**
-   * Generate new session token
-   */
-  generateSessionToken: protectedProcedure.query(async () => {
-    try {
-      const token = credentialEncryptionService.generateSessionToken();
-      return { token };
-    } catch (error) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: `Failed to generate session token: ${error instanceof Error ? error.message : "Unknown error"}`,
-      });
-    }
-  }),
+  generateSessionToken: adminProcedure.mutation(() => ({
+    token: credentialEncryptionService.generateSessionToken(),
+  })),
 });
