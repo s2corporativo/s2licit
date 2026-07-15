@@ -29,7 +29,23 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
 
       - name: Verificação de tipos (tsc)
-        run: pnpm exec tsc --noEmit --pretty false
+        id: typecheck
+        continue-on-error: true
+        run: pnpm exec tsc --noEmit --pretty false > typecheck.log 2>&1
+
+      - name: Publicar diagnóstico do TypeScript
+        if: steps.typecheck.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: typecheck-errors
+          path: typecheck.log
+          retention-days: 3
+
+      - name: Interromper em erro de tipos
+        if: steps.typecheck.outcome == 'failure'
+        run: |
+          cat typecheck.log
+          exit 1
 
       - name: Lint
         run: pnpm lint
