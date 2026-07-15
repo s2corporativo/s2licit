@@ -63,19 +63,29 @@ export function getIntegrationStatuses(): IntegrationStatus[] {
       detail: isWhatsappConfigured()
         ? `Alertas habilitados via ${whatsappMode}.`
         : "Os alertas permanecem no sistema, mas não são encaminhados ao WhatsApp.",
-      expectedConfiguration: whatsappMode === "webhook"
-        ? ["WHATSAPP_WEBHOOK_URL", "WHATSAPP_TO"]
-        : ["WHATSAPP_PHONE_ID", "WHATSAPP_TOKEN", "WHATSAPP_TO"],
+      expectedConfiguration:
+        whatsappMode === "webhook"
+          ? ["WHATSAPP_WEBHOOK_URL", "WHATSAPP_TO"]
+          : ["WHATSAPP_PHONE_ID", "WHATSAPP_TOKEN", "WHATSAPP_TO"],
       mode: whatsappMode,
     },
   ];
 }
 
+/**
+ * Retorna somente nomes de variáveis presentes no processo. O valor nunca é
+ * serializado, registrado ou devolvido ao navegador.
+ */
 export function configuredEnvironmentNames(): string[] {
   const names = [
+    "DATABASE_URL",
+    "JWT_SECRET",
+    "ENCRYPTION_KEY",
     "ADMIN_PASSWORD",
     "GROQ_API_KEY",
     "ANTHROPIC_API_KEY",
+    "BUILT_IN_FORGE_API_URL",
+    "BUILT_IN_FORGE_API_KEY",
     "IMAP_HOST",
     "IMAP_USER",
     "IMAP_PASSWORD",
@@ -88,5 +98,5 @@ export function configuredEnvironmentNames(): string[] {
     "WHATSAPP_TO",
     "PRODEMGE_API_KEY",
   ];
-  return names.filter((name) => Boolean(process.env[name]?.trim()));
+  return names.filter((name) => Boolean(process.env[name]?.trim())).sort();
 }
