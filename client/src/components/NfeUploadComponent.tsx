@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Upload, AlertCircle, CheckCircle2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { trpc } from "@/lib/trpc";
-import { usePriceSync } from "@/hooks/usePriceSync";
 
 interface NfePreview {
   nfeNumber: string;
@@ -30,328 +29,193 @@ interface NfePreview {
 }
 
 interface NfeUploadComponentProps {
-  onSuccess?: (result: any) => void;
+  onSuccess?: (result: unknown) => void;
   onError?: (error: string) => void;
 }
 
 export function NfeUploadComponent({ onSuccess, onError }: NfeUploadComponentProps) {
-  const [xmlContent, setXmlContent] = useState<string>("");
+  const [xmlContent, setXmlContent] = useState("");
   const [preview, setPreview] = useState<NfePreview | null>(null);
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string>("");
-  const [syncSummary, setSyncSummary] = useState<string>("");
-  const [showSyncResults, setShowSyncResults] = useState(false);
-
-  const priceSync = usePriceSync();
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const previewMutation = trpc.nfeImport.previewNfeImport.useMutation();
   const importMutation = trpc.nfeImport.importNfeWithSupplier.useMutation();
+  const busy = previewMutation.isPending || importMutation.isPending;
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
-    setIsLoading(true);
     setError("");
+    setSuccess("");
+    setPreview(null);
+    setSelectedProducts(new Set());
 
-    try {
-      const content = await file.text() as string;
-      setXmlContent(content);
-
-      // Preview the import
-      const result = await previewMutation.mutateAsync({
-        xmlContent: content,
-      });
-
-      if (result.success && result.preview) {
-        setPreview(result.preview);
-        // Select all products by default
-          const allIds = new Set<string>(result.preview.products.map((p: NfePreview["products"][number]) => p.id));
-
-        setSelectedProducts(allIds);
-      } else {
-        setError(result.error || "Erro ao processar NFe");
-      }
-    } catch (err) {
-      setError(`Erro ao ler arquivo: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleProductToggle = (productId: string) => {
-    const newSelected = new Set(selectedProducts);
-    if (newSelected.has(productId)) {
-      newSelected.delete(productId);
-    } else {
-      newSelected.add(productId);
-    }
-    setSelectedProducts(newSelected);
-  };
-
-  const handleSelectAll = () => {
-    if (preview) {
-      if (selectedProducts.size === preview.products.length) {
-        setSelectedProducts(new Set());
-      } else {
-        setSelectedProducts(new Set(preview.products.map(p => p.id)));
-      }
-    }
-  };
-
-  const handleImport = async () => {
-    if (!xmlContent) {
-      setError("Nenhum arquivo selecionado");
+    if (!file.name.toLowerCase().endsWith(".xml")) {
+      setError("Selecione um arquivo XML de NF-e.");
       return;
     }
 
-    setIsLoading(true);
-    setError("");
-    setSyncSummary("");
-
     try {
-      // Capture price snapshot before import
-      const beforeSnapshot = await priceSync.captureBeforeSnapshot(
-        preview?.products.map((_, i) => i) || []
-      );
+      const content = await file.text();
+      const result = await previewMutation.mutateAsync({ xmlContent: content });
+      if (!result.success || !result.preview) {
+        throw new Error(result.error || "Não foi possível validar a NF-e");
+      }
+      setXmlContent(content);
+      setPreview(result.preview as NfePreview);
+      setSelectedProducts(new Set(result.preview.products.map((product) => product.id)));
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Erro ao ler o XML";
+      setError(message);
+      onError?.(message);
+    }
+  };
 
-      // Import NFe
+  const toggleProduct = (productId: string) => {
+    setSelectedProducts((current) => {
+      const next = new Set(current);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (!preview) return;
+    setSelectedProducts((current) =>
+      current.size === preview.products.length
+        ? new Set()
+        : new Set(preview.products.map((product) => product.id)),
+    );
+  };
+
+  const handleImport = async () => {
+    if (!xmlContent || !preview) {
+      setError("Carregue e valide uma NF-e antes de importar.");
+      return;
+    }
+    if (selectedProducts.size === 0) {
+      setError("Selecione ao menos um produto.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    try {
       const result = await importMutation.mutateAsync({
         xmlContent,
         selectedProductIds: Array.from(selectedProducts),
       });
+      if (!result.success) throw new Error(result.error || "A importação não foi concluída");
 
-      if (result.success) {
-        // Synchronize prices after import
-        // Note: importNfeWithSupplier returns productsImported count, not array of IDs
-        // We'll use the preview products as reference for sync
-        if (beforeSnapshot && preview && preview.products.length > 0) {
-          const productIds = preview.products.map((_, i) => i);
-          const syncResult = await priceSync.syncPrices(
-            productIds,
-            beforeSnapshot
-          );
-
-          if (syncResult && syncResult.summary) {
-            setSyncSummary(syncResult.summary);
-            setShowSyncResults(true);
-          }
-        }
-
-        setXmlContent("");
-        setPreview(null);
-        setSelectedProducts(new Set());
-        onSuccess?.(result);
-      } else {
-        setError(result.error || "Erro ao importar NFe");
-        onError?.(result.error || "Erro ao importar NFe");
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      setError(`Erro ao importar: ${errorMsg}`);
-      onError?.(errorMsg);
-    } finally {
-      setIsLoading(false);
+      setSuccess(`${result.productsImported} produto(s) importado(s) integralmente da NF-e ${result.nfeNumber}.`);
+      setXmlContent("");
+      setPreview(null);
+      setSelectedProducts(new Set());
+      onSuccess?.(result);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Erro ao importar NF-e";
+      setError(message);
+      onError?.(message);
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Sync Results */}
-      {showSyncResults && syncSummary && (
-        <Card className="border-blue-200 bg-blue-50 p-4">
-          <div className="flex gap-3">
-            <CheckCircle2 className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <h4 className="font-semibold text-blue-900">Sincronização de Preços</h4>
-              <p className="text-sm text-blue-800 mt-2 whitespace-pre-line">{syncSummary}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => setShowSyncResults(false)}
-              >
-                Fechar
-              </Button>
-            </div>
+    <div className="space-y-5">
+      {success && (
+        <Card className="border-green-200 bg-green-50 p-4">
+          <div className="flex gap-3 text-green-900">
+            <CheckCircle2 className="h-5 w-5 shrink-0" />
+            <p className="text-sm">{success}</p>
           </div>
         </Card>
       )}
 
-      {/* Upload Area */}
+      {error && (
+        <Card className="border-red-200 bg-red-50 p-4">
+          <div className="flex gap-3 text-red-900">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <p className="text-sm">{error}</p>
+          </div>
+        </Card>
+      )}
+
       <Card className="p-6">
-        <div className="flex flex-col items-center justify-center gap-4">
-          <Upload className="h-12 w-12 text-muted-foreground" />
-          <div className="text-center">
-            <h3 className="text-lg font-semibold">Importar Nota Fiscal (NFe)</h3>
-            <p className="text-sm text-muted-foreground">
-              Arraste um arquivo XML ou clique para selecionar
-            </p>
+        <div className="flex flex-col items-center gap-4 text-center">
+          <Upload className="h-12 w-12 text-gray-400" />
+          <div>
+            <h3 className="text-lg font-semibold">Importar Nota Fiscal Eletrônica</h3>
+            <p className="text-sm text-gray-500">O XML será validado antes de qualquer gravação.</p>
           </div>
           <input
-            type="file"
-            accept=".xml"
-            onChange={handleFileUpload}
-            disabled={isLoading}
-            className="hidden"
             id="nfe-file-input"
+            type="file"
+            accept=".xml,application/xml,text/xml"
+            onChange={handleFileUpload}
+            disabled={busy}
+            className="hidden"
           />
-          <Button
-            asChild
-            variant="outline"
-            disabled={isLoading}
-            className="cursor-pointer"
-          >
-            <label htmlFor="nfe-file-input">
-              {isLoading ? "Processando..." : "Selecionar arquivo"}
+          <Button asChild variant="outline" disabled={busy}>
+            <label htmlFor="nfe-file-input" className="cursor-pointer">
+              {previewMutation.isPending ? <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Validando</> : "Selecionar XML"}
             </label>
           </Button>
         </div>
       </Card>
 
-      {/* Error Message */}
-      {error && (
-        <Card className="border-red-200 bg-red-50 p-4">
-          <div className="flex gap-3">
-            <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <h4 className="font-semibold text-red-900">Erro</h4>
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Preview */}
       {preview && (
-        <div className="space-y-4">
-          {/* NFe Info */}
-          <Card className="p-4 border-green-200 bg-green-50">
-            <div className="flex gap-3">
-              <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h4 className="font-semibold text-green-900">NFe Válida</h4>
-                <div className="mt-2 grid grid-cols-2 gap-4 text-sm text-green-800">
-                  <div>
-                    <span className="font-medium">NFe:</span> {preview.nfeNumber}
-                  </div>
-                  <div>
-                    <span className="font-medium">Fornecedor:</span> {preview.supplierName}
-                  </div>
-                  <div>
-                    <span className="font-medium">CNPJ:</span> {preview.supplierCnpj}
-                  </div>
-                  <div>
-                    <span className="font-medium">Produtos:</span> {preview.products.length}
-                  </div>
-                </div>
-              </div>
+        <>
+          <Card className="border-green-200 bg-green-50 p-4">
+            <div className="grid gap-2 text-sm text-green-900 md:grid-cols-3">
+              <p><strong>NF-e:</strong> {preview.nfeNumber}</p>
+              <p><strong>Fornecedor:</strong> {preview.supplierName}</p>
+              <p><strong>CNPJ:</strong> {preview.supplierCnpj}</p>
+              <p><strong>Itens:</strong> {preview.products.length}</p>
+              <p><strong>Valor:</strong> {preview.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+              <p><strong>Selecionados:</strong> {selectedProducts.size}</p>
             </div>
           </Card>
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground">Total de Produtos</div>
-              <div className="text-2xl font-bold">{preview.stats.totalProducts}</div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground">Valor Total</div>
-              <div className="text-2xl font-bold">
-                R$ {preview.stats.totalValue.toFixed(2)}
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground">Preço Médio</div>
-              <div className="text-2xl font-bold">
-                R$ {preview.stats.averagePrice.toFixed(2)}
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="text-sm text-muted-foreground">Selecionados</div>
-              <div className="text-2xl font-bold">{selectedProducts.size}</div>
-            </Card>
-          </div>
-
-          {/* Products Table */}
-          <Card className="p-4">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h4 className="font-semibold">Produtos</h4>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSelectAll}
-                >
-                  {selectedProducts.size === preview.products.length
-                    ? "Desselecionar Todos"
-                    : "Selecionar Todos"}
-                </Button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 px-2 w-8">
-                        <Checkbox
-                          checked={selectedProducts.size === preview.products.length}
-                          onChange={handleSelectAll}
-                        />
-                      </th>
-                      <th className="text-left py-2 px-2">Produto</th>
-                      <th className="text-left py-2 px-2">EAN</th>
-                      <th className="text-right py-2 px-2">Qtd</th>
-                      <th className="text-right py-2 px-2">Preço Unit.</th>
-                      <th className="text-right py-2 px-2">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.products.map(product => (
-                      <tr key={product.id} className="border-b hover:bg-muted/50">
-                        <td className="py-2 px-2">
-                          <Checkbox
-                            checked={selectedProducts.has(product.id)}
-                            onChange={() => handleProductToggle(product.id)}
-                          />
-                        </td>
-                        <td className="py-2 px-2 font-medium">{product.productName}</td>
-                        <td className="py-2 px-2 text-muted-foreground">{product.ean || "-"}</td>
-                        <td className="py-2 px-2 text-right">{product.quantity}</td>
-                        <td className="py-2 px-2 text-right">R$ {product.unitPrice.toFixed(2)}</td>
-                        <td className="py-2 px-2 text-right font-medium">
-                          R$ {product.totalPrice.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          <Card className="overflow-x-auto p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h4 className="font-semibold">Produtos extraídos</h4>
+              <Button variant="outline" size="sm" onClick={toggleAll}>
+                {selectedProducts.size === preview.products.length ? "Desmarcar todos" : "Selecionar todos"}
+              </Button>
             </div>
+            <table className="w-full text-sm">
+              <thead className="border-b bg-gray-50">
+                <tr>
+                  <th className="p-2 text-left">Importar</th>
+                  <th className="p-2 text-left">Produto</th>
+                  <th className="p-2 text-left">EAN</th>
+                  <th className="p-2 text-right">Quantidade</th>
+                  <th className="p-2 text-right">Preço unitário</th>
+                  <th className="p-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {preview.products.map((product) => (
+                  <tr key={product.id}>
+                    <td className="p-2"><Checkbox checked={selectedProducts.has(product.id)} onCheckedChange={() => toggleProduct(product.id)} /></td>
+                    <td className="p-2 font-medium">{product.productName}</td>
+                    <td className="p-2 font-mono text-xs">{product.ean || "—"}</td>
+                    <td className="p-2 text-right">{product.quantity}</td>
+                    <td className="p-2 text-right">{Number(product.unitPrice).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
+                    <td className="p-2 text-right">{Number(product.totalPrice).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </Card>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setXmlContent("");
-                setPreview(null);
-                setSelectedProducts(new Set());
-              }}
-              disabled={isLoading}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleImport}
-              disabled={isLoading || selectedProducts.size === 0}
-            >
-              {isLoading ? "Importando..." : `Importar ${selectedProducts.size} Produtos`}
-            </Button>
-          </div>
-        </div>
+          <Button className="w-full" size="lg" onClick={handleImport} disabled={busy || selectedProducts.size === 0}>
+            {importMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Importando</> : `Importar ${selectedProducts.size} produto(s)`}
+          </Button>
+        </>
       )}
     </div>
   );
