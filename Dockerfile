@@ -33,5 +33,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl --fail --silent "http://127.0.0.1:${PORT:-3000}/readyz" > /dev/null || exit 1
 
-# Nunca inicia a aplicação com migrations pendentes ou inválidas.
-CMD ["sh", "-c", "pnpm db:push && exec node dist/index.js"]
+# Reconcilia bancos legados sem apagar dados e inicia somente após o schema estar íntegro.
+CMD ["sh", "-c", "node scripts/migrate-production.mjs && exec node dist/index.js"]
