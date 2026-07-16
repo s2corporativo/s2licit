@@ -39,6 +39,7 @@ import { workflowRouter } from "./routers/workflowRouter";
 import { operationsRouter } from "./routers/operationsRouter";
 import { auditRouter } from "./routers/auditRouter";
 import { mfaRouter } from "./routers/mfaRouter";
+import { usersRouter } from "./routers/usersRouter";
 import { alertConfigRouter } from "./routers/alertConfigRouter";
 import { marginOptimizationRouter } from "./routers/marginOptimizationRouter";
 import { reportRouter } from "./routers/reportRouter";
@@ -193,6 +194,7 @@ export const appRouter = router({
   priceAlerts: priceAlertsRouter,
   audit: auditRouter,
   mfa: mfaRouter,
+  users: usersRouter,
   alertConfig: alertConfigRouter,
   marginOptimization: marginOptimizationRouter,
   reports: reportRouter,
