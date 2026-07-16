@@ -75,7 +75,7 @@ jobs:
   diagnostico-vps:
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/vps-502-diagnostico-20260715'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Preparar SSH
         run: |
@@ -117,6 +117,22 @@ jobs:
             echo "--- ${container} ---"
             docker inspect --format 'status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$container" 2>&1 || true
           done
+
+          echo "=== ARQUIVOS DE MIGRAÇÃO ==="
+          ls -la drizzle/*.sql drizzle/meta/_journal.json 2>&1 || true
+          sha256sum drizzle/*.sql 2>&1 || true
+          cat drizzle/meta/_journal.json 2>&1 || true
+
+          echo "=== ESTADO DAS MIGRAÇÕES NO MYSQL ==="
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --raw -e "
+            SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN (\"__drizzle_migrations\",\"duplicate_exceptions\");
+            SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\"products\" AND COLUMN_NAME IN (\"viaAdministracao\",\"validadeMeses\");
+            SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\"scraper_configs\" AND COLUMN_NAME=\"customSelectors\";
+            SELECT id, hash, created_at FROM __drizzle_migrations ORDER BY created_at;
+          "' 2>&1 | redact || true
+
+          echo "=== EXECUÇÃO FOREGROUND DA MIGRAÇÃO ==="
+          docker compose run --rm --no-deps -e CI=1 -e NO_COLOR=1 -e TERM=dumb app sh -lc 'pnpm exec drizzle-kit migrate' 2>&1 | redact || true
 
           echo "=== LOGS APP/DB (REDACTADOS) ==="
           docker compose logs --tail=250 app db 2>&1 | redact || true
