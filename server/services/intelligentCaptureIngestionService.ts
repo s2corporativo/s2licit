@@ -3,7 +3,7 @@ import { parseStringPromise } from "xml2js";
 import { parseNfeXml } from "./nfeParserService";
 import { detectCategory, discoverCatalogPages, extractProductData, normalizeProductName } from "./catalogDiscoveryService";
 
-export type CaptureSourceType = "url" | "html" | "pdf" | "spreadsheet" | "xml" | "docx" | "text";
+export type CaptureSourceType = "url" | "html" | "pdf" | "spreadsheet" | "xml" | "docx" | "text" | "image";
 
 export type CaptureProductInput = {
   name: string;
@@ -197,7 +197,13 @@ export async function extractTextFromBinaryDocument(buffer: Buffer, fileName: st
     return result.value ?? "";
   }
 
-  throw new Error("Formato de documento não suportado. Use PDF ou DOCX.");
+  // §2 — imagem digitalizada: OCR por IA de visão.
+  const { isOcrSupportedMime, ocrImagem } = await import("./ocrService");
+  if (isOcrSupportedMime(mimeType, lowerName)) {
+    return await ocrImagem(buffer, mimeType);
+  }
+
+  throw new Error("Formato de documento não suportado. Use PDF, DOCX ou imagem (PNG/JPG).");
 }
 
 function genericXmlObjectToProducts(node: unknown, products: CaptureProductInput[] = []): CaptureProductInput[] {
@@ -282,7 +288,7 @@ export async function buildCaptureDraftFromDocument(input: {
   fileBase64: string;
   fileName: string;
   mimeType: string;
-  sourceType: "pdf" | "docx";
+  sourceType: "pdf" | "docx" | "image";
 }): Promise<CaptureBatchDraft> {
   const buffer = Buffer.from(input.fileBase64, "base64");
   const text = await extractTextFromBinaryDocument(buffer, input.fileName, input.mimeType);

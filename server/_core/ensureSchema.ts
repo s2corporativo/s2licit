@@ -99,3 +99,29 @@ export async function ensureTaxRuleTypes(): Promise<void> {
     console.error("[Schema] Falha ao estender tax_rules.tipo:", err);
   }
 }
+
+/**
+ * Inclui "image" no enum sourceType das tabelas de captura (§2 — OCR de imagem
+ * digitalizada). Idempotente: só altera se o valor ainda não existe.
+ */
+export async function ensureCaptureSourceTypes(): Promise<void> {
+  const tabelas = ["captured_product_batches", "captured_product_source_logs"];
+  const enumDef =
+    "ENUM('url','html','pdf','spreadsheet','xml','docx','text','image') NOT NULL";
+  try {
+    const db = await getDb();
+    if (!db) return;
+    for (const tabela of tabelas) {
+      const [rows] = await db.execute(
+        sql`SELECT COLUMN_TYPE as t FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${tabela} AND COLUMN_NAME = 'sourceType'`,
+      );
+      const tipo = String((rows as any)[0]?.t ?? "");
+      if (!tipo || tipo.includes("'image'")) continue;
+      await db.execute(sql.raw(`ALTER TABLE \`${tabela}\` MODIFY COLUMN \`sourceType\` ${enumDef}`));
+      console.log(`[Schema] Enum ${tabela}.sourceType estendido com 'image'.`);
+    }
+  } catch (err) {
+    console.error("[Schema] Falha ao estender sourceType das tabelas de captura:", err);
+  }
+}

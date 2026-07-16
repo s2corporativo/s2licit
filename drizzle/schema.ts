@@ -2891,7 +2891,7 @@ export const capturedProductBatches = mysqlTable(
   "captured_product_batches",
   {
     id: int("id").autoincrement().primaryKey(),
-    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text"]).notNull(),
+    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text", "image"]).notNull(),
     sourceLabel: varchar("sourceLabel", { length: 256 }),
     sourceReference: varchar("sourceReference", { length: 512 }),
     status: mysqlEnum("status", ["processing", "review", "approved", "rejected", "applied", "failed"]).default("processing").notNull(),
@@ -2974,7 +2974,7 @@ export const capturedProductSourceLogs = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     batchId: int("batchId").notNull().references(() => capturedProductBatches.id, { onDelete: "cascade" }),
     capturedProductId: int("capturedProductId").references(() => capturedProducts.id, { onDelete: "set null" }),
-    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text"]).notNull(),
+    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text", "image"]).notNull(),
     sourceReference: varchar("sourceReference", { length: 512 }),
     logLevel: mysqlEnum("logLevel", ["info", "warning", "error"]).default("info").notNull(),
     message: text("message").notNull(),
