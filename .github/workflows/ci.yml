@@ -1,66 +1,83 @@
-name: CI
+name: Recuperação VPS
 
 on:
   push:
-    branches: ["**"]
+    branches: ["verify/vps-restaurada-20260715"]
   pull_request:
-    branches: ["**"]
+    branches: [main]
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: recuperacao-vps-s2
+  cancel-in-progress: false
 
 jobs:
-  verificar-vps:
+  publicar-main:
     if: github.event_name == 'pull_request' && github.head_ref == 'verify/vps-restaurada-20260715'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 40
     steps:
-      - name: Preparar SSH
+      - name: Baixar versão atual da main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Preparar ferramentas SSH
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass
+          sudo apt-get install -y -qq sshpass rsync
 
-      - name: Consultar estado imediato
+      - name: Enviar código atual para a VPS
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
           set -euo pipefail
           test -n "${SSHPASS:-}" || { echo "::error::Secret VPS_PASSWORD ausente"; exit 1; }
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
-          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE' | tee verificacao-vps.txt
-          set +e
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 "mkdir -p /opt/s2licit"
+          rsync -az --delete \
+            --exclude .git \
+            --exclude node_modules \
+            --exclude dist \
+            --exclude .env \
+            -e "sshpass -e ssh $SSH_OPTS" \
+            ./ root@13.140.167.153:/opt/s2licit/
+
+      - name: Reconstruir e iniciar aplicação
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 \
+            "bash /opt/s2licit/scripts/vps-bootstrap.sh"
+
+      - name: Validar restauração
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE' | tee restauracao-vps.txt
+          set -euo pipefail
           cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | head -1 | cut -d= -f2)
           LOCAL_PORT=${LOCAL_PORT:-3000}
-
-          echo "=== FONTE NA VPS ==="
-          stat -c 'migrate_mtime=%y size=%s' scripts/migrate-production.mjs 2>/dev/null || true
-          grep -q 'normalizeMysqlIdentifiers' scripts/migrate-production.mjs 2>/dev/null && echo 'source_fix=present' || echo 'source_fix=absent'
-          grep -q 'encurta identificadores incompatíveis' scripts/migrate-production.test.ts 2>/dev/null && echo 'test_fix=present' || true
-
-          echo "=== PROCESSOS DE DEPLOY ==="
-          ps -eo pid,etime,cmd | grep -E 'vps-bootstrap|docker (compose )?(build|up)|buildkit|rsync.*s2licit' | grep -v grep || true
-
-          echo "=== CONTAINER ==="
-          docker compose ps -a
-          docker inspect --format 'image={{.Image}} created={{.Created}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}}' sistema-s2-app 2>&1
-
-          echo "=== MIGRAÇÕES ==="
-          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' 2>&1
-
-          echo "=== ENDPOINTS ==="
-          curl -sS -i --max-time 6 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1
-          curl -sS -I --max-time 10 https://s2.s2corporativo.com.br/ 2>&1
-
-          echo "=== ÚLTIMO ERRO ==="
-          docker compose logs --tail=40 app 2>&1 | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+          grep -q 'normalizeMysqlIdentifiers' scripts/migrate-production.mjs
+          curl -fsS "http://127.0.0.1:${LOCAL_PORT}/readyz"
+          echo
+          MIGRATIONS=$(docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' | tail -1)
+          echo "migrations=${MIGRATIONS}"
+          test "${MIGRATIONS}" -ge 7
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 https://s2.s2corporativo.com.br/)
+          echo "https_status=${STATUS}"
+          test "${STATUS}" = "200"
+          docker compose ps
           REMOTE
 
-      - name: Publicar verificação
+      - name: Publicar resultado
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: verificacao-vps
-          path: verificacao-vps.txt
+          name: restauracao-vps
+          path: restauracao-vps.txt
           retention-days: 1
