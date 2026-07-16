@@ -15,6 +15,7 @@ export interface EnrichmentTask {
   status: "pending" | "enriching" | "completed" | "failed";
   result?: EnrichmentResult;
   error?: string;
+  matched?: boolean;
 }
 
 export interface EnrichmentResult {
@@ -39,6 +40,33 @@ const enrichmentSchema = z.object({
   confidence: z.number().min(0).max(100),
 });
 
+// Cada item envolve uma chamada de IA (rede) — processar em série faria uma
+// NF-e com muitos itens levar minutos. Um lote limitado evita tanto a espera
+// serial quanto uma rajada de N chamadas simultâneas à API de IA.
+const ENRICHMENT_CONCURRENCY = 5;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await task(items[index]);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
+}
+
 export async function processNfeEnrichmentPipeline(
   productIds: number[],
   supplierId: number,
@@ -53,64 +81,66 @@ export async function processNfeEnrichmentPipeline(
   if (!db) throw new Error("Database not available");
 
   const uniqueIds = [...new Set(productIds)];
-  const results: EnrichmentTask[] = [];
-  let enriched = 0;
-  let matched = 0;
-  let failed = 0;
 
-  for (const productId of uniqueIds) {
-    try {
-      const [product] = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, productId))
-        .limit(1);
+  const results = await mapWithConcurrency(
+    uniqueIds,
+    ENRICHMENT_CONCURRENCY,
+    async (productId): Promise<EnrichmentTask> => {
+      try {
+        const [product] = await db
+          .select()
+          .from(products)
+          .where(eq(products.id, productId))
+          .limit(1);
 
-      if (!product) throw new Error("Produto não encontrado");
+        if (!product) throw new Error("Produto não encontrado");
 
-      const enrichmentResult = await enrichProductWithAI(product);
-      if (!enrichmentResult) throw new Error("A IA não devolveu dados estruturados válidos");
-      if (enrichmentResult.requiresReview) {
-        throw new Error(`Enriquecimento exige revisão humana (confiança ${enrichmentResult.confidence}%)`);
+        const enrichmentResult = await enrichProductWithAI(product);
+        if (!enrichmentResult) throw new Error("A IA não devolveu dados estruturados válidos");
+        if (enrichmentResult.requiresReview) {
+          throw new Error(`Enriquecimento exige revisão humana (confiança ${enrichmentResult.confidence}%)`);
+        }
+
+        const currentUpdate: Record<string, unknown> = { updatedAt: new Date() };
+        if (!product.activeIngredient && enrichmentResult.activeIngredient) {
+          currentUpdate.activeIngredient = enrichmentResult.activeIngredient;
+        }
+        if (!product.concentration && enrichmentResult.concentration) {
+          currentUpdate.concentration = enrichmentResult.concentration;
+        }
+
+        // Não substitui descrição, indicações, contraindicações ou posologia por texto
+        // gerado por IA sem fonte documental verificável.
+        await db.update(products).set(currentUpdate).where(eq(products.id, productId));
+
+        const catalogMatch = await matchWithCatalog(db, product, enrichmentResult);
+        if (catalogMatch) {
+          await mergeWithCatalogProduct(db, product, catalogMatch, enrichmentResult);
+        }
+
+        return {
+          productId,
+          productName: product.name,
+          supplierId,
+          status: "completed",
+          result: enrichmentResult,
+          matched: Boolean(catalogMatch),
+        };
+      } catch (error) {
+        return {
+          productId,
+          productName: "Não processado",
+          supplierId,
+          status: "failed",
+          error: error instanceof Error ? error.message : "Erro desconhecido",
+        };
       }
+    },
+  );
 
-      const currentUpdate: Record<string, unknown> = { updatedAt: new Date() };
-      if (!product.activeIngredient && enrichmentResult.activeIngredient) {
-        currentUpdate.activeIngredient = enrichmentResult.activeIngredient;
-      }
-      if (!product.concentration && enrichmentResult.concentration) {
-        currentUpdate.concentration = enrichmentResult.concentration;
-      }
-
-      // Não substitui descrição, indicações, contraindicações ou posologia por texto
-      // gerado por IA sem fonte documental verificável.
-      await db.update(products).set(currentUpdate).where(eq(products.id, productId));
-      enriched++;
-
-      const catalogMatch = await matchWithCatalog(db, product, enrichmentResult);
-      if (catalogMatch) {
-        await mergeWithCatalogProduct(db, product, catalogMatch, enrichmentResult);
-        matched++;
-      }
-
-      results.push({
-        productId,
-        productName: product.name,
-        supplierId,
-        status: "completed",
-        result: enrichmentResult,
-      });
-    } catch (error) {
-      failed++;
-      results.push({
-        productId,
-        productName: "Não processado",
-        supplierId,
-        status: "failed",
-        error: error instanceof Error ? error.message : "Erro desconhecido",
-      });
-    }
-  }
+  const enriched = results.filter((r) => r.status === "completed").length;
+  const matched = results.filter((r) => r.matched).length;
+  const failed = results.filter((r) => r.status === "failed").length;
 
   try {
     await notifyOwner({
