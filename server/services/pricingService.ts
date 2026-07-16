@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { priceFromRevenueDivisor } from "./pricingSafety";
 
 /**
  * Configuração de precificação para um fornecedor
@@ -78,12 +79,12 @@ export class PricingService {
     const totalTaxPct =
       config.icmsPercentage + config.ipPercentage + config.pisPercentage + config.cofinsPercentage;
     const custoAquisicao = basePrice + freightAmount;
-    const divisor = 1 - (totalTaxPct + config.marginPercentage) / 100;
-    if (divisor <= 0) {
-      throw new Error("Impostos + margem somam 100% ou mais da venda — operação inviável.");
-    }
     // 3. Preço final (divisor): a venda cobre custo + frete + impostos + margem.
-    let finalPrice = custoAquisicao / divisor;
+    let finalPrice = priceFromRevenueDivisor(
+      custoAquisicao,
+      totalTaxPct + config.marginPercentage,
+      "Impostos + margem somam 100% ou mais da venda — operação inviável.",
+    );
 
     // 4. Decompõe os valores como % sobre a VENDA (por dentro).
     const icmsAmount = (finalPrice * config.icmsPercentage) / 100;

@@ -39,6 +39,26 @@ function assertPercent(name: string, value: number): void {
 }
 
 /**
+ * Núcleo compartilhado de qualquer preço "por dentro": percentuais (margem,
+ * impostos, despesas) incidem sobre a própria venda, não sobre o custo.
+ * preço = base / (1 - somaPercentuais / 100).
+ *
+ * Toda fórmula de precificação por dentro do sistema (proposta, config de
+ * fornecedor) deve passar por aqui para não divergir silenciosamente.
+ */
+export function priceFromRevenueDivisor(
+  baseAmount: number,
+  percentSum: number,
+  invalidMessage = "A soma dos percentuais sobre a venda deve ser inferior a 100%.",
+): number {
+  const denominator = 1 - percentSum / 100;
+  if (denominator <= 0) {
+    throw new Error(invalidMessage);
+  }
+  return baseAmount / denominator;
+}
+
+/**
  * Calcula preço de venda quando margem e despesas percentuais incidem sobre
  * a receita: preço = (custo + custo fixo unitário) / (1 - despesas - margem).
  *
@@ -64,14 +84,11 @@ export function calculateSalePrice({
   assertPercent("Margem", marginPercent);
   assertPercent("Despesas percentuais", revenueCostPercent);
 
-  const denominator = 1 - (marginPercent + revenueCostPercent) / 100;
-  if (denominator <= 0) {
-    throw new Error(
-      "A soma da margem com as despesas percentuais deve ser inferior a 100%.",
-    );
-  }
-
-  return (costValue + fixedCostValue) / denominator;
+  return priceFromRevenueDivisor(
+    costValue + fixedCostValue,
+    marginPercent + revenueCostPercent,
+    "A soma da margem com as despesas percentuais deve ser inferior a 100%.",
+  );
 }
 
 export function findProposalPricingIssues(
