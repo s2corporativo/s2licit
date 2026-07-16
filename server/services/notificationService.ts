@@ -269,7 +269,7 @@ export async function getNotificationHistory(
   try {
     const db = await getDb();
     if (!db) throw new Error("Database connection failed");
-    return db
+    return await db
       .select()
       .from(notificationHistory)
       .where(eq(notificationHistory.supplierId, supplierId))
