@@ -65,6 +65,10 @@ import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichment
 import { invokeLLM } from "./_core/llm";
 import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
 import { calculateSalePrice } from "./services/pricingSafety";
+import {
+  createOpportunityFromReviewedEdital,
+  finalizeOpportunityProposal,
+} from "./services/opportunityWorkflowService";
 
 
 import { TRPCError } from "@trpc/server";
@@ -1681,9 +1685,22 @@ export const appRouter = router({
           ).min(1),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+
+        // Rastreabilidade no funil: toda proposta nasce de uma oportunidade.
+        // reviewConfirmed já garante a revisão humana exigida para o GO.
+        const opportunity = await createOpportunityFromReviewedEdital(
+          {
+            title: `${input.processo.modalidade} — ${input.processo.numero}`,
+            orgao: input.processo.orgao,
+            modalidade: input.processo.modalidade,
+            numeroProcesso: input.processo.numero,
+            objeto: input.processo.objeto,
+          },
+          ctx.user,
+        );
 
         // Pré-validação autoritativa antes de criar o cabeçalho. Assim uma
         // falha de match/preço não deixa proposta órfã ou parcial.
@@ -1818,6 +1835,7 @@ export const appRouter = router({
             recordFeedback(item.itemDescricao, item.productId, canonicalName).catch(() => {});
           }
         }
+        await finalizeOpportunityProposal(opportunity.id, proposalId, ctx.user);
         return { proposalId, addedCount };
       }),
   }),
