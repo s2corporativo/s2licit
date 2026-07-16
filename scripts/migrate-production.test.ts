@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isIgnorableMigrationError,
+  isObsoleteMigrationStatement,
   normalizeMysqlIdentifiers,
   shortenMysqlIdentifier,
   splitMigrationStatements,
@@ -55,6 +56,24 @@ describe("migrate-production", () => {
     }
   });
 
+  it("marca somente o índice legado inválido de ficha técnica como obsoleto", () => {
+    expect(
+      isObsoleteMigrationStatement(
+        "CREATE INDEX `idx_products_active_ficha` ON `products` (`isActive`,`fichaTecnica`);",
+      ),
+    ).toBe(true);
+    expect(
+      isObsoleteMigrationStatement(
+        "CREATE INDEX `idx_products_active_name` ON `products` (`isActive`,`name`);",
+      ),
+    ).toBe(false);
+    expect(
+      isObsoleteMigrationStatement(
+        "DROP INDEX `idx_products_active_ficha` ON `products`;",
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     [1050, "ER_TABLE_EXISTS_ERROR"],
     [1060, "ER_DUP_FIELDNAME"],
@@ -64,9 +83,10 @@ describe("migrate-production", () => {
     expect(isIgnorableMigrationError({ errno, code })).toBe(true);
   });
 
-  it("não ignora erro de dados, conexão ou identificador inválido", () => {
+  it("não ignora erro de dados, conexão, identificador ou índice TEXT", () => {
     expect(isIgnorableMigrationError({ errno: 1062, code: "ER_DUP_ENTRY" })).toBe(false);
     expect(isIgnorableMigrationError({ errno: 1045, code: "ER_ACCESS_DENIED_ERROR" })).toBe(false);
     expect(isIgnorableMigrationError({ errno: 1059, code: "ER_TOO_LONG_IDENT" })).toBe(false);
+    expect(isIgnorableMigrationError({ errno: 1170, code: "ER_BLOB_KEY_WITHOUT_LENGTH" })).toBe(false);
   });
 });

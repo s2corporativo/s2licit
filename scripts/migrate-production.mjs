@@ -8,6 +8,7 @@ const MIGRATION_LOCK = "s2licit_production_migrations";
 const STATEMENT_BREAKPOINT = "--> statement-breakpoint";
 const MYSQL_IDENTIFIER_MAX_LENGTH = 64;
 const IDENTIFIER_HASH_LENGTH = 12;
+const OBSOLETE_INDEX_NAMES = new Set(["idx_products_active_ficha"]);
 const IGNORABLE_ERROR_NUMBERS = new Set([1050, 1060, 1061, 1826]);
 const IGNORABLE_ERROR_CODES = new Set([
   "ER_TABLE_EXISTS_ERROR",
@@ -54,6 +55,18 @@ export function normalizeMysqlIdentifiers(statement) {
       }),
     statement,
   );
+}
+
+/**
+ * Índices legados removidos por incompatibilidade estrutural comprovada.
+ * `idx_products_active_ficha` tentava indexar uma coluna TEXT sem prefixo,
+ * algo recusado pelo MySQL. O filtro por atividade continua atendido pelo
+ * índice simples `idx_products_is_active`; não fingimos que o índice inválido
+ * foi criado.
+ */
+export function isObsoleteMigrationStatement(statement) {
+  const match = statement.match(/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+`([^`]+)`/i);
+  return Boolean(match && OBSOLETE_INDEX_NAMES.has(match[1]));
 }
 
 export function isIgnorableMigrationError(error) {
@@ -103,6 +116,14 @@ async function applyMigration(connection, migration, index) {
 
   for (let statementIndex = 0; statementIndex < statements.length; statementIndex += 1) {
     const originalStatement = statements[statementIndex];
+
+    if (isObsoleteMigrationStatement(originalStatement)) {
+      console.log(
+        `[Migration] ${migration.tag} #${statementIndex + 1}: índice legado incompatível removido do schema; ignorando.`,
+      );
+      continue;
+    }
+
     const statement = normalizeMysqlIdentifiers(originalStatement);
 
     if (statement !== originalStatement) {
