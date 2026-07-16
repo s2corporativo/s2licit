@@ -60,3 +60,13 @@ export async function ensureCompanySettingsColumns(): Promise<void> {
     console.error("[Schema] Falha ao garantir colunas de company_settings:", err);
   }
 }
+
+/** Campos ampliados coletados do fornecedor (§7): promocional e estoque. */
+export async function ensureOfferColumns(): Promise<void> {
+  try {
+    await ensureColumn("product_supplier_offers", "promoPrice", "DECIMAL(12,2) NULL");
+    await ensureColumn("product_supplier_offers", "stock", "INT NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas de ofertas:", err);
+  }
+}

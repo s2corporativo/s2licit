@@ -80,6 +80,13 @@ export interface ScrapedProduct {
   imageUrl?: string;
   productUrl?: string;
   availability?: string;
+  // §7 — campos adicionais (opcionais; ausentes = não disponibilizado, nunca
+  // inventados). Proveniência: consultadoEm/fonteUrl são carimbados no Node.
+  priceNormal?: number;     // preço "de" (old_price)
+  pricePromo?: number;      // preço promocional (spot_price), quando < normal
+  stock?: number;           // estoque informado
+  consultadoEm?: number;    // epoch ms da consulta
+  fonteUrl?: string;        // URL de origem do dado
 }
 
 export interface ScraperRunResult {
@@ -355,6 +362,13 @@ export class ScraperEngine {
         produtos = await this.extractPageProducts(cfg);
       }
       this.addLog(`  Página ${pagina}: ${produtos.length} produtos extraídos`);
+      // §7 — proveniência: carimba origem e horário da consulta (para validade
+      // de preço, §13). Feito no Node (fora do page.evaluate).
+      const agora = Date.now();
+      for (const p of produtos) {
+        p.consultadoEm = agora;
+        p.fonteUrl = p.productUrl ?? categoryUrl;
+      }
       todos.push(...produtos);
 
       // Verificar próxima página
@@ -532,6 +546,12 @@ export class ScraperEngine {
         if (seen.has(key)) continue;
         seen.add(key);
         const ld = code ? ldBySku.get(code) : undefined;
+        // §7 — preço "de", promocional e estoque quando a camada de dados os
+        // expõe. Ausentes ficam undefined (não inventar).
+        const precoNormalRaw = toNumber(d.old_price ?? d.price);
+        const precoSpot = toNumber(d.spot_price);
+        const temEstoque = typeof d.stock !== "undefined";
+        const estoque = temEstoque ? toNumber(d.stock) : undefined;
         out.push({
           name,
           price,
@@ -539,8 +559,10 @@ export class ScraperEngine {
           ean: eanOf(d) ?? (ld ? eanOf(ld) : undefined),
           imageUrl: (d.image && String(d.image)) || (ld ? imageOf(ld) : undefined),
           productUrl: d.url ? String(d.url) : (ld && ld.url ? String(ld.url) : undefined),
-          availability:
-            typeof d.stock !== "undefined" && toNumber(d.stock) > 0 ? "disponivel" : undefined,
+          availability: temEstoque ? (estoque! > 0 ? "disponivel" : "indisponivel") : undefined,
+          priceNormal: precoNormalRaw > 0 ? precoNormalRaw : undefined,
+          pricePromo: precoSpot > 0 && precoNormalRaw > 0 && precoSpot < precoNormalRaw ? precoSpot : undefined,
+          stock: estoque,
         });
       }
 
@@ -646,7 +668,11 @@ export class ScraperEngine {
             supplierName,
             link: sp.productUrl,
             image: sp.imageUrl,
-            availability: "disponivel",
+            // §7 — reflete a disponibilidade real (antes gravava sempre
+            // "disponivel"); promo/estoque quando o fornecedor os expõe.
+            availability: sp.availability ?? "disponivel",
+            promoPrice: sp.pricePromo != null ? String(sp.pricePromo) : null,
+            stock: sp.stock ?? null,
             updatedAt: new Date(),
           };
 

@@ -1999,6 +1999,8 @@ export const productSupplierOffers = mysqlTable(
     brand: varchar("brand", { length: 255 }),
     manufacturer: varchar("manufacturer", { length: 255 }),
     price: decimal("price", { precision: 12, scale: 2 }),
+    promoPrice: decimal("promoPrice", { precision: 12, scale: 2 }), // §7 preço promocional
+    stock: int("stock"), // §7 estoque informado pelo fornecedor
     priceHistory: json("priceHistory"), // JSON array de histórico de preços
     link: text("link"),
     image: text("image"),
