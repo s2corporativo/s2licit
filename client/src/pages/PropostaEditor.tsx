@@ -180,8 +180,8 @@ function ItemRow({
           <span className="text-sm font-semibold text-gray-900">{item.quantity}</span>
         )}
       </td>
-      {/* Custo do Sistema */}
-      <td className="px-3 py-2 w-28">
+      {/* Custo do Sistema — dado interno: nunca sai na proposta impressa (§11) */}
+      <td className="px-3 py-2 w-28 print:hidden">
         {editing ? (
           <input
             type="number"
@@ -233,6 +233,8 @@ function ItemRow({
             <span className="text-sm font-bold text-blue-800">
               {item.suggestedPrice ? `R$ ${parseFloat(item.suggestedPrice).toFixed(2)}` : "Não definido"}
             </span>
+            {/* Indicadores internos (margem, preço mínimo) — nunca na impressão (§11) */}
+            <div className="print:hidden">
             {priceStatus === "ok" && (
               <div className="flex items-center gap-1 mt-0.5">
                 <TrendingUp size={9} className="text-green-600" />
@@ -263,6 +265,7 @@ function ItemRow({
                 Margem: {currentMarginPct.toFixed(1)}%
               </div>
             )}
+            </div>
           </div>
         )}
       </td>
@@ -1156,7 +1159,7 @@ export default function PropostaEditor() {
                 <th className="px-3 py-2 text-left text-[10px] font-bold tracking-widest uppercase">Produto / Descrição</th>
                 <th className="px-3 py-2 text-left text-[10px] font-bold tracking-widest uppercase w-20">Unid.</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-20">Qtd.</th>
-                <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-28">Custo</th>
+                <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-28 print:hidden">Custo</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-28 bg-amber-50 text-amber-800">Ref. Edital</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-32 bg-blue-50 text-blue-800">P. Sugerido</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-32">Total</th>
