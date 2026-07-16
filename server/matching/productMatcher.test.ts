@@ -10,6 +10,7 @@ import {
   getMatchDecision,
   MATCH_THRESHOLD_AUTO,
   MATCH_THRESHOLD_REVIEW,
+  MATCH_THRESHOLD_VISIBLE,
   type EditalItem,
   type ProductCandidate,
 } from "./productMatcher";
@@ -176,27 +177,28 @@ describe("calculateProductSimilarity", () => {
 
 // ─── Decisão de Match ─────────────────────────────────────────────────────────
 
-describe("getMatchDecision", () => {
-  it("score >= 0.85 retorna auto_match", () => {
-    expect(getMatchDecision(0.85)).toBe("auto_match");
-    expect(getMatchDecision(1.0)).toBe("auto_match");
+describe("getMatchDecision (§6)", () => {
+  it("score >= 0.90 retorna auto_match", () => {
     expect(getMatchDecision(0.90)).toBe("auto_match");
+    expect(getMatchDecision(1.0)).toBe("auto_match");
+    expect(getMatchDecision(0.95)).toBe("auto_match");
   });
 
-  it("score 0.60–0.84 retorna needs_review", () => {
-    expect(getMatchDecision(0.60)).toBe("needs_review");
+  it("score 0.75–0.89 retorna needs_review (exige validação humana)", () => {
     expect(getMatchDecision(0.75)).toBe("needs_review");
-    expect(getMatchDecision(0.84)).toBe("needs_review");
+    expect(getMatchDecision(0.85)).toBe("needs_review"); // antes era auto_match
+    expect(getMatchDecision(0.89)).toBe("needs_review");
   });
 
-  it("score < 0.60 retorna no_match", () => {
-    expect(getMatchDecision(0.59)).toBe("no_match");
+  it("score < 0.75 não é automático (no_match)", () => {
+    expect(getMatchDecision(0.74)).toBe("no_match");
+    expect(getMatchDecision(0.60)).toBe("no_match");
     expect(getMatchDecision(0.0)).toBe("no_match");
   });
 
-  it("thresholds estão corretos", () => {
-    expect(MATCH_THRESHOLD_AUTO).toBe(0.85);
-    expect(MATCH_THRESHOLD_REVIEW).toBe(0.60);
+  it("thresholds estão alinhados à regra dos 75%/90%", () => {
+    expect(MATCH_THRESHOLD_AUTO).toBe(0.90);
+    expect(MATCH_THRESHOLD_REVIEW).toBe(0.75);
   });
 });
 
@@ -238,7 +240,7 @@ describe("matchEditalItem", () => {
     const results = matchEditalItem(item, catalog, 5);
     // Pode retornar 0 ou poucos resultados com score baixo
     results.forEach(r => {
-      expect(r.score).toBeGreaterThanOrEqual(MATCH_THRESHOLD_REVIEW);
+      expect(r.score).toBeGreaterThanOrEqual(MATCH_THRESHOLD_VISIBLE);
     });
   });
 
