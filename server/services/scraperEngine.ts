@@ -572,16 +572,20 @@ export class ScraperEngine {
     });
   }
 
-  /** Faz match dos produtos extraídos com o catálogo e atualiza preços */
+  /**
+   * Faz match dos produtos extraídos com o catálogo, atualiza preços dos que
+   * já existem e importa como produto novo qualquer item raspado sem match
+   * (nenhum item raspado é descartado silenciosamente).
+   */
   async matchAndUpdate(
     scrapedProducts: ScrapedProduct[],
     supplierId: number,
     supplierName: string
-  ): Promise<{ matched: number; updated: number; created: number; errors: string[] }> {
+  ): Promise<{ matched: number; updated: number; created: number; newProducts: number; errors: string[] }> {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
 
-    let matched = 0, updated = 0, created = 0;
+    let matched = 0, updated = 0, created = 0, newProducts = 0;
     const errors: string[] = [];
 
     for (const sp of scrapedProducts) {
@@ -675,13 +679,52 @@ export class ScraperEngine {
           try {
             await recordPriceHistory({ productId, supplierId, price: String(sp.price) });
           } catch { /* não bloqueia a captura por falha de histórico */ }
+        } else {
+          // Nenhum match no catálogo — importa como produto novo em vez de
+          // descartar o item raspado (antes, tudo que não batia com um
+          // produto já existente era simplesmente ignorado pela captura).
+          const [insertResult] = await db.insert(products).values({
+            name: sp.name,
+            supplierId,
+            ean: sp.ean || null,
+            codigoFornecedor: sp.code || null,
+            price: String(sp.price),
+            priceUnit: sp.unit || "UN",
+            imageUrl: sp.imageUrl || null,
+            productUrl: sp.productUrl || null,
+            description: `Importado automaticamente da captura do fornecedor ${supplierName}; pendente de enriquecimento e revisão técnica.`,
+            isActive: "yes",
+            tipoCatalogo: "produto_nao_medicamentoso",
+            statusConfiabilidade: "incompleto",
+          });
+          const newProductId = Number((insertResult as { insertId?: number }).insertId);
+
+          if (Number.isInteger(newProductId) && newProductId > 0) {
+            newProducts++;
+            await db.insert(productSupplierOffers).values({
+              productId: newProductId,
+              supplierId,
+              price: String(sp.price),
+              supplierCode: sp.code,
+              supplierName,
+              link: sp.productUrl,
+              image: sp.imageUrl,
+              availability: "disponivel",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+
+            try {
+              await recordPriceHistory({ productId: newProductId, supplierId, price: String(sp.price) });
+            } catch { /* não bloqueia a captura por falha de histórico */ }
+          }
         }
       } catch (err: any) {
         errors.push(`Erro no produto "${sp.name}": ${err?.message}`);
       }
     }
 
-    return { matched, updated, created, errors };
+    return { matched, updated, created, newProducts, errors };
   }
 }
 
@@ -847,12 +890,12 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
     }
 
     // Match e atualização
-    const { matched, updated, created, errors } = await engine.matchAndUpdate(
+    const { matched, updated, newProducts, errors } = await engine.matchAndUpdate(
       allScraped, config.supplierId, supplier.name
     );
     result.productsMatched = matched;
     result.productsUpdated = updated;
-    result.productsNew = created;
+    result.productsNew = newProducts;
     result.errors = errors;
     result.success = true;
 
@@ -864,7 +907,7 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
       productsScrapedCount: allScraped.length,
       productsMatchedCount: matched,
       productsUpdatedCount: updated,
-      productsCreatedCount: created,
+      productsCreatedCount: newProducts,
     }).where(eq(scraperConfigs.id, scraperConfigId));
 
   } catch (err: any) {

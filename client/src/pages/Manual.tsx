@@ -125,7 +125,7 @@ const ADVANCED_GROUPS: Array<{ label: string; links: ManualLink[] }> = [
       { href: "/captura-inteligente", label: "Captura inteligente", minRole: "editor" },
       { href: "/captura-revisao", label: "Revisão de capturas", minRole: "editor" },
       { href: "/configurador-fornecedores", label: "Credenciais de fornecedores", minRole: "admin" },
-      { href: "/scraper-fornecedores", label: "Agente de preços", minRole: "admin" },
+      { href: "/scraper-fornecedores", label: "Agente de preços e importação", minRole: "admin" },
       { href: "/agente", label: "Assistente IA" },
       { href: "/central-ia", label: "Central de IA", minRole: "admin" },
       { href: "/diagnostico", label: "Diagnóstico", minRole: "editor" },

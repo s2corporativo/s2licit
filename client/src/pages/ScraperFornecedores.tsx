@@ -363,10 +363,11 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
+      <div className="grid grid-cols-4 divide-x divide-gray-100 border-b border-gray-100">
         {[
           { label: "Raspados", value: config.productsScrapedCount ?? 0 },
           { label: "Atualizados", value: config.productsUpdatedCount ?? 0 },
+          { label: "Novos", value: config.productsCreatedCount ?? 0 },
           { label: "Horário", value: config.scheduleTime ?? "--:--" },
         ].map(({ label, value }) => (
           <div key={label} className="px-4 py-3 text-center">
@@ -468,10 +469,10 @@ export default function ScraperFornecedores() {
             <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center">
               <Bot size={20} className="text-emerald-400" />
             </div>
-            <h1 className="text-xl font-black text-gray-900">Agente de Atualização de Preços</h1>
+            <h1 className="text-xl font-black text-gray-900">Agente de Preços e Importação</h1>
           </div>
           <p className="text-sm text-gray-500 ml-13">
-            Acessa os sites dos fornecedores com login automático e atualiza preços no catálogo
+            Acessa os sites dos fornecedores com seu login, atualiza preços dos produtos já cadastrados e importa para o catálogo qualquer produto novo encontrado
           </p>
         </div>
         <div className="flex gap-2">
@@ -503,7 +504,7 @@ export default function ScraperFornecedores() {
               { icon: Key, title: "1. Credenciais", desc: "Você cadastra o e-mail e senha do portal do fornecedor. São armazenados com criptografia AES-256." },
               { icon: Bot, title: "2. Login automático", desc: "O agente acessa o site do fornecedor com um navegador real e faz login automaticamente." },
               { icon: Globe, title: "3. Varredura", desc: "Navega pelas categorias de produtos, extraindo nomes, preços, códigos e imagens." },
-              { icon: RefreshCw, title: "4. Atualização", desc: "Os preços são comparados com o catálogo e atualizados automaticamente no sistema." },
+              { icon: RefreshCw, title: "4. Importação", desc: "Produtos já cadastrados têm o preço atualizado; produtos ainda não cadastrados são importados como novos itens no catálogo." },
             ].map(({ icon: Icon, title, desc }) => (
               <div key={title} className="text-center">
                 <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center mx-auto mb-3">
