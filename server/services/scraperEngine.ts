@@ -51,6 +51,12 @@ export interface SelectorConfig {
   useStructuredData?: boolean;
   /** URLs das categorias a raspar (lista) */
   categoryUrls: string[];
+  /**
+   * Template de URL de busca por termo (§4/§5), com o placeholder {q} (ou
+   * {termo}). Ex.: "https://site.com/busca?q={q}". Quando presente, permite
+   * pesquisar um produto específico em vez de varrer categorias inteiras.
+   */
+  searchUrlTemplate?: string;
   /** Seletor de cada card/item de produto na listagem */
   productItem: string;
   /** Seletor do nome do produto (relativo ao productItem) */
@@ -102,6 +108,19 @@ export interface ScraperRunResult {
   errors: string[];
   durationMs: number;
   log: string[];
+}
+
+/**
+ * Monta a URL de busca a partir do template do fornecedor e do termo (§4/§5).
+ * Substitui {q}/{termo}; sem placeholder, anexa ?q=/&q=. Pura e testável.
+ */
+export function buildSearchUrl(template: string, termo: string): string {
+  const enc = encodeURIComponent(termo.trim());
+  if (/\{q\}|\{termo\}/i.test(template)) {
+    return template.replace(/\{q\}/gi, enc).replace(/\{termo\}/gi, enc);
+  }
+  const sep = template.includes("?") ? "&" : "?";
+  return `${template}${sep}q=${enc}`;
 }
 
 // ─── Configurações pré-definidas por fornecedor ───────────────────────────────
@@ -475,6 +494,42 @@ export class ScraperEngine {
     }
 
     return todos;
+  }
+
+  /**
+   * Pesquisa um termo específico usando o template de busca do fornecedor
+   * (§4/§5), em vez de varrer categorias inteiras. Reaproveita a extração e
+   * carimba a proveniência. Requer searchUrlTemplate configurado.
+   */
+  async scrapeSearch(termo: string, cfg: SelectorConfig): Promise<ScrapedProduct[]> {
+    if (!this.page) throw new Error("Não autenticado. Chame login() primeiro.");
+    if (!cfg.searchUrlTemplate) {
+      throw new Error("Busca por termo indisponível: searchUrlTemplate não configurado para este fornecedor.");
+    }
+    const url = buildSearchUrl(cfg.searchUrlTemplate, termo);
+    this.addLog(`Buscando "${termo}": ${url}`);
+    await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    await new Promise((r) => setTimeout(r, cfg.navigationWait ?? 2000));
+    if (cfg.waitForSelector) {
+      try {
+        await this.page.waitForSelector(cfg.waitForSelector, { timeout: 10000 });
+      } catch {
+        this.addLog(`Aviso: seletor de espera "${cfg.waitForSelector}" não encontrado na busca.`);
+      }
+    }
+    let produtos = cfg.useStructuredData
+      ? await this.extractStructuredProducts()
+      : await this.extractPageProducts(cfg);
+    if (cfg.useStructuredData && produtos.length === 0) {
+      produtos = await this.extractPageProducts(cfg);
+    }
+    const agora = Date.now();
+    for (const p of produtos) {
+      p.consultadoEm = agora;
+      p.fonteUrl = p.productUrl ?? url;
+    }
+    this.addLog(`  Busca "${termo}": ${produtos.length} produtos.`);
+    return produtos;
   }
 
   /** Extrai produtos da página atual */

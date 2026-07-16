@@ -2078,6 +2078,7 @@ export const scraperConfigs = mysqlTable("scraper_configs", {
     loginSuccessText?: string;
     loginSuccessSelector?: string;
     categoryUrls: string[];
+    searchUrlTemplate?: string;
     productItem: string;
     productName: string;
     productPrice: string;
