@@ -3,9 +3,12 @@ name: Check VPS Recovery
 on:
   push:
     branches: ["verify/vps-restaurada-20260715"]
+  pull_request:
+    branches: [main]
 
 jobs:
   check:
+    if: github.event_name == 'pull_request' && github.head_ref == 'verify/vps-restaurada-20260715'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
