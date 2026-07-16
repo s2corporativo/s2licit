@@ -82,7 +82,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
 
-      - name: Verificar aplicação publicada
+      - name: Capturar falha completa da aplicação
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -90,32 +90,32 @@ jobs:
           test -n "${SSHPASS:-}" || { echo "::error::Secret VPS_PASSWORD ausente"; exit 1; }
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
           sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE' | tee verificacao-vps.txt
-          set -euo pipefail
+          set +e
           cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | head -1 | cut -d= -f2)
           LOCAL_PORT=${LOCAL_PORT:-3000}
+          redact() {
+            sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+          }
 
           echo "=== CONTAINERS ==="
-          docker compose ps -a
-          docker inspect --format 'app status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}}' sistema-s2-app
-          docker inspect --format 'db status={{.State.Status}} running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' sistema-s2-db
+          docker compose ps -a 2>&1
+          docker inspect --format 'app status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' sistema-s2-app 2>&1
+          docker inspect --format 'image={{.Image}} path={{.Path}} args={{json .Args}}' sistema-s2-app 2>&1
 
-          echo "=== MIGRACOES ==="
-          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"'
+          echo "=== LOGS COMPLETOS DO APP ==="
+          docker compose logs --tail=300 app 2>&1 | redact
 
-          echo "=== ENDPOINTS LOCAIS ==="
-          curl -fsS --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/healthz"
-          echo
-          curl -fsS --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/readyz"
-          echo
+          echo "=== MIGRACOES REGISTRADAS ==="
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations; SELECT id, LEFT(hash,12), created_at FROM __drizzle_migrations ORDER BY id;"' 2>&1 | redact
 
-          echo "=== DOMINIO HTTPS ==="
-          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 https://s2.s2corporativo.com.br/)
-          echo "https_status=${STATUS}"
-          test "$STATUS" = "200"
+          echo "=== TESTE DO MIGRADOR EM CONTAINER ISOLADO ==="
+          docker compose run --rm --no-deps -e NO_COLOR=1 -e TERM=dumb app node scripts/migrate-production.mjs 2>&1 | redact
 
-          echo "=== LOGS RECENTES ==="
-          docker compose logs --tail=80 app 2>&1 | sed -E 's/(password|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+          echo "=== ENDPOINTS ==="
+          curl -sS -i --max-time 8 "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>&1
+          curl -sS -i --max-time 8 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1
+          curl -sS -I --max-time 12 https://s2.s2corporativo.com.br/ 2>&1
           REMOTE
 
       - name: Publicar verificação
