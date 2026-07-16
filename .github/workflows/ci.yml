@@ -71,3 +71,70 @@ jobs:
 
       - name: Build de produção
         run: pnpm build
+
+  diagnostico-vps:
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/vps-502-diagnostico-20260715'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Preparar SSH
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Diagnosticar VPS sem expor segredos
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SSHPASS:-}" ]; then
+            echo "::error::Secret VPS_PASSWORD ausente"
+            exit 1
+          fi
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE'
+          set +e
+          redact() {
+            sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+          }
+
+          echo "=== IDENTIDADE E RECURSOS ==="
+          hostname
+          date -Is
+          uptime
+          df -h / /var/lib/docker 2>/dev/null || true
+          free -m || true
+
+          echo "=== DIRETÓRIO DO SISTEMA ==="
+          cd /opt/s2licit || { echo "ERRO: /opt/s2licit inexistente"; exit 2; }
+          pwd
+          test -f .env && echo ".env presente" || echo "ERRO: .env ausente"
+          grep -E '^(DOMAIN|APP_HTTP_PORT|APP_LOCAL_PORT|NODE_ENV|AI_PROVIDER|EMAIL_SYNC_ENABLED|ALERTS_ENABLED|SCRAPER_SCHEDULE_ENABLED)=' .env 2>/dev/null || true
+
+          echo "=== DOCKER COMPOSE ==="
+          docker compose ps -a || true
+          for container in sistema-s2-app sistema-s2-db; do
+            echo "--- ${container} ---"
+            docker inspect --format 'status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' "$container" 2>&1 || true
+          done
+
+          echo "=== LOGS APP/DB (REDACTADOS) ==="
+          docker compose logs --tail=250 app db 2>&1 | redact || true
+
+          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2)
+          LOCAL_PORT=${LOCAL_PORT:-3000}
+          echo "=== TESTE LOCAL :${LOCAL_PORT} ==="
+          curl -sS -i --max-time 8 "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>&1 || true
+          echo
+          curl -sS -i --max-time 8 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1 || true
+          echo
+
+          echo "=== PORTAS ==="
+          ss -ltnp 2>/dev/null | grep -E ":(80|443|${LOCAL_PORT})\\b" || true
+
+          echo "=== NGINX ==="
+          nginx -t 2>&1 || true
+          systemctl is-active nginx || true
+          grep -R -n -E 'server_name[[:space:]]+s2\.s2corporativo\.com\.br|proxy_pass' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
+          systemctl status nginx --no-pager -n 30 2>&1 | redact || true
+          REMOTE
