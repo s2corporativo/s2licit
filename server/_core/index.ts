@@ -14,6 +14,7 @@ import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
 import type { Request, Response, NextFunction } from "express";
 import { generateProposalPdf, type DeclarationTemplate } from "../proposalPdf";
+import { generateProposalExcel } from "../proposalExcel";
 import { PricingValidationError } from "../services/pricingSafety";
 import { exportProductsToExcel, importProductsFromExcel } from "../exportExcel";
 import { getProposalWithItems, getCompanySettings, upsertCompanySettings, getDb } from "../db";
@@ -184,6 +185,36 @@ async function startServer() {
       }
       console.error("[PDF] Error generating proposal PDF:", err);
       res.status(500).json({ error: "Erro ao gerar PDF" });
+    }
+  });
+
+  // Exportação da proposta em Excel (§11) — mesma máscara do PDF (sem custo/margem).
+  app.get("/api/proposals/:id/xlsx", requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        res.status(400).json({ error: "ID inválido" });
+        return;
+      }
+      const proposal = await getProposalWithItems(id);
+      if (!proposal) {
+        res.status(404).json({ error: "Proposta não encontrada" });
+        return;
+      }
+      const company = await getCompanySettings();
+      const xlsxBuffer = await generateProposalExcel({ proposal: proposal as any, company: company as any });
+      const filename = `proposta-${proposal.id}-${(proposal.title ?? "proposta").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.xlsx`;
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", xlsxBuffer.length);
+      res.send(xlsxBuffer);
+    } catch (err) {
+      if (err instanceof PricingValidationError) {
+        res.status(422).json({ error: err.message, issues: err.issues });
+        return;
+      }
+      console.error("[XLSX] Erro ao gerar Excel da proposta:", err);
+      res.status(500).json({ error: "Erro ao gerar Excel" });
     }
   });
 

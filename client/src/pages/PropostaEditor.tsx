@@ -825,6 +825,29 @@ export default function PropostaEditor() {
     }
   };
 
+  // Exportação em Excel (§11) — mesma máscara do PDF (sem custo/margem).
+  const handleDownloadExcel = async () => {
+    try {
+      const response = await fetch(`/api/proposals/${id}/xlsx`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || "Erro ao gerar Excel");
+      }
+      const blob = await response.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = `proposta-${id}-${(proposal?.title ?? "proposta").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
+      toast.success("Excel baixado com sucesso!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao gerar Excel. Tente novamente.");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-8 py-12 text-center">
@@ -900,6 +923,15 @@ export default function PropostaEditor() {
             ) : (
               <><Download size={12} />Baixar PDF</>
             )}
+          </button>
+          <button
+            onClick={() => handleDownloadExcel()}
+            disabled={!canExportPdf}
+            className="flex items-center gap-2 border border-green-700 text-green-800 px-4 py-2 text-xs font-bold hover:bg-green-700 hover:text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            title={canExportPdf ? "Baixar proposta em Excel (sem custo/margem)" : exportPricingIssues.join("; ")}
+          >
+            <Download size={12} />
+            Excel
           </button>
           <button
             onClick={() => setShowDeclaracoesPanel(true)}
