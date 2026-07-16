@@ -161,8 +161,11 @@ export const products = mysqlTable(
     // Cobertura: listProducts(isActive + categoryId), listProducts(isActive + manufacturer)
     index("idx_products_active_cat").on(table.isActive, table.categoryId),
     index("idx_products_active_mfr").on(table.isActive, table.manufacturer),
-    // Cobertura: catalogHealth, actionQueue, extendedStats (isActive + fichaTecnica)
-    index("idx_products_active_ficha").on(table.isActive, table.fichaTecnica),
+    // NOTA: não há índice para (isActive + fichaTecnica) — fichaTecnica é TEXT e o
+    // MySQL exige um prefixo de tamanho para indexar colunas TEXT/BLOB, o que o
+    // query builder de índices compostos do Drizzle não expressa. O filtro por
+    // isActive já é atendido por idx_products_is_active; não declarar aqui evita
+    // que o schema divirja do banco real (ver scripts/migrate-production.mjs).
     // Cobertura: listProducts ordenado por nome (filtro mais comum)
     index("idx_products_active_name").on(table.isActive, table.name),
     // Cobertura: importação - detecção de duplicatas por fornecedor+nome

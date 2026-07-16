@@ -45,6 +45,7 @@ export function normalizeMysqlIdentifiers(statement) {
     /(\b(?:ADD\s+)?CONSTRAINT\s+)`([^`]+)`/gi,
     /(\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+)`([^`]+)`/gi,
     /(\bADD\s+(?:UNIQUE\s+)?(?:INDEX|KEY)\s+)`([^`]+)`/gi,
+    /(\bDROP\s+(?:INDEX|KEY)\s+)`([^`]+)`/gi,
     /(\b(?:UNIQUE\s+)?KEY\s+)`([^`]+)`/gi,
   ];
 
@@ -62,10 +63,14 @@ export function normalizeMysqlIdentifiers(statement) {
  * `idx_products_active_ficha` tentava indexar uma coluna TEXT sem prefixo,
  * algo recusado pelo MySQL. O filtro por atividade continua atendido pelo
  * índice simples `idx_products_is_active`; não fingimos que o índice inválido
- * foi criado.
+ * foi criado. Como o índice nunca existiu de fato no banco, tanto a criação
+ * quanto uma eventual remoção (quando o schema deixa de declará-lo) devem ser
+ * ignoradas — não há o que criar nem o que dropar.
  */
 export function isObsoleteMigrationStatement(statement) {
-  const match = statement.match(/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+`([^`]+)`/i);
+  const match = statement.match(
+    /^\s*(?:CREATE\s+(?:UNIQUE\s+)?INDEX|DROP\s+INDEX)\s+`([^`]+)`/i,
+  );
   return Boolean(match && OBSOLETE_INDEX_NAMES.has(match[1]));
 }
 

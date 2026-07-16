@@ -56,7 +56,23 @@ describe("migrate-production", () => {
     }
   });
 
-  it("marca somente o índice legado inválido de ficha técnica como obsoleto", () => {
+  it("normaliza DROP INDEX/KEY de um identificador longo para o mesmo nome encurtado usado na criação", () => {
+    const longIndex =
+      "bulk_pricing_application_details_applicationId_createdAt_search_index";
+    const createStatement = `CREATE INDEX \`${longIndex}\` ON \`bulk_pricing_application_details\` (\`applicationId\`,\`createdAt\`)`;
+    const dropIndexStatement = `DROP INDEX \`${longIndex}\` ON \`bulk_pricing_application_details\``;
+    const dropKeyStatement = `ALTER TABLE \`bulk_pricing_application_details\` DROP KEY \`${longIndex}\``;
+
+    const shortenedAtCreate = normalizeMysqlIdentifiers(createStatement).match(/`([^`]+)`/g)?.[0];
+    const normalizedDropIndex = normalizeMysqlIdentifiers(dropIndexStatement);
+    const normalizedDropKey = normalizeMysqlIdentifiers(dropKeyStatement);
+
+    expect(normalizedDropIndex).toContain(shortenedAtCreate);
+    expect(normalizedDropKey).toContain(shortenedAtCreate);
+    expect(normalizedDropIndex).not.toContain(`\`${longIndex}\``);
+  });
+
+  it("marca a criação e a remoção do índice legado inválido de ficha técnica como obsoletas", () => {
     expect(
       isObsoleteMigrationStatement(
         "CREATE INDEX `idx_products_active_ficha` ON `products` (`isActive`,`fichaTecnica`);",
@@ -67,9 +83,17 @@ describe("migrate-production", () => {
         "CREATE INDEX `idx_products_active_name` ON `products` (`isActive`,`name`);",
       ),
     ).toBe(false);
+    // O índice nunca chegou a existir no banco (a criação sempre foi ignorada),
+    // então uma migração que tente removê-lo (gerada ao apagar o índice do
+    // schema) também não tem o que fazer — não é um DROP de verdade.
     expect(
       isObsoleteMigrationStatement(
         "DROP INDEX `idx_products_active_ficha` ON `products`;",
+      ),
+    ).toBe(true);
+    expect(
+      isObsoleteMigrationStatement(
+        "DROP INDEX `idx_products_active_name` ON `products`;",
       ),
     ).toBe(false);
   });
