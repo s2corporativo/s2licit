@@ -29,6 +29,7 @@ function ItemRow({
   onRemove,
   taxPct = 0,
   minMarginPct = 0,
+  precoVencido = false,
 }: {
   item: any;
   index: number;
@@ -36,6 +37,7 @@ function ItemRow({
   onRemove: (id: number) => void;
   taxPct?: number;
   minMarginPct?: number;
+  precoVencido?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [qty, setQty] = useState(String(item.quantity ?? 1));
@@ -235,6 +237,13 @@ function ItemRow({
             </span>
             {/* Indicadores internos (margem, preço mínimo) — nunca na impressão (§11) */}
             <div className="print:hidden">
+            {precoVencido && (
+              <div className="mt-0.5">
+                <span className="text-[9px] text-orange-800 font-bold bg-orange-50 border border-orange-200 px-1 py-0.5 rounded">
+                  ⚠ Preço vencido — revalidar
+                </span>
+              </div>
+            )}
             {priceStatus === "ok" && (
               <div className="flex items-center gap-1 mt-0.5">
                 <TrendingUp size={9} className="text-green-600" />
@@ -462,6 +471,16 @@ export default function PropostaEditor() {
   );
   const { data: company } = trpc.company.get.useQuery();
   const utils = trpc.useUtils();
+
+  // §13 — frescor de preço: marca itens cujo preço está vencido, para revalidar.
+  const freshnessProductIds = (proposal?.items ?? [])
+    .map((it) => it.productId)
+    .filter((n): n is number => typeof n === "number" && n > 0);
+  const { data: freshness } = trpc.pricing.priceFreshness.useQuery(
+    { productIds: freshnessProductIds },
+    { enabled: freshnessProductIds.length > 0 },
+  );
+  const precosVencidos = new Set((freshness ?? []).filter((f) => f.vencido).map((f) => f.productId));
 
   const [editingHeader, setEditingHeader] = useState(false);
   // Modal de parcelamento ao marcar como Entregue
@@ -1215,6 +1234,7 @@ export default function PropostaEditor() {
                     onRemove={(itemId) => removeItem.mutate({ id: itemId })}
                     taxPct={totalImpostosManualPct}
                     minMarginPct={panelMinMargin}
+                    precoVencido={typeof item.productId === "number" && precosVencidos.has(item.productId)}
                   />
                 ))
               )}
