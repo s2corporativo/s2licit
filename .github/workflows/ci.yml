@@ -92,7 +92,7 @@ jobs:
             exit 1
           fi
           SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
-          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE'
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE' | tee vps-diagnostico.txt
           set +e
           redact() {
             sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
@@ -138,3 +138,11 @@ jobs:
           grep -R -n -E 'server_name[[:space:]]+s2\.s2corporativo\.com\.br|proxy_pass' /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null || true
           systemctl status nginx --no-pager -n 30 2>&1 | redact || true
           REMOTE
+
+      - name: Publicar diagnóstico completo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-diagnostico
+          path: vps-diagnostico.txt
+          retention-days: 1
