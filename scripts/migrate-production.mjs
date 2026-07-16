@@ -6,6 +6,8 @@ import mysql from "mysql2/promise";
 
 const MIGRATION_LOCK = "s2licit_production_migrations";
 const STATEMENT_BREAKPOINT = "--> statement-breakpoint";
+const MYSQL_IDENTIFIER_MAX_LENGTH = 64;
+const IDENTIFIER_HASH_LENGTH = 12;
 const IGNORABLE_ERROR_NUMBERS = new Set([1050, 1060, 1061, 1826]);
 const IGNORABLE_ERROR_CODES = new Set([
   "ER_TABLE_EXISTS_ERROR",
@@ -19,6 +21,39 @@ export function splitMigrationStatements(sql) {
     .split(STATEMENT_BREAKPOINT)
     .map(statement => statement.trim())
     .filter(Boolean);
+}
+
+export function shortenMysqlIdentifier(identifier) {
+  if (identifier.length <= MYSQL_IDENTIFIER_MAX_LENGTH) return identifier;
+
+  const digest = createHash("sha256")
+    .update(identifier)
+    .digest("hex")
+    .slice(0, IDENTIFIER_HASH_LENGTH);
+  const prefixLength = MYSQL_IDENTIFIER_MAX_LENGTH - IDENTIFIER_HASH_LENGTH - 1;
+  return `${identifier.slice(0, prefixLength)}_${digest}`;
+}
+
+/**
+ * O Drizzle pode gerar nomes de constraints/índices acima do limite de 64
+ * caracteres do MySQL. Encurta somente identificadores estruturais, mantendo
+ * tabelas, colunas e o conteúdo da instrução intactos.
+ */
+export function normalizeMysqlIdentifiers(statement) {
+  const patterns = [
+    /(\b(?:ADD\s+)?CONSTRAINT\s+)`([^`]+)`/gi,
+    /(\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+)`([^`]+)`/gi,
+    /(\bADD\s+(?:UNIQUE\s+)?(?:INDEX|KEY)\s+)`([^`]+)`/gi,
+    /(\b(?:UNIQUE\s+)?KEY\s+)`([^`]+)`/gi,
+  ];
+
+  return patterns.reduce(
+    (sql, pattern) =>
+      sql.replace(pattern, (_match, prefix, identifier) => {
+        return `${prefix}\`${shortenMysqlIdentifier(identifier)}\``;
+      }),
+    statement,
+  );
 }
 
 export function isIgnorableMigrationError(error) {
@@ -67,7 +102,15 @@ async function applyMigration(connection, migration, index) {
   console.log(`[Migration] ${migration.tag}: ${statements.length} comando(s).`);
 
   for (let statementIndex = 0; statementIndex < statements.length; statementIndex += 1) {
-    const statement = statements[statementIndex];
+    const originalStatement = statements[statementIndex];
+    const statement = normalizeMysqlIdentifiers(originalStatement);
+
+    if (statement !== originalStatement) {
+      console.log(
+        `[Migration] ${migration.tag} #${statementIndex + 1}: identificador MySQL normalizado.`,
+      );
+    }
+
     try {
       await connection.query(statement);
     } catch (error) {
