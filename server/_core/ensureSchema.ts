@@ -34,3 +34,19 @@ export async function ensureProductColumns(): Promise<void> {
     console.error("[Schema] Falha ao garantir colunas de produto:", err);
   }
 }
+
+/**
+ * Colunas de segurança de autenticação e auditoria (§16, §18):
+ * bloqueio de conta por tentativas inválidas e rastreabilidade de origem
+ * (IP / user-agent) na trilha de auditoria.
+ */
+export async function ensureAuthSecurityColumns(): Promise<void> {
+  try {
+    await ensureColumn("users", "failedLoginAttempts", "INT NOT NULL DEFAULT 0");
+    await ensureColumn("users", "lockedUntil", "TIMESTAMP NULL");
+    await ensureColumn("audit_logs", "ipAddress", "VARCHAR(64) NULL");
+    await ensureColumn("audit_logs", "userAgent", "VARCHAR(512) NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas de segurança/auditoria:", err);
+  }
+}

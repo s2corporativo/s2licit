@@ -23,6 +23,9 @@ export const users = mysqlTable("users", {
   // Hash scrypt da senha para login local (null para usuários OAuth)
   passwordHash: varchar("passwordHash", { length: 255 }),
   role: mysqlEnum("role", ["user", "admin", "editor", "viewer"]).default("user").notNull(),
+  // Segurança: bloqueio de conta após tentativas inválidas de login.
+  failedLoginAttempts: int("failedLoginAttempts").default(0).notNull(),
+  lockedUntil: timestamp("lockedUntil"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -1839,6 +1842,9 @@ export const auditLogs = mysqlTable(
     origin: varchar("origin", { length: 128 }).default("manual").notNull(),
     summary: text("summary"),
     changes: json("changes"),
+    // Rastreabilidade de acesso (§18): origem da requisição.
+    ipAddress: varchar("ipAddress", { length: 64 }),
+    userAgent: varchar("userAgent", { length: 512 }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [

@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { auditLogs } from "../../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
 import { checkDatabaseIntegrity, checkForeignKeyIntegrity, getDatabaseStats } from "../db.audit";
+import { requestOrigin } from "../services/auditService";
 
 export const auditRouter = router({
   getLogs: adminProcedure
@@ -34,6 +35,7 @@ export const auditRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database connection failed");
 
+      const origin = requestOrigin(ctx.req);
       await db.insert(auditLogs).values({
         userId: ctx.user.id,
         action: input.action,
@@ -42,6 +44,8 @@ export const auditRouter = router({
         origin: input.origin ?? "manual",
         summary: input.summary ?? null,
         changes: (input.changes ?? null) as any,
+        ipAddress: origin.ipAddress,
+        userAgent: origin.userAgent,
       });
       return { success: true };
     }),
