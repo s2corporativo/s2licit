@@ -5,6 +5,8 @@ import { users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { credentialEncryptionService } from "../services/credentialEncryptionService";
 import { recordAudit, requestOrigin } from "../services/auditService";
+import { verifyTotp } from "../services/totp";
+import { decryptPassword } from "../utils/encryption";
 import { getSessionCookieOptions } from "./cookies";
 import { ENV } from "./env";
 import { sdk } from "./sdk";
@@ -104,12 +106,13 @@ export async function ensureAdminUser(): Promise<void> {
   }
 }
 
-function readBody(req: Request): { email?: string; password?: string; name?: string } {
+function readBody(req: Request): { email?: string; password?: string; name?: string; token?: string } {
   const body = req.body ?? {};
   return {
     email: typeof body.email === "string" ? body.email.trim().toLowerCase() : undefined,
     password: typeof body.password === "string" ? body.password : undefined,
     name: typeof body.name === "string" ? body.name.trim() : undefined,
+    token: typeof body.token === "string" ? body.token.trim() : undefined,
   };
 }
 
@@ -117,7 +120,7 @@ export function registerLocalAuthRoutes(app: Express) {
   // POST /api/auth/login — protegido pelo authRateLimiter (10/min por IP)
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password } = readBody(req);
+      const { email, password, token } = readBody(req);
       if (!email || !password) {
         res.status(400).json({ error: "Informe e-mail e senha." });
         return;
@@ -170,6 +173,32 @@ export function registerLocalAuthRoutes(app: Express) {
         }
         res.status(401).json({ error: "E-mail ou senha incorretos." });
         return;
+      }
+
+      // MFA (TOTP): se ativado, exige o código antes de emitir a sessão (§16).
+      if (user.mfaEnabled) {
+        if (!token) {
+          res.status(401).json({ error: "Código de verificação (MFA) necessário.", mfaRequired: true });
+          return;
+        }
+        let secret: string | null = null;
+        try {
+          secret = user.mfaSecret ? decryptPassword(user.mfaSecret) : null;
+        } catch {
+          secret = null;
+        }
+        if (!secret || !verifyTotp(secret, token, Date.now())) {
+          const lock = nextLockoutState(user.failedLoginAttempts ?? 0, now);
+          await db.update(users)
+            .set({ failedLoginAttempts: lock.failedLoginAttempts, lockedUntil: lock.lockedUntil })
+            .where(eq(users.id, user.id));
+          await recordAudit({
+            userId: user.id, action: "login_falha", entity: "auth", entityId: user.id,
+            origin: "login", summary: "Código MFA inválido", ...origin,
+          });
+          res.status(401).json({ error: "Código de verificação inválido.", mfaRequired: true });
+          return;
+        }
       }
 
       // Sucesso: zera o contador de tentativas e desbloqueia.

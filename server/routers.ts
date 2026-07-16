@@ -38,6 +38,7 @@ import { documentGovernanceRouter } from "./routers/documentGovernanceRouter";
 import { workflowRouter } from "./routers/workflowRouter";
 import { operationsRouter } from "./routers/operationsRouter";
 import { auditRouter } from "./routers/auditRouter";
+import { mfaRouter } from "./routers/mfaRouter";
 import { alertConfigRouter } from "./routers/alertConfigRouter";
 import { marginOptimizationRouter } from "./routers/marginOptimizationRouter";
 import { reportRouter } from "./routers/reportRouter";
@@ -191,6 +192,7 @@ export const appRouter = router({
   propostaAgent: propostaAgentRouter,
   priceAlerts: priceAlertsRouter,
   audit: auditRouter,
+  mfa: mfaRouter,
   alertConfig: alertConfigRouter,
   marginOptimization: marginOptimizationRouter,
   reports: reportRouter,
@@ -224,8 +226,11 @@ export const appRouter = router({
     me: publicProcedure.query((opts) => {
       const u = opts.ctx.user;
       if (!u) return null;
-      // Nunca serializar o hash de senha para o cliente (era vazado no payload).
-      const { passwordHash, ...safe } = u as typeof u & { passwordHash?: unknown };
+      // Nunca serializar o hash de senha nem o segredo MFA para o cliente.
+      const { passwordHash, mfaSecret, ...safe } = u as typeof u & {
+        passwordHash?: unknown;
+        mfaSecret?: unknown;
+      };
       return safe;
     }),
     logout: publicProcedure.mutation(({ ctx }) => {

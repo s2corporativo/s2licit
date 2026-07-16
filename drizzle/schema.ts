@@ -26,6 +26,9 @@ export const users = mysqlTable("users", {
   // Segurança: bloqueio de conta após tentativas inválidas de login.
   failedLoginAttempts: int("failedLoginAttempts").default(0).notNull(),
   lockedUntil: timestamp("lockedUntil"),
+  // MFA (TOTP): segredo criptografado e flag de ativação (§16).
+  mfaEnabled: boolean("mfaEnabled").default(false).notNull(),
+  mfaSecret: text("mfaSecret"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
