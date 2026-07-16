@@ -203,6 +203,62 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     navigationWait: 3000,
   },
 
+  // ── Templates iniciais (VALIDAR com "testar login" e ajustar) ────────────────
+  // Os sites abaixo bloqueiam inspeção automática (403 anti-bot), então estes
+  // configs partem das URLs públicas conhecidas + seletores de fallback amplos e
+  // extração por dados estruturados. Confirme os seletores no Configurador de
+  // Fornecedores (botão "testar login") e prefira catálogo/API onde o ToS
+  // restringir automação (§17).
+  bartofil: {
+    // Portal B2B (Bartofil). Ajuste a URL exata de login pelo Configurador.
+    loginUrl: "https://www.bartofil.com.br/customer/account/login/",
+    loginEmail: 'input[name="login[username]"], input[type="email"], #email, #username',
+    loginPassword: 'input[name="login[password]"], input[type="password"], #pass, #password',
+    loginSubmit: '#send2, button[type="submit"], input[type="submit"]',
+    useStructuredData: true,
+    categoryUrls: [],
+    searchUrlTemplate: "https://www.bartofil.com.br/catalogsearch/result/?q={q}",
+    productItem: '.product-item, .product, .produto, [class*="product"]',
+    productName: '.product-item-link, h2, h3, .name, .nome',
+    productPrice: '.price, .preco, [class*="price"]',
+    productImage: 'img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .action.next',
+    navigationWait: 2500,
+  },
+  bassopancotte: {
+    loginUrl: "https://bassopancotte.com.br/login",
+    loginEmail: 'input[name="email"], input[type="email"], #email, #username, input[name="usuario"]',
+    loginPassword: 'input[name="password"], input[type="password"], #senha, #password',
+    loginSubmit: 'button[type="submit"], input[type="submit"], .btn-login',
+    useStructuredData: true,
+    categoryUrls: [],
+    productItem: '.product, .produto, [class*="product"], [class*="item"]',
+    productName: 'h2, h3, .name, .title, .nome',
+    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productImage: 'img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .proxima',
+    navigationWait: 2500,
+  },
+  magazinemedica: {
+    // Login confirmado (base Django); entra por CPF/CNPJ ou e-mail.
+    loginUrl: "https://magazinemedica.com.br/accounts/registro/login/",
+    loginEmail: '#id_username, input[name="username"], input[name="login"], input[type="text"]',
+    loginPassword: '#id_password, input[name="password"], input[type="password"]',
+    loginSubmit: 'button[type="submit"], input[type="submit"]',
+    useStructuredData: true,
+    categoryUrls: [],
+    searchUrlTemplate: "https://magazinemedica.com.br/busca/?q={q}",
+    productItem: '.product, .produto, [class*="product"], [class*="card"]',
+    productName: 'h2, h3, .name, .title, .nome',
+    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productImage: 'img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .proxima',
+    navigationWait: 2500,
+  },
+
   // Fornecedor genérico — funciona para muitos e-commerces padrão
   generico: {
     loginEmail: 'input[name="email"], input[type="email"], #email, #username',
