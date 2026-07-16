@@ -122,6 +122,7 @@ const navGroups: NavGroup[] = [
     label: "Administração",
     items: [
       { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
+      { href: "/seguranca", icon: ShieldCheck, label: "Segurança (MFA)" },
     ],
   },
 ];
