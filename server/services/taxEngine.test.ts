@@ -38,6 +38,16 @@ describe("taxEngine", () => {
     expect(res.valorLiquido).toBe(940);
   });
 
+  it("§9 — IPI/PIS/COFINS são tipos de 1ª classe e entram no total", () => {
+    const ipi = regra({ id: 10, percentual: "5.000", tipo: "ipi", descricao: "IPI" });
+    const pis = regra({ id: 11, percentual: "1.650", tipo: "pis", descricao: "PIS" });
+    const cofins = regra({ id: 12, percentual: "7.600", tipo: "cofins", descricao: "COFINS" });
+    const res = calcularImpostos({ valorVenda: 1000, regras: [ipi, pis, cofins] });
+    expect(res.linhas.map((l) => l.tipo).sort()).toEqual(["cofins", "ipi", "pis"]);
+    expect(res.totalPercentual).toBeCloseTo(14.25, 3);
+    expect(res.totalValor).toBe(142.5);
+  });
+
   it("aplica DIFAL só em operação interestadual", () => {
     const dentro = calcularImpostos({ valorVenda: 1000, ufOrigem: "MG", ufDestino: "MG", regras: [simples, difalSP] });
     expect(dentro.totalPercentual).toBe(6);

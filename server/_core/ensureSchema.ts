@@ -72,3 +72,30 @@ export async function ensureOfferColumns(): Promise<void> {
     console.error("[Schema] Falha ao garantir colunas de ofertas:", err);
   }
 }
+
+/**
+ * IPI/PIS/COFINS como tipos de 1ª classe no Motor Tributário (§9). Estende o
+ * enum tax_rules.tipo de forma idempotente (só altera se ainda não os inclui).
+ */
+export async function ensureTaxRuleTypes(): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const [rows] = await db.execute(
+      sql`SELECT COLUMN_TYPE as t FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tax_rules' AND COLUMN_NAME = 'tipo'`,
+    );
+    const tipo = String((rows as any)[0]?.t ?? "");
+    if (!tipo) return; // tabela ainda não criada
+    if (tipo.includes("'ipi'") && tipo.includes("'pis'") && tipo.includes("'cofins'")) return;
+    await db.execute(
+      sql.raw(
+        "ALTER TABLE `tax_rules` MODIFY COLUMN `tipo` " +
+          "ENUM('simples_efetiva','icms','difal','st','fcp','iss','ipi','pis','cofins','outro') NOT NULL",
+      ),
+    );
+    console.log("[Schema] Enum tax_rules.tipo estendido com IPI/PIS/COFINS.");
+  } catch (err) {
+    console.error("[Schema] Falha ao estender tax_rules.tipo:", err);
+  }
+}

@@ -3213,7 +3213,7 @@ export const taxRules = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     descricao: varchar("descricao", { length: 256 }).notNull(),
-    tipo: mysqlEnum("tipo", ["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "outro"]).notNull(),
+    tipo: mysqlEnum("tipo", ["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "ipi", "pis", "cofins", "outro"]).notNull(),
     // null = vale para qualquer UF
     ufOrigem: varchar("ufOrigem", { length: 2 }),
     ufDestino: varchar("ufDestino", { length: 2 }),

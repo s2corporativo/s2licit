@@ -6,7 +6,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
-import { ensureProductColumns, ensureAuthSecurityColumns, ensureCompanySettingsColumns, ensureOfferColumns } from "./ensureSchema";
+import { ensureProductColumns, ensureAuthSecurityColumns, ensureCompanySettingsColumns, ensureOfferColumns, ensureTaxRuleTypes } from "./ensureSchema";
 import { initScheduledJobs } from "../services/scheduledJobs";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -51,6 +51,7 @@ async function startServer() {
   await ensureAuthSecurityColumns();
   await ensureCompanySettingsColumns();
   await ensureOfferColumns();
+  await ensureTaxRuleTypes();
 
   const app = express();
   const server = createServer(app);
