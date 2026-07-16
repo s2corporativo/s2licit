@@ -262,14 +262,25 @@ EOF
       echo "⚠️  certbot não conseguiu emitir o certificado agora (o site já responde em HTTP simples em http://${DOMAIN_ATUAL}/). Rode 'certbot --nginx -d ${DOMAIN_ATUAL}' manualmente na VPS para tentar de novo." >&2
     fi
   else
-    # VPS "limpa" (sem Nginx ocupando as portas) — Caddy assume 80/443 direto.
+    # Antes de assumir "VPS limpa", confere se ALGUM OUTRO processo (não
+    # Nginx — já tratado acima — e não um Caddy de execução anterior) já
+    # ocupa 80/443. Instalar o Caddy por cima reproduziria, para qualquer
+    # outro servidor web (Apache, Traefik, etc.), a mesma falha de porta
+    # ocupada que a coexistência com o Nginx foi criada para evitar.
     ocupante_80=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/')
     ocupante_443=$(ss -ltnp 2>/dev/null | awk '$4 ~ /:443$/')
-    if { [ -n "$ocupante_80" ] || [ -n "$ocupante_443" ]; } && ! command -v caddy >/dev/null 2>&1; then
-      echo "⚠️  Porta 80 e/ou 443 já em uso por outro processo ANTES de instalar o Caddy:" >&2
+    ocupante_e_outro_servico=false
+    if { [ -n "$ocupante_80" ] || [ -n "$ocupante_443" ]; } \
+       && ! echo "${ocupante_80}${ocupante_443}" | grep -qi 'caddy'; then
+      ocupante_e_outro_servico=true
+    fi
+
+    if [ "$ocupante_e_outro_servico" = true ] && ! command -v caddy >/dev/null 2>&1; then
+      echo "❌ Porta 80 e/ou 443 já em uso por outro serviço nesta VPS (não é Nginx nem um Caddy já instalado) — não vou tentar subir o Caddy por cima para não derrubar o que já está rodando:" >&2
       [ -n "$ocupante_80" ] && echo "  :80  -> ${ocupante_80}" >&2
       [ -n "$ocupante_443" ] && echo "  :443 -> ${ocupante_443}" >&2
-      echo "  O Caddy pode falhar ao subir e o serviço acima continuará respondendo no domínio." >&2
+      echo "  Configure manualmente um proxy reverso desse serviço para 127.0.0.1:${LOCAL_PORT}, ou pare o serviço e rode este bootstrap novamente." >&2
+      exit 1
     fi
     if ! command -v caddy >/dev/null 2>&1; then
       echo "Instalando Caddy..."
