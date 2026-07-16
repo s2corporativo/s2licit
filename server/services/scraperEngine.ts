@@ -12,6 +12,8 @@ import { products, scraperConfigs, scraperLogs, productSupplierOffers } from "..
 import { eq, and, or, like } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
+import { supplierSessionService } from "./supplierSessionService";
+import { puppeteerCookiesToRecord, recordToPuppeteerCookies } from "./sessionCookies";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -236,8 +238,83 @@ export class ScraperEngine {
     } catch {}
   }
 
+  /** Verifica se a página atual está autenticada, pelos sinais da config. */
+  private async verificarLogado(cfg: SelectorConfig): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      if (cfg.loginSuccessSelector) {
+        return await this.page.evaluate(
+          (sel) => !!document.querySelector(sel),
+          cfg.loginSuccessSelector,
+        );
+      }
+      // Sem seletor de sucesso: considera logado se não há campo de senha visível.
+      const temSenhaVisivel = await this.page.evaluate(() =>
+        Array.from(document.querySelectorAll('input[type="password"]')).some(
+          (el) => (el as HTMLElement).offsetParent !== null,
+        ),
+      );
+      return !temSenhaVisivel;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * §4 — tenta reutilizar uma sessão salva (cookies criptografados) antes de
+   * refazer o login por formulário. Totalmente defensivo: qualquer falha
+   * retorna false e o fluxo cai no login normal.
+   */
+  private async tentarReutilizarSessao(
+    supplierId: number,
+    loginUrl: string,
+    cfg: SelectorConfig,
+  ): Promise<boolean> {
+    try {
+      const session = await supplierSessionService.getActiveSession(supplierId);
+      if (!session) return false;
+      const cookies = recordToPuppeteerCookies(
+        supplierSessionService.parseCookies(session),
+        loginUrl,
+      );
+      if (cookies.length === 0) return false;
+
+      await this.page!.setCookie(...cookies);
+      await this.page!.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
+      await new Promise((r) => setTimeout(r, 800));
+
+      const logado = await this.verificarLogado(cfg);
+      if (!logado) {
+        // Sessão não vale mais: marca como expirada para não insistir.
+        await supplierSessionService.expireSession(supplierId).catch(() => {});
+      }
+      return logado;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Salva os cookies atuais como sessão reutilizável (best-effort). */
+  private async salvarSessao(supplierId: number): Promise<void> {
+    try {
+      if (!this.page) return;
+      const record = puppeteerCookiesToRecord(await this.page.cookies());
+      if (Object.keys(record).length === 0) return;
+      await supplierSessionService.upsertSession(supplierId, { cookies: record }, "active");
+      this.addLog("Sessão salva para reuso.");
+    } catch {
+      /* auditoria/persistência de sessão nunca bloqueia a captura */
+    }
+  }
+
   /** Faz login no site do fornecedor */
-  async login(loginUrl: string, email: string, password: string, cfg: SelectorConfig): Promise<void> {
+  async login(
+    loginUrl: string,
+    email: string,
+    password: string,
+    cfg: SelectorConfig,
+    supplierId?: number,
+  ): Promise<void> {
     if (!this.browser) await this.init();
     this.page = await this.browser!.newPage();
 
@@ -248,6 +325,12 @@ export class ScraperEngine {
 
     // Viewport padrão desktop
     await this.page.setViewport({ width: 1366, height: 768 });
+
+    // §4 — reutiliza sessão salva quando possível (evita novo login).
+    if (supplierId != null && (await this.tentarReutilizarSessao(supplierId, loginUrl, cfg))) {
+      this.addLog("Sessão reutilizada — login por formulário dispensado.");
+      return;
+    }
 
     this.addLog(`Acessando ${loginUrl}...`);
     await this.page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
@@ -330,6 +413,9 @@ export class ScraperEngine {
     }
 
     this.addLog(`Login confirmado. URL: ${currentUrl}`);
+
+    // §4 — persiste a sessão para reuso na próxima execução.
+    if (supplierId != null) await this.salvarSessao(supplierId);
   }
 
   /** Extrai produtos de uma URL de categoria */
@@ -854,8 +940,8 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
       : `https://${scraperType}.com.br/login`);
 
   try {
-    // Login
-    await engine.login(loginUrl, email, password, cfg);
+    // Login (reutiliza a sessão do fornecedor quando válida, §4)
+    await engine.login(loginUrl, email, password, cfg, config.supplierId);
 
     // Raspar todas as categorias configuradas
     const allScraped: ScrapedProduct[] = [];
