@@ -75,14 +75,14 @@ jobs:
   verificar-vps:
     if: github.event_name == 'pull_request' && github.head_ref == 'verify/vps-restaurada-20260715'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 18
     steps:
       - name: Preparar SSH
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
 
-      - name: Capturar falha completa da aplicação
+      - name: Acompanhar deploy e verificar aplicação
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -94,28 +94,50 @@ jobs:
           cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | head -1 | cut -d= -f2)
           LOCAL_PORT=${LOCAL_PORT:-3000}
-          redact() {
-            sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
-          }
+          OLD_IMAGE="sha256:1dc4a23de674625ab8074596549a6dcbae26fc9533b99ab55ebeb055fac79067"
 
-          echo "=== CONTAINERS ==="
-          docker compose ps -a 2>&1
-          docker inspect --format 'app status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' sistema-s2-app 2>&1
-          docker inspect --format 'image={{.Image}} path={{.Path}} args={{json .Args}}' sistema-s2-app 2>&1
+          echo "=== CÓDIGO ENTREGUE ==="
+          if grep -q 'normalizeMysqlIdentifiers' scripts/migrate-production.mjs 2>/dev/null; then
+            echo "source_fix=present"
+          else
+            echo "source_fix=absent"
+          fi
+          ps -eo pid,etime,cmd | grep -E 'vps-bootstrap|docker (compose )?(build|up)|buildkit' | grep -v grep || true
 
-          echo "=== LOGS COMPLETOS DO APP ==="
-          docker compose logs --tail=300 app 2>&1 | redact
+          echo "=== ACOMPANHAMENTO ==="
+          ready=0
+          for attempt in $(seq 1 72); do
+            image=$(docker inspect --format '{{.Image}}' sistema-s2-app 2>/dev/null || echo absent)
+            state=$(docker inspect --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' sistema-s2-app 2>/dev/null || echo absent)
+            migrations=$(docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' 2>/dev/null | tail -1)
+            migrations=${migrations:-0}
+            if curl -fsS --max-time 3 "http://127.0.0.1:${LOCAL_PORT}/readyz" >/dev/null 2>&1; then
+              echo "attempt=${attempt} image=${image} state=${state} migrations=${migrations} ready=yes"
+              ready=1
+              break
+            fi
+            if [ "$attempt" = "1" ] || [ $((attempt % 6)) -eq 0 ]; then
+              echo "attempt=${attempt} image=${image} state=${state} migrations=${migrations} ready=no"
+            fi
+            sleep 10
+          done
 
-          echo "=== MIGRACOES REGISTRADAS ==="
-          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations; SELECT id, LEFT(hash,12), created_at FROM __drizzle_migrations ORDER BY id;"' 2>&1 | redact
-
-          echo "=== TESTE DO MIGRADOR EM CONTAINER ISOLADO ==="
-          docker compose run --rm --no-deps -e NO_COLOR=1 -e TERM=dumb app node scripts/migrate-production.mjs 2>&1 | redact
+          echo "=== ESTADO FINAL ==="
+          docker compose ps -a
+          docker inspect --format 'app image={{.Image}} status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}}' sistema-s2-app 2>&1
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations; SELECT id, LEFT(hash,12), created_at FROM __drizzle_migrations ORDER BY id;"' 2>&1
 
           echo "=== ENDPOINTS ==="
-          curl -sS -i --max-time 8 "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>&1
-          curl -sS -i --max-time 8 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1
-          curl -sS -I --max-time 12 https://s2.s2corporativo.com.br/ 2>&1
+          curl -sS -i --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>&1
+          curl -sS -i --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1
+          curl -sS -I --max-time 15 https://s2.s2corporativo.com.br/ 2>&1
+
+          echo "=== LOGS RECENTES ==="
+          docker compose logs --tail=160 app 2>&1 | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+
+          [ "$ready" = "1" ] || exit 1
+          final_image=$(docker inspect --format '{{.Image}}' sistema-s2-app 2>/dev/null || echo absent)
+          [ "$final_image" != "$OLD_IMAGE" ] || exit 1
           REMOTE
 
       - name: Publicar verificação
