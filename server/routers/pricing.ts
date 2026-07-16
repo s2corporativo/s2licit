@@ -1,8 +1,14 @@
 import { z } from "zod";
-import { adminProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { precoFinalUnificado } from "../services/precoUnificado";
+import { avaliarFrescorPrecos } from "../services/priceFreshnessService";
 
 export const pricingRouter = router({
+  /** §13 — quais preços dos produtos estão vencidos (para a revisão). */
+  priceFreshness: protectedProcedure
+    .input(z.object({ productIds: z.array(z.number().int().positive()).max(500) }))
+    .query(({ input }) => avaliarFrescorPrecos(input.productIds)),
+
   calculateBatchPrices: adminProcedure
     .input(z.object({
       products: z.array(z.object({ id: z.number(), basePrice: z.number() })),

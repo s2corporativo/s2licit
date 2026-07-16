@@ -23,6 +23,12 @@ export const users = mysqlTable("users", {
   // Hash scrypt da senha para login local (null para usuários OAuth)
   passwordHash: varchar("passwordHash", { length: 255 }),
   role: mysqlEnum("role", ["user", "admin", "editor", "viewer"]).default("user").notNull(),
+  // Segurança: bloqueio de conta após tentativas inválidas de login.
+  failedLoginAttempts: int("failedLoginAttempts").default(0).notNull(),
+  lockedUntil: timestamp("lockedUntil"),
+  // MFA (TOTP): segredo criptografado e flag de ativação (§16).
+  mfaEnabled: boolean("mfaEnabled").default(false).notNull(),
+  mfaSecret: text("mfaSecret"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -300,6 +306,9 @@ export const companySettings = mysqlTable("company_settings", {
   bankInfo: text("bankInfo"),
   notes: text("notes"),
   minMarginPercent: decimal("minMarginPercent", { precision: 6, scale: 2 }).default("15"), // Margem mínima global (%)
+  // §13 — validade máxima da consulta de preço antes de exigir revalidação.
+  priceValidityPreset: varchar("priceValidityPreset", { length: 16 }).default("24h"),
+  priceValidityCustomHours: int("priceValidityCustomHours"),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
@@ -1839,6 +1848,9 @@ export const auditLogs = mysqlTable(
     origin: varchar("origin", { length: 128 }).default("manual").notNull(),
     summary: text("summary"),
     changes: json("changes"),
+    // Rastreabilidade de acesso (§18): origem da requisição.
+    ipAddress: varchar("ipAddress", { length: 64 }),
+    userAgent: varchar("userAgent", { length: 512 }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [
@@ -1990,6 +2002,8 @@ export const productSupplierOffers = mysqlTable(
     brand: varchar("brand", { length: 255 }),
     manufacturer: varchar("manufacturer", { length: 255 }),
     price: decimal("price", { precision: 12, scale: 2 }),
+    promoPrice: decimal("promoPrice", { precision: 12, scale: 2 }), // §7 preço promocional
+    stock: int("stock"), // §7 estoque informado pelo fornecedor
     priceHistory: json("priceHistory"), // JSON array de histórico de preços
     link: text("link"),
     image: text("image"),

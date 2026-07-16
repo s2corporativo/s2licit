@@ -8,6 +8,7 @@ import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
 import { executarScraper } from "./scraperEngine";
+import { runDatabaseBackup, cleanupOldBackups } from "./backupService";
 
 /**
  * Agendador central de jobs recorrentes.
@@ -21,6 +22,8 @@ import { executarScraper } from "./scraperEngine";
 const DEFAULT_EMAIL_SYNC_CRON = "*/15 * * * *"; // a cada 15 min
 const DEFAULT_ALERTS_CRON = "0 8 * * *"; // todo dia às 8h
 const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
+const DEFAULT_BACKUP_CRON = "0 3 * * *"; // backup diário às 3h
+const DEFAULT_BACKUP_KEEP_DAYS = 14;
 const SCRAPER_TIMEZONE = "America/Sao_Paulo";
 const ALERT_DAYS = 30; // certidões
 const DEADLINE_DAYS = 3; // prazos de cotação
@@ -143,6 +146,22 @@ async function runScheduledScrapers(): Promise<void> {
   }
 }
 
+/** Executa o backup do banco e aplica a retenção. */
+export async function runBackupJob(): Promise<void> {
+  const destDir = process.env.BACKUP_DIR || "backups";
+  const keepDays = Number(process.env.BACKUP_KEEP_DAYS) || DEFAULT_BACKUP_KEEP_DAYS;
+  const result = await runDatabaseBackup({ destDir });
+  if (result.success) {
+    const removidos = cleanupOldBackups(destDir, keepDays, Date.now());
+    console.log(
+      `[Scheduler] Backup concluído: ${result.file}` +
+        (removidos > 0 ? ` (${removidos} backup(s) antigo(s) removido(s)).` : "."),
+    );
+  } else {
+    console.error(`[Scheduler] Backup falhou: ${result.error}`);
+  }
+}
+
 /** Registra os jobs recorrentes. Chamado uma vez no boot. */
 export function initScheduledJobs(): void {
   // 1. Sincronização de cotações por e-mail
@@ -175,6 +194,17 @@ export function initScheduledJobs(): void {
       console.log(`[Scheduler] Execução automática de fornecedores agendada (verificação ${expr}, horário de Brasília).`);
     } else {
       console.warn(`[Scheduler] SCRAPER_SCHEDULE_CRON inválido: "${expr}" — agendamento automático de fornecedores desativado.`);
+    }
+  }
+
+  // 4. Backup automático do banco (§16)
+  if (enabled(process.env.BACKUP_ENABLED, true)) {
+    const expr = process.env.BACKUP_CRON || DEFAULT_BACKUP_CRON;
+    if (cron.validate(expr)) {
+      cron.schedule(expr, () => { void runBackupJob(); });
+      console.log(`[Scheduler] Backup automático do banco agendado (${expr}).`);
+    } else {
+      console.warn(`[Scheduler] BACKUP_CRON inválido: "${expr}" — backup automático desativado.`);
     }
   }
 }

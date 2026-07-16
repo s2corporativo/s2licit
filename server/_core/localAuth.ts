@@ -4,9 +4,38 @@ import { eq, sql } from "drizzle-orm";
 import { users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { credentialEncryptionService } from "../services/credentialEncryptionService";
+import { recordAudit, requestOrigin } from "../services/auditService";
+import { verifyTotp } from "../services/totp";
+import { decryptPassword } from "../utils/encryption";
 import { getSessionCookieOptions } from "./cookies";
 import { ENV } from "./env";
 import { sdk } from "./sdk";
+
+/**
+ * Política de bloqueio de conta (§16): após MAX_FAILED_LOGINS tentativas
+ * inválidas consecutivas, a conta fica bloqueada por LOCKOUT_MS. O contador
+ * zera em qualquer login bem-sucedido.
+ */
+export const MAX_FAILED_LOGINS = 5;
+export const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutos
+
+/** Estado do bloqueio após uma tentativa inválida (função pura, testável). */
+export function nextLockoutState(
+  currentFailed: number,
+  now: number,
+): { failedLoginAttempts: number; lockedUntil: Date | null } {
+  const failed = (currentFailed ?? 0) + 1;
+  if (failed >= MAX_FAILED_LOGINS) {
+    // Bloqueia e reinicia o contador para a próxima janela.
+    return { failedLoginAttempts: 0, lockedUntil: new Date(now + LOCKOUT_MS) };
+  }
+  return { failedLoginAttempts: failed, lockedUntil: null };
+}
+
+/** A conta está bloqueada agora? (função pura, testável). */
+export function isAccountLocked(lockedUntil: Date | null | undefined, now: number): boolean {
+  return lockedUntil != null && new Date(lockedUntil).getTime() > now;
+}
 
 /**
  * Autenticação local por e-mail e senha.
@@ -77,12 +106,13 @@ export async function ensureAdminUser(): Promise<void> {
   }
 }
 
-function readBody(req: Request): { email?: string; password?: string; name?: string } {
+function readBody(req: Request): { email?: string; password?: string; name?: string; token?: string } {
   const body = req.body ?? {};
   return {
     email: typeof body.email === "string" ? body.email.trim().toLowerCase() : undefined,
     password: typeof body.password === "string" ? body.password : undefined,
     name: typeof body.name === "string" ? body.name.trim() : undefined,
+    token: typeof body.token === "string" ? body.token.trim() : undefined,
   };
 }
 
@@ -90,7 +120,7 @@ export function registerLocalAuthRoutes(app: Express) {
   // POST /api/auth/login — protegido pelo authRateLimiter (10/min por IP)
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password } = readBody(req);
+      const { email, password, token } = readBody(req);
       if (!email || !password) {
         res.status(400).json({ error: "Informe e-mail e senha." });
         return;
@@ -104,15 +134,77 @@ export function registerLocalAuthRoutes(app: Express) {
 
       const found = await db.select().from(users).where(eq(users.email, email)).limit(1);
       const user = found[0];
+      const now = Date.now();
+      const origin = requestOrigin(req);
+
+      // Conta bloqueada por tentativas inválidas: nega antes de verificar a senha.
+      if (user && isAccountLocked(user.lockedUntil, now)) {
+        const retryAfter = Math.ceil((new Date(user.lockedUntil!).getTime() - now) / 1000);
+        res.setHeader("Retry-After", String(Math.max(1, retryAfter)));
+        await recordAudit({
+          userId: user.id, action: "login_bloqueado", entity: "auth", entityId: user.id,
+          origin: "login", summary: `Login negado — conta bloqueada até ${new Date(user.lockedUntil!).toISOString()}`,
+          ...origin,
+        });
+        res.status(429).json({ error: "Conta temporariamente bloqueada por tentativas inválidas. Tente novamente mais tarde." });
+        return;
+      }
 
       // Mensagem idêntica para usuário inexistente e senha errada
       // (não revelar quais e-mails existem).
       if (!user?.passwordHash || !credentialEncryptionService.verifyPassword(password, user.passwordHash)) {
+        if (user) {
+          const lock = nextLockoutState(user.failedLoginAttempts ?? 0, now);
+          await db.update(users)
+            .set({ failedLoginAttempts: lock.failedLoginAttempts, lockedUntil: lock.lockedUntil })
+            .where(eq(users.id, user.id));
+          await recordAudit({
+            userId: user.id, action: "login_falha", entity: "auth", entityId: user.id, origin: "login",
+            summary: lock.lockedUntil
+              ? `Senha inválida — conta bloqueada por ${Math.round(LOCKOUT_MS / 60000)} min`
+              : "Senha inválida",
+            ...origin,
+          });
+        } else {
+          await recordAudit({
+            action: "login_falha", entity: "auth", origin: "login",
+            summary: "Tentativa de login para e-mail inexistente", ...origin,
+          });
+        }
         res.status(401).json({ error: "E-mail ou senha incorretos." });
         return;
       }
 
-      await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user.id));
+      // MFA (TOTP): se ativado, exige o código antes de emitir a sessão (§16).
+      if (user.mfaEnabled) {
+        if (!token) {
+          res.status(401).json({ error: "Código de verificação (MFA) necessário.", mfaRequired: true });
+          return;
+        }
+        let secret: string | null = null;
+        try {
+          secret = user.mfaSecret ? decryptPassword(user.mfaSecret) : null;
+        } catch {
+          secret = null;
+        }
+        if (!secret || !verifyTotp(secret, token, Date.now())) {
+          const lock = nextLockoutState(user.failedLoginAttempts ?? 0, now);
+          await db.update(users)
+            .set({ failedLoginAttempts: lock.failedLoginAttempts, lockedUntil: lock.lockedUntil })
+            .where(eq(users.id, user.id));
+          await recordAudit({
+            userId: user.id, action: "login_falha", entity: "auth", entityId: user.id,
+            origin: "login", summary: "Código MFA inválido", ...origin,
+          });
+          res.status(401).json({ error: "Código de verificação inválido.", mfaRequired: true });
+          return;
+        }
+      }
+
+      // Sucesso: zera o contador de tentativas e desbloqueia.
+      await db.update(users)
+        .set({ lastSignedIn: new Date(), failedLoginAttempts: 0, lockedUntil: null })
+        .where(eq(users.id, user.id));
 
       const sessionToken = await sdk.createSessionToken(user.openId, {
         name: user.name ?? "",
@@ -120,6 +212,11 @@ export function registerLocalAuthRoutes(app: Express) {
       });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: SESSION_TTL_MS });
+
+      await recordAudit({
+        userId: user.id, action: "login_sucesso", entity: "auth", entityId: user.id,
+        origin: "login", summary: `Login bem-sucedido (${user.role})`, ...origin,
+      });
 
       res.json({
         success: true,

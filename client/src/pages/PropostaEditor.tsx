@@ -29,6 +29,7 @@ function ItemRow({
   onRemove,
   taxPct = 0,
   minMarginPct = 0,
+  precoVencido = false,
 }: {
   item: any;
   index: number;
@@ -36,6 +37,7 @@ function ItemRow({
   onRemove: (id: number) => void;
   taxPct?: number;
   minMarginPct?: number;
+  precoVencido?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [qty, setQty] = useState(String(item.quantity ?? 1));
@@ -180,8 +182,8 @@ function ItemRow({
           <span className="text-sm font-semibold text-gray-900">{item.quantity}</span>
         )}
       </td>
-      {/* Custo do Sistema */}
-      <td className="px-3 py-2 w-28">
+      {/* Custo do Sistema — dado interno: nunca sai na proposta impressa (§11) */}
+      <td className="px-3 py-2 w-28 print:hidden">
         {editing ? (
           <input
             type="number"
@@ -233,6 +235,15 @@ function ItemRow({
             <span className="text-sm font-bold text-blue-800">
               {item.suggestedPrice ? `R$ ${parseFloat(item.suggestedPrice).toFixed(2)}` : "Não definido"}
             </span>
+            {/* Indicadores internos (margem, preço mínimo) — nunca na impressão (§11) */}
+            <div className="print:hidden">
+            {precoVencido && (
+              <div className="mt-0.5">
+                <span className="text-[9px] text-orange-800 font-bold bg-orange-50 border border-orange-200 px-1 py-0.5 rounded">
+                  ⚠ Preço vencido — revalidar
+                </span>
+              </div>
+            )}
             {priceStatus === "ok" && (
               <div className="flex items-center gap-1 mt-0.5">
                 <TrendingUp size={9} className="text-green-600" />
@@ -263,6 +274,7 @@ function ItemRow({
                 Margem: {currentMarginPct.toFixed(1)}%
               </div>
             )}
+            </div>
           </div>
         )}
       </td>
@@ -459,6 +471,16 @@ export default function PropostaEditor() {
   );
   const { data: company } = trpc.company.get.useQuery();
   const utils = trpc.useUtils();
+
+  // §13 — frescor de preço: marca itens cujo preço está vencido, para revalidar.
+  const freshnessProductIds = (proposal?.items ?? [])
+    .map((it) => it.productId)
+    .filter((n): n is number => typeof n === "number" && n > 0);
+  const { data: freshness } = trpc.pricing.priceFreshness.useQuery(
+    { productIds: freshnessProductIds },
+    { enabled: freshnessProductIds.length > 0 },
+  );
+  const precosVencidos = new Set((freshness ?? []).filter((f) => f.vencido).map((f) => f.productId));
 
   const [editingHeader, setEditingHeader] = useState(false);
   // Modal de parcelamento ao marcar como Entregue
@@ -822,6 +844,29 @@ export default function PropostaEditor() {
     }
   };
 
+  // Exportação em Excel (§11) — mesma máscara do PDF (sem custo/margem).
+  const handleDownloadExcel = async () => {
+    try {
+      const response = await fetch(`/api/proposals/${id}/xlsx`);
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || "Erro ao gerar Excel");
+      }
+      const blob = await response.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = `proposta-${id}-${(proposal?.title ?? "proposta").replace(/[^a-z0-9]/gi, "-").toLowerCase()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objUrl);
+      toast.success("Excel baixado com sucesso!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao gerar Excel. Tente novamente.");
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="p-8 py-12 text-center">
@@ -897,6 +942,15 @@ export default function PropostaEditor() {
             ) : (
               <><Download size={12} />Baixar PDF</>
             )}
+          </button>
+          <button
+            onClick={() => handleDownloadExcel()}
+            disabled={!canExportPdf}
+            className="flex items-center gap-2 border border-green-700 text-green-800 px-4 py-2 text-xs font-bold hover:bg-green-700 hover:text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            title={canExportPdf ? "Baixar proposta em Excel (sem custo/margem)" : exportPricingIssues.join("; ")}
+          >
+            <Download size={12} />
+            Excel
           </button>
           <button
             onClick={() => setShowDeclaracoesPanel(true)}
@@ -1156,7 +1210,7 @@ export default function PropostaEditor() {
                 <th className="px-3 py-2 text-left text-[10px] font-bold tracking-widest uppercase">Produto / Descrição</th>
                 <th className="px-3 py-2 text-left text-[10px] font-bold tracking-widest uppercase w-20">Unid.</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-20">Qtd.</th>
-                <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-28">Custo</th>
+                <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-28 print:hidden">Custo</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-28 bg-amber-50 text-amber-800">Ref. Edital</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-32 bg-blue-50 text-blue-800">P. Sugerido</th>
                 <th className="px-3 py-2 text-right text-[10px] font-bold tracking-widest uppercase w-32">Total</th>
@@ -1180,6 +1234,7 @@ export default function PropostaEditor() {
                     onRemove={(itemId) => removeItem.mutate({ id: itemId })}
                     taxPct={totalImpostosManualPct}
                     minMarginPct={panelMinMargin}
+                    precoVencido={typeof item.productId === "number" && precosVencidos.has(item.productId)}
                   />
                 ))
               )}

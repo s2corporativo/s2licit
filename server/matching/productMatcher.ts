@@ -17,11 +17,14 @@
  *  - Fabricante:          5%
  *  - EAN/GTIN:            5%
  *
- * Regras de decisão:
- *  - score >= 0.85 → match automático
- *  - score 0.60–0.84 → requer revisão do usuário
- *  - score < 0.60  → não sugerir
+ * Regras de decisão (§6 — fonte única em matchClassification):
+ *  - score >= 0.90 → match automático (uso sem validação)
+ *  - score 0.75–0.89 → requer validação humana
+ *  - score < 0.75  → não usar automaticamente (0.60–0.74 fica visível como
+ *    candidato parcial para o revisor; < 0.60 não é sugerido)
  */
+
+import { classificarCompatibilidade, LIMIAR_AUTO, LIMIAR_SEM_VALIDACAO } from "../services/matchClassification";
 
 // ─── Stopwords para normalização ─────────────────────────────────────────────
 const STOPWORDS = new Set([
@@ -275,9 +278,14 @@ const WEIGHTS: MatchCriteria = {
   ean: 0.05,
 };
 
-// ─── Thresholds de decisão ────────────────────────────────────────────────────
-export const MATCH_THRESHOLD_AUTO = 0.85;
-export const MATCH_THRESHOLD_REVIEW = 0.60;
+// ─── Thresholds de decisão (§6, alinhados a matchClassification) ──────────────
+/** >= 90%: uso automático sem validação humana. */
+export const MATCH_THRESHOLD_AUTO = LIMIAR_SEM_VALIDACAO; // 0.90
+/** >= 75%: requer validação humana; abaixo disso não é automático. */
+export const MATCH_THRESHOLD_REVIEW = LIMIAR_AUTO; // 0.75
+/** Piso de visibilidade: candidatos parciais (0.60–0.74) ainda aparecem para
+ * o revisor humano, mas nunca são usados automaticamente. */
+export const MATCH_THRESHOLD_VISIBLE = 0.6;
 
 // ─── Função principal ─────────────────────────────────────────────────────────
 
@@ -358,11 +366,13 @@ export function calculateProductSimilarity(
 }
 
 /**
- * Determina a decisão com base no score.
+ * Determina a decisão com base no score, delegando à classificação canônica
+ * da §6 (auto >= 90%, validação humana 75–89%, abaixo não-automático).
  */
 export function getMatchDecision(score: number): "auto_match" | "needs_review" | "no_match" {
-  if (score >= MATCH_THRESHOLD_AUTO) return "auto_match";
-  if (score >= MATCH_THRESHOLD_REVIEW) return "needs_review";
+  const c = classificarCompatibilidade(score);
+  if (c.usoAutomaticoPermitido) return "auto_match";
+  if (c.exigeValidacaoHumana) return "needs_review";
   return "no_match";
 }
 
@@ -422,7 +432,7 @@ export function matchEditalItem(
       const decision = getMatchDecision(score);
       return { product, score, criteria, decision };
     })
-    .filter((r) => r.score >= MATCH_THRESHOLD_REVIEW) // Remove matches ruins
+    .filter((r) => r.score >= MATCH_THRESHOLD_VISIBLE) // mantém parciais visíveis; remove ruins (<60%)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxResults);
 

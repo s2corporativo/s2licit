@@ -34,3 +34,41 @@ export async function ensureProductColumns(): Promise<void> {
     console.error("[Schema] Falha ao garantir colunas de produto:", err);
   }
 }
+
+/**
+ * Colunas de segurança de autenticação e auditoria (§16, §18):
+ * bloqueio de conta por tentativas inválidas e rastreabilidade de origem
+ * (IP / user-agent) na trilha de auditoria.
+ */
+export async function ensureAuthSecurityColumns(): Promise<void> {
+  try {
+    await ensureColumn("users", "failedLoginAttempts", "INT NOT NULL DEFAULT 0");
+    await ensureColumn("users", "lockedUntil", "TIMESTAMP NULL");
+    await ensureColumn("users", "mfaEnabled", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await ensureColumn("users", "mfaSecret", "TEXT NULL");
+    await ensureColumn("audit_logs", "ipAddress", "VARCHAR(64) NULL");
+    await ensureColumn("audit_logs", "userAgent", "VARCHAR(512) NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas de segurança/auditoria:", err);
+  }
+}
+
+/** Configuração de validade da consulta de preço (§13). */
+export async function ensureCompanySettingsColumns(): Promise<void> {
+  try {
+    await ensureColumn("company_settings", "priceValidityPreset", "VARCHAR(16) NULL DEFAULT '24h'");
+    await ensureColumn("company_settings", "priceValidityCustomHours", "INT NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas de company_settings:", err);
+  }
+}
+
+/** Campos ampliados coletados do fornecedor (§7): promocional e estoque. */
+export async function ensureOfferColumns(): Promise<void> {
+  try {
+    await ensureColumn("product_supplier_offers", "promoPrice", "DECIMAL(12,2) NULL");
+    await ensureColumn("product_supplier_offers", "stock", "INT NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas de ofertas:", err);
+  }
+}

@@ -14,6 +14,8 @@ export default function Login() {
   const utils = trpc.useUtils();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [token, setToken] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,10 +28,15 @@ export default function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, token: token || undefined }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (data.mfaRequired) {
+          setMfaRequired(true);
+          setError(token ? (data.error ?? "Código inválido.") : null);
+          return;
+        }
         setError(data.error ?? "Falha no login. Tente novamente.");
         return;
       }
@@ -83,6 +90,29 @@ export default function Login() {
             />
           </div>
 
+          {mfaRequired && (
+            <div>
+              <label htmlFor="token" className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">
+                Código de verificação (MFA)
+              </label>
+              <input
+                id="token"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]*"
+                maxLength={8}
+                autoFocus
+                required
+                value={token}
+                onChange={(e) => setToken(e.target.value.replace(/\D/g, ""))}
+                placeholder="000000"
+                className="w-full border border-gray-300 px-3 py-2 text-sm tracking-widest focus:outline-none focus:border-gray-900"
+              />
+              <p className="text-xs text-gray-500 mt-1">Informe o código do seu app autenticador.</p>
+            </div>
+          )}
+
           {error && (
             <div className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2" role="alert">
               {error}
@@ -95,7 +125,7 @@ export default function Login() {
             className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-blue-800 transition-colors disabled:opacity-60"
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-            {loading ? "Entrando..." : "Entrar"}
+            {loading ? "Entrando..." : mfaRequired ? "Verificar e entrar" : "Entrar"}
           </button>
         </form>
       </div>

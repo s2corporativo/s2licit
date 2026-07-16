@@ -12,6 +12,8 @@ import { products, scraperConfigs, scraperLogs, productSupplierOffers } from "..
 import { eq, and, or, like } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
+import { supplierSessionService } from "./supplierSessionService";
+import { puppeteerCookiesToRecord, recordToPuppeteerCookies } from "./sessionCookies";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +82,13 @@ export interface ScrapedProduct {
   imageUrl?: string;
   productUrl?: string;
   availability?: string;
+  // §7 — campos adicionais (opcionais; ausentes = não disponibilizado, nunca
+  // inventados). Proveniência: consultadoEm/fonteUrl são carimbados no Node.
+  priceNormal?: number;     // preço "de" (old_price)
+  pricePromo?: number;      // preço promocional (spot_price), quando < normal
+  stock?: number;           // estoque informado
+  consultadoEm?: number;    // epoch ms da consulta
+  fonteUrl?: string;        // URL de origem do dado
 }
 
 export interface ScraperRunResult {
@@ -229,8 +238,83 @@ export class ScraperEngine {
     } catch {}
   }
 
+  /** Verifica se a página atual está autenticada, pelos sinais da config. */
+  private async verificarLogado(cfg: SelectorConfig): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      if (cfg.loginSuccessSelector) {
+        return await this.page.evaluate(
+          (sel) => !!document.querySelector(sel),
+          cfg.loginSuccessSelector,
+        );
+      }
+      // Sem seletor de sucesso: considera logado se não há campo de senha visível.
+      const temSenhaVisivel = await this.page.evaluate(() =>
+        Array.from(document.querySelectorAll('input[type="password"]')).some(
+          (el) => (el as HTMLElement).offsetParent !== null,
+        ),
+      );
+      return !temSenhaVisivel;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * §4 — tenta reutilizar uma sessão salva (cookies criptografados) antes de
+   * refazer o login por formulário. Totalmente defensivo: qualquer falha
+   * retorna false e o fluxo cai no login normal.
+   */
+  private async tentarReutilizarSessao(
+    supplierId: number,
+    loginUrl: string,
+    cfg: SelectorConfig,
+  ): Promise<boolean> {
+    try {
+      const session = await supplierSessionService.getActiveSession(supplierId);
+      if (!session) return false;
+      const cookies = recordToPuppeteerCookies(
+        supplierSessionService.parseCookies(session),
+        loginUrl,
+      );
+      if (cookies.length === 0) return false;
+
+      await this.page!.setCookie(...cookies);
+      await this.page!.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
+      await new Promise((r) => setTimeout(r, 800));
+
+      const logado = await this.verificarLogado(cfg);
+      if (!logado) {
+        // Sessão não vale mais: marca como expirada para não insistir.
+        await supplierSessionService.expireSession(supplierId).catch(() => {});
+      }
+      return logado;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Salva os cookies atuais como sessão reutilizável (best-effort). */
+  private async salvarSessao(supplierId: number): Promise<void> {
+    try {
+      if (!this.page) return;
+      const record = puppeteerCookiesToRecord(await this.page.cookies());
+      if (Object.keys(record).length === 0) return;
+      await supplierSessionService.upsertSession(supplierId, { cookies: record }, "active");
+      this.addLog("Sessão salva para reuso.");
+    } catch {
+      /* auditoria/persistência de sessão nunca bloqueia a captura */
+    }
+  }
+
   /** Faz login no site do fornecedor */
-  async login(loginUrl: string, email: string, password: string, cfg: SelectorConfig): Promise<void> {
+  async login(
+    loginUrl: string,
+    email: string,
+    password: string,
+    cfg: SelectorConfig,
+    supplierId?: number,
+  ): Promise<void> {
     if (!this.browser) await this.init();
     this.page = await this.browser!.newPage();
 
@@ -241,6 +325,12 @@ export class ScraperEngine {
 
     // Viewport padrão desktop
     await this.page.setViewport({ width: 1366, height: 768 });
+
+    // §4 — reutiliza sessão salva quando possível (evita novo login).
+    if (supplierId != null && (await this.tentarReutilizarSessao(supplierId, loginUrl, cfg))) {
+      this.addLog("Sessão reutilizada — login por formulário dispensado.");
+      return;
+    }
 
     this.addLog(`Acessando ${loginUrl}...`);
     await this.page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
@@ -323,6 +413,9 @@ export class ScraperEngine {
     }
 
     this.addLog(`Login confirmado. URL: ${currentUrl}`);
+
+    // §4 — persiste a sessão para reuso na próxima execução.
+    if (supplierId != null) await this.salvarSessao(supplierId);
   }
 
   /** Extrai produtos de uma URL de categoria */
@@ -355,6 +448,13 @@ export class ScraperEngine {
         produtos = await this.extractPageProducts(cfg);
       }
       this.addLog(`  Página ${pagina}: ${produtos.length} produtos extraídos`);
+      // §7 — proveniência: carimba origem e horário da consulta (para validade
+      // de preço, §13). Feito no Node (fora do page.evaluate).
+      const agora = Date.now();
+      for (const p of produtos) {
+        p.consultadoEm = agora;
+        p.fonteUrl = p.productUrl ?? categoryUrl;
+      }
       todos.push(...produtos);
 
       // Verificar próxima página
@@ -532,6 +632,12 @@ export class ScraperEngine {
         if (seen.has(key)) continue;
         seen.add(key);
         const ld = code ? ldBySku.get(code) : undefined;
+        // §7 — preço "de", promocional e estoque quando a camada de dados os
+        // expõe. Ausentes ficam undefined (não inventar).
+        const precoNormalRaw = toNumber(d.old_price ?? d.price);
+        const precoSpot = toNumber(d.spot_price);
+        const temEstoque = typeof d.stock !== "undefined";
+        const estoque = temEstoque ? toNumber(d.stock) : undefined;
         out.push({
           name,
           price,
@@ -539,8 +645,10 @@ export class ScraperEngine {
           ean: eanOf(d) ?? (ld ? eanOf(ld) : undefined),
           imageUrl: (d.image && String(d.image)) || (ld ? imageOf(ld) : undefined),
           productUrl: d.url ? String(d.url) : (ld && ld.url ? String(ld.url) : undefined),
-          availability:
-            typeof d.stock !== "undefined" && toNumber(d.stock) > 0 ? "disponivel" : undefined,
+          availability: temEstoque ? (estoque! > 0 ? "disponivel" : "indisponivel") : undefined,
+          priceNormal: precoNormalRaw > 0 ? precoNormalRaw : undefined,
+          pricePromo: precoSpot > 0 && precoNormalRaw > 0 && precoSpot < precoNormalRaw ? precoSpot : undefined,
+          stock: estoque,
         });
       }
 
@@ -646,7 +754,11 @@ export class ScraperEngine {
             supplierName,
             link: sp.productUrl,
             image: sp.imageUrl,
-            availability: "disponivel",
+            // §7 — reflete a disponibilidade real (antes gravava sempre
+            // "disponivel"); promo/estoque quando o fornecedor os expõe.
+            availability: sp.availability ?? "disponivel",
+            promoPrice: sp.pricePromo != null ? String(sp.pricePromo) : null,
+            stock: sp.stock ?? null,
             updatedAt: new Date(),
           };
 
@@ -828,8 +940,8 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
       : `https://${scraperType}.com.br/login`);
 
   try {
-    // Login
-    await engine.login(loginUrl, email, password, cfg);
+    // Login (reutiliza a sessão do fornecedor quando válida, §4)
+    await engine.login(loginUrl, email, password, cfg, config.supplierId);
 
     // Raspar todas as categorias configuradas
     const allScraped: ScrapedProduct[] = [];

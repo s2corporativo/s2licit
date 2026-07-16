@@ -18,6 +18,46 @@ import { proposals, proposalItems } from "../../drizzle/schema";
 import { eq, asc } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 
+// ─── Conformidade: detecção de CAPTCHA (sem resolução) ─────────────────────────
+//
+// Por conformidade (spec §3 e §17: "não deverá tentar burlar CAPTCHA … deverá
+// solicitar intervenção manual"), o agente NÃO resolve desafios anti-robô.
+// Esta função apenas IDENTIFICA a presença de um desafio para que o fluxo
+// interrompa e exija login manual. É pura (recebe o texto da página) para ser
+// testável sem navegador.
+export function detectarDesafioCaptcha(textoPagina: string): {
+  detectado: boolean;
+  tipo?: "captcha_matematico" | "recaptcha" | "hcaptcha" | "captcha";
+} {
+  const texto = textoPagina ?? "";
+  const t = texto.toLowerCase();
+  // CAPTCHA matemático (ex.: "Quanto é 6 - 4?")
+  if (/quanto\s+[eé]\s+\d+\s*[+\-*x×]\s*\d+/i.test(texto)) {
+    return { detectado: true, tipo: "captcha_matematico" };
+  }
+  if (t.includes("recaptcha")) return { detectado: true, tipo: "recaptcha" };
+  if (t.includes("hcaptcha")) return { detectado: true, tipo: "hcaptcha" };
+  if (
+    t.includes("não sou um robô") ||
+    t.includes("nao sou um robo") ||
+    t.includes("captcha") ||
+    t.includes("código de verificação") ||
+    t.includes("codigo de verificacao")
+  ) {
+    return { detectado: true, tipo: "captcha" };
+  }
+  return { detectado: false };
+}
+
+/** Erro sinalizando que um desafio de segurança exige intervenção humana. */
+export class CaptchaRequerIntervencaoError extends Error {
+  readonly requerIntervencaoHumana = true;
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = "CaptchaRequerIntervencaoError";
+  }
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "agrega" | "generico";
@@ -163,14 +203,16 @@ export const PORTAL_CONFIGS: Record<PortalType, PortalConfig> = {
   // ── Fundep / Portal de Compras UFMG ──────────────────────────────────────
   // Login: portaldecompras.fundep.ufmg.br/Publico/Login.aspx
   // Credencial: Login (gerado pela Fundep, pode ser CNPJ) + senha
-  // ATENÇÃO: possui CAPTCHA matemático simples — "Quanto é X - Y?" → precisa ser respondido
+  // ATENÇÃO: possui CAPTCHA matemático simples — "Quanto é X - Y?".
+  // Por conformidade, o agente NÃO resolve o CAPTCHA: detecta e exige login manual.
   // Fluxo: Login → Cotações em andamento → Selecionar cotação → Inserir preços por item → Enviar
   fundep: {
     nome: "Fundep / Portal de Compras UFMG",
     loginUrl: "https://portaldecompras.fundep.ufmg.br/Publico/Login.aspx",
     notasImportantes:
       "Login com código de usuário (pode ser CNPJ) e senha enviada por e-mail pela Fundep. " +
-      "Portal tem CAPTCHA matemático simples (ex: 'Quanto é 6 - 4?'). O agente tenta resolver automaticamente. " +
+      "Portal tem CAPTCHA matemático (ex: 'Quanto é 6 - 4?'); por conformidade o agente NÃO o resolve — " +
+      "detecta o desafio e exige que o login seja feito manualmente. " +
       "Fluxo: Login → cotações em andamento → selecionar → inserir preços.",
     estrategia: "linha_por_linha",
     seletores: {
@@ -411,24 +453,27 @@ export class PropostaAgente {
     return false;
   }
 
-  // Tenta resolver CAPTCHA matemático simples (ex: "Quanto é 6 - 4?")
-  private async resolverCaptchaMatematico(): Promise<void> {
+  // Conformidade (§3, §17): detecta CAPTCHA e EXIGE intervenção humana — nunca
+  // tenta resolver/burlar o desafio. Se houver desafio, interrompe o fluxo.
+  private async verificarCaptcha(portalNome: string): Promise<void> {
     if (!this.page) return;
+    let texto = "";
     try {
-      const texto = await this.page.evaluate(() => document.body?.innerText ?? "");
-      const match = texto.match(/Quanto\s+[eé]\s+(\d+)\s*([+\-*])\s*(\d+)/i);
-      if (!match) return;
-      const a = parseInt(match[1]), op = match[2], b = parseInt(match[3]);
-      const resultado = op === "+" ? a + b : op === "-" ? a - b : a * b;
-      this.addLog(`🔢 CAPTCHA detectado: ${a} ${op} ${b} = ${resultado}`);
-      // Tentar preencher campo de CAPTCHA
-      const captchaInput = await this.page.$('input[id*="captcha"], input[id*="Captcha"], input[placeholder*="Responda"]');
-      if (captchaInput) {
-        await captchaInput.click({ clickCount: 3 });
-        await captchaInput.type(String(resultado), { delay: 80 });
-        this.addLog(`✅ CAPTCHA respondido: ${resultado}`);
-      }
-    } catch {}
+      texto = await this.page.evaluate(() => document.body?.innerText ?? "");
+    } catch {
+      return;
+    }
+    const captcha = detectarDesafioCaptcha(texto);
+    if (!captcha.detectado) return;
+
+    await this.capturarTela("CAPTCHA detectado — intervenção humana necessária");
+    const msg =
+      `CAPTCHA detectado no portal ${portalNome} (${captcha.tipo}). ` +
+      `Por conformidade, a automação não resolve desafios de segurança. ` +
+      `Faça o login manualmente no portal e reexecute, ou utilize a consulta assistida.`;
+    this.addLog(`🚫 ${msg}`);
+    this.erros.push(msg);
+    throw new CaptchaRequerIntervencaoError(msg);
   }
 
   async login(cred: PortalCredential): Promise<void> {
@@ -446,8 +491,8 @@ export class PropostaAgente {
     await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     await new Promise(r => setTimeout(r, 1500));
 
-    // Resolver CAPTCHA se presente
-    await this.resolverCaptchaMatematico();
+    // Conformidade: se houver CAPTCHA, interrompe e exige intervenção humana.
+    await this.verificarCaptcha(cfg.nome);
 
     const loginSel = cfg.seletores.loginCpfCnpj || 'input[type="text"]';
     const encontrou = await this.esperarElemento(loginSel, 10000);
@@ -461,8 +506,8 @@ export class PropostaAgente {
     await this.preencherCampo(cfg.seletores.loginSenha, cred.password);
     await new Promise(r => setTimeout(r, 300));
 
-    // Resolver CAPTCHA novamente após preencher campos (alguns portais mostram depois)
-    await this.resolverCaptchaMatematico();
+    // Alguns portais só exibem o CAPTCHA após o preenchimento — verifica de novo.
+    await this.verificarCaptcha(cfg.nome);
 
     await Promise.all([
       this.page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch(() => {}),
