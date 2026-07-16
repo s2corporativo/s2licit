@@ -929,6 +929,52 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
   }
 }
 
+/**
+ * Busca sob demanda de produtos de um fornecedor configurado, sem persistir
+ * (usada pelos conectores da cascata §4). Faz login (reusando sessão) e, se
+ * houver termo + searchUrlTemplate, pesquisa; senão raspa a 1ª categoria.
+ */
+export async function buscarProdutosFornecedor(
+  scraperConfigId: number,
+  query: { termo?: string; codigo?: string },
+): Promise<ScrapedProduct[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const configs = await db.select().from(scraperConfigs)
+    .where(eq(scraperConfigs.id, scraperConfigId)).limit(1);
+  if (!configs[0]) throw new Error(`Configuração de scraper #${scraperConfigId} não encontrada`);
+  const config = configs[0];
+
+  const scraperType = config.scraperType.toLowerCase();
+  const cfg: SelectorConfig =
+    (config.customSelectors as SelectorConfig | null) ??
+    FORNECEDOR_CONFIGS[scraperType] ??
+    FORNECEDOR_CONFIGS.generico;
+
+  let email: string, password: string;
+  if (config.email && config.email.includes("@")) email = config.email;
+  else { try { email = decryptPassword(config.email); } catch { email = config.email ?? ""; } }
+  try { password = decryptPassword(config.passwordHash); }
+  catch { throw new Error("Falha ao descriptografar a senha do fornecedor"); }
+
+  const loginUrl =
+    cfg.loginUrl ??
+    (cfg.categoryUrls[0]
+      ? new URL(cfg.categoryUrls[0]).origin + "/login"
+      : `https://${scraperType}.com.br/login`);
+
+  const engine = new ScraperEngine();
+  try {
+    await engine.login(loginUrl, email, password, cfg, config.supplierId);
+    const termo = (query.termo ?? query.codigo ?? "").trim();
+    if (termo && cfg.searchUrlTemplate) return await engine.scrapeSearch(termo, cfg);
+    if (cfg.categoryUrls[0]) return await engine.scrapeCategory(cfg.categoryUrls[0], cfg);
+    return [];
+  } finally {
+    await engine.close();
+  }
+}
+
 async function executarScraperInternal(scraperConfigId: number): Promise<ScraperRunResult> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível");
