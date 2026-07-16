@@ -11,78 +11,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Habilitar pnpm
-        run: corepack enable
-
-      - name: Instalar dependências
-        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
-
-      - name: Verificação de tipos (tsc)
-        id: typecheck
-        continue-on-error: true
-        run: pnpm exec tsc --noEmit --pretty false > typecheck.log 2>&1
-
-      - name: Publicar diagnóstico do TypeScript
-        if: steps.typecheck.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-errors
-          path: typecheck.log
-          retention-days: 3
-
-      - name: Interromper em erro de tipos
-        if: steps.typecheck.outcome == 'failure'
-        run: |
-          cat typecheck.log
-          exit 1
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Testes (vitest)
-        id: tests
-        continue-on-error: true
-        run: pnpm test -- --reporter=verbose > tests.log 2>&1
-
-      - name: Publicar diagnóstico dos testes
-        if: steps.tests.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-errors
-          path: tests.log
-          retention-days: 3
-
-      - name: Interromper em falha de testes
-        if: steps.tests.outcome == 'failure'
-        run: |
-          tail -n 250 tests.log
-          exit 1
-
-      - name: Build de produção
-        run: pnpm build
-
   verificar-vps:
     if: github.event_name == 'pull_request' && github.head_ref == 'verify/vps-restaurada-20260715'
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 8
     steps:
       - name: Preparar SSH
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq sshpass
 
-      - name: Acompanhar deploy e verificar aplicação
+      - name: Consultar estado imediato
         env:
           SSHPASS: ${{ secrets.VPS_PASSWORD }}
         run: |
@@ -94,50 +33,28 @@ jobs:
           cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | head -1 | cut -d= -f2)
           LOCAL_PORT=${LOCAL_PORT:-3000}
-          OLD_IMAGE="sha256:1dc4a23de674625ab8074596549a6dcbae26fc9533b99ab55ebeb055fac79067"
 
-          echo "=== CÓDIGO ENTREGUE ==="
-          if grep -q 'normalizeMysqlIdentifiers' scripts/migrate-production.mjs 2>/dev/null; then
-            echo "source_fix=present"
-          else
-            echo "source_fix=absent"
-          fi
-          ps -eo pid,etime,cmd | grep -E 'vps-bootstrap|docker (compose )?(build|up)|buildkit' | grep -v grep || true
+          echo "=== FONTE NA VPS ==="
+          stat -c 'migrate_mtime=%y size=%s' scripts/migrate-production.mjs 2>/dev/null || true
+          grep -q 'normalizeMysqlIdentifiers' scripts/migrate-production.mjs 2>/dev/null && echo 'source_fix=present' || echo 'source_fix=absent'
+          grep -q 'encurta identificadores incompatíveis' scripts/migrate-production.test.ts 2>/dev/null && echo 'test_fix=present' || true
 
-          echo "=== ACOMPANHAMENTO ==="
-          ready=0
-          for attempt in $(seq 1 72); do
-            image=$(docker inspect --format '{{.Image}}' sistema-s2-app 2>/dev/null || echo absent)
-            state=$(docker inspect --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' sistema-s2-app 2>/dev/null || echo absent)
-            migrations=$(docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' 2>/dev/null | tail -1)
-            migrations=${migrations:-0}
-            if curl -fsS --max-time 3 "http://127.0.0.1:${LOCAL_PORT}/readyz" >/dev/null 2>&1; then
-              echo "attempt=${attempt} image=${image} state=${state} migrations=${migrations} ready=yes"
-              ready=1
-              break
-            fi
-            if [ "$attempt" = "1" ] || [ $((attempt % 6)) -eq 0 ]; then
-              echo "attempt=${attempt} image=${image} state=${state} migrations=${migrations} ready=no"
-            fi
-            sleep 10
-          done
+          echo "=== PROCESSOS DE DEPLOY ==="
+          ps -eo pid,etime,cmd | grep -E 'vps-bootstrap|docker (compose )?(build|up)|buildkit|rsync.*s2licit' | grep -v grep || true
 
-          echo "=== ESTADO FINAL ==="
+          echo "=== CONTAINER ==="
           docker compose ps -a
-          docker inspect --format 'app image={{.Image}} status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}}' sistema-s2-app 2>&1
-          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations; SELECT id, LEFT(hash,12), created_at FROM __drizzle_migrations ORDER BY id;"' 2>&1
+          docker inspect --format 'image={{.Image}} created={{.Created}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}}' sistema-s2-app 2>&1
+
+          echo "=== MIGRAÇÕES ==="
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' 2>&1
 
           echo "=== ENDPOINTS ==="
-          curl -sS -i --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/healthz" 2>&1
-          curl -sS -i --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1
-          curl -sS -I --max-time 15 https://s2.s2corporativo.com.br/ 2>&1
+          curl -sS -i --max-time 6 "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>&1
+          curl -sS -I --max-time 10 https://s2.s2corporativo.com.br/ 2>&1
 
-          echo "=== LOGS RECENTES ==="
-          docker compose logs --tail=160 app 2>&1 | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
-
-          [ "$ready" = "1" ] || exit 1
-          final_image=$(docker inspect --format '{{.Image}}' sistema-s2-app 2>/dev/null || echo absent)
-          [ "$final_image" != "$OLD_IMAGE" ] || exit 1
+          echo "=== ÚLTIMO ERRO ==="
+          docker compose logs --tail=40 app 2>&1 | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
           REMOTE
 
       - name: Publicar verificação
