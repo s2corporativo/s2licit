@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { ttlMs, avaliarValidade, precisaRevalidar, PRESET_HORAS } from "./priceValidityService";
+import {
+  ttlMs,
+  avaliarValidade,
+  precisaRevalidar,
+  PRESET_HORAS,
+  ttlDeConfiguracao,
+  avaliarValidadeLote,
+} from "./priceValidityService";
 
 const NOW = 1_700_000_000_000;
 const HORA = 60 * 60 * 1000;
@@ -63,5 +70,37 @@ describe("precisaRevalidar", () => {
     expect(precisaRevalidar(new Date(NOW - 2 * HORA), ttlMs("6h"), NOW)).toBe(false);
     expect(precisaRevalidar(new Date(NOW - 8 * HORA), ttlMs("6h"), NOW)).toBe(true);
     expect(precisaRevalidar(null, ttlMs("6h"), NOW)).toBe(true);
+  });
+});
+
+describe("ttlDeConfiguracao", () => {
+  it("usa o preset configurado", () => {
+    expect(ttlDeConfiguracao({ priceValidityPreset: "6h" })).toBe(6 * HORA);
+    expect(ttlDeConfiguracao({ priceValidityPreset: "custom", priceValidityCustomHours: 5 })).toBe(5 * HORA);
+  });
+
+  it("cai no padrão de 24h para preset ausente ou inválido", () => {
+    expect(ttlDeConfiguracao(null)).toBe(24 * HORA);
+    expect(ttlDeConfiguracao({})).toBe(24 * HORA);
+    expect(ttlDeConfiguracao({ priceValidityPreset: "xx" })).toBe(24 * HORA);
+    // custom sem horas válidas também cai no padrão.
+    expect(ttlDeConfiguracao({ priceValidityPreset: "custom" })).toBe(24 * HORA);
+  });
+});
+
+describe("avaliarValidadeLote", () => {
+  it("avalia cada item e sinaliza os vencidos", () => {
+    const res = avaliarValidadeLote(
+      [
+        { id: 1, consultadoEm: new Date(NOW - 2 * HORA) },
+        { id: 2, consultadoEm: new Date(NOW - 8 * HORA) },
+        { id: 3, consultadoEm: null },
+      ],
+      ttlMs("6h"),
+      NOW,
+    );
+    expect(res.find((r) => r.id === 1)?.vencido).toBe(false);
+    expect(res.find((r) => r.id === 2)?.vencido).toBe(true);
+    expect(res.find((r) => r.id === 3)?.vencido).toBe(true);
   });
 });

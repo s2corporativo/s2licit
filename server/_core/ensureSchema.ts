@@ -50,3 +50,13 @@ export async function ensureAuthSecurityColumns(): Promise<void> {
     console.error("[Schema] Falha ao garantir colunas de segurança/auditoria:", err);
   }
 }
+
+/** Configuração de validade da consulta de preço (§13). */
+export async function ensureCompanySettingsColumns(): Promise<void> {
+  try {
+    await ensureColumn("company_settings", "priceValidityPreset", "VARCHAR(16) NULL DEFAULT '24h'");
+    await ensureColumn("company_settings", "priceValidityCustomHours", "INT NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas de company_settings:", err);
+  }
+}

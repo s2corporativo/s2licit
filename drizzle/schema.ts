@@ -303,6 +303,9 @@ export const companySettings = mysqlTable("company_settings", {
   bankInfo: text("bankInfo"),
   notes: text("notes"),
   minMarginPercent: decimal("minMarginPercent", { precision: 6, scale: 2 }).default("15"), // Margem mínima global (%)
+  // §13 — validade máxima da consulta de preço antes de exigir revalidação.
+  priceValidityPreset: varchar("priceValidityPreset", { length: 16 }).default("24h"),
+  priceValidityCustomHours: int("priceValidityCustomHours"),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 

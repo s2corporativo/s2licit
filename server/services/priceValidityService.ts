@@ -94,3 +94,38 @@ export function precisaRevalidar(
 ): boolean {
   return avaliarValidade(consultadoEm, ttl, agora).vencido;
 }
+
+const PRESETS_VALIDOS = new Set<ValidadePreset>(["1h", "6h", "12h", "24h", "3d", "custom"]);
+
+/**
+ * Resolve o TTL (ms) a partir da configuração da empresa (§13). Preset ausente
+ * ou inválido cai no padrão de 24h.
+ */
+export function ttlDeConfiguracao(
+  settings?: { priceValidityPreset?: string | null; priceValidityCustomHours?: number | null } | null,
+): number {
+  const preset = settings?.priceValidityPreset as ValidadePreset | undefined;
+  if (!preset || !PRESETS_VALIDOS.has(preset)) return ttlMs("24h");
+  try {
+    return ttlMs(preset, settings?.priceValidityCustomHours ?? undefined);
+  } catch {
+    return ttlMs("24h");
+  }
+}
+
+export interface ItemValidadePreco {
+  id: number;
+  consultadoEm: Date | string | null | undefined;
+}
+
+/**
+ * Avalia a validade de um lote de preços (para a tela de revisão). Retorna, por
+ * item, o diagnóstico de validade — o consumidor destaca os vencidos.
+ */
+export function avaliarValidadeLote(
+  itens: ItemValidadePreco[],
+  ttl: number,
+  agora: number,
+): Array<{ id: number } & ValidadePreco> {
+  return itens.map((it) => ({ id: it.id, ...avaliarValidade(it.consultadoEm, ttl, agora) }));
+}
