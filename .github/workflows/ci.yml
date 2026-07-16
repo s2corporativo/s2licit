@@ -71,3 +71,57 @@ jobs:
 
       - name: Build de produção
         run: pnpm build
+
+  verificar-vps:
+    if: github.event_name == 'pull_request' && github.head_ref == 'verify/vps-restaurada-20260715'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Preparar SSH
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Verificar aplicação publicada
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${SSHPASS:-}" || { echo "::error::Secret VPS_PASSWORD ausente"; exit 1; }
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE' | tee verificacao-vps.txt
+          set -euo pipefail
+          cd /opt/s2licit
+          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | head -1 | cut -d= -f2)
+          LOCAL_PORT=${LOCAL_PORT:-3000}
+
+          echo "=== CONTAINERS ==="
+          docker compose ps -a
+          docker inspect --format 'app status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}}' sistema-s2-app
+          docker inspect --format 'db status={{.State.Status}} running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' sistema-s2-db
+
+          echo "=== MIGRACOES ==="
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"'
+
+          echo "=== ENDPOINTS LOCAIS ==="
+          curl -fsS --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/healthz"
+          echo
+          curl -fsS --max-time 10 "http://127.0.0.1:${LOCAL_PORT}/readyz"
+          echo
+
+          echo "=== DOMINIO HTTPS ==="
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 https://s2.s2corporativo.com.br/)
+          echo "https_status=${STATUS}"
+          test "$STATUS" = "200"
+
+          echo "=== LOGS RECENTES ==="
+          docker compose logs --tail=80 app 2>&1 | sed -E 's/(password|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+          REMOTE
+
+      - name: Publicar verificação
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verificacao-vps
+          path: verificacao-vps.txt
+          retention-days: 1
