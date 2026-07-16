@@ -1,0 +1,1 @@
+Publicar a main 5c724be285e7a8178cdbf43eaf89938ea481c67e e validar a restauração da VPS.
