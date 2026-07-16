@@ -239,6 +239,31 @@ export async function reprocessFailedCaptures(
 
   for (const sId of supplierIdsWithErrors) {
     const supplierErrors = errors.filter((e) => e.supplierId === sId);
+
+    // Não insiste indefinidamente num fornecedor cuja captura falha sempre —
+    // isto roda desacompanhado a cada 6h via cron, sem intervenção humana.
+    const supplierLogs = await db
+      .select({ status: captureLogs.status, startedAt: captureLogs.startedAt })
+      .from(captureLogs)
+      .where(eq(captureLogs.supplierId, sId));
+    const recentLogs = supplierLogs
+      .slice()
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+      .slice(0, maxRetries);
+    const exhaustedRetries =
+      recentLogs.length >= maxRetries &&
+      recentLogs.every((log) => log.status === "failed");
+    if (exhaustedRetries) {
+      for (const err of supplierErrors) {
+        results.failed++;
+        results.errors.push({
+          errorId: err.id,
+          error: `Reprocessamento suspenso: ${maxRetries} tentativas consecutivas falharam para este fornecedor`,
+        });
+      }
+      continue;
+    }
+
     try {
       const outcome = await startCaptureForSupplier(sId);
       if (outcome.status === "completed") {

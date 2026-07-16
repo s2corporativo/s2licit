@@ -131,7 +131,9 @@ describe("captureSchedulerService", () => {
           { id: 101, supplierId: 5 },
         ])
       );
-      // 2ª query: dentro de startCaptureForSupplier(5) -> scraperConfigs
+      // 2ª query: histórico de capture_logs do fornecedor (sem falhas anteriores)
+      mockWhere.mockReturnValueOnce(queryResult([]));
+      // 3ª query: dentro de startCaptureForSupplier(5) -> scraperConfigs
       mockWhere.mockReturnValueOnce(queryResult([{ id: 9 }]));
       vi.mocked(executarScraper).mockResolvedValueOnce({
         ...baseScraperResult,
@@ -154,12 +156,33 @@ describe("captureSchedulerService", () => {
 
     it("não marca como reprocessado quando a recaptura falha", async () => {
       mockWhere.mockReturnValueOnce(queryResult([{ id: 200, supplierId: 6 }]));
+      mockWhere.mockReturnValueOnce(queryResult([])); // histórico vazio -> não esgotou tentativas
       mockWhere.mockReturnValueOnce(queryResult([])); // sem scraper configurado -> config_not_found
 
       const result = await reprocessFailedCaptures();
 
       expect(result.reprocessed).toBe(0);
       expect(result.failed).toBe(1);
+      expect(markErrorAsReprocessed).not.toHaveBeenCalled();
+    });
+
+    it("suspende o reprocessamento após maxRetries capturas consecutivas com falha, sem chamar o scraper de novo", async () => {
+      mockWhere.mockReturnValueOnce(queryResult([{ id: 300, supplierId: 7 }]));
+      // Histórico: 3 capturas recentes, todas "failed" (maxRetries padrão = 3)
+      mockWhere.mockReturnValueOnce(
+        queryResult([
+          { status: "failed", startedAt: new Date("2026-01-03") },
+          { status: "failed", startedAt: new Date("2026-01-02") },
+          { status: "failed", startedAt: new Date("2026-01-01") },
+        ])
+      );
+
+      const result = await reprocessFailedCaptures();
+
+      expect(executarScraper).not.toHaveBeenCalled();
+      expect(result.reprocessed).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(result.errors[0].error).toContain("Reprocessamento suspenso");
       expect(markErrorAsReprocessed).not.toHaveBeenCalled();
     });
   });
