@@ -1,0 +1,37 @@
+name: Check VPS Recovery
+
+on:
+  push:
+    branches: ["verify/vps-restaurada-20260715"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Preparar SSH
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Consultar estado
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE'
+          set +e
+          cd /opt/s2licit
+          echo "=== FONTE ==="
+          grep -q 'normalizeMysqlIdentifiers' scripts/migrate-production.mjs && echo source_fix=present || echo source_fix=absent
+          echo "=== PROCESSOS ==="
+          ps -eo pid,etime,cmd | grep -E 'vps-bootstrap|docker (compose )?(build|up)|buildkit|node scripts/migrate-production' | grep -v grep || true
+          echo "=== CONTAINERS ==="
+          docker compose ps -a
+          docker inspect --format 'image={{.Image}} status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}}' sistema-s2-app 2>&1 || true
+          echo "=== MIGRACOES ==="
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' 2>&1 || true
+          echo "=== LOGS ==="
+          docker compose logs --tail=60 app 2>&1 | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig'
+          REMOTE
