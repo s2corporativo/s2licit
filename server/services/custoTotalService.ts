@@ -11,6 +11,8 @@
  *  - preço mínimo sustentável: preco = custoUnit / (1 - (imp+taxas+fin+margem)/100).
  */
 
+import { calcularEmbalagem, type EmbalagemResult } from "./packagingService";
+
 export interface EntradaCustoTotal {
   precoProdutoUnit: number;      // preço unitário do fornecedor
   quantidade: number;
@@ -22,6 +24,14 @@ export interface EntradaCustoTotal {
   custoFinanceiroPct?: number;   // % sobre a venda (prazo de recebimento)
   margemMinimaPct?: number;      // margem líquida mínima aceitável
   margemDesejadaPct?: number;    // margem líquida desejada
+  // §8 — apresentação de venda do fornecedor (embalagem fechada). Opcional:
+  // quando informada, expõe a quebra de embalagem e o alerta de sobra.
+  unidadesPorEmbalagem?: number;
+  permitirFracionar?: boolean;
+  // Se true, o custo da sobra (embalagem fechada) é amortizado no custo por
+  // unidade solicitada — refletindo no preço mínimo. Padrão false (não repassa
+  // a sobra ao cliente; apenas a torna visível).
+  carregarSobraNaVenda?: boolean;
 }
 
 export interface ResultadoCustoTotal {
@@ -31,6 +41,7 @@ export interface ResultadoCustoTotal {
   precoMinimoUnit: number | null;      // cobre custo + percentuais + margem mínima
   precoRecomendadoUnit: number | null; // cobre custo + percentuais + margem desejada
   margemLiquidaEm: (precoUnit: number) => number; // % líquida num preço dado
+  embalagem?: EmbalagemResult;   // quebra de embalagem quando informada (§8)
   alertas: string[];
 }
 
@@ -42,7 +53,29 @@ export function calcularCustoTotal(e: EntradaCustoTotal): ResultadoCustoTotal {
   if (e.quantidade <= 0) alertas.push("Quantidade inválida — assumindo 1.");
 
   const extrasLote = (e.freteEntradaTotal ?? 0) + (e.freteSaidaTotal ?? 0) + (e.outrosCustosTotal ?? 0);
-  const custoUnitarioReal = r2(e.precoProdutoUnit + extrasLote / qtd);
+
+  // §8 — embalagem fechada: quando a apresentação é informada, calcula quantas
+  // embalagens comprar, a sobra e o custo real da compra.
+  let embalagem: EmbalagemResult | undefined;
+  let custoUnitarioProduto = e.precoProdutoUnit;
+  if (e.unidadesPorEmbalagem != null && e.unidadesPorEmbalagem >= 1) {
+    embalagem = calcularEmbalagem({
+      quantidadeSolicitada: qtd,
+      unidadesPorEmbalagem: e.unidadesPorEmbalagem,
+      precoUnitario: e.precoProdutoUnit,
+      permitirFracionar: e.permitirFracionar,
+    });
+    if (embalagem.sobra > 0) {
+      alertas.push(
+        `Embalagem fechada: ${embalagem.embalagensNecessarias} × ${e.unidadesPorEmbalagem} un = ` +
+          `${embalagem.quantidadeTotalFornecida} fornecidas (sobra de ${embalagem.sobra} além das ${qtd} solicitadas).`,
+      );
+      // Repassa a sobra ao custo por unidade solicitada apenas se pedido.
+      if (e.carregarSobraNaVenda) custoUnitarioProduto = r2(embalagem.custoTotal / qtd);
+    }
+  }
+
+  const custoUnitarioReal = r2(custoUnitarioProduto + extrasLote / qtd);
   const custoLoteReal = r2(custoUnitarioReal * qtd);
 
   const percentuaisSobreVenda =
@@ -79,6 +112,7 @@ export function calcularCustoTotal(e: EntradaCustoTotal): ResultadoCustoTotal {
     precoMinimoUnit,
     precoRecomendadoUnit,
     margemLiquidaEm,
+    embalagem,
     alertas,
   };
 }
