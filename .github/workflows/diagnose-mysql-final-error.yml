@@ -1,0 +1,49 @@
+name: Diagnose MySQL Final Error
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'diagnose/mysql-final-error-20260715'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Preparar SSH
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+
+      - name: Extrair somente falhas da migração
+        env:
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${SSHPASS:-}" || { echo "::error::Secret VPS_PASSWORD ausente"; exit 1; }
+          SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"
+          sshpass -e ssh $SSH_OPTS root@13.140.167.153 'bash -s' <<'REMOTE' | tee mysql-final-error.txt
+          set +e
+          cd /opt/s2licit
+          echo "=== ESTADO ==="
+          docker compose ps -a
+          docker inspect --format 'image={{.Image}} status={{.State.Status}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}}' sistema-s2-app 2>&1 || true
+          echo "=== HISTORICO ==="
+          docker exec sistema-s2-db sh -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -D"$MYSQL_DATABASE" --batch --skip-column-names -e "SELECT COUNT(*) FROM __drizzle_migrations;"' 2>&1 || true
+          echo "=== FALHAS ==="
+          docker compose logs --tail=2500 app 2>&1 \
+            | grep -E 'Falha fatal|ER_[A-Z_]+|comando [0-9]+/[0-9]+' \
+            | tail -n 80 \
+            | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig' || true
+          echo "=== ULTIMAS LINHAS ==="
+          docker compose logs --tail=20 app 2>&1 \
+            | sed -E 's/(password|passwd|token|secret|authorization|api[_-]?key)([=: ]+)[^ ,;]+/\1\2[REDACTED]/Ig' || true
+          REMOTE
+
+      - name: Publicar diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-final-error
+          path: mysql-final-error.txt
+          retention-days: 1
