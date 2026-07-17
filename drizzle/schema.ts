@@ -2125,6 +2125,7 @@ export const scraperLogs = mysqlTable("scraper_logs", {
   productsCreated: int("productsCreated").default(0),
   errorMessage: text("errorMessage"),
   errorStack: text("errorStack"),
+  evidenceUrl: varchar("evidenceUrl", { length: 512 }), // print da tela no erro (§9)
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -2416,6 +2417,7 @@ export const supplierSessions = mysqlTable("supplier_sessions", {
   
   // Dados de sessão
   cookies: text("cookies"), // JSON stringificado
+  localStorage: text("localStorage"), // JSON stringificado (token de SPAs) — criptografado
   sessionToken: text("sessionToken"),
   authHeader: text("authHeader"),
   
