@@ -1,49 +1,20 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { getRoleLabel, hasMinimumRole, type Role } from "@/lib/access";
-import {
-  Activity,
-  BarChart3,
-  BookOpen,
-  Bot,
-  Brain,
-  Building2,
-  CalendarClock,
-  ClipboardCheck,
-  DollarSign,
-  FileScan,
-  FileSpreadsheet,
-  FileText,
-  GitMerge,
-  Gavel,
-  Image,
-  KanbanSquare,
-  KeyRound,
-  LayoutGrid,
-  LogIn,
-  LogOut,
-  MailCheck,
-  Menu,
-  Package,
-  PackageCheck,
-  Radar,
-  Receipt,
-  ScrollText,
-  Search,
-  Settings,
-  ShieldCheck,
-  Sparkles,
-  Tag,
-  Trophy,
-  Users,
-  X,
-} from "lucide-react";
+import { Menu, Search, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 
+/**
+ * Shell no padrão visual Verdelimp ERP (sidebar compacta com ícones emoji,
+ * seções em maiúsculas, item ativo com borda laranja), na paleta AZUL do S2.
+ */
+const AZUL_SIDEBAR = "#2e3c55"; // equivalente azul do verde #334532 da Verdelimp
+const LARANJA_ATIVO = "#e05008"; // mesmo acento de item ativo da Verdelimp
+
 type NavItem = {
   href: string;
-  icon: React.ElementType;
+  icon: string;
   label: string;
   minRole?: Role;
 };
@@ -55,77 +26,77 @@ type NavGroup = {
 
 /**
  * O menu segue o fluxo real de trabalho da licitação, do início ao fim:
- * 1) a oportunidade chega → 2) o catálogo dá o preço → 3) os fornecedores
- * alimentam o catálogo (captura automática) → 4) a proposta é montada e
- * disputada → 5) execução e resultado. Administração fica isolada no rodapé.
+ * oportunidade → catálogo/preço → fornecedores e captura → proposta e
+ * disputa → execução e resultado. Administração fica isolada no rodapé.
  */
 const navGroups: NavGroup[] = [
   {
-    label: "Visão geral",
+    label: "VISÃO GERAL",
     items: [
-      { href: "/", icon: LayoutGrid, label: "Dashboard" },
-      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
-      { href: "/funil", icon: KanbanSquare, label: "Funil de oportunidades" },
+      { href: "/", icon: "📊", label: "Dashboard" },
+      { href: "/agenda", icon: "📅", label: "Agenda" },
+      { href: "/funil", icon: "🎯", label: "Funil de oportunidades" },
     ],
   },
   {
-    label: "1 · Oportunidades",
+    label: "OPORTUNIDADES",
     items: [
-      { href: "/radar-pncp", icon: Radar, label: "Radar PNCP", minRole: "editor" },
-      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações recebidas", minRole: "editor" },
-      { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
+      { href: "/radar-pncp", icon: "📡", label: "Radar PNCP", minRole: "editor" },
+      { href: "/cotacoes-recebidas", icon: "📨", label: "Cotações recebidas", minRole: "editor" },
+      { href: "/edital", icon: "📄", label: "Importar edital", minRole: "editor" },
     ],
   },
   {
-    label: "2 · Catálogo e preços",
+    label: "CATÁLOGO E PREÇOS",
     items: [
-      { href: "/produtos", icon: Package, label: "Produtos" },
-      { href: "/equivalencias", icon: GitMerge, label: "Equivalências" },
-      { href: "/analise-precos", icon: BarChart3, label: "Análise de preços", minRole: "editor" },
-      { href: "/enriquecimento", icon: Sparkles, label: "Enriquecimento" },
-      { href: "/imagens", icon: Image, label: "Imagens de produtos" },
+      { href: "/produtos", icon: "📦", label: "Produtos" },
+      { href: "/equivalencias", icon: "🔁", label: "Equivalências" },
+      { href: "/analise-precos", icon: "📈", label: "Análise de preços", minRole: "editor" },
+      { href: "/enriquecimento", icon: "✨", label: "Enriquecimento" },
+      { href: "/imagens", icon: "🖼️", label: "Imagens de produtos" },
     ],
   },
   {
-    label: "3 · Fornecedores e captura",
+    label: "FORNECEDORES E CAPTURA",
     items: [
-      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
-      { href: "/scraper-fornecedores", icon: Bot, label: "Captura automática", minRole: "admin" },
-      { href: "/captura-inteligente", icon: Brain, label: "Captura multi-origem", minRole: "editor" },
-      { href: "/captura-revisao", icon: ClipboardCheck, label: "Revisão de capturas", minRole: "editor" },
-      { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
-      { href: "/importar-nfe", icon: Receipt, label: "Importar NF-e", minRole: "editor" },
-      { href: "/configurador-fornecedores", icon: KeyRound, label: "Acessos e credenciais", minRole: "admin" },
+      { href: "/fornecedores", icon: "🏭", label: "Fornecedores", minRole: "editor" },
+      { href: "/scraper-fornecedores", icon: "🤖", label: "Captura automática", minRole: "admin" },
+      { href: "/captura-inteligente", icon: "🧠", label: "Captura multi-origem", minRole: "editor" },
+      { href: "/captura-revisao", icon: "✅", label: "Revisão de capturas", minRole: "editor" },
+      { href: "/importar", icon: "📑", label: "Importar planilha", minRole: "editor" },
+      { href: "/importar-nfe", icon: "🧾", label: "Importar NF-e", minRole: "editor" },
+      { href: "/configurador-fornecedores", icon: "🔑", label: "Acessos e credenciais", minRole: "admin" },
     ],
   },
   {
-    label: "4 · Propostas e disputa",
+    label: "PROPOSTAS E DISPUTA",
     items: [
-      { href: "/propostas", icon: FileText, label: "Propostas" },
-      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
-      { href: "/certidoes", icon: ScrollText, label: "Certidões", minRole: "editor" },
-      { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
-      { href: "/agente-proposta", icon: Tag, label: "Agente de proposta", minRole: "editor" },
+      { href: "/propostas", icon: "📃", label: "Propostas" },
+      { href: "/documentos-habilitacao", icon: "🛡️", label: "Habilitação", minRole: "editor" },
+      { href: "/certidoes", icon: "📜", label: "Certidões", minRole: "editor" },
+      { href: "/sala-disputa", icon: "⚖️", label: "Sala de disputa", minRole: "editor" },
+      { href: "/agente-proposta", icon: "🏷️", label: "Agente de proposta", minRole: "editor" },
     ],
   },
   {
-    label: "5 · Execução e resultados",
+    label: "EXECUÇÃO E RESULTADOS",
     items: [
-      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
-      { href: "/financeiro", icon: DollarSign, label: "Financeiro" },
-      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
+      { href: "/pos-venda", icon: "🚚", label: "Pós-venda" },
+      { href: "/financeiro", icon: "💰", label: "Financeiro" },
+      { href: "/desempenho", icon: "🏆", label: "Desempenho" },
     ],
   },
   {
-    label: "Administração",
+    label: "SISTEMA",
     items: [
-      { href: "/central-ia", icon: Brain, label: "Inteligência artificial", minRole: "admin" },
-      { href: "/portais-licitacao", icon: KeyRound, label: "Portais de licitação", minRole: "editor" },
-      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
-      { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
-      { href: "/usuarios", icon: Users, label: "Usuários e permissões", minRole: "admin" },
-      { href: "/logs", icon: ScrollText, label: "Logs de auditoria", minRole: "admin" },
-      { href: "/seguranca", icon: ShieldCheck, label: "Segurança (MFA)" },
+      { href: "/central-ia", icon: "🤖", label: "Inteligência artificial", minRole: "admin" },
+      { href: "/portais-licitacao", icon: "🔌", label: "Portais de licitação", minRole: "editor" },
+      { href: "/diagnostico", icon: "🩺", label: "Diagnóstico", minRole: "editor" },
+      { href: "/configuracao", icon: "⚙️", label: "Dados da empresa", minRole: "admin" },
+      { href: "/usuarios", icon: "👥", label: "Usuários e permissões", minRole: "admin" },
+      { href: "/logs", icon: "📋", label: "Logs de auditoria", minRole: "admin" },
+      { href: "/seguranca", icon: "🔐", label: "Segurança (MFA)" },
+      { href: "/manual", icon: "📖", label: "Manual do sistema" },
     ],
   },
 ];
@@ -146,16 +117,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user, isAuthenticated, loading, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [semLogo, setSemLogo] = useState(false);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="its-bar mx-auto animate-pulse" />
-          <p className="text-xs font-semibold tracking-widest uppercase text-muted-foreground">
-            Carregando...
-          </p>
-        </div>
+      <div
+        className="flex items-center justify-center h-screen"
+        style={{ color: "#1A3F8F", fontSize: 18, background: "#f3f4f6" }}
+      >
+        💠 Carregando...
       </div>
     );
   }
@@ -170,52 +140,89 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     : [];
 
   const sidebar = (
-    <aside className="saas-sidebar w-64 flex-shrink-0 flex flex-col h-full overflow-hidden bg-[oklch(0.17_0.03_275)] text-slate-300">
-      {/* Marca */}
-      <div className="px-5 py-5 flex items-center gap-3 border-b border-white/10">
-        <img
-          src="https://d2xsxph8kpxj0f.cloudfront.net/310419663032500506/YFd8WWT3YwWshCdAgCSgfQ/logo_s2_transparent_ce807d16.png"
-          alt=""
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          className="h-10 w-auto object-contain drop-shadow"
-        />
-        <div className="min-w-0">
-          <div className="text-sm font-black text-white tracking-tight leading-none">S2 Licit</div>
-          <div className="text-[9px] font-bold tracking-widest text-indigo-300 uppercase mt-1">
-            Licitações · Fornecedores
-          </div>
-        </div>
+    <aside
+      className="saas-sidebar flex flex-col h-full flex-shrink-0"
+      style={{ width: 220, background: AZUL_SIDEBAR, color: "#fff" }}
+    >
+      {/* Marca — logo em chip branco, como na Verdelimp */}
+      <div style={{ padding: "12px 12px 10px", borderBottom: "1px solid rgba(255,255,255,.12)" }}>
+        {!semLogo && (
+          <img
+            src="https://d2xsxph8kpxj0f.cloudfront.net/310419663032500506/YFd8WWT3YwWshCdAgCSgfQ/logo_s2_transparent_ce807d16.png"
+            alt="S2 Licit"
+            onError={() => setSemLogo(true)}
+            style={{
+              maxWidth: 180,
+              maxHeight: 48,
+              objectFit: "contain",
+              display: "block",
+              margin: "0 auto 6px",
+              background: "#fff",
+              borderRadius: 6,
+              padding: 4,
+            }}
+          />
+        )}
+        <p style={{ margin: 0, fontWeight: 900, fontSize: 13, textAlign: "center" }}>
+          {semLogo ? "💠 " : ""}S2 LICIT
+        </p>
+        <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(255,255,255,.4)", textAlign: "center" }}>
+          Licitações &amp; Fornecedores
+        </p>
         <button
-          className="ml-auto lg:hidden text-slate-400 hover:text-white"
+          className="lg:hidden absolute top-3 right-3 text-white/60 hover:text-white"
           onClick={() => setSidebarOpen(false)}
           aria-label="Fechar menu"
         >
-          <X size={18} />
+          <X size={16} />
         </button>
       </div>
 
-      <nav className="flex-1 py-3 overflow-y-auto" aria-label="Navegação principal">
+      <nav style={{ flex: 1, padding: "5px 4px", overflowY: "auto" }} aria-label="Navegação principal">
         {visibleNavGroups.map((group) => (
-          <div key={group.label} className="mb-1">
-            <div className="px-5 pt-3 pb-1">
-              <span className="text-[9px] font-bold tracking-widest uppercase text-slate-500">
-                {group.label}
-              </span>
-            </div>
+          <div key={group.label}>
+            <p
+              style={{
+                margin: "8px 8px 3px",
+                fontSize: 9,
+                color: "rgba(255,255,255,.3)",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: ".5px",
+              }}
+            >
+              {group.label}
+            </p>
             {group.items.map((item) => {
-              const Icon = item.icon;
-              const isActive =
+              const active =
                 item.href === "/" ? location === "/" : location.startsWith(item.href);
-
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`nav-item ${isActive ? "active" : ""}`}
+                  style={{
+                    width: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    padding: "7px 8px",
+                    background: active ? "rgba(255,255,255,.18)" : "transparent",
+                    color: "#fff",
+                    cursor: "pointer",
+                    borderRadius: 7,
+                    marginBottom: 1,
+                    fontSize: 11,
+                    fontWeight: active ? 700 : 400,
+                    textAlign: "left",
+                    borderLeft: active ? `3px solid ${LARANJA_ATIVO}` : "3px solid transparent",
+                    textDecoration: "none",
+                  }}
                 >
-                  <Icon size={14} strokeWidth={isActive ? 2.5 : 2} />
-                  <span className="truncate">{item.label}</span>
+                  <span style={{ fontSize: 13 }}>{item.icon}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {item.label}
+                  </span>
                 </Link>
               );
             })}
@@ -223,43 +230,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         ))}
       </nav>
 
-      <div className="border-t border-white/10 p-3">
+      <div style={{ padding: "9px 12px", borderTop: "1px solid rgba(255,255,255,.1)" }}>
         {isAuthenticated ? (
           <>
-            <Link
-              href="/manual"
-              className={`nav-item mb-2 ${location === "/manual" ? "active" : ""}`}
+            <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,.7)", fontWeight: 600 }}>
+              {user?.name ?? "Usuário"}
+            </p>
+            <p style={{ margin: "2px 0 5px", fontSize: 10, color: "rgba(255,255,255,.4)" }}>
+              {getRoleLabel(user?.role)}
+            </p>
+            <button
+              onClick={() => logout()}
+              style={{
+                width: "100%",
+                background: "rgba(255,255,255,.1)",
+                border: "none",
+                color: "#fff",
+                padding: 6,
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 11,
+              }}
             >
-              <BookOpen size={13} />
-              <span>Como operar</span>
-            </Link>
-            <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl bg-white/5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-xs font-bold">
-                  {user?.name?.[0]?.toUpperCase() ?? "U"}
-                </span>
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold text-white truncate">
-                  {user?.name ?? "Usuário"}
-                </div>
-                <div className="text-[10px] text-slate-400 truncate">
-                  {getRoleLabel(user?.role)}
-                </div>
-              </div>
-              <button
-                onClick={() => logout()}
-                title="Sair"
-                className="text-slate-400 hover:text-white transition"
-              >
-                <LogOut size={14} />
-              </button>
-            </div>
+              Sair
+            </button>
           </>
         ) : (
-          <a href={getLoginUrl()} className="nav-item w-full text-left">
-            <LogIn size={13} />
-            <span>Entrar</span>
+          <a
+            href={getLoginUrl()}
+            style={{
+              display: "block",
+              width: "100%",
+              background: "rgba(255,255,255,.1)",
+              color: "#fff",
+              padding: 6,
+              borderRadius: 6,
+              cursor: "pointer",
+              fontSize: 11,
+              textAlign: "center",
+              textDecoration: "none",
+            }}
+          >
+            Entrar
           </a>
         )}
       </div>
@@ -267,48 +279,60 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="h-screen flex bg-background overflow-hidden">
+    <div className="flex h-screen overflow-hidden" style={{ background: "#f3f4f6" }}>
       {/* Sidebar fixa em desktop */}
-      <div className="hidden lg:block h-full">{sidebar}</div>
+      <div className="hidden lg:block h-full relative">{sidebar}</div>
 
       {/* Sidebar móvel (overlay) */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/50"
             onClick={() => setSidebarOpen(false)}
           />
           <div className="absolute inset-y-0 left-0">{sidebar}</div>
         </div>
       )}
 
-      <div className="flex-1 min-w-0 flex flex-col h-full">
-        {/* Topbar */}
+      <div className="flex flex-col flex-1 min-w-0 h-full">
+        {/* Topbar fina branca, como na Verdelimp */}
         {isAuthenticated && (
-          <header className="flex-shrink-0 h-14 bg-card/80 backdrop-blur border-b border-border flex items-center gap-3 px-4 lg:px-6">
+          <div
+            className="flex items-center gap-3"
+            style={{
+              background: "#fff",
+              borderBottom: "1px solid #e5e7eb",
+              padding: "8px 20px",
+              flexShrink: 0,
+            }}
+          >
             <button
-              className="lg:hidden text-muted-foreground hover:text-foreground"
+              className="lg:hidden text-gray-400 hover:text-gray-700"
               onClick={() => setSidebarOpen(true)}
               aria-label="Abrir menu"
             >
-              <Menu size={20} />
+              <Menu size={18} />
             </button>
-            <div className="font-bold text-sm text-foreground truncate">
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }} className="truncate">
               {currentPageLabel(location)}
-            </div>
-            <div className="ml-auto flex items-center gap-2">
+            </span>
+            <div className="ml-auto flex items-center gap-3">
               <Link
                 href="/busca-global"
-                className="flex items-center gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-1.5 text-xs text-muted-foreground hover:border-ring hover:text-foreground transition"
+                className="flex items-center gap-1.5 text-gray-400 hover:text-gray-700 transition"
+                style={{ fontSize: 11 }}
               >
-                <Search size={13} />
+                <Search size={12} />
                 <span className="hidden sm:inline">Buscar no sistema...</span>
               </Link>
+              <span style={{ fontSize: 11, color: "#9ca3af" }}>💠 S2 Licit ERP</span>
             </div>
-          </header>
+          </div>
         )}
 
-        <main className="flex-1 min-w-0 overflow-auto">{children}</main>
+        <main style={{ flex: 1, overflowY: "auto", padding: 22, background: "#f3f4f6" }}>
+          {children}
+        </main>
       </div>
     </div>
   );
