@@ -1,83 +1,31 @@
-import { and, asc, desc, eq, inArray, isNotNull, like, ne, or, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import mysql2 from "mysql2/promise";
+import { and, asc, desc, eq, inArray, isNotNull, like, or, sql } from "drizzle-orm";
 import { escapeLike, simplifyDbError, normalize, matches, normalizeName, similarity } from "./db/_helpers";
+import { getDb, resetDb } from "./db/_client";
 import {
-  InsertCategory,
-  InsertCompanySettings,
-  InsertImportLog,
   InsertProduct,
   InsertProposal,
   InsertProposalItem,
   InsertFinancialEntry,
-  InsertQuotation,
-  InsertQuotationItem,
-  InsertRequestingOrg,
   InsertSupplier,
   categories,
-  companySettings,
   equivalenceGroups,
   equivalenceMembers,
   financialEntries,
-  importLogs,
   products,
   proposalItems,
   proposalStatusHistory,
   proposals,
-  quotationItems,
-  quotations,
-  requestingOrgs,
   suppliers,
   users,
   masterProducts,
   type InsertUser,
   type MasterProduct,
-  synonyms,
-  type Synonym,
-  type InsertSynonym,
-  proposalTemplates,
-  type ProposalTemplate,
-  type InsertProposalTemplate,
-  matchFeedback,
-  type MatchFeedback,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
-/**
- * Escapa caracteres especiais do operador LIKE no MySQL.
- * Previne LIKE injection via wildcards % e _.
- */
-
-let _db: ReturnType<typeof drizzle> | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-/**
- * Retorna instância do banco com pool de conexões MySQL2.
- * Pool evita ECONNRESET em produção com carga concorrente.
- */
-export async function getDb() {
-  if (_db) return _db;
-  if (!process.env.DATABASE_URL) return null;
-  try {
-    const pool = mysql2.createPool({
-      uri: process.env.DATABASE_URL,
-      connectionLimit: 10,
-      waitForConnections: true,
-      queueLimit: 0,
-      connectTimeout: 10000,
-    });
-    _db = drizzle(pool) as any;
-    console.log("[Database] Pool de conexões iniciado (limit=10)");
-  } catch (error) {
-    console.warn("[Database] Falha ao criar pool:", error);
-    _db = null;
-  }
-  return _db;
-}
-
-/** @deprecated Pool gerencia reconexões automaticamente — mantido por compatibilidade */
-export function resetDb() {
-  _db = null;
-}
+// Conexão/pool compartilhado: getDb/resetDb vivem em ./db/_client e são
+// re-exportados aqui para preservar a API pública `from "../db"`.
+export { getDb, resetDb };
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 
@@ -119,53 +67,8 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// ─── Categories ──────────────────────────────────────────────────────────────
-
-export async function listCategories() {
-  const db = await getDb();
-  if (!db) return [];
-  const all = await db.select().from(categories).orderBy(asc(categories.sortOrder), asc(categories.name));
-  return all;
-}
-
-export async function listCategoriesHierarchy() {
-  const db = await getDb();
-  if (!db) return [];
-  const all = await db.select().from(categories).orderBy(asc(categories.sortOrder), asc(categories.name));
-  type CatWithChildren = (typeof all)[0] & { children: (typeof all)[0][] };
-  const parents = all.filter((c) => !c.parentId) as CatWithChildren[];
-  for (const p of parents) {
-    p.children = all.filter((c) => c.parentId === p.id);
-  }
-  return parents;
-}
-
-export async function getCategoryById(id: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
-  return result[0];
-}
-
-export async function createCategory(data: InsertCategory) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(categories).values(data);
-  return result;
-}
-
-export async function updateCategory(id: number, data: Partial<InsertCategory>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.update(categories).set(data).where(eq(categories.id, id));
-}
-
-export async function deleteCategory(id: number) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.delete(categories).where(eq(categories.id, id));
-}
-
+// ─── Categories → ./db/categories ───
+export * from "./db/categories";
 // ─── Suppliers ───────────────────────────────────────────────────────────────
 
 export async function listSuppliers(activeOnly = false) {
@@ -766,51 +669,8 @@ export async function deleteEquivalenceGroup(groupId: number) {
   await db.delete(equivalenceGroups).where(eq(equivalenceGroups.id, groupId));
 }
 
-// ─── Import Logs ─────────────────────────────────────────────────────────────
-
-export async function createImportLog(data: InsertImportLog) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  // Sanitiza categoryId e supplierId: garante null quando vazio ou inválido
-  const sanitized = {
-    ...data,
-    categoryId: data.categoryId && Number(data.categoryId) > 0 ? Number(data.categoryId) : null,
-    supplierId: data.supplierId && Number(data.supplierId) > 0 ? Number(data.supplierId) : null,
-  };
-  const [result] = await db.insert(importLogs).values(sanitized);
-  return (result as any).insertId as number;
-}
-
-export async function updateImportLog(id: number, data: Partial<InsertImportLog>) {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(importLogs).set(data).where(eq(importLogs.id, id));
-}
-
-export async function listImportLogs(limit = 20) {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select({
-      id: importLogs.id,
-      fileName: importLogs.fileName,
-      totalRows: importLogs.totalRows,
-      importedRows: importLogs.importedRows,
-      errorRows: importLogs.errorRows,
-      status: importLogs.status,
-      errorMessage: importLogs.errorMessage,
-      createdAt: importLogs.createdAt,
-      supplierId: importLogs.supplierId,
-      categoryId: importLogs.categoryId,
-      supplierName: suppliers.name,
-      categoryName: categories.name,
-    })
-    .from(importLogs)
-    .leftJoin(suppliers, eq(importLogs.supplierId, suppliers.id))
-    .leftJoin(categories, eq(importLogs.categoryId, categories.id))
-    .orderBy(desc(importLogs.createdAt))
-    .limit(limit);
-}
+// ─── Import Logs → ./db/importLogs ───────────────────────────────────────────
+export * from "./db/importLogs";
 
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
 
@@ -856,87 +716,8 @@ export async function getProductsPerCategory() {
     .orderBy(asc(categories.sortOrder));
 }
 
-// ─── Quotations ──────────────────────────────────────────────────────────────
-
-export async function createQuotation(data: InsertQuotation): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  const result = await db.insert(quotations).values(data);
-  return (result[0] as any).insertId as number;
-}
-
-export async function listQuotations(): Promise<
-  { id: number; title: string; clientName: string | null; status: string; createdAt: Date; updatedAt: Date; itemCount: number }[]
-> {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db
-    .select({
-      id: quotations.id,
-      title: quotations.title,
-      clientName: quotations.clientName,
-      status: quotations.status,
-      createdAt: quotations.createdAt,
-      updatedAt: quotations.updatedAt,
-      itemCount: sql<number>`count(${quotationItems.id})`,
-    })
-    .from(quotations)
-    .leftJoin(quotationItems, eq(quotationItems.quotationId, quotations.id))
-    .groupBy(quotations.id, quotations.title, quotations.clientName, quotations.status, quotations.createdAt, quotations.updatedAt)
-    .orderBy(desc(quotations.createdAt));
-  return rows;
-}
-
-export async function getQuotationWithItems(id: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const [quotation] = await db.select().from(quotations).where(eq(quotations.id, id)).limit(1);
-  if (!quotation) return null;
-  const items = await db
-    .select()
-    .from(quotationItems)
-    .where(eq(quotationItems.quotationId, id))
-    .orderBy(asc(quotationItems.sortOrder), asc(quotationItems.id));
-  return { ...quotation, items };
-}
-
-export async function updateQuotation(
-  id: number,
-  data: Partial<InsertQuotation>
-): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(quotations).set(data).where(eq(quotations.id, id));
-}
-
-export async function deleteQuotation(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(quotations).where(eq(quotations.id, id));
-}
-
-export async function addQuotationItem(data: InsertQuotationItem): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  const result = await db.insert(quotationItems).values(data);
-  return (result[0] as any).insertId as number;
-}
-
-export async function updateQuotationItem(
-  id: number,
-  data: Partial<InsertQuotationItem>
-): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(quotationItems).set(data).where(eq(quotationItems.id, id));
-}
-
-export async function removeQuotationItem(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(quotationItems).where(eq(quotationItems.id, id));
-}
-
+// ─── Quotations → ./db/quotations ───
+export * from "./db/quotations";
 // ─── Bulk Update Products ─────────────────────────────────────────────────────
 
 export async function bulkUpdateProducts(
@@ -1001,76 +782,10 @@ export async function bulkUpdateProducts(
   return ids.length;
 }
 
-// ─── Company Settings ─────────────────────────────────────────────────────────
-
-export async function getCompanySettings() {
-  const db = await getDb();
-  if (!db) return null;
-  const rows = await db.select().from(companySettings).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function upsertCompanySettings(data: Partial<InsertCompanySettings>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const existing = await getCompanySettings();
-  if (existing) {
-    await db.update(companySettings).set(data).where(eq(companySettings.id, existing.id));
-    return existing.id;
-  } else {
-    const [result] = await db.insert(companySettings).values(data as InsertCompanySettings);
-    return (result as any).insertId as number;
-  }
-}
-
-// ─── Requesting Orgs ──────────────────────────────────────────────────────────
-
-export async function listRequestingOrgs(search?: string) {
-  const db = await getDb();
-  if (!db) return [];
-  const conditions = search ? [like(requestingOrgs.name, `%${search}%`)] : [];
-  return db
-    .select()
-    .from(requestingOrgs)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(asc(requestingOrgs.name));
-}
-
-export async function getRequestingOrgById(id: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const rows = await db.select().from(requestingOrgs).where(eq(requestingOrgs.id, id)).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function upsertRequestingOrg(data: InsertRequestingOrg) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  // Check if org with same name exists
-  const existing = await db
-    .select()
-    .from(requestingOrgs)
-    .where(eq(requestingOrgs.name, data.name))
-    .limit(1);
-  if (existing[0]) {
-    await db.update(requestingOrgs).set(data).where(eq(requestingOrgs.id, existing[0].id));
-    return existing[0].id;
-  }
-  const [result] = await db.insert(requestingOrgs).values(data);
-  return (result as any).insertId as number;
-}
-
-export async function updateRequestingOrg(id: number, data: Partial<InsertRequestingOrg>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.update(requestingOrgs).set(data).where(eq(requestingOrgs.id, id));
-}
-
-export async function deleteRequestingOrg(id: number) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.delete(requestingOrgs).where(eq(requestingOrgs.id, id));
-}
+// ─── Company Settings → ./db/companySettings ───
+export * from "./db/companySettings";
+// ─── Requesting Orgs → ./db/requestingOrgs ──────────────────────────────────
+export * from "./db/requestingOrgs";
 
 // ─── Proposals ────────────────────────────────────────────────────────────────
 
@@ -3086,183 +2801,11 @@ export async function mergeProductFromRow(
   await db.update(products).set(updateData as any).where(eq(products.id, existingId));
 }
 
-// ─── Sinônimos ────────────────────────────────────────────────────────────────
+// ─── Sinônimos → ./db/synonyms ───────────────────────────────────────────────
+export * from "./db/synonyms";
 
-export async function listSynonyms(opts?: {
-  category?: string;
-  search?: string;
-  activeOnly?: boolean;
-}): Promise<Synonym[]> {
-  const db = await getDb();
-  if (!db) return [];
-  try {
-    const conditions = [];
-    if (opts?.activeOnly !== false) conditions.push(eq(synonyms.isActive, "yes"));
-    if (opts?.category && opts.category !== "all") conditions.push(eq(synonyms.category as any, opts.category));
-    if (opts?.search) {
-      conditions.push(
-        or(
-          like(synonyms.term, `%${opts.search}%`),
-          like(synonyms.canonical, `%${opts.search}%`)
-        )!
-      );
-    }
-    const rows = await db
-      .select()
-      .from(synonyms)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(asc(synonyms.canonical), asc(synonyms.term));
-    return rows as Synonym[];
-  } catch (error) {
-    console.error("[listSynonyms] Error:", error);
-    return [];
-  }
-}
-
-export async function createSynonym(data: InsertSynonym): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  const [result] = await db.insert(synonyms).values(data);
-  return (result as any).insertId as number;
-}
-
-export async function updateSynonym(id: number, data: Partial<InsertSynonym>): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(synonyms).set(data as any).where(eq(synonyms.id, id));
-}
-
-export async function deleteSynonym(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(synonyms).where(eq(synonyms.id, id));
-}
-
-export async function bulkCreateSynonyms(data: InsertSynonym[]): Promise<number> {
-  const db = await getDb();
-  if (!db || data.length === 0) return 0;
-  // Insert in batches of 100
-  let count = 0;
-  for (let i = 0; i < data.length; i += 100) {
-    const batch = data.slice(i, i + 100);
-    await db.insert(synonyms).values(batch).onDuplicateKeyUpdate({ set: { updatedAt: sql`now()` } });
-    count += batch.length;
-  }
-  return count;
-}
-
-/**
- * Carrega todos os sinônimos ativos e retorna um Map: term_normalizado → [canonical_normalizado, ...]
- * Usado pelo algoritmo de matching para expandir termos de busca.
- */
-export async function loadSynonymMap(): Promise<Map<string, string[]>> {
-  const db = await getDb();
-  if (!db) return new Map();
-  try {
-    const rows = await db
-      .select({ term: synonyms.term, canonical: synonyms.canonical })
-      .from(synonyms)
-      .where(eq(synonyms.isActive, "yes"));
-    const map = new Map<string, string[]>();
-    const norm = (s: string) =>
-      s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").trim();
-    for (const row of rows) {
-      const t = norm(row.term);
-      const c = norm(row.canonical);
-      if (!t || !c) continue;
-      if (!map.has(t)) map.set(t, []);
-      map.get(t)!.push(c);
-      // Também mapeia o canônico para si mesmo (para busca direta)
-      if (!map.has(c)) map.set(c, []);
-      if (!map.get(c)!.includes(c)) map.get(c)!.push(c);
-    }
-    return map;
-  } catch (error) {
-    console.error("[loadSynonymMap] Error:", error);
-    return new Map();
-  }
-}
-
-// ── Bulk toggle sinônimos (ativar/desativar em lote) ──────────────────────────
-export async function bulkToggleSynonyms(ids: number[], isActive: "yes" | "no"): Promise<number> {
-  const db = await getDb();
-  if (!db || ids.length === 0) return 0;
-  await db
-    .update(synonyms)
-    .set({ isActive, updatedAt: new Date() } as any)
-    .where(inArray(synonyms.id, ids));
-  return ids.length;
-}
-
-// ── Bulk delete sinônimos ─────────────────────────────────────────────────────
-export async function bulkDeleteSynonyms(ids: number[]): Promise<number> {
-  const db = await getDb();
-  if (!db || ids.length === 0) return 0;
-  await db.delete(synonyms).where(inArray(synonyms.id, ids));
-  return ids.length;
-}
-
-// ── Templates de Proposta ─────────────────────────────────────────────────────
-export async function listProposalTemplates(): Promise<ProposalTemplate[]> {
-  const db = await getDb();
-  if (!db) return [];
-  try {
-    return await db.select().from(proposalTemplates).orderBy(asc(proposalTemplates.name));
-  } catch (error) {
-    console.error("[listProposalTemplates] Error:", error);
-    return [];
-  }
-}
-
-export async function getProposalTemplate(id: number): Promise<ProposalTemplate | null> {
-  const db = await getDb();
-  if (!db) return null;
-  try {
-    const rows = await db.select().from(proposalTemplates).where(eq(proposalTemplates.id, id)).limit(1);
-    return rows[0] ?? null;
-  } catch (error) {
-    console.error("[getProposalTemplate] Error:", error);
-    return null;
-  }
-}
-
-export async function createProposalTemplate(data: InsertProposalTemplate): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  // Se isDefault=yes, desmarcar os outros
-  if (data.isDefault === "yes") {
-    await db.update(proposalTemplates).set({ isDefault: "no" } as any).where(eq(proposalTemplates.isDefault, "yes"));
-  }
-  const [result] = await db.insert(proposalTemplates).values(data);
-  return (result as any).insertId as number;
-}
-
-export async function updateProposalTemplate(id: number, data: Partial<InsertProposalTemplate>): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  if (data.isDefault === "yes") {
-    await db.update(proposalTemplates).set({ isDefault: "no" } as any).where(ne(proposalTemplates.id, id));
-  }
-  await db.update(proposalTemplates).set({ ...data, updatedAt: new Date() } as any).where(eq(proposalTemplates.id, id));
-}
-
-export async function deleteProposalTemplate(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(proposalTemplates).where(eq(proposalTemplates.id, id));
-}
-
-export async function getDefaultProposalTemplate(): Promise<ProposalTemplate | null> {
-  const db = await getDb();
-  if (!db) return null;
-  try {
-    const rows = await db.select().from(proposalTemplates).where(eq(proposalTemplates.isDefault, "yes")).limit(1);
-    return rows[0] ?? null;
-  } catch (error) {
-    console.error("[getDefaultProposalTemplate] Error:", error);
-    return null;
-  }
-}
+// ── Templates de Proposta → ./db/proposalTemplates ────────────────────────────
+export * from "./db/proposalTemplates";
 
 // ─── Rentabilidade por Categoria ─────────────────────────────────────────────
 export async function getMarginByCategory() {
@@ -3324,130 +2867,8 @@ export async function getMarginByCategory() {
     .sort((a, b) => b.marginPercent - a.marginPercent);
 }
 
-// ─── Match Feedback (Aprendizado de Matching) ────────────────────────────────
-
-/** Normaliza um termo do edital para uso como chave de lookup */
-export function normalizeEditalTerm(term: string): string {
-  return term
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove acentos
-    .replace(/[^a-z0-9\s]/g, " ")    // remove pontuação
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Carrega o mapa de feedback: editalTerm → { productId, productName, useCount } */
-export async function loadFeedbackMap(): Promise<Map<string, { productId: number; productName: string; useCount: number }>> {
-  const db = await getDb();
-  if (!db) return new Map();
-  const rows = await db
-    .select({
-      editalTerm: matchFeedback.editalTerm,
-      productId: matchFeedback.productId,
-      productName: matchFeedback.productName,
-      useCount: matchFeedback.useCount,
-    })
-    .from(matchFeedback)
-    .orderBy(desc(matchFeedback.useCount));
-  const map = new Map<string, { productId: number; productName: string; useCount: number }>();
-  for (const row of rows) {
-    // Mantém apenas o par com maior useCount por termo
-    if (!map.has(row.editalTerm)) {
-      map.set(row.editalTerm, {
-        productId: row.productId,
-        productName: row.productName,
-        useCount: row.useCount,
-      });
-    }
-  }
-  return map;
-}
-
-/** Registra ou incrementa um par aprendido (editalTerm → productId) */
-export async function recordFeedback(editalTerm: string, productId: number, productName: string): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  const normalizedTerm = normalizeEditalTerm(editalTerm);
-  if (!normalizedTerm) return;
-  // Verificar se já existe
-  const existing = await db
-    .select({ id: matchFeedback.id, useCount: matchFeedback.useCount })
-    .from(matchFeedback)
-    .where(and(eq(matchFeedback.editalTerm, normalizedTerm), eq(matchFeedback.productId, productId)))
-    .limit(1);
-  if (existing.length > 0) {
-    // Incrementar useCount e atualizar lastUsedAt
-    await db
-      .update(matchFeedback)
-      .set({
-        useCount: (existing[0].useCount ?? 1) + 1,
-        lastUsedAt: new Date(),
-        productName, // atualiza o nome caso tenha mudado
-      })
-      .where(eq(matchFeedback.id, existing[0].id));
-  } else {
-    // Inserir novo par
-    await db.insert(matchFeedback).values({
-      editalTerm: normalizedTerm,
-      productId,
-      productName,
-      useCount: 1,
-      confirmedAt: new Date(),
-      lastUsedAt: new Date(),
-    });
-  }
-}
-
-/** Lista feedbacks com paginação e busca */
-export async function listFeedbacks(opts: {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-}): Promise<{ items: MatchFeedback[]; total: number }> {
-  const db = await getDb();
-  if (!db) return { items: [], total: 0 };
-  const { page = 1, pageSize = 50, search } = opts;
-  const offset = (page - 1) * pageSize;
-
-  const whereClause = search
-    ? or(
-        like(matchFeedback.editalTerm, `%${search}%`),
-        like(matchFeedback.productName, `%${search}%`)
-      )
-    : undefined;
-
-  const [items, countRows] = await Promise.all([
-    db
-      .select()
-      .from(matchFeedback)
-      .where(whereClause)
-      .orderBy(desc(matchFeedback.useCount), desc(matchFeedback.lastUsedAt))
-      .limit(pageSize)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(matchFeedback)
-      .where(whereClause),
-  ]);
-
-  return { items, total: Number(countRows[0]?.count ?? 0) };
-}
-
-/** Remove um feedback pelo ID */
-export async function deleteFeedback(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(matchFeedback).where(eq(matchFeedback.id, id));
-}
-
-/** Remove múltiplos feedbacks por IDs */
-export async function bulkDeleteFeedback(ids: number[]): Promise<void> {
-  const db = await getDb();
-  if (!db || ids.length === 0) return;
-  await db.delete(matchFeedback).where(inArray(matchFeedback.id, ids));
-}
-
+// ─── Match Feedback → ./db/matchFeedback ───
+export * from "./db/matchFeedback";
 // ─── Detecção e Fusão de Duplicatas ──────────────────────────────────────────
 
 /** Normaliza string para comparação fuzzy */

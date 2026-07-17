@@ -45,14 +45,24 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   // Falhas de schema são fatais: nunca disponibilizar a aplicação parcialmente migrada.
+  //
+  // A ORDEM aqui importa: todas as colunas precisam existir ANTES de qualquer
+  // consulta via ORM. O drizzle `db.select().from(users)` projeta TODAS as
+  // colunas declaradas no schema (incluindo mfaEnabled/mfaSecret/failedLoginAttempts/
+  // lockedUntil), então rodar ensureAdminUser() — que lê e grava `users` pelo ORM —
+  // antes de ensureAuthSecurityColumns() criar essas colunas quebra o boot em bancos
+  // legados com "Unknown column". Por isso ensureAdminUser() roda por último, depois
+  // de todas as funções ensure*Columns() reconciliarem o schema.
   await ensurePasswordColumn();
-  await ensureAdminUser();
   await ensureProductColumns();
   await ensureAuthSecurityColumns();
   await ensureCompanySettingsColumns();
   await ensureOfferColumns();
   await ensureTaxRuleTypes();
   await ensureCaptureSourceTypes();
+  // ensureAdminUser() por último: lê/grava `users` pelo ORM (projeta todas as
+  // colunas), então precisa que todas as ensure*Columns já tenham rodado.
+  await ensureAdminUser();
 
   const app = express();
   const server = createServer(app);
