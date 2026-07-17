@@ -112,6 +112,24 @@ export async function runDailyAlerts(): Promise<void> {
  * (ex.: clique manual coincidindo com o horário agendado) vive em
  * `executarScraper` (scraperEngine.ts), não aqui.
  */
+/**
+ * Alerta de falha de captura: notificação do sistema + WhatsApp (se
+ * configurado). A operação depende de preços atualizados — falha silenciosa
+ * de madrugada precisa acordar alguém.
+ */
+async function alertaFalhaCaptura(fornecedor: string, erro: string): Promise<void> {
+  const titulo = `Falha na captura automática — ${fornecedor}`;
+  const corpo = `A captura agendada do fornecedor ${fornecedor} falhou: ${erro}`;
+  try {
+    await notifyOwner({ title: titulo, content: corpo });
+  } catch { /* alerta nunca derruba o scheduler */ }
+  if (isWhatsappConfigured()) {
+    try {
+      await enviarWhatsapp(`⚠️ ${titulo}\n\n${corpo}`);
+    } catch { /* idem */ }
+  }
+}
+
 async function runScheduledScrapers(): Promise<void> {
   const db = await getDb();
   if (!db) return;
@@ -132,9 +150,13 @@ async function runScheduledScrapers(): Promise<void> {
       executarScraper(cfg.id)
         .then((r) => {
           console.log(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
+          if (!r.success) {
+            void alertaFalhaCaptura(r.supplierName || `#${cfg.id}`, r.errors[0] ?? "erro desconhecido");
+          }
         })
         .catch((err) => {
           console.error(`[Scheduler] Scraper #${cfg.id} falhou:`, (err as Error).message);
+          void alertaFalhaCaptura(`#${cfg.id}`, (err as Error).message);
         });
 
       // Pequeno intervalo entre disparos para não sobrecarregar caso vários
@@ -159,6 +181,18 @@ export async function runBackupJob(): Promise<void> {
     );
   } else {
     console.error(`[Scheduler] Backup falhou: ${result.error}`);
+    // Backup que falha em silêncio só é descoberto no dia em que faz falta.
+    try {
+      await notifyOwner({
+        title: "Falha no backup automático do banco",
+        content: `O backup agendado falhou: ${result.error ?? "erro desconhecido"}`,
+      });
+    } catch { /* alerta nunca derruba o scheduler */ }
+    if (isWhatsappConfigured()) {
+      try {
+        await enviarWhatsapp(`🚨 Falha no backup automático do banco: ${result.error ?? "erro desconhecido"}`);
+      } catch { /* idem */ }
+    }
   }
 }
 
