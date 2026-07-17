@@ -185,66 +185,6 @@
   color: oklch(0.55 0.17 155);
 }
 
-/* Navegação da sidebar escura */
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  margin: 0 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  color: oklch(0.72 0.02 265);
-  transition: all 0.15s ease;
-  border-radius: 0.625rem;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.nav-item:hover {
-  color: oklch(0.98 0 0);
-  background: oklch(1 0 0 / 7%);
-}
-
-.nav-item.active {
-  color: oklch(0.98 0 0);
-  background: linear-gradient(90deg, oklch(0.51 0.23 277 / 90%), oklch(0.51 0.23 277 / 55%));
-  font-weight: 600;
-  box-shadow: 0 4px 14px oklch(0.51 0.23 277 / 30%);
-}
-
-.stat-card {
-  padding: 1.5rem;
-  border: 1px solid oklch(0.935 0.004 265);
-  border-radius: 1rem;
-  background: white;
-  box-shadow: 0 1px 2px oklch(0.2 0.02 265 / 5%);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.stat-card:hover {
-  box-shadow: 0 8px 24px oklch(0.2 0.02 265 / 8%);
-}
-
-.stat-card .stat-value {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 2.25rem;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  color: oklch(0.18 0.02 265);
-}
-
-.stat-card .stat-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: oklch(0.50 0.02 265);
-  margin-top: 0.5rem;
-}
-
 .its-table {
   width: 100%;
   border-collapse: collapse;
