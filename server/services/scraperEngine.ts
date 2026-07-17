@@ -264,21 +264,39 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     nextPage: '[rel="next"], [class*="next"], [class*="proxima"]',
     navigationWait: 3000,
   },
+  // Magazine Médica (Grupo Ballke) roda em Django server-rendered (Bootstrap 2).
+  // Seletores de login reais confirmados no HTML da página /accounts/login/.
+  //
+  // ⚠ §3/§17 — o formulário tem reCAPTCHA v3 INVISÍVEL (score-based, sitekey
+  // 6LcIGf..., name="captcha" obrigatório). Não é um desafio que o usuário
+  // resolve com clique, mas o Google pontua o comportamento: um login headless
+  // tende a receber score baixo e ser rejeitado silenciosamente. Por isso o
+  // motor deve DETECTAR a falha (continuar na página de login em vez de ir para
+  // loginSuccessUrl) e requerer intervenção humana / reuso de sessão; preferir
+  // o caminho de catálogo público.
   magazinemedica: {
-    // Login confirmado (base Django); entra por CPF/CNPJ ou e-mail.
-    loginUrl: "https://magazinemedica.com.br/accounts/registro/login/",
-    loginEmail: '#id_username, input[name="username"], input[name="login"], input[type="text"]',
-    loginPassword: '#id_password, input[name="password"], input[type="password"]',
-    loginSubmit: 'button[type="submit"], input[type="submit"]',
+    loginUrl: "https://magazinemedica.com.br/accounts/login/",
+    loginEmail: '#id_username, input[name="username"]',
+    loginPassword: '#id_password, input[name="password"]',
+    loginSubmit: '#login_entrar, button[type="submit"]',
+    // Após o login o campo hidden next="/accounts/" redireciona para a área
+    // do cliente — sinal confiável de sessão autenticada.
+    loginSuccessUrl: "/accounts/",
     useStructuredData: true,
-    categoryUrls: [],
-    searchUrlTemplate: "https://magazinemedica.com.br/busca/?q={q}",
-    productItem: '.product, .produto, [class*="product"], [class*="card"]',
-    productName: 'h2, h3, .name, .title, .nome',
+    categoryUrls: [
+      "https://magazinemedica.com.br/colecao/veterinaria-e-pet-shop/",
+      "https://magazinemedica.com.br/categorias/medicamentos/",
+      "https://magazinemedica.com.br/categorias/descartaveis/",
+      "https://magazinemedica.com.br/categorias/medicina/",
+    ],
+    // Busca real do site: form GET action="/busca/" com input name="keywords".
+    searchUrlTemplate: "https://magazinemedica.com.br/busca/?keywords={q}",
+    productItem: '.product, .produto, [class*="product"], [class*="card"], .thumbnail',
+    productName: 'h2, h3, .name, .title, .nome, .product-title',
     productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
-    productImage: 'img',
+    productImage: 'img.lazy, img',
     productLink: 'a',
-    nextPage: '[rel="next"], .next, .proxima',
+    nextPage: '[rel="next"], .next, .proxima, .pagination .active + li a',
     navigationWait: 2500,
   },
   // Utilidades Clínicas roda em Magento 2 (base Henry Schein Brazil). Seletores

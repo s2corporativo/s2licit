@@ -56,4 +56,16 @@ describe("FORNECEDOR_CONFIGS — fornecedores cadastrados", () => {
     // Sinal de sessão autenticada (logout no cabeçalho Magento).
     expect(cfg.loginSuccessSelector).toContain("logout");
   });
+
+  it("magazinemedica (Django) usa os seletores reais confirmados", () => {
+    const cfg = FORNECEDOR_CONFIGS.magazinemedica;
+    expect(cfg.loginUrl).toBe("https://magazinemedica.com.br/accounts/login/");
+    expect(cfg.loginEmail).toContain("#id_username");
+    expect(cfg.loginPassword).toContain("#id_password");
+    expect(cfg.loginSubmit).toContain("#login_entrar");
+    // Redireciona para /accounts/ ao logar (campo hidden next).
+    expect(cfg.loginSuccessUrl).toBe("/accounts/");
+    // Busca real usa o parâmetro keywords, não q.
+    expect(cfg.searchUrlTemplate).toContain("keywords=");
+  });
 });
