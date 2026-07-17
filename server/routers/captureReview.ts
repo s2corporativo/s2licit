@@ -409,9 +409,10 @@ export const captureReviewRouter = router({
         status: z.enum(["detected", "approved", "rejected", "applied"]).optional(),
       })
     )
-    .mutation(async () => {
+    .mutation(async ({ input }) => {
       try {
-        return { csv: "", filename: "capture-export.csv" };
+        const csv = await buildCaptureCsv(input);
+        return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
       } catch (error) {
         console.error("Error exporting CSV:", error);
         return { csv: "", filename: "" };
@@ -420,12 +421,57 @@ export const captureReviewRouter = router({
 
   exportCsv: protectedProcedure
     .input(z.object({ supplierId: z.number().optional() }))
-    .query(async () => {
+    .query(async ({ input }) => {
       try {
-        return { csv: "", filename: "capture-export.csv" };
+        const csv = await buildCaptureCsv(input);
+        return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
       } catch (error) {
         console.error("Error exporting CSV:", error);
         return { csv: "", filename: "" };
       }
     }),
 });
+
+/** Monta o CSV das alterações de captura (com filtros opcionais). */
+async function buildCaptureCsv(filters: {
+  supplierId?: number;
+  status?: "detected" | "approved" | "rejected" | "applied";
+}): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
+
+  const conditions = [];
+  if (filters.supplierId) conditions.push(eq(productCaptureHistory.supplierId, filters.supplierId));
+  if (filters.status) conditions.push(eq(productCaptureHistory.status, filters.status));
+
+  const base = db
+    .select({
+      id: productCaptureHistory.id,
+      productName: products.name,
+      supplierName: suppliers.name,
+      field: productCaptureHistory.fieldChanged,
+      oldValue: productCaptureHistory.valueBefore,
+      newValue: productCaptureHistory.valueAfter,
+      status: productCaptureHistory.status,
+      createdAt: productCaptureHistory.createdAt,
+    })
+    .from(productCaptureHistory)
+    .innerJoin(products, eq(productCaptureHistory.productId, products.id))
+    .innerJoin(suppliers, eq(productCaptureHistory.supplierId, suppliers.id));
+
+  const rows = await (conditions.length > 0 ? base.where(and(...conditions)) : base)
+    .orderBy(desc(productCaptureHistory.createdAt))
+    .limit(50000)
+    .execute();
+
+  const esc = (v: unknown) => {
+    const s = v == null ? "" : String(v);
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = "id;produto;fornecedor;campo;valor_anterior;valor_novo;status;data";
+  const lines = rows.map((r) =>
+    [r.id, r.productName, r.supplierName, r.field, r.oldValue, r.newValue, r.status,
+      r.createdAt ? new Date(r.createdAt).toISOString() : ""].map(esc).join(";"),
+  );
+  return [header, ...lines].join("\n");
+}

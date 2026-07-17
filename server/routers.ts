@@ -43,7 +43,6 @@ import { supplierImportRouter } from "./routers/supplierImport";
 import { priceAlertsRouter } from "./routers/priceAlerts";
 import { captureReviewRouter } from "./routers/captureReview";
 import { captureSchedulerRouter } from "./routers/captureScheduler";
-import { scraperIntegrationRouter } from "./routers/scraperIntegration";
 import { captureAnalyticsRouter } from "./routers/captureAnalytics";
 import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
 import { notificationWebhooksRouter } from "./routers/notificationWebhooks";
@@ -120,7 +119,6 @@ export const appRouter = router({
   reports: reportRouter,
   captureReview: captureReviewRouter,
   captureScheduler: captureSchedulerRouter,
-  scraperIntegration: scraperIntegrationRouter,
   captureAnalytics: captureAnalyticsRouter,
   nfeEnrichmentPipeline: nfeEnrichmentPipelineRouter,
   notificationWebhooks: notificationWebhooksRouter,
@@ -233,23 +231,10 @@ export const appRouter = router({
   declarations: declarationsRouter,
 
 
-  // REMOVIDO: Histórico de Licitações — módulo excluído em 26/03/2026
-
-  // ─── 7. Ranking de Competitividade ───────────────────────────────────────────
-
-  // ─── 8. Alerta de Risco Financeiro ───────────────────────────────────────────
-
-  // ─── 9. Estoque ──────────────────────────────────────────────────────────────
-   // ─── 10. Regras Tributárias ───────────────────────────────────────────────────
-
-  // ─── 11. Reajuste Contratual ──────────────────────────────────────────────────
-
-  // ─── 12. Painel Economia Potencial ───────────────────────────────────────────
-
   // ─── Reclassificação em Lote via IA ───────────────────────────────────────
   reclassificacao: reclassificacaoRouter,
 
-  // ─── Sinônimos para Matchingg ───────────────────────────────────────────────
+  // ─── Sinônimos para Matching ───────────────────────────────────────────────
   synonyms: synonymsRouter,
 
 

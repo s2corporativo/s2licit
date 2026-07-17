@@ -170,8 +170,9 @@ export const products = mysqlTable(
     // Cobertura: listProducts(isActive + categoryId), listProducts(isActive + manufacturer)
     index("idx_products_active_cat").on(table.isActive, table.categoryId),
     index("idx_products_active_mfr").on(table.isActive, table.manufacturer),
-    // Cobertura: catalogHealth, actionQueue, extendedStats (isActive + fichaTecnica)
-    index("idx_products_active_ficha").on(table.isActive, table.fichaTecnica),
+    // Cobertura: catalogHealth, actionQueue, extendedStats (fichaTecnica é TEXT,
+    // não indexável sem prefixo no MySQL — o filtro IS NULL varre só por isActive)
+    index("idx_products_active_ficha").on(table.isActive),
     // Cobertura: listProducts ordenado por nome (filtro mais comum)
     index("idx_products_active_name").on(table.isActive, table.name),
     // Cobertura: importação - detecção de duplicatas por fornecedor+nome

@@ -8,8 +8,14 @@
 
 import puppeteer, { Browser, Page } from "puppeteer";
 import { getDb, recordPriceHistory } from "../db";
-import { products, scraperConfigs, scraperLogs, productSupplierOffers } from "../../drizzle/schema";
-import { eq, and, or, like } from "drizzle-orm";
+import {
+  products,
+  scraperConfigs,
+  scraperLogs,
+  productSupplierOffers,
+  productCaptureHistory,
+} from "../../drizzle/schema";
+import { eq, and, or, isNotNull } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
 import { supplierSessionService } from "./supplierSessionService";
@@ -579,7 +585,13 @@ export class ScraperEngine {
 
     const todos: ScrapedProduct[] = [];
     let pagina = 1;
-    const MAX_PAGES = 20;
+    // Catálogos grandes (10 mil+ produtos por fornecedor) exigem varredura
+    // profunda. O teto é uma trava de segurança contra paginação infinita —
+    // a varredura para naturalmente quando o site deixa de trazer itens novos.
+    const MAX_PAGES = Math.max(1, parseInt(process.env.SCRAPER_MAX_PAGES ?? "1000", 10) || 1000);
+    // Chaves já vistas (código/EAN/nome) — detecta página repetida (alguns sites
+    // voltam à primeira página ao clicar "próxima" na última).
+    const vistos = new Set<string>();
 
     this.addLog(`Raspando categoria: ${categoryUrl}`);
     await this.page.goto(categoryUrl, { waitUntil: "networkidle2", timeout: 30000 });
@@ -606,11 +618,22 @@ export class ScraperEngine {
       // §7 — proveniência: carimba origem e horário da consulta (para validade
       // de preço, §13). Feito no Node (fora do page.evaluate).
       const agora = Date.now();
+      // Página repetida/vazia encerra a varredura (fim real do catálogo).
+      let novos = 0;
       for (const p of produtos) {
         p.consultadoEm = agora;
         p.fonteUrl = p.productUrl ?? categoryUrl;
+        const chave = p.code ?? p.ean ?? p.name;
+        if (!vistos.has(chave)) {
+          vistos.add(chave);
+          todos.push(p);
+          novos++;
+        }
       }
-      todos.push(...produtos);
+      if (produtos.length > 0 && novos === 0) {
+        this.addLog(`  Página ${pagina} só repetiu itens já vistos — fim da categoria.`);
+        break;
+      }
 
       // Verificar próxima página
       if (!cfg.nextPage) break;
@@ -871,7 +894,15 @@ export class ScraperEngine {
     });
   }
 
-  /** Faz match dos produtos extraídos com o catálogo e atualiza preços */
+  /**
+   * Faz match dos produtos extraídos com o catálogo, atualiza preços e
+   * CADASTRA automaticamente os produtos que ainda não existem (nome, preço,
+   * código, EAN, foto e link — catálogo completo do fornecedor).
+   *
+   * O catálogo é pré-carregado em memória (mapas por EAN, código e nome
+   * normalizado) para suportar fornecedores com 10 mil+ produtos sem uma
+   * consulta ao banco por item raspado.
+   */
   async matchAndUpdate(
     scrapedProducts: ScrapedProduct[],
     supplierId: number,
@@ -883,52 +914,134 @@ export class ScraperEngine {
     let matched = 0, updated = 0, created = 0;
     const errors: string[] = [];
 
+    // ── Pré-carrega o catálogo em mapas de busca ──────────────────────────
+    // EAN/GTIN/barcode: match entre fornecedores (produto pode existir vindo
+    // de outro fornecedor). Código e nome: match dentro do fornecedor.
+    const eanMap = new Map<string, number>();
+    const eanRows = await db.select({
+      id: products.id, ean: products.ean, gtin: products.gtin, barcode: products.barcode,
+    }).from(products).where(or(
+      isNotNull(products.ean), isNotNull(products.gtin), isNotNull(products.barcode),
+    ));
+    for (const r of eanRows) {
+      for (const k of [r.ean, r.gtin, r.barcode]) {
+        if (k && !eanMap.has(k)) eanMap.set(k, r.id);
+      }
+    }
+
+    const codeMap = new Map<string, number>();
+    const nameBuckets = new Map<string, { id: number; nameNorm: string }[]>();
+    const supplierRows = await db.select({
+      id: products.id,
+      name: products.name,
+      codigoFornecedor: products.codigoFornecedor,
+      price: products.price,
+      imageUrl: products.imageUrl,
+    }).from(products).where(eq(products.supplierId, supplierId));
+    const priceById = new Map<number, string | null>();
+    const imageById = new Map<number, string | null>();
+    for (const r of supplierRows) {
+      if (r.codigoFornecedor) codeMap.set(r.codigoFornecedor, r.id);
+      priceById.set(r.id, r.price);
+      imageById.set(r.id, r.imageUrl);
+      const firstWord = normalizeText(r.name).split(/\s+/).find((w) => w.length >= 3);
+      if (firstWord) {
+        const bucket = nameBuckets.get(firstWord) ?? [];
+        bucket.push({ id: r.id, nameNorm: normalizeText(r.name) });
+        nameBuckets.set(firstWord, bucket);
+      }
+    }
+    this.addLog(
+      `Catálogo pré-carregado: ${supplierRows.length} produtos do fornecedor, ${eanMap.size} chaves EAN globais.`
+    );
+
+    const historyRows: (typeof productCaptureHistory.$inferInsert)[] = [];
+
     for (const sp of scrapedProducts) {
       try {
-        // 1. Tentar match por EAN
+        // 1. Match por EAN (qualquer fornecedor)
         let productId: number | null = null;
+        if (sp.ean && eanMap.has(sp.ean)) productId = eanMap.get(sp.ean)!;
 
-        if (sp.ean) {
-          const byEan = await db.select({ id: products.id })
-            .from(products)
-            .where(or(eq(products.ean, sp.ean), eq(products.gtin, sp.ean), eq(products.barcode, sp.ean)))
-            .limit(1);
-          if (byEan[0]) productId = byEan[0].id;
-        }
+        // 2. Match por código do fornecedor
+        if (!productId && sp.code && codeMap.has(sp.code)) productId = codeMap.get(sp.code)!;
 
-        // 2. Tentar match por código do fornecedor
-        if (!productId && sp.code) {
-          const byCode = await db.select({ id: products.id })
-            .from(products)
-            .where(and(eq(products.supplierId, supplierId), eq(products.codigoFornecedor, sp.code)))
-            .limit(1);
-          if (byCode[0]) productId = byCode[0].id;
-        }
-
-        // 3. Tentar match fuzzy por nome normalizado
+        // 3. Match fuzzy por nome normalizado (bucket da primeira palavra)
         if (!productId) {
           const normName = normalizeText(sp.name);
           if (normName.length >= 4) {
-            // Narrowing no banco: filtra por LIKE na primeira palavra
-            // significativa (MySQL LIKE é case-insensitive na collation padrão),
-            // e refina por similaridade em JS. Antes, o filtro LIKE não existia
-            // (db.$client ? undefined : undefined), varrendo só 20 produtos.
-            const firstWord = sp.name.trim().split(/\s+/).find((w) => w.length >= 3) ?? "";
-            const byName = await db.select({ id: products.id, name: products.name })
-              .from(products)
-              .where(and(
-                eq(products.supplierId, supplierId),
-                firstWord ? like(products.name, `%${firstWord}%`) : undefined,
-              ))
-              .limit(50);
-
-            // Match por similaridade no nome
-            const best = byName.find(p => normalizeText(p.name).includes(normName.slice(0, 20)));
+            const firstWord = normName.split(/\s+/).find((w) => w.length >= 3) ?? "";
+            const bucket = nameBuckets.get(firstWord) ?? [];
+            const best = bucket.find((p) => p.nameNorm.includes(normName.slice(0, 20)));
             if (best) productId = best.id;
           }
         }
 
-        if (productId) {
+        // 4. Sem correspondência → CADASTRA o produto automaticamente com
+        //    todos os dados capturados do site (nome, preço, código, EAN,
+        //    foto, link). Entra como "pendente_revisao" para curadoria
+        //    posterior sem travar a operação.
+        if (!productId) {
+          const [ins] = await db.insert(products).values({
+            supplierId,
+            name: sp.name.slice(0, 512),
+            price: String(sp.price),
+            codigoFornecedor: sp.code ?? null,
+            code: sp.code ?? null,
+            ean: sp.ean ?? null,
+            gtin: sp.ean ?? null,
+            unit: sp.unit ?? null,
+            imageUrl: sp.imageUrl ?? null,
+            productUrl: sp.productUrl ?? sp.fonteUrl ?? null,
+            stock: sp.stock != null ? String(sp.stock) : null,
+            statusConfiabilidade: "pendente_revisao",
+            isActive: "yes",
+          });
+          const newId = Number((ins as any).insertId);
+          created++;
+          // Alimenta os mapas para deduplicar dentro da própria varredura.
+          if (sp.code) codeMap.set(sp.code, newId);
+          if (sp.ean) eanMap.set(sp.ean, newId);
+          priceById.set(newId, String(sp.price));
+          imageById.set(newId, sp.imageUrl ?? null);
+          const fw = normalizeText(sp.name).split(/\s+/).find((w) => w.length >= 3);
+          if (fw) {
+            const bucket = nameBuckets.get(fw) ?? [];
+            bucket.push({ id: newId, nameNorm: normalizeText(sp.name) });
+            nameBuckets.set(fw, bucket);
+          }
+
+          historyRows.push({
+            productId: newId,
+            supplierId,
+            fieldChanged: "produto_criado",
+            valueBefore: null,
+            valueAfter: sp.name,
+            changeSource: "captured",
+            status: "applied",
+          });
+
+          await db.insert(productSupplierOffers).values({
+            productId: newId,
+            supplierId,
+            price: String(sp.price),
+            supplierCode: sp.code,
+            supplierName,
+            link: sp.productUrl,
+            image: sp.imageUrl,
+            availability: sp.availability ?? "disponivel",
+            promoPrice: sp.pricePromo != null ? String(sp.pricePromo) : null,
+            stock: sp.stock ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+          try {
+            await recordPriceHistory({ productId: newId, supplierId, price: String(sp.price) });
+          } catch { /* não bloqueia a captura por falha de histórico */ }
+          continue;
+        }
+
+        {
           matched++;
           // Atualizar oferta do fornecedor (tabela product_supplier_offers)
           const existing = await db.select({ id: productSupplierOffers.id })
@@ -965,13 +1078,43 @@ export class ScraperEngine {
               ...offerData,
               createdAt: new Date(),
             });
-            created++;
+            updated++;
           }
 
-          // Atualizar campo price do produto principal se for o mesmo fornecedor
-          await db.update(products)
-            .set({ price: String(sp.price), updatedAt: new Date() })
-            .where(and(eq(products.id, productId), eq(products.supplierId, supplierId)));
+          // Atualiza preço/foto/link do produto principal quando pertence a
+          // este fornecedor. A foto só é preenchida se estiver vazia — nunca
+          // sobrescreve imagem curada manualmente.
+          const precoAntes = priceById.get(productId);
+          const pertenceAoFornecedor = priceById.has(productId);
+          if (pertenceAoFornecedor) {
+            const setores: Record<string, unknown> = {
+              price: String(sp.price),
+              updatedAt: new Date(),
+            };
+            if (sp.imageUrl && !imageById.get(productId)) {
+              setores.imageUrl = sp.imageUrl;
+              imageById.set(productId, sp.imageUrl);
+            }
+            if (sp.productUrl) setores.productUrl = sp.productUrl;
+            await db.update(products)
+              .set(setores)
+              .where(and(eq(products.id, productId), eq(products.supplierId, supplierId)));
+
+            // Trilha de auditoria da captura: registra a variação de preço
+            // aplicada (alimenta a tela "Revisão de Capturas").
+            if (precoAntes != null && Number(precoAntes) !== sp.price) {
+              historyRows.push({
+                productId,
+                supplierId,
+                fieldChanged: "price",
+                valueBefore: String(precoAntes),
+                valueAfter: String(sp.price),
+                changeSource: "captured",
+                status: "applied",
+              });
+              priceById.set(productId, String(sp.price));
+            }
+          }
 
           // Versiona o preço capturado no histórico (antes o scraping não
           // registrava, deixando alertas de variação cegos para a captura).
@@ -982,6 +1125,16 @@ export class ScraperEngine {
       } catch (err: any) {
         errors.push(`Erro no produto "${sp.name}": ${err?.message}`);
       }
+    }
+
+    // Trilha de auditoria em lote (chunks para não estourar o limite de placeholders)
+    for (let i = 0; i < historyRows.length; i += 500) {
+      try {
+        await db.insert(productCaptureHistory).values(historyRows.slice(i, i + 500));
+      } catch { /* auditoria nunca bloqueia a captura */ }
+    }
+    if (historyRows.length > 0) {
+      this.addLog(`Trilha de captura registrada: ${historyRows.length} alterações.`);
     }
 
     return { matched, updated, created, errors };

@@ -337,7 +337,7 @@ export async function buildCaptureDraftFromWebsite(input: {
   };
 }): Promise<CaptureBatchDraft> {
   const mode = input.mode ?? "product";
-  const maxItems = Math.min(Math.max(input.maxItems ?? 10, 1), 30);
+  const maxItems = Math.min(Math.max(input.maxItems ?? 50, 1), 500);
 
   if (mode === "product") {
     const product = await extractProductData(input.url, input.selectors);
@@ -365,7 +365,7 @@ export async function buildCaptureDraftFromWebsite(input: {
     };
   }
 
-  const pages = await discoverCatalogPages(input.url, input.url, Math.min(maxItems, 10), input.selectors?.pageSelector);
+  const pages = await discoverCatalogPages(input.url, input.url, Math.min(maxItems, 50), input.selectors?.pageSelector);
   const productLinks = Array.from(new Set(pages.flatMap((page) => page.productLinks))).slice(0, maxItems);
   const extracted = await Promise.all(productLinks.map((link) => extractProductData(link, input.selectors)));
   const products = compactProducts(

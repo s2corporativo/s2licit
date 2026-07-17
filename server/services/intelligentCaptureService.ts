@@ -137,7 +137,10 @@ async function loadCatalogProducts(): Promise<CatalogProduct[]> {
     .from(products)
     .where(and(eq(products.isActive, "yes")))
     .orderBy(asc(products.name))
-    .limit(5000);
+    // Teto de segurança bem acima do catálogo esperado (10 mil+ por fornecedor):
+    // um corte baixo aqui faria o auto-match ignorar produtos existentes e
+    // sugerir duplicatas.
+    .limit(100000);
 }
 
 export function resolveAutomaticMatch(product: CapturedInputProduct, catalogProducts: CatalogProduct[]): MatchResolution {

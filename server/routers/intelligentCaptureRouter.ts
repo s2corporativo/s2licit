@@ -72,7 +72,7 @@ export const intelligentCaptureRouter = router({
       sourceReference: z.string().nullable().optional(),
       createdByUserId: z.number().nullable().optional(),
       meta: z.record(z.string(), z.unknown()).nullable().optional(),
-      products: z.array(captureProductSchema).max(1000),
+      products: z.array(captureProductSchema).max(20000),
     }))
     .mutation(async ({ ctx, input }) =>
       createCaptureBatch({
@@ -85,7 +85,7 @@ export const intelligentCaptureRouter = router({
     .input(z.object({
       url: z.string().url("Informe uma URL válida"),
       mode: z.enum(["product", "catalog"]).default("product"),
-      maxItems: z.number().min(1).max(30).default(10),
+      maxItems: z.number().min(1).max(500).default(50),
     }))
     .mutation(async ({ ctx, input }) => {
       const draft = await buildCaptureDraftFromWebsite(input);
