@@ -1,0 +1,33 @@
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql2 from "mysql2/promise";
+
+let _db: ReturnType<typeof drizzle> | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/**
+ * Retorna instância do banco com pool de conexões MySQL2.
+ * Pool evita ECONNRESET em produção com carga concorrente.
+ */
+export async function getDb() {
+  if (_db) return _db;
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const pool = mysql2.createPool({
+      uri: process.env.DATABASE_URL,
+      connectionLimit: 10,
+      waitForConnections: true,
+      queueLimit: 0,
+      connectTimeout: 10000,
+    });
+    _db = drizzle(pool) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    console.log("[Database] Pool de conexões iniciado (limit=10)");
+  } catch (error) {
+    console.warn("[Database] Falha ao criar pool:", error);
+    _db = null;
+  }
+  return _db;
+}
+
+/** @deprecated Pool gerencia reconexões automaticamente — mantido por compatibilidade */
+export function resetDb() {
+  _db = null;
+}
