@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { UserPlus, Trash2, KeyRound, Unlock, Loader2, ShieldCheck } from "lucide-react";
+import { UserPlus, Trash2, KeyRound, Unlock, Loader2, ShieldCheck, Ban, Power } from "lucide-react";
 
 const ROLES = ["viewer", "user", "editor", "admin"] as const;
 const ROLE_LABEL: Record<string, string> = { viewer: "Visualizador", user: "Usuário", editor: "Editor", admin: "Administrador" };
@@ -21,6 +21,7 @@ export default function Usuarios() {
   const roleM = trpc.users.updateRole.useMutation({ onSuccess: onOk("Papel atualizado."), onError: onErr });
   const pwM = trpc.users.resetPassword.useMutation({ onSuccess: onOk("Senha redefinida."), onError: onErr });
   const unlockM = trpc.users.unlock.useMutation({ onSuccess: onOk("Conta desbloqueada."), onError: onErr });
+  const disableM = trpc.users.setDisabled.useMutation({ onSuccess: onOk("Status da conta atualizado."), onError: onErr });
   const removeM = trpc.users.remove.useMutation({ onSuccess: onOk("Usuário removido."), onError: onErr });
 
   const submit = (e: React.FormEvent) => {
@@ -104,6 +105,7 @@ export default function Usuarios() {
                       <div className="flex flex-wrap gap-1">
                         {u.mfaEnabled && <span className="text-[9px] font-bold text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">MFA</span>}
                         {locked && <span className="text-[9px] font-bold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">Bloqueado</span>}
+                        {u.disabled && <span className="text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">Desativado</span>}
                       </div>
                     </td>
                     <td className="px-3 py-2">
@@ -111,6 +113,14 @@ export default function Usuarios() {
                         {locked && (
                           <button title="Desbloquear" onClick={() => unlockM.mutate({ id: u.id })}
                             className="border border-gray-300 p-1.5 hover:border-gray-900"><Unlock size={13} /></button>
+                        )}
+                        {u.disabled ? (
+                          <button title="Reativar conta" onClick={() => disableM.mutate({ id: u.id, disabled: false })}
+                            className="border border-green-200 text-green-700 p-1.5 hover:bg-green-50"><Power size={13} /></button>
+                        ) : (
+                          <button title="Desativar conta (revogar acesso)" onClick={() => {
+                            if (window.confirm(`Desativar ${u.email}? O acesso será revogado (recomendado no lugar de remover).`)) disableM.mutate({ id: u.id, disabled: true });
+                          }} className="border border-orange-200 text-orange-700 p-1.5 hover:bg-orange-50"><Ban size={13} /></button>
                         )}
                         <button title="Redefinir senha" onClick={() => {
                           const p = window.prompt(`Nova senha para ${u.email} (mín. 8 caracteres):`);

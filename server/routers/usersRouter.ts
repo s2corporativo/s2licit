@@ -28,6 +28,7 @@ function usuarioSeguro(u: typeof users.$inferSelect) {
     email: u.email,
     role: u.role,
     mfaEnabled: !!u.mfaEnabled,
+    disabled: !!u.disabled,
     lastSignedIn: u.lastSignedIn,
     lockedUntil: u.lockedUntil,
     createdAt: u.createdAt,
@@ -137,6 +138,30 @@ export const usersRouter = router({
       });
       return { success: true };
     }),
+
+  /**
+   * Desativa/reativa uma conta (§ revogação): forma segura de revogar acesso —
+   * inclusive de usuários OAuth, cuja linha seria recriada se apenas deletada.
+   */
+  setDisabled: adminProcedure
+    .input(z.object({ id: z.number().int().positive(), disabled: z.boolean() }))
+    .mutation(({ ctx, input }) => comLockDeAdmin(async () => {
+      const { db, todos } = await carregarUsuarios();
+      if (input.disabled && input.id === ctx.user.id) {
+        throw new Error("Você não pode desativar a própria conta.");
+      }
+      if (input.disabled && ehUltimoAdmin(todos, input.id)) {
+        throw new Error("Não é possível desativar o único administrador do sistema.");
+      }
+      await db.update(users).set({ disabled: input.disabled }).where(eq(users.id, input.id));
+      await recordAudit({
+        userId: ctx.user.id, action: input.disabled ? "usuario_desativado" : "usuario_reativado",
+        entity: "user", entityId: input.id, origin: "admin",
+        summary: input.disabled ? "Conta desativada (acesso revogado)" : "Conta reativada",
+        ...requestOrigin(ctx.req),
+      });
+      return { success: true };
+    })),
 
   remove: adminProcedure
     .input(z.object({ id: z.number().int().positive() }))

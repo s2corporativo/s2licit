@@ -101,6 +101,10 @@ async function startServer() {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const user = await sdk.authenticateRequest(req);
+        if ((user as { disabled?: boolean }).disabled) {
+          res.status(403).json({ error: "Conta desativada" });
+          return;
+        }
         const rank = ROLE_RANK[(user.role as string) ?? "user"] ?? 0;
         if (rank < ROLE_RANK[minimumRole]) {
           res.status(403).json({ error: `Requer perfil ${minimumRole} ou superior` });

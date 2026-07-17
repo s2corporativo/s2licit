@@ -29,6 +29,9 @@ export const users = mysqlTable("users", {
   // MFA (TOTP): segredo criptografado e flag de ativação (§16).
   mfaEnabled: boolean("mfaEnabled").default(false).notNull(),
   mfaSecret: text("mfaSecret"),
+  // Conta desativada/revogada: bloqueia o acesso mesmo para usuários OAuth, cuja
+  // linha seria recriada por uma sessão válida se apenas deletada.
+  disabled: boolean("disabled").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
