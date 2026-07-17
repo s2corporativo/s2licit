@@ -45,6 +45,13 @@ export function extrairNumero(v: string | number): number | null {
   return m ? parseFloat(m[0]) : null;
 }
 
+/** Extrai a unidade (token de letras ao final, ex.: "W", "mm", "cm"). */
+export function extrairUnidade(v: string | number): string {
+  const s = String(v).toLowerCase();
+  const m = s.match(/([a-z%µωº°"']+)\s*$/i);
+  return m ? m[1].toLowerCase() : "";
+}
+
 /** Score 0–1 de um único atributo (numérico com tolerância, ou textual). */
 export function compararAtributo(attr: AtributoMaterial): number | null {
   const { solicitado, ofertado } = attr;
@@ -59,6 +66,11 @@ export function compararAtributo(attr: AtributoMaterial): number | null {
     : nSolic != null && nOfer != null && /\d/.test(String(solicitado)) && /\d/.test(String(ofertado));
 
   if (ambosNumericos && nSolic != null && nOfer != null) {
+    // Unidades diferentes (ex.: W × V, mm × cm) NÃO equivalem — não fazemos
+    // conversão de unidade, então valores de grandezas distintas são incompatíveis.
+    const uSolic = extrairUnidade(solicitado);
+    const uOfer = extrairUnidade(ofertado);
+    if (uSolic && uOfer && uSolic !== uOfer) return 0;
     if (nSolic === nOfer) return 1;
     const tol = attr.toleranciaPct ?? 0;
     const base = Math.max(Math.abs(nSolic), 1e-9);

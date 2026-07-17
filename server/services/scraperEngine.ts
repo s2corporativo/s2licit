@@ -232,6 +232,9 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     loginPassword: 'input[name="password"], input[type="password"], #senha, #password',
     loginSubmit: 'button[type="submit"], input[type="submit"], .btn-login',
     useStructuredData: true,
+    // Sem template a busca sob demanda retornaria sempre vazio — ajuste a URL
+    // exata pelo Configurador ("testar login" / capturar).
+    searchUrlTemplate: "https://bassopancotte.com.br/busca?q={q}",
     categoryUrls: [],
     productItem: '.product, .produto, [class*="product"], [class*="item"]',
     productName: 'h2, h3, .name, .title, .nome',
@@ -991,6 +994,23 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
  * houver termo + searchUrlTemplate, pesquisa; senão raspa a 1ª categoria.
  */
 export async function buscarProdutosFornecedor(
+  scraperConfigId: number,
+  query: { termo?: string; codigo?: string },
+): Promise<ScrapedProduct[]> {
+  // Participa do mesmo lock por config do executarScraper: impede dois
+  // navegadores simultâneos na mesma conta (sessão/throttling do fornecedor).
+  if (runningConfigIds.has(scraperConfigId)) {
+    throw new Error(`Fornecedor #${scraperConfigId} já está em consulta — tente novamente em instantes.`);
+  }
+  runningConfigIds.add(scraperConfigId);
+  try {
+    return await buscarProdutosFornecedorInterno(scraperConfigId, query);
+  } finally {
+    runningConfigIds.delete(scraperConfigId);
+  }
+}
+
+async function buscarProdutosFornecedorInterno(
   scraperConfigId: number,
   query: { termo?: string; codigo?: string },
 ): Promise<ScrapedProduct[]> {

@@ -28,6 +28,15 @@ describe("compararAtributo", () => {
   it("sem dados retorna null", () => {
     expect(compararAtributo({ nome: "x", solicitado: null, ofertado: "y" })).toBeNull();
   });
+
+  it("unidades diferentes não equivalem, mesmo com o mesmo número", () => {
+    expect(compararAtributo({ nome: "pot", solicitado: "100 W", ofertado: "100 V" })).toBe(0);
+    expect(compararAtributo({ nome: "dim", solicitado: "10 mm", ofertado: "10 cm", toleranciaPct: 5 })).toBe(0);
+  });
+
+  it("mesma unidade dentro da tolerância ainda vale 1", () => {
+    expect(compararAtributo({ nome: "pot", solicitado: "100 W", ofertado: "102 W", toleranciaPct: 5 })).toBe(1);
+  });
 });
 
 describe("compararMateriais (§6)", () => {

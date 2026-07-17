@@ -29,7 +29,8 @@ describe("scrapedProductToResult (§7)", () => {
     expect(r.precoPromocional).toBe(10);
     expect(r.estoque).toBe(5);
     expect(r.disponivel).toBe(true);
-    expect(r.fonte).toEqual({ metodo: "scraper", origem: "Fornecedor X" });
+    // Proveniência a nível de URL: usa a página consultada (fonteUrl) como origem.
+    expect(r.fonte).toEqual({ metodo: "scraper", origem: "https://forn.com/cat" });
     expect(r.consultadoEm).toBe(AGORA);
     // Campos não fornecidos ficam ausentes (não inventados).
     expect(r.precoPessoaJuridica).toBeUndefined();
@@ -41,6 +42,11 @@ describe("scrapedProductToResult (§7)", () => {
     expect(scrapedProductToResult({ ...base, stock: 0 }, "F", AGORA).disponivel).toBe(false);
     expect(scrapedProductToResult({ ...base, stock: 3 }, "F", AGORA).disponivel).toBe(true);
     expect(scrapedProductToResult(base, "F", AGORA).disponivel).toBeUndefined();
+  });
+
+  it("sem URL na origem, usa o nome do fornecedor como fallback de proveniência", () => {
+    const r = scrapedProductToResult({ name: "X", price: 1 }, "Fornecedor X", AGORA);
+    expect(r.fonte.origem).toBe("Fornecedor X");
   });
 });
 

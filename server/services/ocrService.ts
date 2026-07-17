@@ -21,6 +21,14 @@ const OCR_MIMES = new Set([
 
 const OCR_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
 
+const EXT_TO_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
+
 /** A entrada é uma imagem que deve passar por OCR? (puro, testável) */
 export function isOcrSupportedMime(mimeType: string, fileName = ""): boolean {
   if (mimeType && OCR_MIMES.has(mimeType.toLowerCase())) return true;
@@ -28,8 +36,22 @@ export function isOcrSupportedMime(mimeType: string, fileName = ""): boolean {
   return OCR_EXTS.some((ext) => lower.endsWith(ext));
 }
 
+/**
+ * Resolve o media type real para o data URI: usa o mimetype quando é uma imagem
+ * conhecida; senão deriva da extensão do arquivo (ex.: octet-stream de um .jpg);
+ * por fim, image/png. Evita declarar um tipo que não bate com o payload.
+ */
+export function mimeParaOcr(mimeType: string, fileName = ""): string {
+  if (mimeType && OCR_MIMES.has(mimeType.toLowerCase())) return mimeType.toLowerCase();
+  const lower = fileName.toLowerCase();
+  for (const [ext, mime] of Object.entries(EXT_TO_MIME)) {
+    if (lower.endsWith(ext)) return mime;
+  }
+  return "image/png";
+}
+
 /** Transcreve o texto de uma imagem. Requer a IA de visão da Anthropic. */
-export async function ocrImagem(buffer: Buffer, mimeType: string): Promise<string> {
+export async function ocrImagem(buffer: Buffer, mimeType: string, fileName = ""): Promise<string> {
   const provider = activeProvider();
   if (!provider || provider.kind !== "anthropic") {
     throw new Error(
@@ -37,7 +59,7 @@ export async function ocrImagem(buffer: Buffer, mimeType: string): Promise<strin
     );
   }
 
-  const mime = mimeType && OCR_MIMES.has(mimeType.toLowerCase()) ? mimeType : "image/png";
+  const mime = mimeParaOcr(mimeType, fileName);
   const dataUri = `data:${mime};base64,${buffer.toString("base64")}`;
 
   const response = await invokeLLM({
