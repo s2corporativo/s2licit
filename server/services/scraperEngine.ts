@@ -237,23 +237,32 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     nextPage: '[rel="next"], [class*="next"], [class*="proxima"]',
     navigationWait: 3000,
   },
+  // Basso Pancotte usa o "Portal do cliente" em React Native Web / Expo
+  // (cliente.bassopancotte.com.br: fontes @expo/vector-icons, bundle
+  // webpackJsonppec, sweetalert2) — NÃO é loja server-rendered. O login e o
+  // conteúdo são renderizados por JS; o RNW gera DOM aninhado com classes
+  // hasheadas, então a raspagem por seletores CSS é frágil. Caminho recomendado
+  // (§4): API/catálogo ou captura manual. Confirme os seletores reais e a rota
+  // do catálogo pelo Configurador ("testar login" a partir do DOM renderizado).
   bassopancotte: {
-    loginUrl: "https://bassopancotte.com.br/login",
-    loginEmail: 'input[name="email"], input[type="email"], #email, #username, input[name="usuario"]',
-    loginPassword: 'input[name="password"], input[type="password"], #senha, #password',
-    loginSubmit: 'button[type="submit"], input[type="submit"], .btn-login',
-    useStructuredData: true,
-    // Sem template a busca sob demanda retornaria sempre vazio — ajuste a URL
-    // exata pelo Configurador ("testar login" / capturar).
-    searchUrlTemplate: "https://bassopancotte.com.br/busca?q={q}",
+    loginUrl: "https://cliente.bassopancotte.com.br/login",
+    // RNW: senha vira input[type=password]; e-mail costuma vir como type=text.
+    loginEmail:
+      'input[type="email"], input[autocomplete="username"], input[autocomplete="email"], input[name*="email" i], input[name*="user" i], input[type="text"]',
+    loginPassword: 'input[type="password"], input[autocomplete="current-password"], input[name*="senha" i], input[name*="pass" i]',
+    // RNW renderiza botões como <div role="button"> ou <button>.
+    loginSubmit: 'button[type="submit"], [role="button"], button',
+    waitForSelector: 'input[type="password"]',
+    // Rota de busca do portal ainda não confirmada — ajuste no Configurador.
+    searchUrlTemplate: "https://cliente.bassopancotte.com.br/busca?q={q}",
     categoryUrls: [],
-    productItem: '.product, .produto, [class*="product"], [class*="item"]',
-    productName: 'h2, h3, .name, .title, .nome',
-    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productItem: '[class*="product"], [class*="produto"], [class*="item"], [class*="card"]',
+    productName: 'h2, h3, [class*="name"], [class*="title"], [class*="nome"]',
+    productPrice: '[class*="price"], [class*="preco"], [class*="valor"]',
     productImage: 'img',
     productLink: 'a',
-    nextPage: '[rel="next"], .next, .proxima',
-    navigationWait: 2500,
+    nextPage: '[rel="next"], [class*="next"], [class*="proxima"]',
+    navigationWait: 3000,
   },
   magazinemedica: {
     // Login confirmado (base Django); entra por CPF/CNPJ ou e-mail.
