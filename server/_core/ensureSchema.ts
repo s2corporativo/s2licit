@@ -75,6 +75,22 @@ export async function ensureOfferColumns(): Promise<void> {
 }
 
 /**
+ * Colunas do conector de fornecedores:
+ * - supplier_sessions.localStorage: reuso de sessão de SPAs que guardam o token
+ *   de autenticação no localStorage (não só em cookies), criptografado no cofre.
+ * - scraper_logs.evidenceUrl: print da tela capturado quando a raspagem falha,
+ *   para diagnosticar mudança de layout sem expor a senha (§9).
+ */
+export async function ensureScraperColumns(): Promise<void> {
+  try {
+    await ensureColumn("supplier_sessions", "localStorage", "TEXT NULL");
+    await ensureColumn("scraper_logs", "evidenceUrl", "VARCHAR(512) NULL");
+  } catch (err) {
+    console.error("[Schema] Falha ao garantir colunas do conector de fornecedores:", err);
+  }
+}
+
+/**
  * IPI/PIS/COFINS como tipos de 1ª classe no Motor Tributário (§9). Estende o
  * enum tax_rules.tipo de forma idempotente (só altera se ainda não os inclui).
  */

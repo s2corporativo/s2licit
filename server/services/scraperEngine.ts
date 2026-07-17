@@ -14,6 +14,7 @@ import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
 import { supplierSessionService } from "./supplierSessionService";
 import { puppeteerCookiesToRecord, recordToPuppeteerCookies } from "./sessionCookies";
+import { storagePut } from "../storage";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -436,6 +437,14 @@ export class ScraperEngine {
 
       await this.page!.setCookie(...cookies);
       await this.page!.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
+
+      // SPAs (Bartofil/Basso) guardam o token no localStorage, não em cookie.
+      // Restaura o localStorage salvo e recarrega para o app reconhecer a sessão.
+      const ls = supplierSessionService.parseLocalStorage(session);
+      if (Object.keys(ls).length > 0) {
+        await this.injetarLocalStorage(ls);
+        await this.page!.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
+      }
       await new Promise((r) => setTimeout(r, 800));
 
       const logado = await this.verificarLogado(cfg);
@@ -449,16 +458,73 @@ export class ScraperEngine {
     }
   }
 
-  /** Salva os cookies atuais como sessão reutilizável (best-effort). */
+  /** Lê o localStorage da página atual (best-effort; alguns sites bloqueiam). */
+  private async lerLocalStorage(): Promise<Record<string, string>> {
+    if (!this.page) return {};
+    try {
+      return await this.page.evaluate(() => {
+        const out: Record<string, string> = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k != null) out[k] = localStorage.getItem(k) ?? "";
+        }
+        return out;
+      });
+    } catch {
+      return {};
+    }
+  }
+
+  /** Reaplica pares no localStorage da página atual (best-effort). */
+  private async injetarLocalStorage(entries: Record<string, string>): Promise<void> {
+    if (!this.page) return;
+    try {
+      await this.page.evaluate((data: Record<string, string>) => {
+        for (const [k, v] of Object.entries(data)) {
+          try { localStorage.setItem(k, v); } catch { /* quota/opaque origin */ }
+        }
+      }, entries);
+    } catch {
+      /* ignora — apenas não reaproveita o token */
+    }
+  }
+
+  /** Salva cookies + localStorage atuais como sessão reutilizável (best-effort). */
   private async salvarSessao(supplierId: number): Promise<void> {
     try {
       if (!this.page) return;
       const record = puppeteerCookiesToRecord(await this.page.cookies());
-      if (Object.keys(record).length === 0) return;
-      await supplierSessionService.upsertSession(supplierId, { cookies: record }, "active");
-      this.addLog("Sessão salva para reuso.");
+      const ls = await this.lerLocalStorage();
+      if (Object.keys(record).length === 0 && Object.keys(ls).length === 0) return;
+      await supplierSessionService.upsertSession(
+        supplierId,
+        { cookies: record, localStorage: ls },
+        "active",
+      );
+      this.addLog("Sessão salva para reuso (cookies + localStorage).");
     } catch {
       /* auditoria/persistência de sessão nunca bloqueia a captura */
+    }
+  }
+
+  /**
+   * §9 — captura um print da tela atual e guarda no storage, devolvendo a URL.
+   * Usado quando a raspagem falha, para diagnosticar mudança de layout sem
+   * expor a senha. Best-effort: qualquer falha retorna null.
+   */
+  async capturarEvidencia(prefixo: string): Promise<string | null> {
+    try {
+      if (!this.page) return null;
+      const buf = (await this.page.screenshot({ type: "jpeg", quality: 60, fullPage: false })) as Buffer;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const { url } = await storagePut(
+        `scraper-evidencias/${prefixo}-${stamp}.jpg`,
+        buf,
+        "image/jpeg",
+      );
+      return url;
+    } catch {
+      return null;
     }
   }
 
@@ -1193,6 +1259,7 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
       ? new URL(cfg.categoryUrls[0]).origin + "/login"
       : `https://${scraperType}.com.br/login`);
 
+  let evidenceUrl: string | null = null;
   try {
     // Login (reutiliza a sessão do fornecedor quando válida, §4)
     await engine.login(loginUrl, email, password, cfg, config.supplierId);
@@ -1237,6 +1304,9 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
     result.errors.push(err?.message ?? "Erro desconhecido");
     result.success = false;
 
+    // §9 — evidência da falha (print da tela) enquanto a página ainda está viva.
+    evidenceUrl = await engine.capturarEvidencia(`config-${scraperConfigId}`);
+
     await db.update(scraperConfigs).set({
       lastRunAt: new Date(),
       lastRunStatus: "failed",
@@ -1260,6 +1330,7 @@ async function executarScraperInternal(scraperConfigId: number): Promise<Scraper
         productsUpdated: result.productsUpdated,
         productsCreated: result.productsNew,
         errorMessage: result.errors[0]?.slice(0, 500),
+        evidenceUrl,
       });
     } catch {}
   }
