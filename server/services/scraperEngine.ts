@@ -209,22 +209,33 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
   // extração por dados estruturados. Confirme os seletores no Configurador de
   // Fornecedores (botão "testar login") e prefira catálogo/API onde o ToS
   // restringir automação (§17).
+  // Bartofil B2B é uma SPA (React/Vite: <div id="root">, bundle /assets/*.js,
+  // manifest.webmanifest) — NÃO é Magento. O formulário de login e a grade de
+  // produtos são renderizados por JavaScript, então waitForSelector é essencial
+  // (esperar o campo de senha aparecer antes de preencher). Como é SPA com
+  // catálogo servido por API interna, o caminho recomendado (§4) é API/catálogo;
+  // a raspagem do DOM é fallback. Os seletores abaixo são genéricos amplos —
+  // confirme os reais no Configurador ("testar login") a partir do DOM
+  // renderizado (F12 → Inspecionar o <input> de e-mail/senha).
   bartofil: {
-    // Portal B2B (Bartofil). Ajuste a URL exata de login pelo Configurador.
-    loginUrl: "https://www.bartofil.com.br/customer/account/login/",
-    loginEmail: 'input[name="login[username]"], input[type="email"], #email, #username',
-    loginPassword: 'input[name="login[password]"], input[type="password"], #pass, #password',
-    loginSubmit: '#send2, button[type="submit"], input[type="submit"]',
-    useStructuredData: true,
+    loginUrl: "https://www.bartofil.com.br/login",
+    loginEmail:
+      'input[type="email"], input[name="email"], input[name="username"], input[name="login"], input[id*="email" i], input[placeholder*="mail" i], input[placeholder*="CNPJ" i]',
+    loginPassword:
+      'input[type="password"], input[name="password"], input[name="senha"], input[id*="pass" i], input[id*="senha" i]',
+    loginSubmit: 'button[type="submit"], [type="submit"], button[class*="login" i]',
+    // Espera o formulário da SPA hidratar antes de tentar o login.
+    waitForSelector: 'input[type="password"]',
     categoryUrls: [],
-    searchUrlTemplate: "https://www.bartofil.com.br/catalogsearch/result/?q={q}",
-    productItem: '.product-item, .product, .produto, [class*="product"]',
-    productName: '.product-item-link, h2, h3, .name, .nome',
-    productPrice: '.price, .preco, [class*="price"]',
+    // Rota de busca da SPA ainda não confirmada — ajuste no Configurador.
+    searchUrlTemplate: "https://www.bartofil.com.br/busca?q={q}",
+    productItem: '[class*="product"], [class*="produto"], [class*="card"], li[class*="item"]',
+    productName: 'h2, h3, [class*="name"], [class*="nome"], [class*="title"], [class*="titulo"]',
+    productPrice: '[class*="price"], [class*="preco"], [class*="valor"]',
     productImage: 'img',
     productLink: 'a',
-    nextPage: '[rel="next"], .next, .action.next',
-    navigationWait: 2500,
+    nextPage: '[rel="next"], [class*="next"], [class*="proxima"]',
+    navigationWait: 3000,
   },
   bassopancotte: {
     loginUrl: "https://bassopancotte.com.br/login",
