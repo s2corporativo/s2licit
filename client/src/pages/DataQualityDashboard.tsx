@@ -15,7 +15,7 @@ export function DataQualityDashboard() {
   const imagesStats = trpc.images.getImageStats.useQuery();
   const duplicatesStats = trpc.duplicates.getDuplicateStats.useQuery();
   const enrichmentStats = trpc.enrichment.getEnrichmentStats.useQuery();
-  const reclassificationStats = trpc.reclassification.getReclassificationStats.useQuery();
+  const reclassificationStats = trpc.reclassificacao.getReclassificationStats.useQuery();
 
   return (
     <div className="space-y-6">
