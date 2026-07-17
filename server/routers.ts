@@ -1,5 +1,10 @@
 import { COOKIE_NAME } from "@shared/const";
 import { metadataRouter } from "./routers/metadata";
+import { suppliersRouter } from "./routers/suppliers";
+import { companyRouter } from "./routers/company";
+import { orgsRouter } from "./routers/orgs";
+import { synonymsRouter } from "./routers/synonyms";
+import { proposalTemplatesRouter } from "./routers/proposalTemplates";
 import { duplicatesRouter } from "./routers/duplicates";
 import { drogavetRouter } from "./routers/drogavet";
 import { imagesRouter } from "./routers/images";
@@ -78,34 +83,23 @@ import {
   createCategory,
   createEquivalenceGroup,
   createProposal,
-  createSupplier,
   deleteCategory,
   deleteEquivalenceGroup,
   deleteProposal,
-  deleteRequestingOrg,
-  deleteSupplier,
   getDashboardStats,
-  getCompanySettings,
   getEquivalenceGroupWithMembers,
   getProductById,
   getProductsPerCategory,
   getProposalWithItems,
-  getRequestingOrgById,
-  getSupplierById,
   listCategories,
   listCategoriesHierarchy,
   listEquivalenceGroups,
   listProposals,
-  listRequestingOrgs,
-  listSuppliers,
   removeEquivalenceMember,
   removeProposalItem,
   updateCategory,
   updateProposal,
   updateProposalItem,
-  updateRequestingOrg,
-  updateSupplier,
-  upsertCompanySettings,
   upsertRequestingOrg,
   // Proposal administration
   listProposalsAdmin,
@@ -144,21 +138,8 @@ import {
   suggestProductsFromList,
   getDb,
   checkDuplicatesInRows,
-  // Synonyms
-  listSynonyms,
-  createSynonym,
-  updateSynonym,
-  deleteSynonym,
-  bulkCreateSynonyms,
-  bulkToggleSynonyms,
-  bulkDeleteSynonyms,
   loadSynonymMap,
-  listProposalTemplates,
   getProposalTemplate,
-  createProposalTemplate,
-  updateProposalTemplate,
-  deleteProposalTemplate,
-  getDefaultProposalTemplate,
   loadFeedbackMap,
   recordFeedback,
   normalizeEditalTerm,
@@ -357,50 +338,8 @@ export const appRouter = router({
   }),
 
   // ─── Suppliers ────────────────────────────────────────────────────────────
-  suppliers: router({
-    list: protectedProcedure
-      .input(z.object({ activeOnly: z.boolean().optional() }).optional())
-      .query(({ input }) => listSuppliers(input?.activeOnly)),
+  suppliers: suppliersRouter,
 
-    get: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getSupplierById(input.id)),
-
-    create: protectedProcedure
-      .input(
-        z.object({
-          name: z.string().min(1).max(256),
-          code: z.string().optional(),
-          contact: z.string().optional(),
-          email: z.string().email().optional().or(z.literal("")),
-          phone: z.string().optional(),
-          notes: z.string().optional(),
-        })
-      )
-      .mutation(({ input }) => createSupplier(input)),
-
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          name: z.string().min(1).max(256).optional(),
-          code: z.string().optional(),
-          contact: z.string().optional(),
-          email: z.string().optional(),
-          phone: z.string().optional(),
-          notes: z.string().optional(),
-          isActive: z.enum(["yes", "no"]).optional(),
-        })
-      )
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateSupplier(id, data);
-      }),
-
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteSupplier(input.id)),
-  }),
 
   // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
@@ -653,79 +592,12 @@ export const appRouter = router({
   // ─── Quotations ───────────────────────────────────────────────────────────
 
   // ─── Company Settings ────────────────────────────────────────────────────────
-  company: router({
-    get: protectedProcedure.query(() => getCompanySettings()),
-    upsert: protectedProcedure
-      .input(
-        z.object({
-          name: z.string().max(256).optional(),
-          cnpj: z.string().max(18).optional().nullable(),
-          address: z.string().optional().nullable(),
-          city: z.string().max(128).optional().nullable(),
-          state: z.string().max(2).optional().nullable(),
-          zipCode: z.string().max(10).optional().nullable(),
-          phone: z.string().max(32).optional().nullable(),
-          email: z.string().max(320).optional().nullable(),
-          website: z.string().max(256).optional().nullable(),
-          logoUrl: z.string().optional().nullable(),
-          bankInfo: z.string().optional().nullable(),
-          notes: z.string().optional().nullable(),
-          minMarginPercent: z.number().min(0).max(100).optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => upsertCompanySettings(input as any)),
-  }),
+  company: companyRouter,
+
 
   // ─── Requesting Orgs ─────────────────────────────────────────────────────────
-  orgs: router({
-    list: protectedProcedure
-      .input(z.object({ search: z.string().optional() }))
-      .query(({ input }) => listRequestingOrgs(input.search)),
+  orgs: orgsRouter,
 
-    get: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getRequestingOrgById(input.id)),
-
-    upsert: protectedProcedure
-      .input(
-        z.object({
-          name: z.string().min(1).max(256),
-          cnpj: z.string().max(18).optional().nullable(),
-          address: z.string().optional().nullable(),
-          city: z.string().max(128).optional().nullable(),
-          state: z.string().max(2).optional().nullable(),
-          phone: z.string().max(32).optional().nullable(),
-          email: z.string().max(320).optional().nullable(),
-          contactPerson: z.string().max(256).optional().nullable(),
-          notes: z.string().optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => upsertRequestingOrg(input as any)),
-
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          name: z.string().min(1).max(256).optional(),
-          cnpj: z.string().max(18).optional().nullable(),
-          address: z.string().optional().nullable(),
-          city: z.string().max(128).optional().nullable(),
-          state: z.string().max(2).optional().nullable(),
-          phone: z.string().max(32).optional().nullable(),
-          email: z.string().max(320).optional().nullable(),
-          contactPerson: z.string().max(256).optional().nullable(),
-          notes: z.string().optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateRequestingOrg(id, data as any);
-      }),
-
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteRequestingOrg(input.id)),
-  }),
 
   // ─── Proposals ───────────────────────────────────────────────────────────────
   proposals: router({
@@ -2237,198 +2109,12 @@ export const appRouter = router({
       }),
   }),
   // ─── Sinônimos para Matchingg ───────────────────────────────────────────────
-  synonyms: router({
-    list: protectedProcedure
-      .input(z.object({
-        category: z.string().optional(),
-        search: z.string().optional(),
-        activeOnly: z.boolean().optional(),
-      }).optional())
-      .query(({ input }) => listSynonyms(input ?? {})),
+  synonyms: synonymsRouter,
 
-    create: protectedProcedure
-      .input(z.object({
-        term: z.string().min(1).max(256),
-        canonical: z.string().min(1).max(256),
-        category: z.string().optional(),
-        isActive: z.enum(["yes", "no"]).optional(),
-      }))
-      .mutation(({ input }) => createSynonym(input as any)),
-
-    update: protectedProcedure
-      .input(z.object({
-        id: z.number(),
-        term: z.string().min(1).max(256).optional(),
-        canonical: z.string().min(1).max(256).optional(),
-        category: z.string().optional(),
-        isActive: z.enum(["yes", "no"]).optional(),
-      }))
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateSynonym(id, data as any);
-      }),
-
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteSynonym(input.id)),
-
-    bulkCreate: protectedProcedure
-      .input(z.object({
-        items: z.array(z.object({
-          term: z.string().min(1).max(256),
-          canonical: z.string().min(1).max(256),
-          category: z.string().optional(),
-        })),
-      }))
-      .mutation(({ input }) =>
-        bulkCreateSynonyms(input.items.map((i) => ({ ...i, isActive: "yes" as const })))
-      ),
-
-    bulkToggle: protectedProcedure
-      .input(z.object({
-        ids: z.array(z.number()).min(1).max(500),
-        isActive: z.enum(["yes", "no"]),
-      }))
-      .mutation(({ input }) => bulkToggleSynonyms(input.ids, input.isActive)),
-    bulkDelete: protectedProcedure
-      .input(z.object({
-        ids: z.array(z.number()).min(1).max(500),
-      }))
-      .mutation(({ input }) => bulkDeleteSynonyms(input.ids)),
-    // Retorna estatísticas de uso dos sinônimos
-    stats: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return { total: 0, byCategory: [] };
-      const [rows] = await (db as any).execute(sql`
-        SELECT category, COUNT(*) as count
-        FROM synonyms
-        WHERE isActive = 'yes'
-        GROUP BY category
-        ORDER BY count DESC
-      `);
-      const rowsArr = Array.isArray(rows) ? rows : [];
-      const total = rowsArr.reduce((s: number, r: any) => s + Number(r.count), 0);
-      return { total, byCategory: rowsArr as Array<{ category: string; count: number }> };
-    }),
-  }),
 
   // ─── Templates de Proposta ──────────────────────────────────────────────────
-  proposalTemplates: router({
-    list: protectedProcedure.query(() => listProposalTemplates()),
+  proposalTemplates: proposalTemplatesRouter,
 
-    getDefault: protectedProcedure.query(() => getDefaultProposalTemplate()),
-
-    get: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getProposalTemplate(input.id)),
-
-    create: protectedProcedure
-      .input(z.object({
-        name: z.string().min(1).max(128),
-        orgType: z.enum(["prefeitura", "estado", "federal", "privado", "outro"]).default("outro"),
-        icmsPercent: z.number().min(0).max(100).default(0),
-        stPercent: z.number().min(0).max(100).default(0),
-        ipiPercent: z.number().min(0).max(100).default(0),
-        otherTaxPercent: z.number().min(0).max(100).default(0),
-        freightType: z.enum(["cif", "fob", "none"]).default("cif"),
-        freightPercent: z.number().min(0).max(100).default(0),
-        validityDays: z.number().int().min(1).default(30),
-        declarations: z.string().optional(),
-        paymentTerms: z.string().max(256).optional(),
-        deliveryDays: z.number().int().min(0).default(15),
-        notes: z.string().optional(),
-        isDefault: z.enum(["yes", "no"]).default("no"),
-      }))
-      .mutation(({ input }) => createProposalTemplate({
-        ...input,
-        icmsPercent: String(input.icmsPercent),
-        stPercent: String(input.stPercent),
-        ipiPercent: String(input.ipiPercent),
-        otherTaxPercent: String(input.otherTaxPercent),
-        freightPercent: String(input.freightPercent),
-      } as any)),
-
-    update: protectedProcedure
-      .input(z.object({
-        id: z.number(),
-        name: z.string().min(1).max(128).optional(),
-        orgType: z.enum(["prefeitura", "estado", "federal", "privado", "outro"]).optional(),
-        icmsPercent: z.number().min(0).max(100).optional(),
-        stPercent: z.number().min(0).max(100).optional(),
-        ipiPercent: z.number().min(0).max(100).optional(),
-        otherTaxPercent: z.number().min(0).max(100).optional(),
-        freightType: z.enum(["cif", "fob", "none"]).optional(),
-        freightPercent: z.number().min(0).max(100).optional(),
-        validityDays: z.number().int().min(1).optional(),
-        declarations: z.string().optional(),
-        paymentTerms: z.string().max(256).optional(),
-        deliveryDays: z.number().int().min(0).optional(),
-        notes: z.string().optional(),
-        isDefault: z.enum(["yes", "no"]).optional(),
-      }))
-      .mutation(({ input }) => {
-        const { id, icmsPercent, stPercent, ipiPercent, otherTaxPercent, freightPercent, ...rest } = input;
-        return updateProposalTemplate(id, {
-          ...rest,
-          ...(icmsPercent !== undefined && { icmsPercent: String(icmsPercent) }),
-          ...(stPercent !== undefined && { stPercent: String(stPercent) }),
-          ...(ipiPercent !== undefined && { ipiPercent: String(ipiPercent) }),
-          ...(otherTaxPercent !== undefined && { otherTaxPercent: String(otherTaxPercent) }),
-          ...(freightPercent !== undefined && { freightPercent: String(freightPercent) }),
-        } as any);
-      }),
-
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteProposalTemplate(input.id)),
-    seedDefaults: protectedProcedure
-      .mutation(async () => {
-        const defaults = [
-          {
-            name: "Licitação Federal (Ministério/Autarquia)",
-            orgType: "federal" as const,
-            icmsPercent: "0", stPercent: "0", ipiPercent: "0", otherTaxPercent: "0",
-            freightType: "cif" as const, freightPercent: "0",
-            validityDays: 90, paymentTerms: "30 dias após entrega", deliveryDays: 30,
-            declarations: "Declaramos que os produtos ofertados atendem às especificações do edital, às normas vigentes da ANVISA e ao Decreto nº 7.892/2013.",
-            isDefault: "yes" as const,
-          },
-          {
-            name: "Licitação Estadual — Padrão",
-            orgType: "estado" as const,
-            icmsPercent: "12", stPercent: "2", ipiPercent: "0", otherTaxPercent: "0",
-            freightType: "cif" as const, freightPercent: "0",
-            validityDays: 60, paymentTerms: "30 dias após entrega", deliveryDays: 20,
-            declarations: "Declaramos que os produtos ofertados atendem às especificações do edital e às normas vigentes da ANVISA.",
-            isDefault: "no" as const,
-          },
-          {
-            name: "Licitação Municipal (Prefeitura)",
-            orgType: "prefeitura" as const,
-            icmsPercent: "12", stPercent: "0", ipiPercent: "0", otherTaxPercent: "0",
-            freightType: "cif" as const, freightPercent: "0",
-            validityDays: 60, paymentTerms: "30 dias após entrega", deliveryDays: 15,
-            declarations: "Declaramos que os produtos ofertados atendem às especificações do edital e às normas vigentes da ANVISA.",
-            isDefault: "no" as const,
-          },
-          {
-            name: "Venda Direta — Cliente Privado",
-            orgType: "privado" as const,
-            icmsPercent: "12", stPercent: "0", ipiPercent: "0", otherTaxPercent: "0",
-            freightType: "cif" as const, freightPercent: "3",
-            validityDays: 30, paymentTerms: "À vista ou 30 dias", deliveryDays: 10,
-            declarations: "",
-            isDefault: "no" as const,
-          },
-        ];
-        let created = 0;
-        for (const t of defaults) {
-          await createProposalTemplate(t as any);
-          created++;
-        }
-        return { created };
-      }),
-  }),
   // ─── Metadados e apoio operacional ───────────────────────────────────────────
   metadata: metadataRouter,
 
