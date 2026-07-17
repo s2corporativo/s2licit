@@ -7,6 +7,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
 import { ensureProductColumns, ensureAuthSecurityColumns, ensureCompanySettingsColumns, ensureOfferColumns, ensureTaxRuleTypes, ensureCaptureSourceTypes } from "./ensureSchema";
+import { ensureFornecedoresIniciais } from "./seedFornecedores";
 import { initScheduledJobs } from "../services/scheduledJobs";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -63,6 +64,9 @@ async function startServer() {
   // ensureAdminUser() por último: lê/grava `users` pelo ORM (projeta todas as
   // colunas), então precisa que todas as ensure*Columns já tenham rodado.
   await ensureAdminUser();
+  // Cadastro-base dos fornecedores com scraper pronto (Tambasa, Bartofil, etc.),
+  // para já aparecerem na tela "Agente de preços". Credenciais ficam no cofre.
+  await ensureFornecedoresIniciais();
 
   const app = express();
   const server = createServer(app);
