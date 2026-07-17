@@ -15,6 +15,9 @@ export async function createContext(
 
   try {
     user = await sdk.authenticateRequest(opts.req);
+    // Conta desativada/revogada: trata como não autenticada (bloqueia acesso
+    // mesmo para usuários OAuth recriados a partir de uma sessão válida).
+    if (user?.disabled) user = null;
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;

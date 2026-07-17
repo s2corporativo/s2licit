@@ -51,6 +51,15 @@ function montarCustomSelectors(sel: SeletoresForm, categoryUrlsRaw: string) {
   return { customSelectors: out };
 }
 
+/**
+ * Normaliza o nome do fornecedor para a chave do preset em FORNECEDOR_CONFIGS
+ * (sem acentos nem espaços) — ex.: "Basso Pancotte" → "bassopancotte". Permite
+ * sugerir o tipo de scraper automaticamente ao escolher o fornecedor.
+ */
+function slugFornecedor(nome: string): string {
+  return nome.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string | null }) {
   if (!status || status === "pending")
@@ -131,7 +140,17 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
             <select
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               value={form.supplierId}
-              onChange={e => setForm(f => ({ ...f, supplierId: e.target.value }))}
+              onChange={e => {
+                const supplierId = e.target.value;
+                // Ao escolher um fornecedor cujo nome bate com um preset pronto
+                // (Tambasa, Bartofil, Basso Pancotte, Magazine Médica, Utilidades
+                // Clínicas), já seleciona o tipo de scraper correspondente.
+                const sup = suppliers.find((s: any) => String(s.id) === supplierId);
+                const slug = sup ? slugFornecedor(sup.name) : "";
+                const temPreset = tipos.some((t: any) => t.tipo === slug);
+                if (temPreset) setPersonalizado(false);
+                setForm(f => ({ ...f, supplierId, scraperType: temPreset ? slug : f.scraperType }));
+              }}
             >
               <option value="">Selecione...</option>
               {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}

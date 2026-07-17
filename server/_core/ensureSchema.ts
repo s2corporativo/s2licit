@@ -46,6 +46,7 @@ export async function ensureAuthSecurityColumns(): Promise<void> {
     await ensureColumn("users", "lockedUntil", "TIMESTAMP NULL");
     await ensureColumn("users", "mfaEnabled", "BOOLEAN NOT NULL DEFAULT FALSE");
     await ensureColumn("users", "mfaSecret", "TEXT NULL");
+    await ensureColumn("users", "disabled", "BOOLEAN NOT NULL DEFAULT FALSE");
     await ensureColumn("audit_logs", "ipAddress", "VARCHAR(64) NULL");
     await ensureColumn("audit_logs", "userAgent", "VARCHAR(512) NULL");
   } catch (err) {

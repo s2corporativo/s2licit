@@ -150,6 +150,16 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
+      // Conta desativada: bloqueia o login (mesmo com senha correta).
+      if (user?.disabled) {
+        await recordAudit({
+          userId: user.id, action: "login_bloqueado", entity: "auth", entityId: user.id,
+          origin: "login", summary: "Login negado — conta desativada", ...origin,
+        });
+        res.status(403).json({ error: "Esta conta está desativada. Contate o administrador." });
+        return;
+      }
+
       // Mensagem idêntica para usuário inexistente e senha errada
       // (não revelar quais e-mails existem).
       if (!user?.passwordHash || !credentialEncryptionService.verifyPassword(password, user.passwordHash)) {

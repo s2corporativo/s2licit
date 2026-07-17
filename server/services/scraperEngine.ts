@@ -209,56 +209,133 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
   // extração por dados estruturados. Confirme os seletores no Configurador de
   // Fornecedores (botão "testar login") e prefira catálogo/API onde o ToS
   // restringir automação (§17).
+  // Bartofil B2B é uma SPA (React/Vite: <div id="root">, bundle /assets/*.js,
+  // manifest.webmanifest) — NÃO é Magento. O formulário de login e a grade de
+  // produtos são renderizados por JavaScript, então waitForSelector é essencial
+  // (esperar o campo de senha aparecer antes de preencher). Como é SPA com
+  // catálogo servido por API interna, o caminho recomendado (§4) é API/catálogo;
+  // a raspagem do DOM é fallback. Os seletores abaixo são genéricos amplos —
+  // confirme os reais no Configurador ("testar login") a partir do DOM
+  // renderizado (F12 → Inspecionar o <input> de e-mail/senha).
   bartofil: {
-    // Portal B2B (Bartofil). Ajuste a URL exata de login pelo Configurador.
-    loginUrl: "https://www.bartofil.com.br/customer/account/login/",
-    loginEmail: 'input[name="login[username]"], input[type="email"], #email, #username',
-    loginPassword: 'input[name="login[password]"], input[type="password"], #pass, #password',
-    loginSubmit: '#send2, button[type="submit"], input[type="submit"]',
-    useStructuredData: true,
+    loginUrl: "https://www.bartofil.com.br/login",
+    loginEmail:
+      'input[type="email"], input[name="email"], input[name="username"], input[name="login"], input[id*="email" i], input[placeholder*="mail" i], input[placeholder*="CNPJ" i]',
+    loginPassword:
+      'input[type="password"], input[name="password"], input[name="senha"], input[id*="pass" i], input[id*="senha" i]',
+    loginSubmit: 'button[type="submit"], [type="submit"], button[class*="login" i]',
+    // Espera o formulário da SPA hidratar antes de tentar o login.
+    waitForSelector: 'input[type="password"]',
     categoryUrls: [],
-    searchUrlTemplate: "https://www.bartofil.com.br/catalogsearch/result/?q={q}",
-    productItem: '.product-item, .product, .produto, [class*="product"]',
-    productName: '.product-item-link, h2, h3, .name, .nome',
-    productPrice: '.price, .preco, [class*="price"]',
+    // Rota de busca da SPA ainda não confirmada — ajuste no Configurador.
+    searchUrlTemplate: "https://www.bartofil.com.br/busca?q={q}",
+    productItem: '[class*="product"], [class*="produto"], [class*="card"], li[class*="item"]',
+    productName: 'h2, h3, [class*="name"], [class*="nome"], [class*="title"], [class*="titulo"]',
+    productPrice: '[class*="price"], [class*="preco"], [class*="valor"]',
     productImage: 'img',
     productLink: 'a',
-    nextPage: '[rel="next"], .next, .action.next',
-    navigationWait: 2500,
+    nextPage: '[rel="next"], [class*="next"], [class*="proxima"]',
+    navigationWait: 3000,
   },
+  // Basso Pancotte usa o "Portal do cliente" em React Native Web / Expo
+  // (cliente.bassopancotte.com.br: fontes @expo/vector-icons, bundle
+  // webpackJsonppec, sweetalert2) — NÃO é loja server-rendered. O login e o
+  // conteúdo são renderizados por JS; o RNW gera DOM aninhado com classes
+  // hasheadas, então a raspagem por seletores CSS é frágil. Caminho recomendado
+  // (§4): API/catálogo ou captura manual. Confirme os seletores reais e a rota
+  // do catálogo pelo Configurador ("testar login" a partir do DOM renderizado).
   bassopancotte: {
-    loginUrl: "https://bassopancotte.com.br/login",
-    loginEmail: 'input[name="email"], input[type="email"], #email, #username, input[name="usuario"]',
-    loginPassword: 'input[name="password"], input[type="password"], #senha, #password',
-    loginSubmit: 'button[type="submit"], input[type="submit"], .btn-login',
-    useStructuredData: true,
-    // Sem template a busca sob demanda retornaria sempre vazio — ajuste a URL
-    // exata pelo Configurador ("testar login" / capturar).
-    searchUrlTemplate: "https://bassopancotte.com.br/busca?q={q}",
+    loginUrl: "https://cliente.bassopancotte.com.br/login",
+    // RNW: senha vira input[type=password]; e-mail costuma vir como type=text.
+    loginEmail:
+      'input[type="email"], input[autocomplete="username"], input[autocomplete="email"], input[name*="email" i], input[name*="user" i], input[type="text"]',
+    loginPassword: 'input[type="password"], input[autocomplete="current-password"], input[name*="senha" i], input[name*="pass" i]',
+    // RNW renderiza botões como <div role="button"> ou <button>.
+    loginSubmit: 'button[type="submit"], [role="button"], button',
+    waitForSelector: 'input[type="password"]',
+    // Rota de busca do portal ainda não confirmada — ajuste no Configurador.
+    searchUrlTemplate: "https://cliente.bassopancotte.com.br/busca?q={q}",
     categoryUrls: [],
-    productItem: '.product, .produto, [class*="product"], [class*="item"]',
-    productName: 'h2, h3, .name, .title, .nome',
-    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productItem: '[class*="product"], [class*="produto"], [class*="item"], [class*="card"]',
+    productName: 'h2, h3, [class*="name"], [class*="title"], [class*="nome"]',
+    productPrice: '[class*="price"], [class*="preco"], [class*="valor"]',
     productImage: 'img',
     productLink: 'a',
-    nextPage: '[rel="next"], .next, .proxima',
+    nextPage: '[rel="next"], [class*="next"], [class*="proxima"]',
+    navigationWait: 3000,
+  },
+  // Magazine Médica (Grupo Ballke) roda em Django server-rendered (Bootstrap 2).
+  // Seletores de login reais confirmados no HTML da página /accounts/login/.
+  //
+  // ⚠ §3/§17 — o formulário tem reCAPTCHA v3 INVISÍVEL (score-based, sitekey
+  // 6LcIGf..., name="captcha" obrigatório). Não é um desafio que o usuário
+  // resolve com clique, mas o Google pontua o comportamento: um login headless
+  // tende a receber score baixo e ser rejeitado silenciosamente. Por isso o
+  // motor deve DETECTAR a falha (continuar na página de login em vez de ir para
+  // loginSuccessUrl) e requerer intervenção humana / reuso de sessão; preferir
+  // o caminho de catálogo público.
+  magazinemedica: {
+    loginUrl: "https://magazinemedica.com.br/accounts/login/",
+    loginEmail: '#id_username, input[name="username"]',
+    loginPassword: '#id_password, input[name="password"]',
+    loginSubmit: '#login_entrar, button[type="submit"]',
+    // Após o login o campo hidden next="/accounts/" redireciona para a área
+    // do cliente — sinal confiável de sessão autenticada.
+    loginSuccessUrl: "/accounts/",
+    useStructuredData: true,
+    categoryUrls: [
+      "https://magazinemedica.com.br/colecao/veterinaria-e-pet-shop/",
+      "https://magazinemedica.com.br/categorias/medicamentos/",
+      "https://magazinemedica.com.br/categorias/descartaveis/",
+      "https://magazinemedica.com.br/categorias/medicina/",
+    ],
+    // Busca real do site: form GET action="/busca/" com input name="keywords".
+    searchUrlTemplate: "https://magazinemedica.com.br/busca/?keywords={q}",
+    productItem: '.product, .produto, [class*="product"], [class*="card"], .thumbnail',
+    productName: 'h2, h3, .name, .title, .nome, .product-title',
+    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productImage: 'img.lazy, img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .proxima, .pagination .active + li a',
     navigationWait: 2500,
   },
-  magazinemedica: {
-    // Login confirmado (base Django); entra por CPF/CNPJ ou e-mail.
-    loginUrl: "https://magazinemedica.com.br/accounts/registro/login/",
-    loginEmail: '#id_username, input[name="username"], input[name="login"], input[type="text"]',
-    loginPassword: '#id_password, input[name="password"], input[type="password"]',
-    loginSubmit: 'button[type="submit"], input[type="submit"]',
+  // Utilidades Clínicas roda em Magento 2 (base Henry Schein Brazil). Seletores
+  // reais confirmados na página de login. B2B profissional: os preços só
+  // aparecem logado e há produtos restritos (exigem CRM/CRMV/CRO no cadastro).
+  //
+  // ⚠ §3/§17 — o site tem CAPTCHA no user_login (hoje isRequired:false, mas pode
+  // ser ligado) e AUTENTICAÇÃO POR DISPOSITIVO / 2FA (modal hsb-mfa, token por
+  // SMS/WhatsApp). Quando qualquer um for exigido, o login automático NÃO deve
+  // tentar resolvê-lo: o motor detecta o desafio e requer intervenção humana
+  // (login manual + reuso de sessão via cookies). Prefira o caminho de
+  // catálogo/sessão salva; a raspagem com senha só funciona quando 2FA/captcha
+  // estiverem desligados para o acesso usado.
+  utilidadesclinicas: {
+    // Página de login padrão do Magento (o mesmo formulário existe no modal
+    // #login-form-registro, que posta em /customer/ajax/login/).
+    loginUrl: "https://www.utilidadesclinicas.com.br/customer/account/login/",
+    // Campo aceita e-mail OU CPF/CNPJ (label "E-mail ou CPF/CNPJ").
+    loginEmail: '#email-registro, input[name="login[username]"], #email, input[name="login[username]"]',
+    loginPassword: '#pass-popup, input[name="login[password]"], #pass',
+    loginSubmit: '#send2, button.action.login, button[type="submit"]',
+    // Em Magento o link de logout no cabeçalho confirma a sessão autenticada.
+    loginSuccessSelector: '.customer-welcome, a[href*="customer/account/logout"], .customer-name',
     useStructuredData: true,
-    categoryUrls: [],
-    searchUrlTemplate: "https://magazinemedica.com.br/busca/?q={q}",
-    productItem: '.product, .produto, [class*="product"], [class*="card"]',
-    productName: 'h2, h3, .name, .title, .nome',
-    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
-    productImage: 'img',
-    productLink: 'a',
-    nextPage: '[rel="next"], .next, .proxima',
+    categoryUrls: [
+      "https://www.utilidadesclinicas.com.br/veterinaria.html",
+      "https://www.utilidadesclinicas.com.br/descartaveis.html",
+      "https://www.utilidadesclinicas.com.br/estetoscopios.html",
+    ],
+    // Busca padrão do Magento (endpoint de resultado). O mini-form do site usa
+    // /catalog_search/?term= — se este template voltar vazio, troque no
+    // Configurador ("testar login" / capturar).
+    searchUrlTemplate: "https://www.utilidadesclinicas.com.br/catalogsearch/result/?q={q}",
+    productItem: '.product-item, li.item.product, [class*="product-item"]',
+    productName: '.product-item-link, .product-item-name, h2, h3',
+    productPrice: '.price, [data-price-type="finalPrice"] .price, [class*="price"]',
+    productImage: 'img.product-image-photo, img',
+    productLink: '.product-item-link, a.product-item-photo, a',
+    nextPage: '.pages-item-next a, [rel="next"], .action.next',
     navigationWait: 2500,
   },
 
