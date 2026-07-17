@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { Lock, LogIn, Loader2 } from "lucide-react";
+import { Landmark, LogIn, Loader2 } from "lucide-react";
 
 /**
  * Página de login local (e-mail e senha).
@@ -50,17 +50,18 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 bg-gray-900 flex items-center justify-center mb-4">
-            <Lock size={24} className="text-white" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900">Sistema S2</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestão de licitações e cotações</p>
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "#f3f4f6" }}>
+      <div
+        className="w-full"
+        style={{ background: "#fff", borderRadius: 14, padding: 32, maxWidth: 400, boxShadow: "0 4px 24px rgba(0,0,0,.08)" }}
+      >
+        <div className="flex flex-col items-center" style={{ marginBottom: 28 }}>
+          <Landmark size={44} strokeWidth={1.25} style={{ color: "#1A3F8F", marginBottom: 8 }} />
+          <h1 style={{ color: "#1A3F8F", fontSize: 22, fontWeight: 900 }}>S2 LICIT</h1>
+          <p style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>Sistema Integrado de Licitações</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white border border-gray-200 p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">
               E-mail
@@ -72,7 +73,7 @@ export default function Login() {
               autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              className="w-full text-sm focus:outline-none" style={{ padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8 }}
             />
           </div>
           <div>
@@ -86,7 +87,7 @@ export default function Login() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+              className="w-full text-sm focus:outline-none" style={{ padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8 }}
             />
           </div>
 
@@ -107,7 +108,7 @@ export default function Login() {
                 value={token}
                 onChange={(e) => setToken(e.target.value.replace(/\D/g, ""))}
                 placeholder="000000"
-                className="w-full border border-gray-300 px-3 py-2 text-sm tracking-widest focus:outline-none focus:border-gray-900"
+                className="w-full text-sm tracking-widest focus:outline-none" style={{ padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8 }}
               />
               <p className="text-xs text-gray-500 mt-1">Informe o código do seu app autenticador.</p>
             </div>
@@ -122,7 +123,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white px-4 py-2.5 text-sm font-semibold hover:bg-blue-800 transition-colors disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2 text-white text-sm font-semibold transition-colors disabled:opacity-60 hover:opacity-90" style={{ background: "#1A3F8F", padding: "11px 16px", borderRadius: 8 }}
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
             {loading ? "Entrando..." : mfaRequired ? "Verificar e entrar" : "Entrar"}
