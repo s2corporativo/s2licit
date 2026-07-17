@@ -37,7 +37,10 @@ import {
   RotateCcw,
   Trash2,
   WrenchIcon,
+  LayoutGrid,
 } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { hasMinimumRole, type Role } from "@/lib/access";
 import { useMemo, useState } from "react";
 import {
   Bar,
@@ -87,6 +90,95 @@ function buildPncpUrl(externalId: string | null | undefined): string | null {
   const [, cnpj, campo2, seq, ano] = match;
   return `https://pncp.gov.br/app/editais/${cnpj}/${campo2}/${ano}/${seq}`;
 }
+
+// ─── Central de Funções ────────────────────────────────────────────────────────
+// Hub com TODAS as funções principais, agrupadas pelo mesmo fluxo do menu lateral
+// (Operação → Oportunidades → Propostas → Catálogo → Automação → Execução → Admin).
+// Rotas canônicas (sem passar por redirects) e visibilidade por papel.
+type FuncItem = { href: string; label: string; desc: string; minRole?: Role };
+type FuncGroup = {
+  label: string;
+  icon: React.ReactNode;
+  head: string;   // cor do título do grupo
+  hoverBg: string; // hover de cada item
+  hoverText: string; // cor do rótulo no hover
+  dot: string;     // cor do chevron no hover
+  items: FuncItem[];
+};
+
+const FUNCTION_GROUPS: FuncGroup[] = [
+  {
+    label: "Operação", icon: <Zap size={11} />, head: "text-blue-700",
+    hoverBg: "hover:bg-blue-50", hoverText: "group-hover:text-blue-700", dot: "group-hover:text-blue-500",
+    items: [
+      { href: "/agenda", label: "Agenda", desc: "Prazos e compromissos" },
+      { href: "/funil", label: "Funil", desc: "Oportunidades por estágio" },
+      { href: "/busca", label: "Busca rápida", desc: "Encontrar um produto" },
+    ],
+  },
+  {
+    label: "Oportunidades", icon: <FileScan size={11} />, head: "text-orange-700",
+    hoverBg: "hover:bg-orange-50", hoverText: "group-hover:text-orange-700", dot: "group-hover:text-orange-500",
+    items: [
+      { href: "/radar-pncp", label: "Radar PNCP", desc: "Editais públicos", minRole: "editor" },
+      { href: "/cotacoes-recebidas", label: "Cotações recebidas", desc: "Pedidos por e-mail", minRole: "editor" },
+      { href: "/edital", label: "Importar edital", desc: "PDF/DOCX com IA", minRole: "editor" },
+    ],
+  },
+  {
+    label: "Propostas", icon: <FileText size={11} />, head: "text-indigo-700",
+    hoverBg: "hover:bg-indigo-50", hoverText: "group-hover:text-indigo-700", dot: "group-hover:text-indigo-500",
+    items: [
+      { href: "/propostas", label: "Propostas", desc: "Criar e gerenciar" },
+      { href: "/documentos-habilitacao", label: "Habilitação", desc: "Documentos exigidos", minRole: "editor" },
+      { href: "/sala-disputa", label: "Sala de disputa", desc: "Lances e sessão", minRole: "editor" },
+      { href: "/templates-proposta", label: "Templates", desc: "Modelos de proposta" },
+    ],
+  },
+  {
+    label: "Catálogo", icon: <Package size={11} />, head: "text-emerald-700",
+    hoverBg: "hover:bg-emerald-50", hoverText: "group-hover:text-emerald-700", dot: "group-hover:text-emerald-500",
+    items: [
+      { href: "/produtos", label: "Produtos", desc: "Catálogo completo" },
+      { href: "/fornecedores", label: "Fornecedores", desc: "Cadastro de fornecedores", minRole: "editor" },
+      { href: "/equivalencias", label: "Equivalências", desc: "Produtos similares" },
+      { href: "/importar", label: "Importar planilha", desc: "Excel ou CSV", minRole: "editor" },
+      { href: "/importar-nfe", label: "Importar NF-e", desc: "XML de nota fiscal", minRole: "editor" },
+    ],
+  },
+  {
+    label: "Automação e IA", icon: <Sparkles size={11} />, head: "text-violet-700",
+    hoverBg: "hover:bg-violet-50", hoverText: "group-hover:text-violet-700", dot: "group-hover:text-violet-500",
+    items: [
+      { href: "/scraper-fornecedores", label: "Agente de preços", desc: "Login e importação de fornecedores", minRole: "admin" },
+      { href: "/captura-inteligente", label: "Captura automática", desc: "Multi-origem com IA", minRole: "editor" },
+      { href: "/portais-licitacao", label: "Acessos aos portais", desc: "Credenciais de portais", minRole: "editor" },
+      { href: "/central-ia", label: "Central de IA", desc: "Modelos e chaves", minRole: "admin" },
+      { href: "/agente", label: "Assistente IA", desc: "Pergunte ao sistema" },
+    ],
+  },
+  {
+    label: "Execução e resultados", icon: <DollarSign size={11} />, head: "text-rose-700",
+    hoverBg: "hover:bg-rose-50", hoverText: "group-hover:text-rose-700", dot: "group-hover:text-rose-500",
+    items: [
+      { href: "/financeiro", label: "Financeiro", desc: "Pedidos e receitas" },
+      { href: "/pos-venda", label: "Pós-venda", desc: "Entregas e contratos" },
+      { href: "/desempenho", label: "Desempenho", desc: "Taxa de vitória" },
+      { href: "/certidoes", label: "Certidões", desc: "Regularidade fiscal", minRole: "editor" },
+    ],
+  },
+  {
+    label: "Administração", icon: <ShieldAlert size={11} />, head: "text-slate-700",
+    hoverBg: "hover:bg-slate-50", hoverText: "group-hover:text-slate-800", dot: "group-hover:text-slate-500",
+    items: [
+      { href: "/configuracao", label: "Dados da empresa", desc: "Cadastro e logo", minRole: "admin" },
+      { href: "/usuarios", label: "Usuários e permissões", desc: "Papéis de acesso", minRole: "admin" },
+      { href: "/logs", label: "Logs de auditoria", desc: "Trilha de ações", minRole: "admin" },
+      { href: "/seguranca", label: "Segurança (MFA)", desc: "2 fatores da conta" },
+      { href: "/diagnostico", label: "Diagnóstico", desc: "Saúde do sistema", minRole: "editor" },
+    ],
+  },
+];
 
 // ─── Componentes auxiliares ───────────────────────────────────────────────────
 
@@ -164,6 +256,14 @@ function KpiCard({
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const funcaoGroups = useMemo(
+    () =>
+      FUNCTION_GROUPS
+        .map((g) => ({ ...g, items: g.items.filter((it) => hasMinimumRole(user?.role, it.minRole)) }))
+        .filter((g) => g.items.length > 0),
+    [user?.role],
+  );
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [catalogCollapsed, setCatalogCollapsed] = useState(false);
   const [pipelineCollapsed, setPipelineCollapsed] = useState(false);
@@ -264,10 +364,10 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Linha 2: 3 CTAs principais */}
+          {/* Linha 2: CTAs principais (rotas canônicas, sem redirects) */}
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 backdrop-blur-sm">
             <Link
-              href="/proposta-rapida"
+              href="/propostas"
               className="flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-black text-blue-900 shadow-lg shadow-[#08193b]/20 transition-all hover:-translate-y-0.5 hover:bg-blue-50"
             >
               <Sparkles size={15} />
@@ -294,19 +394,21 @@ export default function Dashboard() {
               <FileText size={15} />
               Importar XML
             </Link>
+            {hasMinimumRole(user?.role, "admin") && (
+              <Link
+                href="/scraper-fornecedores"
+                className="flex items-center gap-2 rounded-xl border border-purple-300/40 bg-purple-600/30 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-600/50"
+              >
+                <Tag size={15} />
+                Agente de Preços
+              </Link>
+            )}
             <Link
               href="/busca"
               className="flex items-center gap-2 rounded-xl border border-white/25 bg-white/8 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-white/14"
             >
               <Search size={15} />
               Buscar Produto
-            </Link>
-            <Link
-              href="/proposta-automatica"
-              className="flex items-center gap-2 rounded-xl border border-purple-300/35 bg-purple-600/28 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-600/45"
-            >
-              <Sparkles size={15} />
-              Analisar Edital
             </Link>
             <button
               onClick={() => setDiagOpen((v) => !v)}
@@ -906,107 +1008,38 @@ export default function Dashboard() {
             ACESSO RÁPIDO — reorganizado por grupo
         ══════════════════════════════════════════════════════════════════ */}
         <div>
-          <SectionHeader icon={<Zap size={14} />} title="Acesso Rápido" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* Propostas */}
-            <div className="bg-white border border-gray-200 p-4 shadow-sm">
-              <div className="text-[10px] font-black tracking-widest uppercase text-blue-700 mb-3 flex items-center gap-1.5"><FileText size={11} /> Propostas</div>
-              <div className="space-y-1.5">
-                {[
-                  { href: "/proposta-rapida", label: "Proposta Rápida", desc: "Cole lista ou planilha" },
-                  { href: "/propostas-admin", label: "Adm. Propostas", desc: "Gerenciar todas" },
-                  { href: "/templates-proposta", label: "Templates", desc: "Modelos de proposta" },
-                ].map(a => (
-                  <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-blue-50 transition-colors group rounded-sm">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-800 group-hover:text-blue-700">{a.label}</div>
-                      <div className="text-[10px] text-gray-400">{a.desc}</div>
-                    </div>
-                    <ChevronRight size={11} className="text-gray-300 group-hover:text-blue-500" />
-                  </Link>
-                ))}
+          <SectionHeader
+            icon={<LayoutGrid size={14} />}
+            title="Central de Funções"
+            action={
+              <Link href="/manual" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
+                Como operar <ArrowRight size={9} />
+              </Link>
+            }
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {funcaoGroups.map((g) => (
+              <div key={g.label} className="bg-white border border-gray-200 p-4 shadow-sm rounded-sm">
+                <div className={`text-[10px] font-black tracking-widest uppercase ${g.head} mb-3 flex items-center gap-1.5`}>
+                  {g.icon} {g.label}
+                </div>
+                <div className="space-y-1">
+                  {g.items.map((a) => (
+                    <Link
+                      key={a.href}
+                      href={a.href}
+                      className={`flex items-center justify-between py-1.5 px-2 ${g.hoverBg} transition-colors group rounded-sm`}
+                    >
+                      <div className="min-w-0">
+                        <div className={`text-xs font-semibold text-gray-800 ${g.hoverText}`}>{a.label}</div>
+                        <div className="text-[10px] text-gray-400 truncate">{a.desc}</div>
+                      </div>
+                      <ChevronRight size={11} className={`text-gray-300 ${g.dot} flex-shrink-0`} />
+                    </Link>
+                  ))}
+                </div>
               </div>
-            </div>
-
-            {/* Catálogo */}
-            <div className="bg-white border border-gray-200 p-4 shadow-sm">
-              <div className="text-[10px] font-black tracking-widest uppercase text-emerald-700 mb-3 flex items-center gap-1.5"><Package size={11} /> Catálogo</div>
-              <div className="space-y-1.5">
-                {[
-                  { href: "/produtos", label: "Produtos", desc: "Catálogo completo" },
-                  { href: "/importar", label: "Importar Planilha", desc: "Excel ou CSV" },
-                  { href: "/busca", label: "Busca Rápida", desc: "Encontrar produto" },
-                  { href: "/comparacao", label: "Comparar Preços", desc: "Por princípio ativo" },
-                ].map(a => (
-                  <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-emerald-50 transition-colors group rounded-sm">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-800 group-hover:text-emerald-700">{a.label}</div>
-                      <div className="text-[10px] text-gray-400">{a.desc}</div>
-                    </div>
-                    <ChevronRight size={11} className="text-gray-300 group-hover:text-emerald-500" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            {/* Licitações */}
-            <div className="bg-white border border-gray-200 p-4 shadow-sm">
-              <div className="text-[10px] font-black tracking-widest uppercase text-orange-700 mb-3 flex items-center gap-1.5"><BarChart3 size={11} /> Licitações</div>
-              <div className="space-y-1.5">
-                {[
-                  { href: "/edital", label: "Importar Edital", desc: "PDF ou DOCX com IA" },
-                  { href: "/proposta-automatica", label: "Proposta Automática", desc: "IA extrai itens" },
-                ].map(a => (
-                  <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-orange-50 transition-colors group rounded-sm">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-800 group-hover:text-orange-700">{a.label}</div>
-                      <div className="text-[10px] text-gray-400">{a.desc}</div>
-                    </div>
-                    <ChevronRight size={11} className="text-gray-300 group-hover:text-orange-500" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            {/* Inteligência */}
-            <div className="bg-white border border-gray-200 p-4 shadow-sm">
-              <div className="text-[10px] font-black tracking-widest uppercase text-violet-700 mb-3 flex items-center gap-1.5"><Sparkles size={11} /> Inteligência</div>
-              <div className="space-y-1.5">
-                {[
-                  { href: "/equivalencias", label: "Equivalências", desc: "Produtos similares" },
-
-                  { href: "/reclassificacao", label: "Reclassificação IA", desc: "Categorias automáticas" },
-                  { href: "/comparacao", label: "Inteligência de Preço", desc: "Análise comparativa" },
-                ].map(a => (
-                  <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-violet-50 transition-colors group rounded-sm">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-800 group-hover:text-violet-700">{a.label}</div>
-                      <div className="text-[10px] text-gray-400">{a.desc}</div>
-                    </div>
-                    <ChevronRight size={11} className="text-gray-300 group-hover:text-violet-500" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            {/* Financeiro */}
-            <div className="bg-white border border-gray-200 p-4 shadow-sm">
-              <div className="text-[10px] font-black tracking-widest uppercase text-rose-700 mb-3 flex items-center gap-1.5"><ShieldAlert size={11} /> Financeiro</div>
-              <div className="space-y-1.5">
-                {[
-                  { href: "/financeiro", label: "Controle Financeiro", desc: "Pedidos e receitas" },
-                  { href: "/propostas", label: "Propostas Comerciais", desc: "Gerir e acompanhar" },
-                ].map(a => (
-                  <Link key={a.href} href={a.href} className="flex items-center justify-between py-1.5 px-2 hover:bg-rose-50 transition-colors group rounded-sm">
-                    <div>
-                      <div className="text-xs font-semibold text-gray-800 group-hover:text-rose-700">{a.label}</div>
-                      <div className="text-[10px] text-gray-400">{a.desc}</div>
-                    </div>
-                    <ChevronRight size={11} className="text-gray-300 group-hover:text-rose-500" />
-                  </Link>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
