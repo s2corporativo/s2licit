@@ -5,6 +5,8 @@ import { credentialEncryptionService } from "./credentialEncryptionService";
 
 export interface SessionData {
   cookies?: Record<string, string>;
+  /** Pares chave→valor do localStorage (SPAs guardam o token aqui, não em cookie). */
+  localStorage?: Record<string, string>;
   sessionToken?: string;
   authHeader?: string;
   expiresAt?: Date;
@@ -29,6 +31,7 @@ function revealSession(session: SupplierSession): SupplierSession {
   return {
     ...session,
     cookies: revealSupplierSessionValue(session.cookies),
+    localStorage: revealSupplierSessionValue(session.localStorage),
     sessionToken: revealSupplierSessionValue(session.sessionToken),
     authHeader: revealSupplierSessionValue(session.authHeader),
   };
@@ -57,6 +60,9 @@ export class SupplierSessionService {
     const protectedCookies = protectSupplierSessionValue(
       sessionData.cookies ? JSON.stringify(sessionData.cookies) : null,
     );
+    const protectedLocalStorage = protectSupplierSessionValue(
+      sessionData.localStorage ? JSON.stringify(sessionData.localStorage) : null,
+    );
     const protectedToken = protectSupplierSessionValue(sessionData.sessionToken);
     const protectedAuth = protectSupplierSessionValue(sessionData.authHeader);
 
@@ -69,6 +75,7 @@ export class SupplierSessionService {
 
       // Omissão significa preservar o valor atual; objeto vazio permite limpar cookies.
       if (sessionData.cookies !== undefined) updateData.cookies = protectedCookies;
+      if (sessionData.localStorage !== undefined) updateData.localStorage = protectedLocalStorage;
       if (sessionData.sessionToken !== undefined) updateData.sessionToken = protectedToken;
       if (sessionData.authHeader !== undefined) updateData.authHeader = protectedAuth;
       if (sessionData.expiresAt !== undefined) updateData.expiresAt = sessionData.expiresAt;
@@ -90,6 +97,7 @@ export class SupplierSessionService {
     await db.insert(supplierSessions).values({
       supplierId,
       cookies: protectedCookies,
+      localStorage: protectedLocalStorage,
       sessionToken: protectedToken,
       authHeader: protectedAuth,
       status,
@@ -138,6 +146,15 @@ export class SupplierSessionService {
     if (!session.cookies) return {};
     try {
       return JSON.parse(session.cookies);
+    } catch {
+      return {};
+    }
+  }
+
+  parseLocalStorage(session: SupplierSession): Record<string, string> {
+    if (!session.localStorage) return {};
+    try {
+      return JSON.parse(session.localStorage);
     } catch {
       return {};
     }

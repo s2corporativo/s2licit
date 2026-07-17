@@ -6,7 +6,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
-import { ensureProductColumns, ensureAuthSecurityColumns, ensureCompanySettingsColumns, ensureOfferColumns, ensureTaxRuleTypes, ensureCaptureSourceTypes } from "./ensureSchema";
+import { ensureProductColumns, ensureAuthSecurityColumns, ensureCompanySettingsColumns, ensureOfferColumns, ensureTaxRuleTypes, ensureCaptureSourceTypes, ensureScraperColumns } from "./ensureSchema";
 import { ensureFornecedoresIniciais } from "./seedFornecedores";
 import { initScheduledJobs } from "../services/scheduledJobs";
 import { appRouter } from "../routers";
@@ -61,6 +61,7 @@ async function startServer() {
   await ensureOfferColumns();
   await ensureTaxRuleTypes();
   await ensureCaptureSourceTypes();
+  await ensureScraperColumns();
   // ensureAdminUser() por último: lê/grava `users` pelo ORM (projeta todas as
   // colunas), então precisa que todas as ensure*Columns já tenham rodado.
   await ensureAdminUser();
