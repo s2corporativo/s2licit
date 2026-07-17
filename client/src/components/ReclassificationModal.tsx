@@ -44,13 +44,13 @@ export function ReclassificationModal({
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
-  const listProductsQuery = trpc.reclassification.listProductsNeedingReclassification.useQuery(
+  const listProductsQuery = trpc.reclassificacao.listProductsNeedingReclassification.useQuery(
     { limit: 50, offset: 0 },
     { enabled: open && step === "loading" }
   );
 
-  const reclassifyMutation = trpc.reclassification.suggestReclassification.useMutation();
-  const applyMutation = trpc.reclassification.applySuggestions.useMutation();
+  const reclassifyMutation = trpc.reclassificacao.suggestReclassification.useMutation();
+  const applyMutation = trpc.reclassificacao.applySuggestions.useMutation();
 
   useEffect(() => {
     if (open && step === "loading" && listProductsQuery.data) {

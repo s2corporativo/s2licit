@@ -1,14 +1,14 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "../db";
-import { reclassificationRouter } from "./reclassification";
+import { reclassificacaoRouter } from "./reclassificacao";
 
 function caller() {
-  return reclassificationRouter.createCaller({
+  return reclassificacaoRouter.createCaller({
     user: { id: "test", role: "editor" },
   } as any);
 }
 
-describe("reclassificationRouter", () => {
+describe("reclassificacaoRouter (fluxo por produto unificado)", () => {
   let db: any;
 
   beforeAll(async () => {

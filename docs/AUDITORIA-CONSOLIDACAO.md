@@ -67,30 +67,42 @@ mapeado para consolidação futura.
     Telas que estavam fora do menu entraram no fluxo: Revisão de capturas,
     Análise de preços, Enriquecimento, Imagens, Importar NF-e, Certidões.
 
-## Mapeado para consolidação futura (não crítico, sem impacto em produção)
+## Consolidação executada (2ª rodada — limpeza profunda)
 
-Routers tRPC registrados no boot mas sem nenhuma chamada do client — candidatos
-a remoção ou fusão em uma próxima rodada (verificar webhooks/uso interno antes):
-`editalAnalyzer`, `scraperMulti`, `scraperSync`, `supplierImport`,
-`priceAlerts`, `marginOptimization`, `connectors`, `alertConfig`, `reports`,
-`captureScheduler`, `captureAnalytics`, `operations`, `duplicateDetection`,
-`executiveDecision`, `postAwardContracts`, `importConsolidated`,
-`productMatching`, `importMatching`, `quotations`, `recognition`, `drogavet`,
-`metadata`, `supplierAuth`, `notificationWebhooks`.
+- **24 routers mortos removidos** (zero chamadas do client, sem webhooks nem
+  uso interno; verificado por busca exaustiva antes de cada remoção):
+  `editalAnalyzer`, `scraperMulti`, `scraperSync`, `supplierImport`,
+  `priceAlerts`, `marginOptimization`, `connectors`, `alertConfig`, `reports`,
+  `captureScheduler`, `captureAnalytics`, `operations`, `duplicateDetection`,
+  `executiveDecision`, `postAwardContracts`, `importConsolidated`,
+  `productMatching`, `importMatching`, `quotations`, `recognition`,
+  `drogavet`, `metadata`, `supplierAuth`, `notificationWebhooks`.
+- **21 módulos órfãos removidos em cascata** (varridos até ponto fixo —
+  módulo sem nenhum importador fora de testes): 18 serviços
+  (`captureSchedulerService`, `captureLogService`, `captureAnalyticsService`,
+  `duplicateDetectionService`, `executiveDecisionService`,
+  `importConsolidationService`, `importMatchingService`,
+  `marginOptimizationService`, `materialEquivalence`,
+  `postAwardContractsService`, `priceHistoryService`,
+  `priceSyncNotificationService`, `priceVariationAlertService`,
+  `productImageService`, `scraperTableSyncService`, `supplierRankingService`,
+  `notificationService`, `productConsolidationService`) e 3 conectores
+  (`connectorFactory`, `scraperConnector`, `supplierConnector`), com os
+  respectivos testes.
+- **Reclassificação unificada**: as procedures do router EN
+  (`reclassification`) foram fundidas no `reclassificacao` — um único
+  namespace atende `ReclassificacaoIA`, `DataQualityDashboard` e
+  `ReclassificationModal`; teste migrado junto.
+- **Scripts one-off superados removidos**: `reclassify-ai/batch/by-keyword/
+  outros.mjs` (substituídos pela tela Reclassificação IA) e
+  `rebuild-categories.mjs` (substituído pela v2).
 
-Duplicações de domínio a unificar com calma:
+## Ainda mapeado para consolidação futura
 
-- **Reclassificação**: `reclassificacao` (PT, usado por `ReclassificacaoIA`)
-  × `reclassification` (EN, usado por `DataQualityDashboard` e
-  `ReclassificationModal`). Unificar num único router.
-- **Famílias de pricing**: ~10 routers e ~10 serviços de preço se sobrepõem
-  (`pricing`, `priceAnalysis`, `priceIntelligence`, `precificacao`,
-  `precoUnificado`...). Definir fronteiras e fundir.
-- **Agendamento de captura**: o oficial é `scheduledJobs.runScheduledScrapers`
-  (dispara no `scheduleTime` de `scraperConfigs`). O
-  `captureSchedulerService.initializeGlobalScheduler` é legado, nunca
-  inicializado no boot, e lê a tabela `supplierCaptureConfigs`, que nenhuma
-  tela popula.
+- **Famílias de pricing**: os routers de preço remanescentes E USADOS pelo
+  client (`pricing`, `priceAnalysis`, `priceIntelligence`, `precificacao`,
+  `priceSync`, `categoryPricing`, `bulkPricing`, `priceImport`) ainda se
+  sobrepõem em conceito; fundir exige redesenho das telas que os consomem.
 - **Duas telas gravando em `scraperConfigs`**: "Agente de captura"
   (`scraperAgent`) e "Acessos e credenciais" (`supplierCredentials`) — mesmos
   dados, validações levemente diferentes.

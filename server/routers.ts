@@ -1,4 +1,3 @@
-import { metadataRouter } from "./routers/metadata";
 import { authRouter } from "./routers/auth";
 import { masterProductsRouter } from "./routers/masterProducts";
 import { priceIntelligenceRouter } from "./routers/priceIntelligence";
@@ -16,21 +15,11 @@ import { orgsRouter } from "./routers/orgs";
 import { synonymsRouter } from "./routers/synonyms";
 import { proposalTemplatesRouter } from "./routers/proposalTemplates";
 import { duplicatesRouter } from "./routers/duplicates";
-import { drogavetRouter } from "./routers/drogavet";
 import { imagesRouter } from "./routers/images";
-import { recognitionRouter } from "./routers/recognition";
-import { reclassificationRouter } from "./routers/reclassification";
-import { importConsolidatedRouter } from "./routers/importConsolidated";
-import { productMatchingRouter } from "./routers/productMatching";
-import { importMatchingRouter } from "./routers/importMatching";
-import { quotationsRouter } from "./routers/quotations";
 import { importSmartRouter } from "./importSmartRouter";
-import { editalAnalyzerRouter } from "./routers/editalAnalyzer";
 import { nfeImportRouter } from "./routers/nfeImport";
 import { priceSyncRouter } from "./routers/priceSync";
 import { priceImportRouter } from "./routers/priceImport";
-import { scraperMultiRouter } from "./routers/scraperMulti";
-import { scraperSyncRouter } from "./routers/scraperSync";
 import { priceAnalysisRouter } from "./routers/priceAnalysis";
 import { supplierCredentialsRouter } from "./routers/supplierCredentials";
 import { pricingRouter } from "./routers/pricing";
@@ -39,28 +28,14 @@ import { bulkPricingRouter } from "./routers/bulkPricing";
 import { agenteRouter } from "./routers/agente";
 import { scraperAgentRouter } from "./routers/scraperAgent";
 import { propostaAgentRouter } from "./routers/propostaAgentRouter";
-import { supplierImportRouter } from "./routers/supplierImport";
-import { priceAlertsRouter } from "./routers/priceAlerts";
 import { captureReviewRouter } from "./routers/captureReview";
-import { captureSchedulerRouter } from "./routers/captureScheduler";
-import { captureAnalyticsRouter } from "./routers/captureAnalytics";
 import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
-import { notificationWebhooksRouter } from "./routers/notificationWebhooks";
 import { enrichmentHistoryRouter } from "./routers/enrichmentHistoryRouter";
-import { supplierAuthRouter } from "./routers/supplierAuthRouter";
 import { documentGovernanceRouter } from "./routers/documentGovernanceRouter";
 import { workflowRouter } from "./routers/workflowRouter";
-import { operationsRouter } from "./routers/operationsRouter";
 import { auditRouter } from "./routers/auditRouter";
 import { mfaRouter } from "./routers/mfaRouter";
 import { usersRouter } from "./routers/usersRouter";
-import { connectorsRouter } from "./routers/connectors";
-import { alertConfigRouter } from "./routers/alertConfigRouter";
-import { marginOptimizationRouter } from "./routers/marginOptimizationRouter";
-import { reportRouter } from "./routers/reportRouter";
-import { duplicateDetectionRouter } from "./routers/duplicateDetectionRouter";
-import { executiveDecisionRouter } from "./routers/executiveDecisionRouter";
-import { postAwardContractsRouter } from "./routers/postAwardContractsRouter";
 import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
 import { pncpRadarRouter } from "./routers/pncpRadar";
 import { emailQuotationsRouter } from "./routers/emailQuotations";
@@ -94,39 +69,25 @@ import { protectedProcedure, router } from "./_core/trpc";
 export const appRouter = router({
   system: systemRouter,
   importSmart: importSmartRouter,
-  editalAnalyzer: editalAnalyzerRouter,
   nfeImport: nfeImportRouter,
   priceSync: priceSyncRouter,
   priceImport: priceImportRouter,
-  scraperMulti: scraperMultiRouter,
-  scraperSync: scraperSyncRouter,
   priceAnalysis: priceAnalysisRouter,
   supplierCredentials: supplierCredentialsRouter,
-  supplierImport: supplierImportRouter,
   pricing: pricingRouter,
   categoryPricing: categoryPricingRouter,
   bulkPricing: bulkPricingRouter,
   agente: agenteRouter,
   scraperAgent: scraperAgentRouter,
   propostaAgent: propostaAgentRouter,
-  priceAlerts: priceAlertsRouter,
   audit: auditRouter,
   mfa: mfaRouter,
   users: usersRouter,
-  connectors: connectorsRouter,
-  alertConfig: alertConfigRouter,
-  marginOptimization: marginOptimizationRouter,
-  reports: reportRouter,
   captureReview: captureReviewRouter,
-  captureScheduler: captureSchedulerRouter,
-  captureAnalytics: captureAnalyticsRouter,
   nfeEnrichmentPipeline: nfeEnrichmentPipelineRouter,
-  notificationWebhooks: notificationWebhooksRouter,
   enrichmentHistory: enrichmentHistoryRouter,
-  supplierAuth: supplierAuthRouter,
   documents: documentGovernanceRouter,
   workflow: workflowRouter,
-  operations: operationsRouter,
   pncpRadar: pncpRadarRouter,
   emailQuotations: emailQuotationsRouter,
   certidoes: certidoesRouter,
@@ -190,15 +151,10 @@ export const appRouter = router({
   // ─── Catalog Enrichment ────────────────────────────────────────────────────
   enrichment: enrichmentInlineRouter,
   // ─── Reclassificação em Lote via IA ──────────────────────────────────────────────────────
-  reclassification: reclassificationRouter,
   // ─── Importação com Consolidação Automática ──────────────────────────────────────────────────
-  importConsolidated: importConsolidatedRouter,
   // ─── Reconhecimento Inteligente de Produtos ──────────────────────────────────────────────────
-  productMatching: productMatchingRouter,
   // ─── Importação com Matching Automático ──────────────────────────────────────────────────────
-  importMatching: importMatchingRouter,
   // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────────────────────────
-  quotations: quotationsRouter,
   // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────────────────────
   edital: editalRouter,
 
@@ -242,19 +198,13 @@ export const appRouter = router({
   proposalTemplates: proposalTemplatesRouter,
 
   // ─── Metadados e apoio operacional ───────────────────────────────────────────
-  metadata: metadataRouter,
 
   // ─── Motor Universal de Equivalência e duplicidades ──────────────────────────
   duplicates: duplicatesRouter,
-  duplicateDetection: duplicateDetectionRouter,
-  executiveDecision: executiveDecisionRouter,
-  postAwardContracts: postAwardContractsRouter,
   intelligentCapture: intelligentCaptureRouter,
 
   // ─── Módulos complementares ───────────────────────────────────────────────────
-  drogavet: drogavetRouter,
   images: imagesRouter,
-  recognition: recognitionRouter,
 });
 export type AppRouter = typeof appRouter;
 
