@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { protectedProcedure, router } from "../_core/trpc";
+import { authenticatedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { users } from "../../drizzle/schema";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../services/totp";
@@ -17,12 +17,12 @@ import { recordAudit, requestOrigin } from "../services/auditService";
 const ISSUER = "Sistema S2";
 
 export const mfaRouter = router({
-  status: protectedProcedure.query(({ ctx }) => {
+  status: authenticatedProcedure.query(({ ctx }) => {
     return { enabled: !!ctx.user.mfaEnabled };
   }),
 
   /** Gera um novo segredo (desativado até confirmar) e devolve a URI otpauth. */
-  setup: protectedProcedure.mutation(async ({ ctx }) => {
+  setup: authenticatedProcedure.mutation(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
 
@@ -38,7 +38,7 @@ export const mfaRouter = router({
   }),
 
   /** Confirma um código válido e ATIVA o MFA. */
-  enable: protectedProcedure
+  enable: authenticatedProcedure
     .input(z.object({ token: z.string().min(6).max(8) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -59,7 +59,7 @@ export const mfaRouter = router({
     }),
 
   /** Desativa o MFA mediante um código válido. */
-  disable: protectedProcedure
+  disable: authenticatedProcedure
     .input(z.object({ token: z.string().min(6).max(8) }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();

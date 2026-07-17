@@ -42,7 +42,9 @@ export function scrapedProductToResult(
     unidadeVenda: sp.unit,
     estoque: sp.stock,
     disponivel,
-    fonte: { metodo: "scraper", origem },
+    // Proveniência a nível de URL: a página consultada quando disponível; o
+    // nome do fornecedor fica como fallback (a rastreabilidade do preço exige a origem).
+    fonte: { metodo: "scraper", origem: sp.fonteUrl ?? sp.productUrl ?? origem },
     consultadoEm: sp.consultadoEm ?? agora,
   };
 }

@@ -200,7 +200,7 @@ export async function extractTextFromBinaryDocument(buffer: Buffer, fileName: st
   // §2 — imagem digitalizada: OCR por IA de visão.
   const { isOcrSupportedMime, ocrImagem } = await import("./ocrService");
   if (isOcrSupportedMime(mimeType, lowerName)) {
-    return await ocrImagem(buffer, mimeType);
+    return await ocrImagem(buffer, mimeType, fileName);
   }
 
   throw new Error("Formato de documento não suportado. Use PDF, DOCX ou imagem (PNG/JPG).");

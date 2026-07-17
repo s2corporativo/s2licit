@@ -24,6 +24,7 @@ const sourceLabels: Record<string, string> = {
   spreadsheet: "Planilha / CSV",
   xml: "XML",
   docx: "DOCX",
+  image: "Imagem (OCR)",
   text: "Texto estruturado",
 };
 
@@ -280,21 +281,29 @@ export default function IntelligentCaptureCenter() {
               <TabsContent value="documento" className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
                 <div className="space-y-4 border border-slate-200 p-4">
                   <div className="space-y-2">
-                    <Label htmlFor="document-upload">Arquivo PDF ou DOCX</Label>
+                    <Label htmlFor="document-upload">Arquivo PDF, DOCX ou imagem (OCR)</Label>
                     <Input
                       id="document-upload"
                       type="file"
-                      accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp,image/gif"
                       onChange={async (event) => {
                         const file = event.target.files?.[0];
                         if (!file) return;
                         setDocumentFileName(file.name);
                         const fileBase64 = await fileToBase64(file);
-                        const sourceType = file.name.toLowerCase().endsWith(".docx") ? "docx" : "pdf";
+                        const lower = file.name.toLowerCase();
+                        const isImage = /\.(png|jpe?g|webp|gif)$/.test(lower) || (file.type || "").startsWith("image/");
+                        const sourceType = lower.endsWith(".docx") ? "docx" : isImage ? "image" : "pdf";
+                        const fallbackMime =
+                          sourceType === "docx"
+                            ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            : sourceType === "image"
+                              ? "image/png"
+                              : "application/pdf";
                         ingestDocument.mutate({
                           fileBase64,
                           fileName: file.name,
-                          mimeType: file.type || (sourceType === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                          mimeType: file.type || fallbackMime,
                           sourceType,
                         });
                         event.currentTarget.value = "";

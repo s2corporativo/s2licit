@@ -40,6 +40,22 @@ async function carregarUsuarios() {
   return { db, todos: await db.select().from(users) };
 }
 
+/**
+ * Serializa as operações que podem remover/rebaixar o último admin, para que a
+ * checagem (ler admins) e a escrita não sofram corrida (TOCTOU) — ex.: dois
+ * admins se rebaixando ao mesmo tempo deixariam o sistema sem administrador.
+ * Escopo de processo (a aplicação roda em instância única).
+ */
+let adminMutex: Promise<unknown> = Promise.resolve();
+function comLockDeAdmin<T>(fn: () => Promise<T>): Promise<T> {
+  const run = adminMutex.then(fn, fn);
+  adminMutex = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export const usersRouter = router({
   list: adminProcedure.query(async () => {
     const { todos } = await carregarUsuarios();
@@ -80,7 +96,7 @@ export const usersRouter = router({
 
   updateRole: adminProcedure
     .input(z.object({ id: z.number().int().positive(), role: z.enum(ROLES) }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(({ ctx, input }) => comLockDeAdmin(async () => {
       const { db, todos } = await carregarUsuarios();
       if (input.role !== "admin" && ehUltimoAdmin(todos, input.id)) {
         throw new Error("Não é possível rebaixar o único administrador do sistema.");
@@ -91,7 +107,7 @@ export const usersRouter = router({
         origin: "admin", summary: `Papel alterado para ${input.role}`, ...requestOrigin(ctx.req),
       });
       return { success: true };
-    }),
+    })),
 
   resetPassword: adminProcedure
     .input(z.object({ id: z.number().int().positive(), password: z.string().min(8).max(200) }))
@@ -124,7 +140,7 @@ export const usersRouter = router({
 
   remove: adminProcedure
     .input(z.object({ id: z.number().int().positive() }))
-    .mutation(async ({ ctx, input }) => {
+    .mutation(({ ctx, input }) => comLockDeAdmin(async () => {
       const { db, todos } = await carregarUsuarios();
       if (input.id === ctx.user.id) throw new Error("Você não pode remover a própria conta.");
       if (ehUltimoAdmin(todos, input.id)) {
@@ -137,5 +153,5 @@ export const usersRouter = router({
         origin: "admin", summary: `Removeu ${alvo?.email ?? input.id}`, ...requestOrigin(ctx.req),
       });
       return { success: true };
-    }),
+    })),
 });
