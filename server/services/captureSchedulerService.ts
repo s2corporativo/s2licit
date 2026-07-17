@@ -281,14 +281,16 @@ export async function cleanupOldCaptureLogs(
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
-  // Buscar logs antigos
+  // Conta e remove os logs antigos (a contagem sai antes do delete para o
+  // retorno refletir o que foi efetivamente apagado).
   const oldLogs = await db
-    .select()
+    .select({ id: captureLogs.id })
     .from(captureLogs)
     .where(lt(captureLogs.createdAt, cutoffDate));
 
-  // Deletar logs antigos (se necessário)
-  // await db.delete(captureLogs).where(lt(captureLogs.createdAt, cutoffDate));
+  if (oldLogs.length > 0) {
+    await db.delete(captureLogs).where(lt(captureLogs.createdAt, cutoffDate));
+  }
 
   return oldLogs.length;
 }
@@ -300,9 +302,12 @@ export async function initializeGlobalScheduler(): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database connection failed");
 
+  // ATENÇÃO: caminho legado, não inicializado no boot. O agendamento oficial
+  // dos scrapers vive em scheduledJobs.ts (runScheduledScrapers), que dispara
+  // cada fornecedor no scheduleTime configurado em scraperConfigs. Este
+  // scheduler só agenda registros de supplierCaptureConfigs (tabela legada).
   console.log("[Scheduler] Inicializando scheduler global...");
 
-  // Buscar todos os fornecedores com captura ativa
   const configs = await db
     .select({
       supplierId: supplierCaptureConfigs.supplierId,

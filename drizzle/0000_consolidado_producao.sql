@@ -1850,7 +1850,7 @@ CREATE TABLE `users` (
 );
 --> statement-breakpoint
 ALTER TABLE `audit_logs` ADD CONSTRAINT `audit_logs_userId_users_id_fk` FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `bulk_pricing_application_details` ADD CONSTRAINT `bulk_pricing_application_details_applicationId_bulk_pricing_applications_id_fk` FOREIGN KEY (`applicationId`) REFERENCES `bulk_pricing_applications`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `bulk_pricing_application_details` ADD CONSTRAINT `bulk_pricing_app_details_applicationId_fk` FOREIGN KEY (`applicationId`) REFERENCES `bulk_pricing_applications`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `bulk_pricing_application_details` ADD CONSTRAINT `bulk_pricing_application_details_productId_products_id_fk` FOREIGN KEY (`productId`) REFERENCES `products`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `bulk_pricing_applications` ADD CONSTRAINT `bulk_pricing_applications_categoryId_categories_id_fk` FOREIGN KEY (`categoryId`) REFERENCES `categories`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `bulk_pricing_applications` ADD CONSTRAINT `bulk_pricing_applications_appliedBy_users_id_fk` FOREIGN KEY (`appliedBy`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -1858,9 +1858,9 @@ ALTER TABLE `capture_errors` ADD CONSTRAINT `capture_errors_captureLogId_capture
 ALTER TABLE `capture_errors` ADD CONSTRAINT `capture_errors_supplierId_suppliers_id_fk` FOREIGN KEY (`supplierId`) REFERENCES `suppliers`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `capture_logs` ADD CONSTRAINT `capture_logs_supplierId_suppliers_id_fk` FOREIGN KEY (`supplierId`) REFERENCES `suppliers`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `captured_product_batches` ADD CONSTRAINT `captured_product_batches_createdByUserId_users_id_fk` FOREIGN KEY (`createdByUserId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `captured_product_field_confidence` ADD CONSTRAINT `captured_product_field_confidence_capturedProductId_captured_products_id_fk` FOREIGN KEY (`capturedProductId`) REFERENCES `captured_products`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `captured_product_source_logs` ADD CONSTRAINT `captured_product_source_logs_batchId_captured_product_batches_id_fk` FOREIGN KEY (`batchId`) REFERENCES `captured_product_batches`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `captured_product_source_logs` ADD CONSTRAINT `captured_product_source_logs_capturedProductId_captured_products_id_fk` FOREIGN KEY (`capturedProductId`) REFERENCES `captured_products`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `captured_product_field_confidence` ADD CONSTRAINT `captured_product_field_conf_capturedProductId_fk` FOREIGN KEY (`capturedProductId`) REFERENCES `captured_products`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `captured_product_source_logs` ADD CONSTRAINT `captured_product_source_logs_batchId_fk` FOREIGN KEY (`batchId`) REFERENCES `captured_product_batches`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `captured_product_source_logs` ADD CONSTRAINT `captured_product_source_logs_capturedProductId_fk` FOREIGN KEY (`capturedProductId`) REFERENCES `captured_products`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `captured_products` ADD CONSTRAINT `captured_products_batchId_captured_product_batches_id_fk` FOREIGN KEY (`batchId`) REFERENCES `captured_product_batches`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `captured_products` ADD CONSTRAINT `captured_products_matchedProductId_products_id_fk` FOREIGN KEY (`matchedProductId`) REFERENCES `products`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `category_pricing_rules` ADD CONSTRAINT `category_pricing_rules_categoryId_categories_id_fk` FOREIGN KEY (`categoryId`) REFERENCES `categories`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -1880,7 +1880,7 @@ ALTER TABLE `duplicate_detection_results` ADD CONSTRAINT `duplicate_detection_re
 ALTER TABLE `duplicate_detection_results` ADD CONSTRAINT `duplicate_detection_results_secondaryProductId_products_id_fk` FOREIGN KEY (`secondaryProductId`) REFERENCES `products`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `duplicate_detection_results` ADD CONSTRAINT `duplicate_detection_results_reviewedByUserId_users_id_fk` FOREIGN KEY (`reviewedByUserId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `duplicate_detection_runs` ADD CONSTRAINT `duplicate_detection_runs_triggeredByUserId_users_id_fk` FOREIGN KEY (`triggeredByUserId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `duplicate_merge_history` ADD CONSTRAINT `duplicate_merge_history_resultId_duplicate_detection_results_id_fk` FOREIGN KEY (`resultId`) REFERENCES `duplicate_detection_results`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `duplicate_merge_history` ADD CONSTRAINT `duplicate_merge_history_resultId_fk` FOREIGN KEY (`resultId`) REFERENCES `duplicate_detection_results`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `duplicate_merge_history` ADD CONSTRAINT `duplicate_merge_history_primaryProductId_products_id_fk` FOREIGN KEY (`primaryProductId`) REFERENCES `products`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `duplicate_merge_history` ADD CONSTRAINT `duplicate_merge_history_secondaryProductId_products_id_fk` FOREIGN KEY (`secondaryProductId`) REFERENCES `products`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `duplicate_merge_history` ADD CONSTRAINT `duplicate_merge_history_performedByUserId_users_id_fk` FOREIGN KEY (`performedByUserId`) REFERENCES `users`(`id`) ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -2133,7 +2133,7 @@ CREATE INDEX `idx_products_created_at` ON `products` (`createdAt`);--> statement
 CREATE INDEX `idx_products_code` ON `products` (`code`);--> statement-breakpoint
 CREATE INDEX `idx_products_active_cat` ON `products` (`isActive`,`categoryId`);--> statement-breakpoint
 CREATE INDEX `idx_products_active_mfr` ON `products` (`isActive`,`manufacturer`);--> statement-breakpoint
-CREATE INDEX `idx_products_active_ficha` ON `products` (`isActive`,`fichaTecnica`);--> statement-breakpoint
+CREATE INDEX `idx_products_active_ficha` ON `products` (`isActive`);--> statement-breakpoint
 CREATE INDEX `idx_products_active_name` ON `products` (`isActive`,`name`);--> statement-breakpoint
 CREATE INDEX `idx_products_supplier_name` ON `products` (`supplierId`,`name`);--> statement-breakpoint
 CREATE INDEX `idx_products_tipoCatalogo` ON `products` (`tipoCatalogo`);--> statement-breakpoint

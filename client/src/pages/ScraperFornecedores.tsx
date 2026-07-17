@@ -338,12 +338,136 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   );
 }
 
+// ─── Diálogo de confirmação de login (pedido a cada atualização) ─────────────
+function LoginDialog({
+  config,
+  onClose,
+  onConfirm,
+  pending,
+}: {
+  config: any;
+  onClose: () => void;
+  onConfirm: (creds: { email?: string; password?: string; usarSenhaSalva: boolean }) => void;
+  pending: boolean;
+}) {
+  const { data: emailData } = trpc.scraperAgent.verEmail.useQuery({ id: config.id });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [usarSalva, setUsarSalva] = useState(true);
+  const [showPass, setShowPass] = useState(false);
+
+  const emailAtual = email || emailData?.email || "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="px-6 py-5 bg-gradient-to-r from-indigo-600 to-violet-600">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center">
+              <Key size={18} className="text-white" />
+            </div>
+            <div>
+              <h3 className="text-white font-bold text-sm">Confirmar login do fornecedor</h3>
+              <p className="text-indigo-100 text-[11px]">
+                {config.scraperType.charAt(0).toUpperCase() + config.scraperType.slice(1)} — a
+                atualização acessa o portal com estas credenciais
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+              E-mail / usuário do portal
+            </label>
+            <input
+              type="email"
+              value={emailAtual}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="email@fornecedor.com.br"
+              className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition"
+            />
+          </div>
+
+          <label className="flex items-center gap-2.5 rounded-xl border border-slate-200 px-3.5 py-3 cursor-pointer hover:bg-slate-50 transition">
+            <input
+              type="checkbox"
+              checked={usarSalva}
+              onChange={(e) => setUsarSalva(e.target.checked)}
+              className="accent-indigo-600 w-4 h-4"
+            />
+            <div>
+              <div className="text-xs font-semibold text-slate-700">Usar a senha salva no cofre</div>
+              <div className="text-[10px] text-slate-400">
+                Criptografada com AES-256 — desmarque para digitar outra
+              </div>
+            </div>
+          </label>
+
+          {!usarSalva && (
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                Senha do portal
+              </label>
+              <div className="relative">
+                <input
+                  type={showPass ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 pr-10 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 outline-none transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-xl border border-slate-200 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              disabled={pending || (!usarSalva && password.length < 4)}
+              onClick={() =>
+                onConfirm({
+                  email: email || undefined,
+                  password: usarSalva ? undefined : password,
+                  usarSenhaSalva: usarSalva,
+                })
+              }
+              className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-40 transition flex items-center justify-center gap-2"
+            >
+              {pending ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              Entrar e atualizar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Card de Fornecedor ───────────────────────────────────────────────────────
 function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => void }) {
   const [showLog, setShowLog] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
 
   const executar = trpc.scraperAgent.executar.useMutation({
-    onSuccess: () => { toast.success("Scraping iniciado!"); setTimeout(onRefresh, 2000); },
+    onSuccess: () => {
+      toast.success("Login confirmado — captura iniciada!");
+      setShowLogin(false);
+      setTimeout(onRefresh, 2000);
+    },
     onError: (e) => toast.error(e.message),
   });
 
@@ -444,13 +568,21 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
       {/* Ações */}
       <div className="flex gap-2 px-5 pb-4 pt-2">
         <button
-          onClick={() => executar.mutate({ scraperConfigId: config.id })}
+          onClick={() => setShowLogin(true)}
           disabled={isRunning || executar.isPending}
           className="flex-1 flex items-center justify-center gap-2 bg-gray-900 text-white rounded-lg py-2 text-xs font-semibold hover:bg-gray-700 disabled:opacity-40 transition"
         >
           {isRunning ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {isRunning ? "Executando..." : "Atualizar Agora"}
         </button>
+        {showLogin && (
+          <LoginDialog
+            config={config}
+            onClose={() => setShowLogin(false)}
+            pending={executar.isPending}
+            onConfirm={(creds) => executar.mutate({ scraperConfigId: config.id, ...creds })}
+          />
+        )}
         <button
           onClick={() => {
             if (confirm(`Remover a configuração de scraping de "${config.scraperType}"? As credenciais salvas serão apagadas.`)) {
@@ -487,10 +619,11 @@ export default function ScraperFornecedores() {
             <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center">
               <Bot size={20} className="text-emerald-400" />
             </div>
-            <h1 className="text-xl font-black text-gray-900">Agente de Atualização de Preços</h1>
+            <h1 className="text-xl font-black text-gray-900">Agente de Captura de Catálogo</h1>
           </div>
           <p className="text-sm text-gray-500 ml-13">
-            Acessa os sites dos fornecedores com login automático e atualiza preços no catálogo
+            Acessa o site do fornecedor com login, varre o catálogo completo e cadastra
+            automaticamente todos os produtos — características, fotos e preços
           </p>
         </div>
         <div className="flex gap-2">
@@ -519,10 +652,10 @@ export default function ScraperFornecedores() {
           <h2 className="font-bold text-sm text-gray-900 mb-4">Como funciona</h2>
           <div className="grid grid-cols-4 gap-4">
             {[
-              { icon: Key, title: "1. Credenciais", desc: "Você cadastra o e-mail e senha do portal do fornecedor. São armazenados com criptografia AES-256." },
-              { icon: Bot, title: "2. Login automático", desc: "O agente acessa o site do fornecedor com um navegador real e faz login automaticamente." },
-              { icon: Globe, title: "3. Varredura", desc: "Navega pelas categorias de produtos, extraindo nomes, preços, códigos e imagens." },
-              { icon: RefreshCw, title: "4. Atualização", desc: "Os preços são comparados com o catálogo e atualizados automaticamente no sistema." },
+              { icon: Key, title: "1. Login confirmado", desc: "A cada atualização o sistema pede a confirmação do login do fornecedor. A senha fica no cofre com AES-256." },
+              { icon: Bot, title: "2. Acesso automático", desc: "O agente entra no site do fornecedor com um navegador real e navega como um operador." },
+              { icon: Globe, title: "3. Varredura total", desc: "Percorre todas as páginas do catálogo (10 mil+ produtos), extraindo nome, código, EAN, foto e preço." },
+              { icon: RefreshCw, title: "4. Cadastro e atualização", desc: "Produtos já conhecidos têm o preço atualizado; produtos novos são cadastrados automaticamente no catálogo." },
             ].map(({ icon: Icon, title, desc }) => (
               <div key={title} className="text-center">
                 <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center mx-auto mb-3">

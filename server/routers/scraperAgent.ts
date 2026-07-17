@@ -68,7 +68,15 @@ const testarConexaoSchema = z.object({
   customSelectors: customSelectorsSchema.optional(),
 });
 
-const executarSchema = z.object({ scraperConfigId: z.number() });
+// A atualização manual SEMPRE pede a confirmação do login do fornecedor:
+// o operador confirma o e-mail e digita a senha (ou reutiliza a salva).
+// Credenciais enviadas aqui substituem as armazenadas antes da execução.
+const executarSchema = z.object({
+  scraperConfigId: z.number(),
+  email: z.string().email().optional(),
+  password: z.string().min(4).optional(),
+  usarSenhaSalva: z.boolean().default(true),
+});
 
 const statusSchema = z.object({ scraperConfigId: z.number() });
 
@@ -177,6 +185,20 @@ export const scraperAgentRouter = router({
     .input(executarSchema)
     .mutation(async ({ input }: { input: z.infer<typeof executarSchema> }) => {
       const { scraperConfigId } = input;
+
+      // Confirmação de login: se o operador digitou credenciais novas, elas
+      // são gravadas (senha criptografada) antes de iniciar a captura. Sem
+      // senha nova, exige explicitamente o uso da senha salva.
+      if (input.password || input.email) {
+        const db = await getDb();
+        if (!db) throw new Error("Banco indisponível");
+        const updates: Record<string, any> = {};
+        if (input.email) updates.email = input.email;
+        if (input.password) updates.passwordHash = encryptPassword(input.password);
+        await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, scraperConfigId));
+      } else if (!input.usarSenhaSalva) {
+        throw new Error("Informe a senha do fornecedor ou marque 'usar senha salva'.");
+      }
 
       if (runningJobs.has(scraperConfigId)) {
         const job = runningJobs.get(scraperConfigId)!;

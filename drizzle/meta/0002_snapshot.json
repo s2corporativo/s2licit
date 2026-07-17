@@ -11457,8 +11457,7 @@
         "idx_products_active_ficha": {
           "name": "idx_products_active_ficha",
           "columns": [
-            "isActive",
-            "fichaTecnica"
+            "isActive"
           ],
           "isUnique": false
         },
