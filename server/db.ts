@@ -5,108 +5,28 @@ import {
   InsertProduct,
   InsertProposal,
   InsertProposalItem,
-  InsertFinancialEntry,
-  InsertSupplier,
   categories,
   equivalenceGroups,
   equivalenceMembers,
-  financialEntries,
   products,
   proposalItems,
   proposalStatusHistory,
   proposals,
   suppliers,
-  users,
   masterProducts,
-  type InsertUser,
   type MasterProduct,
 } from "../drizzle/schema";
-import { ENV } from "./_core/env";
 
 // Conexão/pool compartilhado: getDb/resetDb vivem em ./db/_client e são
 // re-exportados aqui para preservar a API pública `from "../db"`.
 export { getDb, resetDb };
 
-// ─── Users ───────────────────────────────────────────────────────────────────
-
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) throw new Error("User openId is required for upsert");
-  const db = await getDb();
-  if (!db) return;
-
-  const values: InsertUser = { openId: user.openId };
-  const updateSet: Record<string, unknown> = {};
-  const textFields = ["name", "email", "loginMethod"] as const;
-  textFields.forEach((field) => {
-    const value = user[field];
-    if (value === undefined) return;
-    const normalized = value ?? null;
-    values[field] = normalized;
-    updateSet[field] = normalized;
-  });
-  if (user.lastSignedIn !== undefined) {
-    values.lastSignedIn = user.lastSignedIn;
-    updateSet.lastSignedIn = user.lastSignedIn;
-  }
-  if (user.role !== undefined) {
-    values.role = user.role;
-    updateSet.role = user.role;
-  } else if (user.openId === ENV.ownerOpenId) {
-    values.role = "admin";
-    updateSet.role = "admin";
-  }
-  if (!values.lastSignedIn) values.lastSignedIn = new Date();
-  if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
-}
-
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
-}
-
+// ─── Users → ./db/users ───
+export * from "./db/users";
 // ─── Categories → ./db/categories ───
 export * from "./db/categories";
-// ─── Suppliers ───────────────────────────────────────────────────────────────
-
-export async function listSuppliers(activeOnly = false) {
-  const db = await getDb();
-  if (!db) return [];
-  const query = db.select().from(suppliers).orderBy(asc(suppliers.name));
-  if (activeOnly) {
-    return db.select().from(suppliers).where(eq(suppliers.isActive, "yes")).orderBy(asc(suppliers.name));
-  }
-  return query;
-}
-
-export async function getSupplierById(id: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(suppliers).where(eq(suppliers.id, id)).limit(1);
-  return result[0];
-}
-
-export async function createSupplier(data: InsertSupplier) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(suppliers).values(data);
-  return result;
-}
-
-export async function updateSupplier(id: number, data: Partial<InsertSupplier>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.update(suppliers).set(data).where(eq(suppliers.id, id));
-}
-
-export async function deleteSupplier(id: number) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.delete(suppliers).where(eq(suppliers.id, id));
-}
-
+// ─── Suppliers → ./db/suppliers ───
+export * from "./db/suppliers";
 // ─── Products ────────────────────────────────────────────────────────────────
 
 export async function listProducts(opts: {
@@ -672,50 +592,8 @@ export async function deleteEquivalenceGroup(groupId: number) {
 // ─── Import Logs → ./db/importLogs ───────────────────────────────────────────
 export * from "./db/importLogs";
 
-// ─── Dashboard Stats ──────────────────────────────────────────────────────────
-
-export async function getDashboardStats() {
-  const db = await getDb();
-  if (!db) return null;
-
-  const [totalProducts, totalSuppliers, totalCategories, totalEquivGroups] = await Promise.all([
-    db.select({ count: sql<number>`count(*)` }).from(products).where(eq(products.isActive, "yes")),
-    db.select({ count: sql<number>`count(*)` }).from(suppliers).where(eq(suppliers.isActive, "yes")),
-    db.select({ count: sql<number>`count(*)` }).from(categories),
-    db.select({ count: sql<number>`count(*)` }).from(equivalenceGroups),
-  ]);
-
-  return {
-    totalProducts: Number(totalProducts[0]?.count ?? 0),
-    totalSuppliers: Number(totalSuppliers[0]?.count ?? 0),
-    totalCategories: Number(totalCategories[0]?.count ?? 0),
-    totalEquivGroups: Number(totalEquivGroups[0]?.count ?? 0),
-    radarProposals: 0,
-    radarWon: 0,
-    radarOpportunities: 0,
-    radarConversionRate: 0,
-  };
-}
-
-export async function getProductsPerCategory() {
-  const db = await getDb();
-  if (!db) return [];
-  return db
-    .select({
-      categoryId: categories.id,
-      categoryName: categories.name,
-      categoryColor: categories.color,
-      count: sql<number>`count(${products.id})`,
-    })
-    .from(categories)
-    .leftJoin(
-      products,
-      and(eq(products.categoryId, categories.id), eq(products.isActive, "yes"))
-    )
-    .groupBy(categories.id, categories.name, categories.color)
-    .orderBy(asc(categories.sortOrder));
-}
-
+// ─── Dashboard Stats → ./db/dashboard ───
+export * from "./db/dashboard";
 // ─── Quotations → ./db/quotations ───
 export * from "./db/quotations";
 // ─── Bulk Update Products ─────────────────────────────────────────────────────
@@ -1031,136 +909,8 @@ export async function duplicateProposal(id: number) {
   return newId;
 }
 
-// ─── Financial Entries ───────────────────────────────────────────────────────
-
-export async function listFinancialEntries(filters?: {
-  type?: "income" | "expense";
-  isPaid?: "yes" | "no";
-  dateFrom?: Date;
-  dateTo?: Date;
-  proposalId?: number;
-}) {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db
-    .select()
-    .from(financialEntries)
-    .orderBy(desc(financialEntries.createdAt));
-
-  let result = rows;
-  if (filters?.type) result = result.filter((r) => r.type === filters.type);
-  if (filters?.isPaid) result = result.filter((r) => r.isPaid === filters.isPaid);
-  if (filters?.proposalId) result = result.filter((r) => r.proposalId === filters.proposalId);
-  if (filters?.dateFrom) result = result.filter((r) => new Date(r.createdAt) >= filters.dateFrom!);
-  if (filters?.dateTo) result = result.filter((r) => new Date(r.createdAt) <= filters.dateTo!);
-  return result;
-}
-
-export async function createFinancialEntry(data: InsertFinancialEntry) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(financialEntries).values(data);
-  return (result as any).insertId as number;
-}
-
-export async function updateFinancialEntry(id: number, data: Partial<InsertFinancialEntry>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.update(financialEntries).set(data).where(eq(financialEntries.id, id));
-}
-
-export async function deleteFinancialEntry(id: number) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.delete(financialEntries).where(eq(financialEntries.id, id));
-}
-
-export async function getFinancialSummary(dateFrom?: Date, dateTo?: Date) {
-  const db = await getDb();
-  if (!db) return { totalIncome: 0, totalExpense: 0, balance: 0, paidIncome: 0, paidExpense: 0, pendingIncome: 0, pendingExpense: 0 };
-
-  const rows = await db.select().from(financialEntries);
-  let filtered = rows;
-  if (dateFrom) filtered = filtered.filter((r) => new Date(r.createdAt) >= dateFrom);
-  if (dateTo) filtered = filtered.filter((r) => new Date(r.createdAt) <= dateTo);
-
-  const totalIncome = filtered.filter((r) => r.type === "income").reduce((s, r) => s + parseFloat(String(r.amount ?? 0)), 0);
-  const totalExpense = filtered.filter((r) => r.type === "expense").reduce((s, r) => s + parseFloat(String(r.amount ?? 0)), 0);
-  const paidIncome = filtered.filter((r) => r.type === "income" && r.isPaid === "yes").reduce((s, r) => s + parseFloat(String(r.amount ?? 0)), 0);
-  const paidExpense = filtered.filter((r) => r.type === "expense" && r.isPaid === "yes").reduce((s, r) => s + parseFloat(String(r.amount ?? 0)), 0);
-
-  return {
-    totalIncome,
-    totalExpense,
-    balance: totalIncome - totalExpense,
-    paidIncome,
-    paidExpense,
-    pendingIncome: totalIncome - paidIncome,
-    pendingExpense: totalExpense - paidExpense,
-  };
-}
-
-export async function getProposalFinancialStats() {
-  const db = await getDb();
-  if (!db) return { byStatus: [] };
-  const rows = await db.select().from(proposals);
-  const statusGroups: Record<string, { count: number; total: number }> = {};
-  for (const row of rows) {
-    const s = row.status ?? "draft";
-    if (!statusGroups[s]) statusGroups[s] = { count: 0, total: 0 };
-    statusGroups[s].count++;
-    statusGroups[s].total += parseFloat(String(row.totalValue ?? 0));
-  }
-  return {
-    byStatus: Object.entries(statusGroups).map(([status, data]) => ({ status, ...data })),
-  };
-}
-
-// ─── Freight Report ───────────────────────────────────────────────────────────
-export async function getFreightReport(dateFrom?: Date, dateTo?: Date) {
-  const db = await getDb();
-  if (!db) return { byCarrier: [], total: 0, totalPaid: 0 };
-  const rows = await db
-    .select({
-      id: proposals.id,
-      title: proposals.title,
-      freightValue: proposals.freightValue,
-      freightCarrier: proposals.freightCarrier,
-      freightTrackingCode: proposals.freightTrackingCode,
-      freightPaidAt: proposals.freightPaidAt,
-      deliveredAt: proposals.deliveredAt,
-      status: proposals.status,
-    })
-    .from(proposals)
-    .where(sql`${proposals.freightValue} IS NOT NULL AND CAST(${proposals.freightValue} AS DECIMAL) > 0`);
-
-  let filtered = rows;
-  if (dateFrom) filtered = filtered.filter((r) => r.deliveredAt && new Date(r.deliveredAt) >= dateFrom);
-  if (dateTo) filtered = filtered.filter((r) => r.deliveredAt && new Date(r.deliveredAt) <= dateTo);
-
-  // Group by carrier
-  const byCarrier: Record<string, { carrier: string; count: number; total: number; paid: number; items: typeof filtered }> = {};
-  for (const row of filtered) {
-    const carrier = row.freightCarrier ?? "Sem transportadora";
-    if (!byCarrier[carrier]) byCarrier[carrier] = { carrier, count: 0, total: 0, paid: 0, items: [] };
-    const val = parseFloat(String(row.freightValue ?? 0));
-    byCarrier[carrier].count++;
-    byCarrier[carrier].total += val;
-    if (row.freightPaidAt) byCarrier[carrier].paid += val;
-    byCarrier[carrier].items.push(row);
-  }
-
-  const total = filtered.reduce((s, r) => s + parseFloat(String(r.freightValue ?? 0)), 0);
-  const totalPaid = filtered.filter((r) => r.freightPaidAt).reduce((s, r) => s + parseFloat(String(r.freightValue ?? 0)), 0);
-
-  return {
-    byCarrier: Object.values(byCarrier).sort((a, b) => b.total - a.total),
-    total,
-    totalPaid,
-    items: filtered,
-  };
-}
-
+// ─── Financial + Freight → ./db/financial ───
+export * from "./db/financial";
 // ─── Expiring Proposals ───────────────────────────────────────────────────────
 export async function getExpiringProposals(daysAhead = 7) {
   const db = await getDb();
@@ -2807,66 +2557,8 @@ export * from "./db/synonyms";
 // ── Templates de Proposta → ./db/proposalTemplates ────────────────────────────
 export * from "./db/proposalTemplates";
 
-// ─── Rentabilidade por Categoria ─────────────────────────────────────────────
-export async function getMarginByCategory() {
-  const db = await getDb();
-  if (!db) return [];
-  // Buscar proposal_items com categoria (via products), custo e preço sugerido
-  const rows = await db
-    .select({
-      categoryName: categories.name,
-      unitPrice: proposalItems.unitPrice,
-      costPrice: proposalItems.costPrice,
-      suggestedPrice: proposalItems.suggestedPrice,
-      quantity: proposalItems.quantity,
-      proposalStatus: proposals.status,
-    })
-    .from(proposalItems)
-    .leftJoin(proposals, eq(proposalItems.proposalId, proposals.id))
-    .leftJoin(products, eq(proposalItems.productId, products.id))
-    .leftJoin(categories, eq(products.categoryId, categories.id))
-    .where(
-      and(
-        sql`${proposalItems.suggestedPrice} IS NOT NULL`,
-        sql`CAST(${proposalItems.suggestedPrice} AS DECIMAL) > 0`
-      )
-    );
-
-  // Agrupar por categoria
-  const grouped: Record<string, {
-    categoryName: string;
-    totalRevenue: number;
-    totalCost: number;
-    itemCount: number;
-    deliveredCount: number;
-  }> = {};
-
-  for (const row of rows) {
-    const key = row.categoryName ?? "Sem Categoria";
-    if (!grouped[key]) grouped[key] = { categoryName: key, totalRevenue: 0, totalCost: 0, itemCount: 0, deliveredCount: 0 };
-    const qty = parseFloat(String(row.quantity ?? 1));
-    const sale = parseFloat(String(row.suggestedPrice ?? 0));
-    const cost = parseFloat(String(row.costPrice ?? row.unitPrice ?? 0));
-    grouped[key].totalRevenue += sale * qty;
-    grouped[key].totalCost += cost * qty;
-    grouped[key].itemCount++;
-    if (row.proposalStatus === "delivered") grouped[key].deliveredCount++;
-  }
-
-  return Object.values(grouped)
-    .map((g) => ({
-      categoryName: g.categoryName,
-      totalRevenue: g.totalRevenue,
-      totalCost: g.totalCost,
-      itemCount: g.itemCount,
-      deliveredCount: g.deliveredCount,
-      marginPercent: g.totalRevenue > 0
-        ? ((g.totalRevenue - g.totalCost) / g.totalRevenue) * 100
-        : 0,
-    }))
-    .sort((a, b) => b.marginPercent - a.marginPercent);
-}
-
+// ─── Rentabilidade por Categoria → ./db/categoryProfitability ───
+export * from "./db/categoryProfitability";
 // ─── Match Feedback → ./db/matchFeedback ───
 export * from "./db/matchFeedback";
 // ─── Detecção e Fusão de Duplicatas ──────────────────────────────────────────
@@ -3062,166 +2754,9 @@ export async function mergeProductGroup(
 }
 
 
-// ─── Preços por Fornecedor ────────────────────────────────────────────────────
-
-export async function getProductSupplierPrices(productId: number) {
-  const db = await getDb();
-  if (!db) return [];
-  const { productSupplierPrices, suppliers } = await import("../drizzle/schema");
-  const { eq, asc } = await import("drizzle-orm");
-  return db.select({
-    id: productSupplierPrices.id,
-    productId: productSupplierPrices.productId,
-    supplierId: productSupplierPrices.supplierId,
-    price: productSupplierPrices.price,
-    codigoFornecedor: productSupplierPrices.codigoFornecedor,
-    linkProduto: productSupplierPrices.linkProduto,
-    updatedAt: productSupplierPrices.updatedAt,
-    supplierName: suppliers.name,
-  })
-    .from(productSupplierPrices)
-    .leftJoin(suppliers, eq(productSupplierPrices.supplierId, suppliers.id))
-    .where(eq(productSupplierPrices.productId, productId))
-    .orderBy(asc(productSupplierPrices.supplierId));
-}
-
-export async function upsertProductSupplierPrice(
-  productId: number,
-  supplierId: number,
-  price: string | null,
-  extra?: { codigoFornecedor?: string; linkProduto?: string; origem?: string }
-) {
-  const db = await getDb();
-  if (!db) return;
-  const { productSupplierPrices } = await import("../drizzle/schema");
-  const { and, eq } = await import("drizzle-orm");
-  const existing = await db.select({ id: productSupplierPrices.id })
-    .from(productSupplierPrices)
-    .where(and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId)))
-    .limit(1);
-  const now = new Date();
-  if (existing.length > 0) {
-    await db.update(productSupplierPrices)
-      .set({ price, codigoFornecedor: extra?.codigoFornecedor ?? null, linkProduto: extra?.linkProduto ?? null, updatedAt: now })
-      .where(and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId)));
-  } else {
-    await db.insert(productSupplierPrices).values({ productId, supplierId, price, codigoFornecedor: extra?.codigoFornecedor ?? null, linkProduto: extra?.linkProduto ?? null, updatedAt: now });
-  }
-}
-
-export async function getPriceHistory(productId: number, supplierId?: number, limit = 20) {
-  const db = await getDb();
-  if (!db) return [];
-  const { productSupplierPrices } = await import("../drizzle/schema");
-  const { and, eq, desc } = await import("drizzle-orm");
-  const conditions = supplierId
-    ? and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId))
-    : eq(productSupplierPrices.productId, productId);
-  return db.select().from(productSupplierPrices).where(conditions).orderBy(desc(productSupplierPrices.updatedAt)).limit(limit);
-}
-
-export async function findProductByEan(ean: string) {
-  const db = await getDb();
-  if (!db) return null;
-  const { products } = await import("../drizzle/schema");
-  const { eq } = await import("drizzle-orm");
-  const rows = await db.select().from(products).where(eq((products as any).ean, ean)).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function deleteProductSupplierPrice(productId: number, supplierId: number) {
-  const db = await getDb();
-  if (!db) return;
-  const { productSupplierPrices } = await import("../drizzle/schema");
-  const { and, eq } = await import("drizzle-orm");
-  await db.delete(productSupplierPrices).where(and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId)));
-}
-
-export async function batchUpsertSupplierPrices(entries: Array<{ productId: number; supplierId: number; price: string | null; codigoFornecedor?: string; linkProduto?: string; origem?: string }>) {
-  for (const entry of entries) {
-    await upsertProductSupplierPrice(entry.productId, entry.supplierId, entry.price, {
-      codigoFornecedor: entry.codigoFornecedor,
-      linkProduto: entry.linkProduto,
-      origem: entry.origem ?? "import",
-    });
-  }
-}
-
-// ─── Edital Analyzer ─────────────────────────────────────────────────────────
-
-export async function listEditalAnalyses() {
-  const db = await getDb();
-  if (!db) return [];
-  const { editalAnalyses } = await import("../drizzle/schema");
-  const { desc } = await import("drizzle-orm");
-  return db.select().from(editalAnalyses).orderBy(desc(editalAnalyses.createdAt));
-}
-
-export async function createEditalAnalysis(data: {
-  fileName: string; fileUrl: string; fileKey?: string | null; licitacaoId?: number | null;
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  const { editalAnalyses } = await import("../drizzle/schema");
-  const [res] = await db.insert(editalAnalyses).values({ ...data, status: "pendente", createdAt: new Date() } as any);
-  return (res as any).insertId as number;
-}
-
-export async function getEditalAnalysis(id: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const { editalAnalyses } = await import("../drizzle/schema");
-  const { eq } = await import("drizzle-orm");
-  const rows = await db.select().from(editalAnalyses).where(eq(editalAnalyses.id, id)).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function updateEditalAnalysis(id: number, data: Partial<{ status: string; errorMessage: string | null; itensExtraidos: any; proposalId: number | null; prazosEntrega: string | null; condicoesPagamento: string | null; documentosExigidos: any; orgaoComprador: string | null; numeroEdital: string | null; processedAt: Date | null }>) {
-  const db = await getDb();
-  if (!db) return;
-  const { editalAnalyses } = await import("../drizzle/schema");
-  const { eq } = await import("drizzle-orm");
-  await db.update(editalAnalyses).set(data as any).where(eq(editalAnalyses.id, id));
-}
-
-// ─── Match Logs ───────────────────────────────────────────────────────────────
-
-export async function createMatchLog(data: {
-  editalItem: string; editalAnalysisId?: number | null;
-  produtoSugeridoId?: number | null; produtoSugeridoNome?: string | null;
-  score?: number | null; decisao?: string | null; tempoExecucaoMs?: number | null;
-}) {
-  const db = await getDb();
-  if (!db) return;
-  const { matchLogs } = await import("../drizzle/schema");
-  await db.insert(matchLogs).values({ ...data, createdAt: new Date() } as any);
-}
-
-export async function getMatchLogsByAnalysis(analysisId: number) {
-  const db = await getDb();
-  if (!db) return [];
-  const { matchLogs } = await import("../drizzle/schema");
-  const { eq, desc } = await import("drizzle-orm");
-  return db.select().from(matchLogs).where(eq(matchLogs.editalAnalysisId, analysisId)).orderBy(desc(matchLogs.createdAt));
-}
-
-export async function createMatchFeedbackV2(data: {
-  analysisId: number; itemDescription: string; matchedProductId: number;
-  feedback: string; userId?: number | null;
-}) {
-  return createMatchLog({ editalItem: data.itemDescription, editalAnalysisId: data.analysisId, produtoSugeridoId: data.matchedProductId, decisao: data.feedback });
-}
-
-export async function listAllProductsForMatching() {
-  const db = await getDb();
-  if (!db) return [];
-  const { products } = await import("../drizzle/schema");
-  const { eq } = await import("drizzle-orm");
-  return db.select({
-    id: products.id,
-    name: products.name,
-    fichaTecnica: products.fichaTecnica,
-    principioAtivo: (products as any).principioAtivo,
-    categoryId: products.categoryId,
-  }).from(products).where(eq(products.isActive, "yes")).limit(5000);
-}
+// ─── Preços por Fornecedor → ./db/supplierPrices ───
+export * from "./db/supplierPrices";
+// ─── Edital Analyzer → ./db/editalAnalyses ───
+export * from "./db/editalAnalyses";
+// ─── Match Logs → ./db/matchLogs ───
+export * from "./db/matchLogs";
