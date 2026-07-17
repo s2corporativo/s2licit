@@ -26,6 +26,7 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  Tag,
   Trophy,
   Users,
 } from "lucide-react";
@@ -106,6 +107,12 @@ const navGroups: NavGroup[] = [
         href: "/configurador-fornecedores",
         icon: Building2,
         label: "Acessos fornecedores",
+        minRole: "admin",
+      },
+      {
+        href: "/scraper-fornecedores",
+        icon: Tag,
+        label: "Agente de preços",
         minRole: "admin",
       },
       { href: "/central-ia", icon: Brain, label: "Inteligência artificial", minRole: "admin" },
