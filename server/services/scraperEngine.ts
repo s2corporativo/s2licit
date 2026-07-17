@@ -261,6 +261,45 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     nextPage: '[rel="next"], .next, .proxima',
     navigationWait: 2500,
   },
+  // Utilidades Clínicas roda em Magento 2 (base Henry Schein Brazil). Seletores
+  // reais confirmados na página de login. B2B profissional: os preços só
+  // aparecem logado e há produtos restritos (exigem CRM/CRMV/CRO no cadastro).
+  //
+  // ⚠ §3/§17 — o site tem CAPTCHA no user_login (hoje isRequired:false, mas pode
+  // ser ligado) e AUTENTICAÇÃO POR DISPOSITIVO / 2FA (modal hsb-mfa, token por
+  // SMS/WhatsApp). Quando qualquer um for exigido, o login automático NÃO deve
+  // tentar resolvê-lo: o motor detecta o desafio e requer intervenção humana
+  // (login manual + reuso de sessão via cookies). Prefira o caminho de
+  // catálogo/sessão salva; a raspagem com senha só funciona quando 2FA/captcha
+  // estiverem desligados para o acesso usado.
+  utilidadesclinicas: {
+    // Página de login padrão do Magento (o mesmo formulário existe no modal
+    // #login-form-registro, que posta em /customer/ajax/login/).
+    loginUrl: "https://www.utilidadesclinicas.com.br/customer/account/login/",
+    // Campo aceita e-mail OU CPF/CNPJ (label "E-mail ou CPF/CNPJ").
+    loginEmail: '#email-registro, input[name="login[username]"], #email, input[name="login[username]"]',
+    loginPassword: '#pass-popup, input[name="login[password]"], #pass',
+    loginSubmit: '#send2, button.action.login, button[type="submit"]',
+    // Em Magento o link de logout no cabeçalho confirma a sessão autenticada.
+    loginSuccessSelector: '.customer-welcome, a[href*="customer/account/logout"], .customer-name',
+    useStructuredData: true,
+    categoryUrls: [
+      "https://www.utilidadesclinicas.com.br/veterinaria.html",
+      "https://www.utilidadesclinicas.com.br/descartaveis.html",
+      "https://www.utilidadesclinicas.com.br/estetoscopios.html",
+    ],
+    // Busca padrão do Magento (endpoint de resultado). O mini-form do site usa
+    // /catalog_search/?term= — se este template voltar vazio, troque no
+    // Configurador ("testar login" / capturar).
+    searchUrlTemplate: "https://www.utilidadesclinicas.com.br/catalogsearch/result/?q={q}",
+    productItem: '.product-item, li.item.product, [class*="product-item"]',
+    productName: '.product-item-link, .product-item-name, h2, h3',
+    productPrice: '.price, [data-price-type="finalPrice"] .price, [class*="price"]',
+    productImage: 'img.product-image-photo, img',
+    productLink: '.product-item-link, a.product-item-photo, a',
+    nextPage: '.pages-item-next a, [rel="next"], .action.next',
+    navigationWait: 2500,
+  },
 
   // Fornecedor genérico — funciona para muitos e-commerces padrão
   generico: {
