@@ -2,17 +2,12 @@ import { and, asc, desc, eq, inArray, isNotNull, like, or, sql } from "drizzle-o
 import { escapeLike, simplifyDbError, normalize, matches, normalizeName, similarity } from "./db/_helpers";
 import { getDb, resetDb } from "./db/_client";
 import {
-  InsertCategory,
-  InsertCompanySettings,
   InsertProduct,
   InsertProposal,
   InsertProposalItem,
   InsertFinancialEntry,
-  InsertQuotation,
-  InsertQuotationItem,
   InsertSupplier,
   categories,
-  companySettings,
   equivalenceGroups,
   equivalenceMembers,
   financialEntries,
@@ -20,15 +15,11 @@ import {
   proposalItems,
   proposalStatusHistory,
   proposals,
-  quotationItems,
-  quotations,
   suppliers,
   users,
   masterProducts,
   type InsertUser,
   type MasterProduct,
-  matchFeedback,
-  type MatchFeedback,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -76,53 +67,8 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// ─── Categories ──────────────────────────────────────────────────────────────
-
-export async function listCategories() {
-  const db = await getDb();
-  if (!db) return [];
-  const all = await db.select().from(categories).orderBy(asc(categories.sortOrder), asc(categories.name));
-  return all;
-}
-
-export async function listCategoriesHierarchy() {
-  const db = await getDb();
-  if (!db) return [];
-  const all = await db.select().from(categories).orderBy(asc(categories.sortOrder), asc(categories.name));
-  type CatWithChildren = (typeof all)[0] & { children: (typeof all)[0][] };
-  const parents = all.filter((c) => !c.parentId) as CatWithChildren[];
-  for (const p of parents) {
-    p.children = all.filter((c) => c.parentId === p.id);
-  }
-  return parents;
-}
-
-export async function getCategoryById(id: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
-  return result[0];
-}
-
-export async function createCategory(data: InsertCategory) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const [result] = await db.insert(categories).values(data);
-  return result;
-}
-
-export async function updateCategory(id: number, data: Partial<InsertCategory>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.update(categories).set(data).where(eq(categories.id, id));
-}
-
-export async function deleteCategory(id: number) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  await db.delete(categories).where(eq(categories.id, id));
-}
-
+// ─── Categories → ./db/categories ───
+export * from "./db/categories";
 // ─── Suppliers ───────────────────────────────────────────────────────────────
 
 export async function listSuppliers(activeOnly = false) {
@@ -770,87 +716,8 @@ export async function getProductsPerCategory() {
     .orderBy(asc(categories.sortOrder));
 }
 
-// ─── Quotations ──────────────────────────────────────────────────────────────
-
-export async function createQuotation(data: InsertQuotation): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  const result = await db.insert(quotations).values(data);
-  return (result[0] as any).insertId as number;
-}
-
-export async function listQuotations(): Promise<
-  { id: number; title: string; clientName: string | null; status: string; createdAt: Date; updatedAt: Date; itemCount: number }[]
-> {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db
-    .select({
-      id: quotations.id,
-      title: quotations.title,
-      clientName: quotations.clientName,
-      status: quotations.status,
-      createdAt: quotations.createdAt,
-      updatedAt: quotations.updatedAt,
-      itemCount: sql<number>`count(${quotationItems.id})`,
-    })
-    .from(quotations)
-    .leftJoin(quotationItems, eq(quotationItems.quotationId, quotations.id))
-    .groupBy(quotations.id, quotations.title, quotations.clientName, quotations.status, quotations.createdAt, quotations.updatedAt)
-    .orderBy(desc(quotations.createdAt));
-  return rows;
-}
-
-export async function getQuotationWithItems(id: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const [quotation] = await db.select().from(quotations).where(eq(quotations.id, id)).limit(1);
-  if (!quotation) return null;
-  const items = await db
-    .select()
-    .from(quotationItems)
-    .where(eq(quotationItems.quotationId, id))
-    .orderBy(asc(quotationItems.sortOrder), asc(quotationItems.id));
-  return { ...quotation, items };
-}
-
-export async function updateQuotation(
-  id: number,
-  data: Partial<InsertQuotation>
-): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(quotations).set(data).where(eq(quotations.id, id));
-}
-
-export async function deleteQuotation(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(quotations).where(eq(quotations.id, id));
-}
-
-export async function addQuotationItem(data: InsertQuotationItem): Promise<number> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-  const result = await db.insert(quotationItems).values(data);
-  return (result[0] as any).insertId as number;
-}
-
-export async function updateQuotationItem(
-  id: number,
-  data: Partial<InsertQuotationItem>
-): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(quotationItems).set(data).where(eq(quotationItems.id, id));
-}
-
-export async function removeQuotationItem(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(quotationItems).where(eq(quotationItems.id, id));
-}
-
+// ─── Quotations → ./db/quotations ───
+export * from "./db/quotations";
 // ─── Bulk Update Products ─────────────────────────────────────────────────────
 
 export async function bulkUpdateProducts(
@@ -915,28 +782,8 @@ export async function bulkUpdateProducts(
   return ids.length;
 }
 
-// ─── Company Settings ─────────────────────────────────────────────────────────
-
-export async function getCompanySettings() {
-  const db = await getDb();
-  if (!db) return null;
-  const rows = await db.select().from(companySettings).limit(1);
-  return rows[0] ?? null;
-}
-
-export async function upsertCompanySettings(data: Partial<InsertCompanySettings>) {
-  const db = await getDb();
-  if (!db) throw new Error("DB not available");
-  const existing = await getCompanySettings();
-  if (existing) {
-    await db.update(companySettings).set(data).where(eq(companySettings.id, existing.id));
-    return existing.id;
-  } else {
-    const [result] = await db.insert(companySettings).values(data as InsertCompanySettings);
-    return (result as any).insertId as number;
-  }
-}
-
+// ─── Company Settings → ./db/companySettings ───
+export * from "./db/companySettings";
 // ─── Requesting Orgs → ./db/requestingOrgs ──────────────────────────────────
 export * from "./db/requestingOrgs";
 
@@ -3020,130 +2867,8 @@ export async function getMarginByCategory() {
     .sort((a, b) => b.marginPercent - a.marginPercent);
 }
 
-// ─── Match Feedback (Aprendizado de Matching) ────────────────────────────────
-
-/** Normaliza um termo do edital para uso como chave de lookup */
-export function normalizeEditalTerm(term: string): string {
-  return term
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove acentos
-    .replace(/[^a-z0-9\s]/g, " ")    // remove pontuação
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Carrega o mapa de feedback: editalTerm → { productId, productName, useCount } */
-export async function loadFeedbackMap(): Promise<Map<string, { productId: number; productName: string; useCount: number }>> {
-  const db = await getDb();
-  if (!db) return new Map();
-  const rows = await db
-    .select({
-      editalTerm: matchFeedback.editalTerm,
-      productId: matchFeedback.productId,
-      productName: matchFeedback.productName,
-      useCount: matchFeedback.useCount,
-    })
-    .from(matchFeedback)
-    .orderBy(desc(matchFeedback.useCount));
-  const map = new Map<string, { productId: number; productName: string; useCount: number }>();
-  for (const row of rows) {
-    // Mantém apenas o par com maior useCount por termo
-    if (!map.has(row.editalTerm)) {
-      map.set(row.editalTerm, {
-        productId: row.productId,
-        productName: row.productName,
-        useCount: row.useCount,
-      });
-    }
-  }
-  return map;
-}
-
-/** Registra ou incrementa um par aprendido (editalTerm → productId) */
-export async function recordFeedback(editalTerm: string, productId: number, productName: string): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  const normalizedTerm = normalizeEditalTerm(editalTerm);
-  if (!normalizedTerm) return;
-  // Verificar se já existe
-  const existing = await db
-    .select({ id: matchFeedback.id, useCount: matchFeedback.useCount })
-    .from(matchFeedback)
-    .where(and(eq(matchFeedback.editalTerm, normalizedTerm), eq(matchFeedback.productId, productId)))
-    .limit(1);
-  if (existing.length > 0) {
-    // Incrementar useCount e atualizar lastUsedAt
-    await db
-      .update(matchFeedback)
-      .set({
-        useCount: (existing[0].useCount ?? 1) + 1,
-        lastUsedAt: new Date(),
-        productName, // atualiza o nome caso tenha mudado
-      })
-      .where(eq(matchFeedback.id, existing[0].id));
-  } else {
-    // Inserir novo par
-    await db.insert(matchFeedback).values({
-      editalTerm: normalizedTerm,
-      productId,
-      productName,
-      useCount: 1,
-      confirmedAt: new Date(),
-      lastUsedAt: new Date(),
-    });
-  }
-}
-
-/** Lista feedbacks com paginação e busca */
-export async function listFeedbacks(opts: {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-}): Promise<{ items: MatchFeedback[]; total: number }> {
-  const db = await getDb();
-  if (!db) return { items: [], total: 0 };
-  const { page = 1, pageSize = 50, search } = opts;
-  const offset = (page - 1) * pageSize;
-
-  const whereClause = search
-    ? or(
-        like(matchFeedback.editalTerm, `%${search}%`),
-        like(matchFeedback.productName, `%${search}%`)
-      )
-    : undefined;
-
-  const [items, countRows] = await Promise.all([
-    db
-      .select()
-      .from(matchFeedback)
-      .where(whereClause)
-      .orderBy(desc(matchFeedback.useCount), desc(matchFeedback.lastUsedAt))
-      .limit(pageSize)
-      .offset(offset),
-    db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(matchFeedback)
-      .where(whereClause),
-  ]);
-
-  return { items, total: Number(countRows[0]?.count ?? 0) };
-}
-
-/** Remove um feedback pelo ID */
-export async function deleteFeedback(id: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.delete(matchFeedback).where(eq(matchFeedback.id, id));
-}
-
-/** Remove múltiplos feedbacks por IDs */
-export async function bulkDeleteFeedback(ids: number[]): Promise<void> {
-  const db = await getDb();
-  if (!db || ids.length === 0) return;
-  await db.delete(matchFeedback).where(inArray(matchFeedback.id, ids));
-}
-
+// ─── Match Feedback → ./db/matchFeedback ───
+export * from "./db/matchFeedback";
 // ─── Detecção e Fusão de Duplicatas ──────────────────────────────────────────
 
 /** Normaliza string para comparação fuzzy */

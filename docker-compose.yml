@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Deploy do Sistema S2 (app + MySQL) para VPS.
 # Os segredos vêm de um arquivo .env ao lado deste (veja .env.production.example).
 # Suba com:  docker compose up -d --build
