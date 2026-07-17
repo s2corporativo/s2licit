@@ -1,5 +1,10 @@
 import { COOKIE_NAME } from "@shared/const";
 import { metadataRouter } from "./routers/metadata";
+import { categoriesRouter } from "./routers/categories";
+import { equivalencesRouter } from "./routers/equivalences";
+import { dashboardRouter } from "./routers/dashboard";
+import { financialRouter } from "./routers/financial";
+import { proposalsRouter } from "./routers/proposals";
 import { suppliersRouter } from "./routers/suppliers";
 import { companyRouter } from "./routers/company";
 import { orgsRouter } from "./routers/orgs";
@@ -71,53 +76,16 @@ import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 import { invokeLLM } from "./_core/llm";
-import { validateEquivalenceForMultipleItems } from "./services/equivalenceValidationService";
 import { calculateSalePrice } from "./services/pricingSafety";
 
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
-  addEquivalenceMember,
   addProposalItem,
-  createCategory,
-  createEquivalenceGroup,
   createProposal,
-  deleteCategory,
-  deleteEquivalenceGroup,
-  deleteProposal,
-  getDashboardStats,
-  getEquivalenceGroupWithMembers,
   getProductById,
-  getProductsPerCategory,
-  getProposalWithItems,
-  listCategories,
-  listCategoriesHierarchy,
-  listEquivalenceGroups,
-  listProposals,
-  removeEquivalenceMember,
-  removeProposalItem,
-  updateCategory,
-  updateProposal,
-  updateProposalItem,
   upsertRequestingOrg,
-  // Proposal administration
-  listProposalsAdmin,
-  advanceProposalStatus,
-  updateProposalFreight,
-  getProposalStatusHistory,
-  duplicateProposal,
-  // Financial entries
-  listFinancialEntries,
-  createFinancialEntry,
-  updateFinancialEntry,
-  deleteFinancialEntry,
-  getFinancialSummary,
-  getProposalFinancialStats,
-  getMarginByCategory,
-  // Freight report & expiring proposals
-  getFreightReport,
-  getExpiringProposals,
   // Master products (base mestre)
   listMasterProducts,
   searchMasterProducts,
@@ -132,10 +100,6 @@ import {
   getProductPriceHistory,
   getProductsWithPriceAlert,
   listProductsWithLandedCost,
-  previewEquivalenceGroups,
-  applyEquivalenceGroups,
-  getEquivalenceStats,
-  suggestProductsFromList,
   getDb,
   checkDuplicatesInRows,
   loadSynonymMap,
@@ -145,13 +109,13 @@ import {
   normalizeEditalTerm,
 } from "./db";
 import {
-  products, categories, suppliers, proposals,
+  products, categories,
   declarationTemplates, proposalDeclarations,
 } from "../drizzle/schema";
-import { inArray, isNull, or, like, sql, eq, ne, asc, and, desc } from "drizzle-orm";
+import { isNull, or, like, sql, eq, asc, and } from "drizzle-orm";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, editorProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
@@ -226,116 +190,8 @@ export const appRouter = router({
   }),
 
   // ─── Categories ───────────────────────────────────────────────────────────
-  categories: router({
-    list: protectedProcedure.query(() => listCategories()),
-    listHierarchy: protectedProcedure.query(() => listCategoriesHierarchy()),
+  categories: categoriesRouter,
 
-    create: protectedProcedure
-      .input(
-        z.object({
-          name: z.string().min(1).max(128),
-          slug: z.string().min(1).max(128),
-          description: z.string().optional(),
-          color: z.string().optional(),
-          sortOrder: z.number().optional(),
-          parentId: z.number().optional(),
-        })
-      )
-      .mutation(({ input }) => createCategory(input)),
-
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          name: z.string().min(1).max(128).optional(),
-          description: z.string().optional(),
-          color: z.string().optional(),
-          sortOrder: z.number().optional(),
-          parentId: z.number().nullable().optional(),
-        })
-      )
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateCategory(id, data);
-      }),
-
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteCategory(input.id)),
-    // ── Sugestão automática de categoria via LLM ──────────────────────────
-    suggest: protectedProcedure
-      .input(
-        z.object({
-          productNames: z.array(z.string()).min(1).max(100),
-        })
-      )
-      .mutation(async ({ input }) => {
-        const allCats = await listCategoriesHierarchy();
-        // Montar lista plana de categorias para o LLM
-        const catList = allCats.flatMap((p) => [
-          { id: p.id, name: p.name, parent: null },
-          ...(p.children ?? []).map((c) => ({ id: c.id, name: c.name, parent: p.name })),
-        ]);
-        const catSummary = catList
-          .map((c) => `${c.id}: ${c.parent ? c.parent + " > " : ""}${c.name}`)
-          .join("\n");
-        try {
-          const llmResp = await invokeLLM({
-            messages: [
-              {
-                role: "system" as const,
-                content:
-                  "Você é um especialista em classificação de produtos agropecuários, veterinários e de construção. " +
-                  "Para cada produto listado, escolha a categoria mais adequada da lista fornecida. " +
-                  "Prefira subcategorias (com pai) quando disponíveis. Responda APENAS com JSON válido.",
-              },
-              {
-                role: "user" as const,
-                content:
-                  `Categorias disponíveis:\n${catSummary}\n\n` +
-                  `Produtos para classificar:\n${JSON.stringify(
-                    input.productNames.map((name, idx) => ({ idx, name }))
-                  )}`,
-              },
-            ],
-            response_format: {
-              type: "json_schema" as const,
-              json_schema: {
-                name: "category_suggestions",
-                strict: true,
-                schema: {
-                  type: "object",
-                  properties: {
-                    results: {
-                      type: "array",
-                      items: {
-                        type: "object",
-                        properties: {
-                          idx: { type: "integer" },
-                          categoryId: { type: "integer" },
-                          categoryName: { type: "string" },
-                          confidence: { type: "number" },
-                        },
-                        required: ["idx", "categoryId", "categoryName", "confidence"],
-                        additionalProperties: false,
-                      },
-                    },
-                  },
-                  required: ["results"],
-                  additionalProperties: false,
-                },
-              },
-            },
-          });
-          const parsed = JSON.parse(llmResp.choices[0].message.content as string) as {
-            results: { idx: number; categoryId: number; categoryName: string; confidence: number }[];
-          };
-          return { results: parsed.results };
-        } catch {
-          return { results: [] };
-        }
-      }),
-  }),
 
   // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: suppliersRouter,
@@ -345,250 +201,14 @@ export const appRouter = router({
   products: productsRouter,
 
   // ─── Equivalences ─────────────────────────────────────────────────────────
-  equivalences: router({
-    list: protectedProcedure
-      .input(z.object({ categoryId: z.number().optional() }).optional())
-      .query(({ input }) => listEquivalenceGroups(input?.categoryId)),
+  equivalences: equivalencesRouter,
 
-    get: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getEquivalenceGroupWithMembers(input.id)),
-
-    create: protectedProcedure
-      .input(
-        z.object({
-          activeIngredient: z.string().min(1),
-          categoryId: z.number().optional(),
-          notes: z.string().optional(),
-          productIds: z.array(z.number()).min(1),
-        })
-      )
-      .mutation(({ input }) => createEquivalenceGroup(input)),
-
-    addMember: protectedProcedure
-      .input(z.object({ groupId: z.number(), productId: z.number() }))
-      .mutation(({ input }) => addEquivalenceMember(input.groupId, input.productId)),
-
-    removeMember: protectedProcedure
-      .input(z.object({ groupId: z.number(), productId: z.number() }))
-      .mutation(({ input }) => removeEquivalenceMember(input.groupId, input.productId)),
-
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteEquivalenceGroup(input.id)),
-
-    // Auto-geração de grupos por princípio ativo
-    preview: protectedProcedure
-      .input(
-        z.object({
-          batchId: z.number().optional(),
-          categoryIdsA: z.array(z.number()).optional(),
-          categoryIdsB: z.array(z.number()).optional(),
-        }).optional()
-      )
-      .mutation(({ input }) =>
-        previewEquivalenceGroups({
-          batchId: input?.batchId,
-          categoryIdsA: input?.categoryIdsA,
-          categoryIdsB: input?.categoryIdsB,
-        })
-      ),
-
-    applyAuto: protectedProcedure
-      .input(
-        z.object({
-          groups: z.array(
-            z.object({
-              activeIngredient: z.string().min(1),
-              productIds: z.array(z.number()),
-              existingGroupId: z.number().nullable(),
-            })
-          ),
-        })
-      )
-      .mutation(({ input }) => applyEquivalenceGroups(input.groups)),
-
-    stats: protectedProcedure.query(() => getEquivalenceStats()),
-    // Geração inicial com 1 clique: preview + apply automático de todos os grupos novos
-    generateAndApplyAll: protectedProcedure
-      .input(
-        z.object({
-          crossOnly: z.boolean().default(false), // se true, apenas grupos que cruzam categorias
-        }).optional()
-      )
-      .mutation(async ({ input }) => {
-        // 1. Preview sem filtro de categoria (analisa todos os produtos)
-        const groups = await previewEquivalenceGroups({});
-        // 2. Filtra apenas grupos novos (sem grupo existente)
-        const newGroups = groups.filter((g) => g.existingGroupId === null);
-        // 3. Se crossOnly, filtra apenas grupos que cruzam categorias
-        const toApply = input?.crossOnly
-          ? newGroups.filter((g) => g.crossCategory)
-          : newGroups;
-        if (toApply.length === 0) return { created: 0, updated: 0, skipped: 0, total: groups.length };
-        // 4. Aplica todos os grupos novos
-        const result = await applyEquivalenceGroups(
-          toApply.map((g) => ({
-            activeIngredient: g.activeIngredient,
-            productIds: g.members.map((m) => m.id),
-            existingGroupId: null,
-          }))
-        );
-        return { ...result, total: groups.length };
-      }),
-  }),
 
   // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: importsRouter,
    // ─── Dashboard ────────────────────────────────────────────────────────────
-  dashboard: router({
-    stats: protectedProcedure.query(() => getDashboardStats()),
-    productsPerCategory: protectedProcedure.query(() => getProductsPerCategory()),
-    expiringProposals: protectedProcedure
-      .input(z.object({ daysAhead: z.number().optional() }).optional())
-      .query(({ input }) => getExpiringProposals(input?.daysAhead ?? 7)),
-    financialSummary: protectedProcedure.query(() => getFinancialSummary()),
-    proposalStats: protectedProcedure.query(() => getProposalFinancialStats()),
-    marginByCategory: protectedProcedure.query(() => getMarginByCategory()),
-    extendedStats: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return { revenueInOrders: 0, avgTicket: 0, wonProposals: 0, productsWithoutCategory: 0, productsWithoutAI: 0 };
-      const [orderRows, wonRows, noCatRows, noAIRows] = await Promise.all([
-        db.select({ total: sql<number>`COALESCE(SUM(CAST(${proposals.totalValue} AS DECIMAL(15,2))), 0)` })
-          .from(proposals)
-          .where(inArray(proposals.status, ["order", "in_transit", "delivered"])),
-        db.select({ count: sql<number>`count(*)`, total: sql<number>`COALESCE(SUM(CAST(${proposals.totalValue} AS DECIMAL(15,2))), 0)` })
-          .from(proposals)
-          .where(eq(proposals.status, "delivered")),
-        db.select({ count: sql<number>`count(*)` })
-          .from(products)
-          .where(and(eq(products.isActive, "yes"), isNull(products.categoryId))),
-        db.select({ count: sql<number>`count(*)` })
-          .from(products)
-          .where(and(eq(products.isActive, "yes"), or(isNull(products.fichaTecnica), sql`${products.fichaTecnica} = ''`))),
-      ]);
-      const revenueInOrders = Number(orderRows[0]?.total ?? 0);
-      const wonCount = Number(wonRows[0]?.count ?? 0);
-      const wonTotal = Number(wonRows[0]?.total ?? 0);
-      return {
-        revenueInOrders,
-        avgTicket: wonCount > 0 ? wonTotal / wonCount : 0,
-        wonProposals: wonCount,
-        productsWithoutCategory: Number(noCatRows[0]?.count ?? 0),
-        productsWithoutAI: Number(noAIRows[0]?.count ?? 0),
-      };
-    }),
+  dashboard: dashboardRouter,
 
-     recentActivity: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return [];
-      return db
-        .select({
-          id: proposals.id,
-          title: proposals.title,
-          orgName: proposals.orgName,
-          status: proposals.status,
-          totalValue: proposals.totalValue,
-          updatedAt: proposals.updatedAt,
-        })
-        .from(proposals)
-        .orderBy(desc(proposals.updatedAt))
-        .limit(5);
-    }),
-
-    // ── catalogHealth: saúde cadastral detalhada do catálogo ──
-    catalogHealth: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return { withoutFichaTecnica: 0, withoutActiveIngredient: 0, withoutManufacturer: 0, withoutEan: 0, withoutCategory: 0, withoutImage: 0, withoutPrice: 0, total: 0 };
-      // Query consolidada: 1 passagem pela tabela em vez de 7 queries separadas
-      const [healthRow] = await db
-        .select({
-          total: sql<number>`COUNT(*)`,
-          noFicha: sql<number>`SUM(CASE WHEN (fichaTecnica IS NULL OR fichaTecnica = '') THEN 1 ELSE 0 END)`,
-          noMfr: sql<number>`SUM(CASE WHEN (manufacturer IS NULL OR manufacturer = '') THEN 1 ELSE 0 END)`,
-          noEan: sql<number>`SUM(CASE WHEN (ean IS NULL AND gtin IS NULL AND barcode IS NULL) THEN 1 ELSE 0 END)`,
-          noCat: sql<number>`SUM(CASE WHEN categoryId IS NULL THEN 1 ELSE 0 END)`,
-          noImg: sql<number>`SUM(CASE WHEN (imageUrl IS NULL OR imageUrl = '') THEN 1 ELSE 0 END)`,
-          noPrice: sql<number>`SUM(CASE WHEN (price IS NULL OR price = '0.00') THEN 1 ELSE 0 END)`,
-        })
-        .from(products)
-        .where(eq(products.isActive, "yes"));
-      return {
-        total: Number(healthRow?.total ?? 0),
-        withoutFichaTecnica: Number(healthRow?.noFicha ?? 0),
-        withoutActiveIngredient: Number(healthRow?.noFicha ?? 0), // alias para compatibilidade
-        withoutManufacturer: Number(healthRow?.noMfr ?? 0),
-        withoutEan: Number(healthRow?.noEan ?? 0),
-        withoutCategory: Number(healthRow?.noCat ?? 0),
-        withoutImage: Number(healthRow?.noImg ?? 0),
-        withoutPrice: Number(healthRow?.noPrice ?? 0),
-      };
-    }),
-
-    // ── proposalPipeline: pipeline de propostas por estágio com valor e prazo ──
-    proposalPipeline: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return [];
-      const rows = await db
-        .select({
-          status: proposals.status,
-          count: sql<number>`count(*)`,
-          totalValue: sql<number>`COALESCE(SUM(CAST(${proposals.totalValue} AS DECIMAL(15,2))), 0)`,
-        })
-        .from(proposals)
-        .groupBy(proposals.status);
-      // Buscar prazo mais próximo por status
-      const deadlines = await db
-        .select({
-          status: proposals.status,
-          minDate: sql<Date>`MIN(${proposals.sentAt})`,
-        })
-        .from(proposals)
-        .where(sql`${proposals.sentAt} IS NOT NULL`)
-        .groupBy(proposals.status);
-      const deadlineMap = Object.fromEntries(deadlines.map(d => [d.status, d.minDate]));
-      return rows.map(r => ({
-        status: r.status,
-        count: Number(r.count),
-        totalValue: Number(r.totalValue),
-        nearestDeadline: deadlineMap[r.status] ?? null,
-      }));
-    }),
-
-    // ── actionQueue: fila de ações do dia priorizadas ──
-    actionQueue: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return [];
-      const now = new Date();
-      const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      // Paralelizar todas as queries com Promise.all para reduzir latência
-      const [drafts, noCat, noFicha, expiring, sentProposals] = await Promise.all([
-        db.select({ count: sql<number>`count(*)` }).from(proposals).where(eq(proposals.status, "draft")),
-        db.select({ count: sql<number>`count(*)` }).from(products).where(and(eq(products.isActive, "yes"), isNull(products.categoryId))),
-        db.select({ count: sql<number>`count(*)` }).from(products).where(and(eq(products.isActive, "yes"), or(isNull(products.fichaTecnica), sql`${products.fichaTecnica} = ''`))),
-        db.select({ count: sql<number>`count(*)` }).from(proposals).where(and(
-          sql`${proposals.sentAt} IS NOT NULL`,
-          sql`DATE_ADD(${proposals.sentAt}, INTERVAL COALESCE(${proposals.validityDays}, 30) DAY) <= ${in7Days}`,
-          sql`DATE_ADD(${proposals.sentAt}, INTERVAL COALESCE(${proposals.validityDays}, 30) DAY) >= ${now}`,
-          sql`${proposals.status} NOT IN ('delivered','cancelled')`
-        )),
-        db.select({ count: sql<number>`count(*)` }).from(proposals).where(eq(proposals.status, "sent")),
-      ]);
-      const items: Array<{ type: string; label: string; detail: string; href: string; priority: "critical" | "warning" | "info" }> = [];
-      const draftCount = Number(drafts[0]?.count ?? 0);
-      const noCatCount = Number(noCat[0]?.count ?? 0);
-      const noFichaCount = Number(noFicha[0]?.count ?? 0);
-      const expiringCount = Number(expiring[0]?.count ?? 0);
-      const sentCount = Number(sentProposals[0]?.count ?? 0);
-      if (expiringCount > 0) items.push({ type: "proposal", label: `${expiringCount} proposta${expiringCount > 1 ? "s" : ""} vencendo em 7 dias`, detail: "Verificar prazo de entrega", href: "/propostas-admin", priority: "critical" });
-      if (draftCount > 0) items.push({ type: "proposal", label: `${draftCount} proposta${draftCount > 1 ? "s" : ""} em rascunho`, detail: "Continuar montagem", href: "/propostas-admin", priority: "warning" });
-      if (sentCount > 0) items.push({ type: "proposal", label: `${sentCount} proposta${sentCount > 1 ? "s" : ""} aguardando retorno`, detail: "Acompanhar status", href: "/propostas-admin", priority: "info" });
-      if (noCatCount > 0) items.push({ type: "catalog", label: `${noCatCount} produto${noCatCount > 1 ? "s" : ""} sem categoria`, detail: "Reclassificar com IA", href: "/produtos", priority: noCatCount > 100 ? "warning" : "info" });
-      if (noFichaCount > 0) items.push({ type: "catalog", label: `${noFichaCount} produto${noFichaCount > 1 ? "s" : ""} sem ficha técnica`, detail: "Enriquecer via IA", href: "/enriquecimento", priority: noFichaCount > 200 ? "warning" : "info" });
-      const priorityOrder = { critical: 0, warning: 1, info: 2 };
-      return items.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
-    }),
-  }),
   // ─── Quotations ───────────────────────────────────────────────────────────
 
   // ─── Company Settings ────────────────────────────────────────────────────────
@@ -600,371 +220,12 @@ export const appRouter = router({
 
 
   // ─── Proposals ───────────────────────────────────────────────────────────────
-  proposals: router({
-    list: protectedProcedure.query(() => listProposals()),
+  proposals: proposalsRouter,
 
-    get: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getProposalWithItems(input.id)),
-    create: protectedProcedure
-      .input(
-        z.object({
-          title: z.string().min(1).max(256),
-          processNumber: z.string().max(128).optional().nullable(),
-          orgId: z.number().optional().nullable(),
-          orgName: z.string().max(256).optional().nullable(),
-          status: z.enum(["draft", "sent", "order", "in_transit", "delivered", "cancelled"]).optional(),
-          validityDays: z.number().optional(),
-          paymentTerms: z.string().max(256).optional().nullable(),
-          deliveryTerms: z.string().max(256).optional().nullable(),
-          notes: z.string().optional().nullable(),
-          origem: z.string().max(32).optional().nullable(),
-          radarOpportunityId: z.number().optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => createProposal(input as any)),
-
-    update: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          title: z.string().min(1).max(256).optional(),
-          processNumber: z.string().max(128).optional().nullable(),
-          orgId: z.number().optional().nullable(),
-          orgName: z.string().max(256).optional().nullable(),
-          status: z.enum(["draft", "sent", "order", "in_transit", "delivered", "cancelled"]).optional(),
-          validityDays: z.number().optional(),
-          paymentTerms: z.string().max(256).optional().nullable(),
-          deliveryTerms: z.string().max(256).optional().nullable(),
-          notes: z.string().optional().nullable(),
-          notesHtml: z.string().optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateProposal(id, data as any);
-      }),
-
-     delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteProposal(input.id)),
-
-    addItem: protectedProcedure
-      .input(
-        z.object({
-          proposalId: z.number(),
-          productId: z.number().optional().nullable(),
-          productName: z.string().min(1).max(512),
-          activeIngredient: z.string().max(512).optional().nullable(),
-          manufacturer: z.string().max(256).optional().nullable(),
-          concentration: z.string().max(128).optional().nullable(),
-          presentation: z.string().max(256).optional().nullable(),
-          unit: z.string().max(64).optional().nullable(),
-          supplierName: z.string().max(256).optional().nullable(),
-          unitPrice: z.string().optional().nullable(),
-          quantity: z.number().min(1).default(1),
-          notes: z.string().optional().nullable(),
-          imageUrl: z.string().optional().nullable(),
-          productUrl: z.string().optional().nullable(),
-          registroMapa: z.string().max(128).optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => addProposalItem(input as any)),
-
-    updateItem: protectedProcedure
-      .input(
-        z.object({
-          id: z.number(),
-          productId: z.number().optional().nullable(),
-          productName: z.string().max(512).optional(),
-          activeIngredient: z.string().max(512).optional().nullable(),
-          manufacturer: z.string().max(256).optional().nullable(),
-          concentration: z.string().max(128).optional().nullable(),
-          presentation: z.string().max(256).optional().nullable(),
-          unit: z.string().max(64).optional().nullable(),
-          supplierName: z.string().max(256).optional().nullable(),
-          unitPrice: z.string().optional().nullable(),
-          costPrice: z.string().optional().nullable(),
-          editalRefPrice: z.string().optional().nullable(),
-          suggestedPrice: z.string().optional().nullable(),
-          quantity: z.number().min(1).optional(),
-          notes: z.string().optional().nullable(),
-          sortOrder: z.number().optional(),
-          registroMapa: z.string().max(128).optional().nullable(),
-          imageUrl: z.string().max(2000).optional().nullable(),
-          productUrl: z.string().max(2000).optional().nullable(),
-        })
-      )
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateProposalItem(id, data as any);
-      }),
-
-    removeItem: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => removeProposalItem(input.id)),
-    // Administration
-    listAdmin: protectedProcedure
-      .input(z.object({
-        status: z.string().optional(),
-        orgName: z.string().optional(),
-        dateFrom: z.date().optional(),
-        dateTo: z.date().optional(),
-      }).optional())
-      .query(({ input }) => listProposalsAdmin(input)),
-    advanceStatus: protectedProcedure
-      .input(z.object({
-        id: z.number(),
-        newStatus: z.enum(["draft", "sent", "order", "in_transit", "delivered", "cancelled"]),
-        notes: z.string().optional(),
-        // Parcelamento: apenas quando newStatus === 'delivered'
-        installments: z.number().int().min(1).max(60).optional(),
-        firstDueDate: z.date().optional(), // data de vencimento da 1ª parcela
-      }))
-      .mutation(async ({ input }) => {
-        await advanceProposalStatus(input.id, input.newStatus, input.notes);
-        // Gerar entradas financeiras parceladas ao marcar como entregue
-        if (input.newStatus === "delivered" && input.installments && input.installments > 1) {
-          const db = await getDb();
-          if (!db) return { success: true };
-          const [proposal] = await db
-            .select({ totalValue: proposals.totalValue, title: proposals.title, orgName: proposals.orgName })
-            .from(proposals)
-            .where(eq(proposals.id, input.id))
-            .limit(1);
-          if (proposal?.totalValue) {
-            const total = parseFloat(String(proposal.totalValue));
-            const parcelValue = total / input.installments;
-            const baseDate = input.firstDueDate ? new Date(input.firstDueDate) : new Date();
-            for (let i = 0; i < input.installments; i++) {
-              const dueDate = new Date(baseDate);
-              dueDate.setMonth(dueDate.getMonth() + i);
-              await createFinancialEntry({
-                type: "income",
-                category: "Proposta",
-                description: `${proposal.title ?? "Proposta"} — Parcela ${i + 1}/${input.installments}${proposal.orgName ? ` (${proposal.orgName})` : ""}`,
-                amount: String(parcelValue.toFixed(2)) as any,
-                dueDate,
-                isPaid: "no",
-                proposalId: input.id,
-              });
-            }
-          }
-        } else if (input.newStatus === "delivered") {
-          // Parcela única — criar uma entrada financeira
-          const db = await getDb();
-          if (!db) return { success: true };
-          const [proposal] = await db
-            .select({ totalValue: proposals.totalValue, title: proposals.title, orgName: proposals.orgName })
-            .from(proposals)
-            .where(eq(proposals.id, input.id))
-            .limit(1);
-          if (proposal?.totalValue) {
-            const dueDate = input.firstDueDate ? new Date(input.firstDueDate) : new Date();
-            await createFinancialEntry({
-              type: "income",
-              category: "Proposta",
-              description: `${proposal.title ?? "Proposta"}${proposal.orgName ? ` (${proposal.orgName})` : ""}`,
-              amount: String(parseFloat(String(proposal.totalValue)).toFixed(2)) as any,
-              dueDate,
-              isPaid: "no",
-              proposalId: input.id,
-            });
-          }
-        }
-        return { success: true };
-      }),
-    updateFreight: protectedProcedure
-      .input(z.object({
-        id: z.number(),
-        freightValue: z.string().optional().nullable(),
-        freightCarrier: z.string().max(256).optional().nullable(),
-        freightTrackingCode: z.string().max(128).optional().nullable(),
-        freightPaidAt: z.date().optional().nullable(),
-      }))
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateProposalFreight(id, data as any);
-      }),
-    getStatusHistory: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .query(({ input }) => getProposalStatusHistory(input.id)),
-    duplicate: protectedProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => duplicateProposal(input.id)),
-
-    // Sugestão automática de produtos a partir de lista de texto/planilha
-    suggestFromList: protectedProcedure
-      .input(z.object({
-        productNames: z.array(z.string().min(1)).min(1).max(200),
-      }))
-      .mutation(({ input }) => suggestProductsFromList(input.productNames)),
-
-    // Busca similares mais baratos para um produto recém-adicionado à proposta
-    findCheaperSimilar: protectedProcedure
-      .input(z.object({
-        productId: z.number(),          // produto recém-adicionado
-        unitPrice: z.string(),          // preço unitário do produto adicionado
-        excludeProductId: z.number().optional().nullable(), // evitar retornar o próprio produto
-      }))
-      .query(async ({ input }) => {
-        const db = await getDb();
-        if (!db) return { similars: [] };
-
-        // Buscar o produto para obter o princípio ativo
-        const [prod] = await db
-          .select({ activeIngredient: products.activeIngredient, name: products.name })
-          .from(products)
-          .where(eq(products.id, input.productId))
-          .limit(1);
-
-        if (!prod?.activeIngredient || prod.activeIngredient.trim().length < 3) {
-          return { similars: [] };
-        }
-
-        const currentPrice = parseFloat(input.unitPrice);
-        if (isNaN(currentPrice) || currentPrice <= 0) return { similars: [] };
-
-        // Buscar produtos com mesmo princípio ativo e preço menor
-        const similars = await db
-          .select({
-            id: products.id,
-            name: products.name,
-            activeIngredient: products.activeIngredient,
-            manufacturer: products.manufacturer,
-            concentration: products.concentration,
-            presentation: products.presentation,
-            price: products.price,
-            unit: products.unit,
-            imageUrl: products.imageUrl,
-            supplierName: suppliers.name,
-          })
-          .from(products)
-          .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
-          .where(
-            and(
-              eq(products.activeIngredient, prod.activeIngredient),
-              ne(products.id, input.productId),
-              eq(products.isActive, "yes"),
-              sql`CAST(${products.price} AS DECIMAL(12,2)) < ${currentPrice}`,
-            )
-          )
-          .orderBy(asc(products.price))
-          .limit(5);
-
-        return {
-          similars: similars.map((s) => ({
-            ...s,
-            price: s.price ? String(s.price) : null,
-            savingPct: s.price
-              ? Math.round(((currentPrice - parseFloat(String(s.price))) / currentPrice) * 100)
-              : 0,
-          })),
-          originalName: prod.name,
-          originalPrice: input.unitPrice,
-          activeIngredient: prod.activeIngredient,
-        };
-      }),
-
-    // ─── Validação de Equivalência para Itens de Pregão ──────────────────────────
-
-    validateEquivalenceForItems: protectedProcedure
-      .input(
-        z.object({
-          items: z.array(
-            z.object({
-              id: z.string(),
-              description: z.string().min(1),
-              quantity: z.number().optional(),
-              unit: z.string().optional(),
-              estimatedValue: z.number().optional(),
-            })
-          ).min(1),
-        })
-      )
-      .mutation(async ({ input }) => {
-        return validateEquivalenceForMultipleItems(input.items);
-      }),
-  }),
 
   // ─── Financial Entries ────────────────────────────────────────────────
-  financial: router({
-    list: protectedProcedure
-      .input(z.object({
-        type: z.enum(["income", "expense"]).optional(),
-        isPaid: z.enum(["yes", "no"]).optional(),
-        dateFrom: z.date().optional(),
-        dateTo: z.date().optional(),
-        proposalId: z.number().optional(),
-      }).optional())
-      .query(({ input }) => listFinancialEntries(input)),
-    create: protectedProcedure
-      .input(z.object({
-        type: z.enum(["income", "expense"]),
-        category: z.string().max(128).optional().nullable(),
-        description: z.string().min(1).max(512),
-        amount: z.string(),
-        dueDate: z.date().optional().nullable(),
-        paidAt: z.date().optional().nullable(),
-        isPaid: z.enum(["yes", "no"]).default("no"),
-        proposalId: z.number().optional().nullable(),
-        notes: z.string().optional().nullable(),
-      }))
-      .mutation(({ input }) => createFinancialEntry(input as any)),
-    update: protectedProcedure
-      .input(z.object({
-        id: z.number(),
-        type: z.enum(["income", "expense"]).optional(),
-        category: z.string().max(128).optional().nullable(),
-        description: z.string().max(512).optional(),
-        amount: z.string().optional(),
-        dueDate: z.date().optional().nullable(),
-        paidAt: z.date().optional().nullable(),
-        isPaid: z.enum(["yes", "no"]).optional(),
-        proposalId: z.number().optional().nullable(),
-        notes: z.string().optional().nullable(),
-      }))
-      .mutation(({ input }) => {
-        const { id, ...data } = input;
-        return updateFinancialEntry(id, data as any);
-      }),
-    delete: editorProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteFinancialEntry(input.id)),
-    summary: protectedProcedure
-      .input(z.object({
-        dateFrom: z.date().optional(),
-        dateTo: z.date().optional(),
-      }).optional())
-      .query(({ input }) => getFinancialSummary(input?.dateFrom, input?.dateTo)),
-    proposalStats: protectedProcedure
-      .query(() => getProposalFinancialStats()),
-    freightReport: protectedProcedure
-      .input(z.object({
-        dateFrom: z.date().optional(),
-        dateTo: z.date().optional(),
-      }).optional())
-      .query(({ input }) => getFreightReport(input?.dateFrom, input?.dateTo)),
-    createFromProposal: protectedProcedure
-      .input(z.object({
-        proposalId: z.number(),
-        amount: z.string(),
-        description: z.string(),
-        isPaid: z.enum(["yes", "no"]).default("no"),
-        notes: z.string().optional().nullable(),
-      }))
-      .mutation(({ input }) =>
-        createFinancialEntry({
-          type: "income",
-          category: "Proposta Aprovada",
-          description: input.description,
-          amount: input.amount,
-          isPaid: input.isPaid,
-          proposalId: input.proposalId,
-          notes: input.notes ?? null,
-        } as any)
-      ),
-  }),
+  financial: financialRouter,
+
   masterProducts: router({
     list: protectedProcedure
       .input(z.object({ search: z.string().optional(), limit: z.number().optional() }).optional())
