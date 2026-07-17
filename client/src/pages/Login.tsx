@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { LogIn, Loader2 } from "lucide-react";
+import { Landmark, LogIn, Loader2 } from "lucide-react";
 
 /**
  * Página de login local (e-mail e senha).
@@ -56,7 +56,7 @@ export default function Login() {
         style={{ background: "#fff", borderRadius: 14, padding: 32, maxWidth: 400, boxShadow: "0 4px 24px rgba(0,0,0,.08)" }}
       >
         <div className="flex flex-col items-center" style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 44, marginBottom: 8 }}>💠</div>
+          <Landmark size={44} strokeWidth={1.25} style={{ color: "#1A3F8F", marginBottom: 8 }} />
           <h1 style={{ color: "#1A3F8F", fontSize: 22, fontWeight: 900 }}>S2 LICIT</h1>
           <p style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>Sistema Integrado de Licitações</p>
         </div>

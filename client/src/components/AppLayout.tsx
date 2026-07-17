@@ -1,20 +1,60 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { getRoleLabel, hasMinimumRole, type Role } from "@/lib/access";
-import { Menu, Search, X } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  BookOpen,
+  Bot,
+  Brain,
+  Building2,
+  CalendarClock,
+  ClipboardCheck,
+  ClipboardList,
+  DollarSign,
+  FileScan,
+  FileSpreadsheet,
+  FileText,
+  Gavel,
+  GitMerge,
+  Image,
+  KanbanSquare,
+  KeyRound,
+  LayoutGrid,
+  Lock,
+  LogOut,
+  MailCheck,
+  Menu,
+  Package,
+  PackageCheck,
+  PlugZap,
+  Radar,
+  Receipt,
+  ScrollText,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Tag,
+  Trophy,
+  Users,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 
 /**
- * Shell no padrão visual Verdelimp ERP (sidebar compacta com ícones emoji,
- * seções em maiúsculas, item ativo com borda laranja), na paleta AZUL do S2.
+ * Shell no padrão visual Verdelimp ERP (sidebar compacta, seções em
+ * maiúsculas, item ativo com borda laranja), na paleta AZUL do S2 — com
+ * ícones de linha finos (traço 1.5) e fios/hairlines delicados.
  */
 const AZUL_SIDEBAR = "#2e3c55"; // equivalente azul do verde #334532 da Verdelimp
 const LARANJA_ATIVO = "#e05008"; // mesmo acento de item ativo da Verdelimp
+const TRACO = 1.5; // espessura fina dos ícones
 
 type NavItem = {
   href: string;
-  icon: string;
+  icon: React.ElementType;
   label: string;
   minRole?: Role;
 };
@@ -33,70 +73,70 @@ const navGroups: NavGroup[] = [
   {
     label: "VISÃO GERAL",
     items: [
-      { href: "/", icon: "📊", label: "Dashboard" },
-      { href: "/agenda", icon: "📅", label: "Agenda" },
-      { href: "/funil", icon: "🎯", label: "Funil de oportunidades" },
+      { href: "/", icon: LayoutGrid, label: "Dashboard" },
+      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
+      { href: "/funil", icon: KanbanSquare, label: "Funil de oportunidades" },
     ],
   },
   {
     label: "OPORTUNIDADES",
     items: [
-      { href: "/radar-pncp", icon: "📡", label: "Radar PNCP", minRole: "editor" },
-      { href: "/cotacoes-recebidas", icon: "📨", label: "Cotações recebidas", minRole: "editor" },
-      { href: "/edital", icon: "📄", label: "Importar edital", minRole: "editor" },
+      { href: "/radar-pncp", icon: Radar, label: "Radar PNCP", minRole: "editor" },
+      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações recebidas", minRole: "editor" },
+      { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
     ],
   },
   {
     label: "CATÁLOGO E PREÇOS",
     items: [
-      { href: "/produtos", icon: "📦", label: "Produtos" },
-      { href: "/equivalencias", icon: "🔁", label: "Equivalências" },
-      { href: "/analise-precos", icon: "📈", label: "Análise de preços", minRole: "editor" },
-      { href: "/enriquecimento", icon: "✨", label: "Enriquecimento" },
-      { href: "/imagens", icon: "🖼️", label: "Imagens de produtos" },
+      { href: "/produtos", icon: Package, label: "Produtos" },
+      { href: "/equivalencias", icon: GitMerge, label: "Equivalências" },
+      { href: "/analise-precos", icon: BarChart3, label: "Análise de preços", minRole: "editor" },
+      { href: "/enriquecimento", icon: Sparkles, label: "Enriquecimento" },
+      { href: "/imagens", icon: Image, label: "Imagens de produtos" },
     ],
   },
   {
     label: "FORNECEDORES E CAPTURA",
     items: [
-      { href: "/fornecedores", icon: "🏭", label: "Fornecedores", minRole: "editor" },
-      { href: "/scraper-fornecedores", icon: "🤖", label: "Captura automática", minRole: "admin" },
-      { href: "/captura-inteligente", icon: "🧠", label: "Captura multi-origem", minRole: "editor" },
-      { href: "/captura-revisao", icon: "✅", label: "Revisão de capturas", minRole: "editor" },
-      { href: "/importar", icon: "📑", label: "Importar planilha", minRole: "editor" },
-      { href: "/importar-nfe", icon: "🧾", label: "Importar NF-e", minRole: "editor" },
-      { href: "/configurador-fornecedores", icon: "🔑", label: "Acessos e credenciais", minRole: "admin" },
+      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
+      { href: "/scraper-fornecedores", icon: Bot, label: "Captura automática", minRole: "admin" },
+      { href: "/captura-inteligente", icon: Brain, label: "Captura multi-origem", minRole: "editor" },
+      { href: "/captura-revisao", icon: ClipboardCheck, label: "Revisão de capturas", minRole: "editor" },
+      { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
+      { href: "/importar-nfe", icon: Receipt, label: "Importar NF-e", minRole: "editor" },
+      { href: "/configurador-fornecedores", icon: KeyRound, label: "Acessos e credenciais", minRole: "admin" },
     ],
   },
   {
     label: "PROPOSTAS E DISPUTA",
     items: [
-      { href: "/propostas", icon: "📃", label: "Propostas" },
-      { href: "/documentos-habilitacao", icon: "🛡️", label: "Habilitação", minRole: "editor" },
-      { href: "/certidoes", icon: "📜", label: "Certidões", minRole: "editor" },
-      { href: "/sala-disputa", icon: "⚖️", label: "Sala de disputa", minRole: "editor" },
-      { href: "/agente-proposta", icon: "🏷️", label: "Agente de proposta", minRole: "editor" },
+      { href: "/propostas", icon: FileText, label: "Propostas" },
+      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
+      { href: "/certidoes", icon: ScrollText, label: "Certidões", minRole: "editor" },
+      { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
+      { href: "/agente-proposta", icon: Tag, label: "Agente de proposta", minRole: "editor" },
     ],
   },
   {
     label: "EXECUÇÃO E RESULTADOS",
     items: [
-      { href: "/pos-venda", icon: "🚚", label: "Pós-venda" },
-      { href: "/financeiro", icon: "💰", label: "Financeiro" },
-      { href: "/desempenho", icon: "🏆", label: "Desempenho" },
+      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
+      { href: "/financeiro", icon: DollarSign, label: "Financeiro" },
+      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
     ],
   },
   {
     label: "SISTEMA",
     items: [
-      { href: "/central-ia", icon: "🤖", label: "Inteligência artificial", minRole: "admin" },
-      { href: "/portais-licitacao", icon: "🔌", label: "Portais de licitação", minRole: "editor" },
-      { href: "/diagnostico", icon: "🩺", label: "Diagnóstico", minRole: "editor" },
-      { href: "/configuracao", icon: "⚙️", label: "Dados da empresa", minRole: "admin" },
-      { href: "/usuarios", icon: "👥", label: "Usuários e permissões", minRole: "admin" },
-      { href: "/logs", icon: "📋", label: "Logs de auditoria", minRole: "admin" },
-      { href: "/seguranca", icon: "🔐", label: "Segurança (MFA)" },
-      { href: "/manual", icon: "📖", label: "Manual do sistema" },
+      { href: "/central-ia", icon: Brain, label: "Inteligência artificial", minRole: "admin" },
+      { href: "/portais-licitacao", icon: PlugZap, label: "Portais de licitação", minRole: "editor" },
+      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
+      { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
+      { href: "/usuarios", icon: Users, label: "Usuários e permissões", minRole: "admin" },
+      { href: "/logs", icon: ClipboardList, label: "Logs de auditoria", minRole: "admin" },
+      { href: "/seguranca", icon: Lock, label: "Segurança (MFA)" },
+      { href: "/manual", icon: BookOpen, label: "Manual do sistema" },
     ],
   },
 ];
@@ -125,7 +165,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         className="flex items-center justify-center h-screen"
         style={{ color: "#1A3F8F", fontSize: 18, background: "#f3f4f6" }}
       >
-        💠 Carregando...
+        Carregando...
       </div>
     );
   }
@@ -141,7 +181,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const sidebar = (
     <aside
-      className="saas-sidebar flex flex-col h-full flex-shrink-0"
+      className="saas-sidebar flex flex-col h-full flex-shrink-0 relative"
       style={{ width: 220, background: AZUL_SIDEBAR, color: "#fff" }}
     >
       {/* Marca — logo em chip branco, como na Verdelimp */}
@@ -163,8 +203,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             }}
           />
         )}
-        <p style={{ margin: 0, fontWeight: 900, fontSize: 13, textAlign: "center" }}>
-          {semLogo ? "💠 " : ""}S2 LICIT
+        <p style={{ margin: 0, fontWeight: 900, fontSize: 13, textAlign: "center", letterSpacing: ".5px" }}>
+          S2 LICIT
         </p>
         <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(255,255,255,.4)", textAlign: "center" }}>
           Licitações &amp; Fornecedores
@@ -174,26 +214,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           onClick={() => setSidebarOpen(false)}
           aria-label="Fechar menu"
         >
-          <X size={16} />
+          <X size={16} strokeWidth={TRACO} />
         </button>
       </div>
 
       <nav style={{ flex: 1, padding: "5px 4px", overflowY: "auto" }} aria-label="Navegação principal">
-        {visibleNavGroups.map((group) => (
+        {visibleNavGroups.map((group, gi) => (
           <div key={group.label}>
             <p
               style={{
                 margin: "8px 8px 3px",
+                paddingTop: gi > 0 ? 7 : 0,
                 fontSize: 9,
                 color: "rgba(255,255,255,.3)",
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: ".5px",
+                // fio fino separando as seções
+                borderTop: gi > 0 ? "1px solid rgba(255,255,255,.07)" : "none",
               }}
             >
               {group.label}
             </p>
             {group.items.map((item) => {
+              const Icon = item.icon;
               const active =
                 item.href === "/" ? location === "/" : location.startsWith(item.href);
               return (
@@ -205,10 +249,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     width: "100%",
                     display: "flex",
                     alignItems: "center",
-                    gap: 7,
+                    gap: 8,
                     padding: "7px 8px",
                     background: active ? "rgba(255,255,255,.18)" : "transparent",
-                    color: "#fff",
+                    color: active ? "#fff" : "rgba(255,255,255,.85)",
                     cursor: "pointer",
                     borderRadius: 7,
                     marginBottom: 1,
@@ -219,7 +263,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     textDecoration: "none",
                   }}
                 >
-                  <span style={{ fontSize: 13 }}>{item.icon}</span>
+                  <Icon
+                    size={14}
+                    strokeWidth={active ? 2 : TRACO}
+                    style={{ flexShrink: 0, opacity: active ? 1 : 0.75 }}
+                  />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.label}
                   </span>
@@ -241,10 +289,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </p>
             <button
               onClick={() => logout()}
+              className="flex items-center justify-center gap-1.5"
               style={{
                 width: "100%",
                 background: "rgba(255,255,255,.1)",
-                border: "none",
+                border: "1px solid rgba(255,255,255,.12)",
                 color: "#fff",
                 padding: 6,
                 borderRadius: 6,
@@ -252,6 +301,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 fontSize: 11,
               }}
             >
+              <LogOut size={12} strokeWidth={TRACO} />
               Sair
             </button>
           </>
@@ -262,6 +312,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               display: "block",
               width: "100%",
               background: "rgba(255,255,255,.1)",
+              border: "1px solid rgba(255,255,255,.12)",
               color: "#fff",
               padding: 6,
               borderRadius: 6,
@@ -281,7 +332,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "#f3f4f6" }}>
       {/* Sidebar fixa em desktop */}
-      <div className="hidden lg:block h-full relative">{sidebar}</div>
+      <div className="hidden lg:block h-full">{sidebar}</div>
 
       {/* Sidebar móvel (overlay) */}
       {sidebarOpen && (
@@ -295,7 +346,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       <div className="flex flex-col flex-1 min-w-0 h-full">
-        {/* Topbar fina branca, como na Verdelimp */}
+        {/* Topbar fina branca com fio delicado, como na Verdelimp */}
         {isAuthenticated && (
           <div
             className="flex items-center gap-3"
@@ -311,7 +362,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               onClick={() => setSidebarOpen(true)}
               aria-label="Abrir menu"
             >
-              <Menu size={18} />
+              <Menu size={18} strokeWidth={TRACO} />
             </button>
             <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }} className="truncate">
               {currentPageLabel(location)}
@@ -320,12 +371,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Link
                 href="/busca-global"
                 className="flex items-center gap-1.5 text-gray-400 hover:text-gray-700 transition"
-                style={{ fontSize: 11 }}
+                style={{
+                  fontSize: 11,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: "4px 10px",
+                }}
               >
-                <Search size={12} />
+                <Search size={12} strokeWidth={TRACO} />
                 <span className="hidden sm:inline">Buscar no sistema...</span>
               </Link>
-              <span style={{ fontSize: 11, color: "#9ca3af" }}>💠 S2 Licit ERP</span>
+              <span
+                className="hidden sm:flex items-center gap-1.5"
+                style={{ fontSize: 11, color: "#9ca3af" }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: "#2563eb",
+                    display: "inline-block",
+                  }}
+                />
+                S2 Licit ERP
+              </span>
             </div>
           </div>
         )}

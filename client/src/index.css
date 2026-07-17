@@ -156,7 +156,7 @@
 }
 
 .its-rule {
-  border-top: 1px solid oklch(0.91 0.005 265);
+  border-top: 1px solid oklch(0.935 0.004 265);
 }
 
 .category-badge {
@@ -216,7 +216,7 @@
 
 .stat-card {
   padding: 1.5rem;
-  border: 1px solid oklch(0.91 0.005 265);
+  border: 1px solid oklch(0.935 0.004 265);
   border-radius: 1rem;
   background: white;
   box-shadow: 0 1px 2px oklch(0.2 0.02 265 / 5%);
@@ -259,14 +259,14 @@
   color: oklch(0.50 0.02 265);
   padding: 0.625rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid oklch(0.88 0.005 265);
+  border-bottom: 1px solid oklch(0.90 0.005 265);
   white-space: nowrap;
   background: oklch(0.975 0.003 265);
 }
 
 .its-table td {
   padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid oklch(0.94 0.005 265);
+  border-bottom: 1px solid oklch(0.955 0.004 265);
   vertical-align: middle;
 }
 
