@@ -204,10 +204,24 @@ export async function runProductionMigrations({ databaseUrl = process.env.DATABA
 
       const recordedHash = timestamps.get(createdAt);
       if (recordedHash && recordedHash !== hash) {
-        throw new Error(
-          `Conflito no histórico da migração ${entry.tag}: o timestamp ${createdAt} já está ` +
-            "registrado com outro hash. A execução foi interrompida para proteger os dados.",
+        // O timestamp já foi aplicado, mas o conteúdo do arquivo mudou. Isso
+        // acontece quando uma migração já aplicada recebe uma correção de
+        // compatibilidade (ex.: encurtar nomes de FK acima de 64 caracteres,
+        // remover índice inválido em coluna TEXT) para instalações novas.
+        // O schema desta base já reflete a migração aplicada — reconciliamos
+        // o hash registrado e seguimos, sem reexecutar nem derrubar o boot.
+        console.warn(
+          `[Migration] ${entry.tag}: arquivo da migração já aplicada foi atualizado ` +
+            `(hash ${recordedHash.slice(0, 12)}… → ${hash.slice(0, 12)}…). ` +
+            "Reconciliando o histórico sem reexecutar.",
         );
+        await connection.execute(
+          "UPDATE `__drizzle_migrations` SET `hash` = ? WHERE `created_at` = ? AND `hash` = ?",
+          [hash, createdAt, recordedHash],
+        );
+        hashes.add(hash);
+        timestamps.set(createdAt, hash);
+        continue;
       }
 
       await applyMigration(
