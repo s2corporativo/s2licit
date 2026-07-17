@@ -30,7 +30,7 @@ on:
 env:
   DEPLOY_HOST: ${{ inputs.host || '13.140.167.153' }}
   DEPLOY_USER: ${{ inputs.ssh_user || 'root' }}
-  DEPLOY_DOMAIN: ${{ inputs.domain || '' }}
+  DEPLOY_DOMAIN: ${{ inputs.domain || 's2.s2corporativo.com.br' }}
 
 concurrency:
   group: deploy-vps
