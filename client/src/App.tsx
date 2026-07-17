@@ -319,6 +319,9 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
+      {/* switchable desligado de propósito: as páginas internas ainda usam
+          cores fixas claras — ligar o toggle deixaria o tema escuro parcial.
+          Os tokens .dark do index.css já estão prontos para a migração. */}
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
