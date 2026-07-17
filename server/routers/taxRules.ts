@@ -11,7 +11,7 @@ import { aliquotaTotal, calcularImpostos } from "../services/taxEngine";
  * enquadramento definitivo é validado com o contador (spec §15).
  */
 
-const tipoSchema = z.enum(["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "outro"]);
+const tipoSchema = z.enum(["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "ipi", "pis", "cofins", "outro"]);
 const ufSchema = z.string().length(2).transform((s) => s.toUpperCase());
 
 export const taxRulesRouter = router({

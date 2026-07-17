@@ -9,7 +9,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { calculateStringSimilarity } from "./productMatchingService";
 
-type CaptureSourceType = "url" | "html" | "pdf" | "spreadsheet" | "xml" | "docx" | "text";
+type CaptureSourceType = "url" | "html" | "pdf" | "spreadsheet" | "xml" | "docx" | "text" | "image";
 type CaptureActionSuggestion = "create" | "update" | "review" | "ignore";
 type DuplicateSignal = "none" | "possible" | "probable" | "confirmed";
 

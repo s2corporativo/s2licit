@@ -2078,6 +2078,7 @@ export const scraperConfigs = mysqlTable("scraper_configs", {
     loginSuccessText?: string;
     loginSuccessSelector?: string;
     categoryUrls: string[];
+    searchUrlTemplate?: string;
     productItem: string;
     productName: string;
     productPrice: string;
@@ -2891,7 +2892,7 @@ export const capturedProductBatches = mysqlTable(
   "captured_product_batches",
   {
     id: int("id").autoincrement().primaryKey(),
-    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text"]).notNull(),
+    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text", "image"]).notNull(),
     sourceLabel: varchar("sourceLabel", { length: 256 }),
     sourceReference: varchar("sourceReference", { length: 512 }),
     status: mysqlEnum("status", ["processing", "review", "approved", "rejected", "applied", "failed"]).default("processing").notNull(),
@@ -2974,7 +2975,7 @@ export const capturedProductSourceLogs = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     batchId: int("batchId").notNull().references(() => capturedProductBatches.id, { onDelete: "cascade" }),
     capturedProductId: int("capturedProductId").references(() => capturedProducts.id, { onDelete: "set null" }),
-    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text"]).notNull(),
+    sourceType: mysqlEnum("sourceType", ["url", "html", "pdf", "spreadsheet", "xml", "docx", "text", "image"]).notNull(),
     sourceReference: varchar("sourceReference", { length: 512 }),
     logLevel: mysqlEnum("logLevel", ["info", "warning", "error"]).default("info").notNull(),
     message: text("message").notNull(),
@@ -3213,7 +3214,7 @@ export const taxRules = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     descricao: varchar("descricao", { length: 256 }).notNull(),
-    tipo: mysqlEnum("tipo", ["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "outro"]).notNull(),
+    tipo: mysqlEnum("tipo", ["simples_efetiva", "icms", "difal", "st", "fcp", "iss", "ipi", "pis", "cofins", "outro"]).notNull(),
     // null = vale para qualquer UF
     ufOrigem: varchar("ufOrigem", { length: 2 }),
     ufDestino: varchar("ufDestino", { length: 2 }),

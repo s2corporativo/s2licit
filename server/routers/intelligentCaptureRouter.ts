@@ -106,7 +106,7 @@ export const intelligentCaptureRouter = router({
       fileBase64: z.string().min(1),
       fileName: z.string().min(1),
       mimeType: z.string().min(1),
-      sourceType: z.enum(["pdf", "docx"]),
+      sourceType: z.enum(["pdf", "docx", "image"]),
     }))
     .mutation(async ({ ctx, input }) => {
       const draft = await buildCaptureDraftFromDocument(input);

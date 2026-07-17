@@ -51,6 +51,12 @@ export interface SelectorConfig {
   useStructuredData?: boolean;
   /** URLs das categorias a raspar (lista) */
   categoryUrls: string[];
+  /**
+   * Template de URL de busca por termo (§4/§5), com o placeholder {q} (ou
+   * {termo}). Ex.: "https://site.com/busca?q={q}". Quando presente, permite
+   * pesquisar um produto específico em vez de varrer categorias inteiras.
+   */
+  searchUrlTemplate?: string;
   /** Seletor de cada card/item de produto na listagem */
   productItem: string;
   /** Seletor do nome do produto (relativo ao productItem) */
@@ -102,6 +108,19 @@ export interface ScraperRunResult {
   errors: string[];
   durationMs: number;
   log: string[];
+}
+
+/**
+ * Monta a URL de busca a partir do template do fornecedor e do termo (§4/§5).
+ * Substitui {q}/{termo}; sem placeholder, anexa ?q=/&q=. Pura e testável.
+ */
+export function buildSearchUrl(template: string, termo: string): string {
+  const enc = encodeURIComponent(termo.trim());
+  if (/\{q\}|\{termo\}/i.test(template)) {
+    return template.replace(/\{q\}/gi, enc).replace(/\{termo\}/gi, enc);
+  }
+  const sep = template.includes("?") ? "&" : "?";
+  return `${template}${sep}q=${enc}`;
 }
 
 // ─── Configurações pré-definidas por fornecedor ───────────────────────────────
@@ -182,6 +201,62 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     nextPage: '.next-page, [rel="next"]',
     waitForSelector: '.product, .produto',
     navigationWait: 3000,
+  },
+
+  // ── Templates iniciais (VALIDAR com "testar login" e ajustar) ────────────────
+  // Os sites abaixo bloqueiam inspeção automática (403 anti-bot), então estes
+  // configs partem das URLs públicas conhecidas + seletores de fallback amplos e
+  // extração por dados estruturados. Confirme os seletores no Configurador de
+  // Fornecedores (botão "testar login") e prefira catálogo/API onde o ToS
+  // restringir automação (§17).
+  bartofil: {
+    // Portal B2B (Bartofil). Ajuste a URL exata de login pelo Configurador.
+    loginUrl: "https://www.bartofil.com.br/customer/account/login/",
+    loginEmail: 'input[name="login[username]"], input[type="email"], #email, #username',
+    loginPassword: 'input[name="login[password]"], input[type="password"], #pass, #password',
+    loginSubmit: '#send2, button[type="submit"], input[type="submit"]',
+    useStructuredData: true,
+    categoryUrls: [],
+    searchUrlTemplate: "https://www.bartofil.com.br/catalogsearch/result/?q={q}",
+    productItem: '.product-item, .product, .produto, [class*="product"]',
+    productName: '.product-item-link, h2, h3, .name, .nome',
+    productPrice: '.price, .preco, [class*="price"]',
+    productImage: 'img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .action.next',
+    navigationWait: 2500,
+  },
+  bassopancotte: {
+    loginUrl: "https://bassopancotte.com.br/login",
+    loginEmail: 'input[name="email"], input[type="email"], #email, #username, input[name="usuario"]',
+    loginPassword: 'input[name="password"], input[type="password"], #senha, #password',
+    loginSubmit: 'button[type="submit"], input[type="submit"], .btn-login',
+    useStructuredData: true,
+    categoryUrls: [],
+    productItem: '.product, .produto, [class*="product"], [class*="item"]',
+    productName: 'h2, h3, .name, .title, .nome',
+    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productImage: 'img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .proxima',
+    navigationWait: 2500,
+  },
+  magazinemedica: {
+    // Login confirmado (base Django); entra por CPF/CNPJ ou e-mail.
+    loginUrl: "https://magazinemedica.com.br/accounts/registro/login/",
+    loginEmail: '#id_username, input[name="username"], input[name="login"], input[type="text"]',
+    loginPassword: '#id_password, input[name="password"], input[type="password"]',
+    loginSubmit: 'button[type="submit"], input[type="submit"]',
+    useStructuredData: true,
+    categoryUrls: [],
+    searchUrlTemplate: "https://magazinemedica.com.br/busca/?q={q}",
+    productItem: '.product, .produto, [class*="product"], [class*="card"]',
+    productName: 'h2, h3, .name, .title, .nome',
+    productPrice: '.price, .preco, [class*="price"], [class*="preco"]',
+    productImage: 'img',
+    productLink: 'a',
+    nextPage: '[rel="next"], .next, .proxima',
+    navigationWait: 2500,
   },
 
   // Fornecedor genérico — funciona para muitos e-commerces padrão
@@ -475,6 +550,42 @@ export class ScraperEngine {
     }
 
     return todos;
+  }
+
+  /**
+   * Pesquisa um termo específico usando o template de busca do fornecedor
+   * (§4/§5), em vez de varrer categorias inteiras. Reaproveita a extração e
+   * carimba a proveniência. Requer searchUrlTemplate configurado.
+   */
+  async scrapeSearch(termo: string, cfg: SelectorConfig): Promise<ScrapedProduct[]> {
+    if (!this.page) throw new Error("Não autenticado. Chame login() primeiro.");
+    if (!cfg.searchUrlTemplate) {
+      throw new Error("Busca por termo indisponível: searchUrlTemplate não configurado para este fornecedor.");
+    }
+    const url = buildSearchUrl(cfg.searchUrlTemplate, termo);
+    this.addLog(`Buscando "${termo}": ${url}`);
+    await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+    await new Promise((r) => setTimeout(r, cfg.navigationWait ?? 2000));
+    if (cfg.waitForSelector) {
+      try {
+        await this.page.waitForSelector(cfg.waitForSelector, { timeout: 10000 });
+      } catch {
+        this.addLog(`Aviso: seletor de espera "${cfg.waitForSelector}" não encontrado na busca.`);
+      }
+    }
+    let produtos = cfg.useStructuredData
+      ? await this.extractStructuredProducts()
+      : await this.extractPageProducts(cfg);
+    if (cfg.useStructuredData && produtos.length === 0) {
+      produtos = await this.extractPageProducts(cfg);
+    }
+    const agora = Date.now();
+    for (const p of produtos) {
+      p.consultadoEm = agora;
+      p.fonteUrl = p.productUrl ?? url;
+    }
+    this.addLog(`  Busca "${termo}": ${produtos.length} produtos.`);
+    return produtos;
   }
 
   /** Extrai produtos da página atual */
@@ -871,6 +982,52 @@ export async function executarScraper(scraperConfigId: number): Promise<ScraperR
     return await executarScraperInternal(scraperConfigId);
   } finally {
     runningConfigIds.delete(scraperConfigId);
+  }
+}
+
+/**
+ * Busca sob demanda de produtos de um fornecedor configurado, sem persistir
+ * (usada pelos conectores da cascata §4). Faz login (reusando sessão) e, se
+ * houver termo + searchUrlTemplate, pesquisa; senão raspa a 1ª categoria.
+ */
+export async function buscarProdutosFornecedor(
+  scraperConfigId: number,
+  query: { termo?: string; codigo?: string },
+): Promise<ScrapedProduct[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível");
+  const configs = await db.select().from(scraperConfigs)
+    .where(eq(scraperConfigs.id, scraperConfigId)).limit(1);
+  if (!configs[0]) throw new Error(`Configuração de scraper #${scraperConfigId} não encontrada`);
+  const config = configs[0];
+
+  const scraperType = config.scraperType.toLowerCase();
+  const cfg: SelectorConfig =
+    (config.customSelectors as SelectorConfig | null) ??
+    FORNECEDOR_CONFIGS[scraperType] ??
+    FORNECEDOR_CONFIGS.generico;
+
+  let email: string, password: string;
+  if (config.email && config.email.includes("@")) email = config.email;
+  else { try { email = decryptPassword(config.email); } catch { email = config.email ?? ""; } }
+  try { password = decryptPassword(config.passwordHash); }
+  catch { throw new Error("Falha ao descriptografar a senha do fornecedor"); }
+
+  const loginUrl =
+    cfg.loginUrl ??
+    (cfg.categoryUrls[0]
+      ? new URL(cfg.categoryUrls[0]).origin + "/login"
+      : `https://${scraperType}.com.br/login`);
+
+  const engine = new ScraperEngine();
+  try {
+    await engine.login(loginUrl, email, password, cfg, config.supplierId);
+    const termo = (query.termo ?? query.codigo ?? "").trim();
+    if (termo && cfg.searchUrlTemplate) return await engine.scrapeSearch(termo, cfg);
+    if (cfg.categoryUrls[0]) return await engine.scrapeCategory(cfg.categoryUrls[0], cfg);
+    return [];
+  } finally {
+    await engine.close();
   }
 }
 

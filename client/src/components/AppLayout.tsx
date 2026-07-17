@@ -23,9 +23,11 @@ import {
   Package,
   PackageCheck,
   Radar,
+  ScrollText,
   Settings,
   ShieldCheck,
   Trophy,
+  Users,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
@@ -122,6 +124,9 @@ const navGroups: NavGroup[] = [
     label: "Administração",
     items: [
       { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
+      { href: "/usuarios", icon: Users, label: "Usuários e permissões", minRole: "admin" },
+      { href: "/logs", icon: ScrollText, label: "Logs de auditoria", minRole: "admin" },
+      { href: "/seguranca", icon: ShieldCheck, label: "Segurança (MFA)" },
     ],
   },
 ];

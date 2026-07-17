@@ -17,6 +17,9 @@ const TIPO_LABEL: Record<string, string> = {
   st: "ICMS-ST",
   fcp: "FCP",
   iss: "ISS",
+  ipi: "IPI",
+  pis: "PIS",
+  cofins: "COFINS",
   outro: "Outro",
 };
 

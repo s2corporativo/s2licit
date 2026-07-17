@@ -17,6 +17,9 @@ const named = <T extends string>(p: Promise<Record<T, React.ComponentType<any>>>
 const BuscaRapida = lazy(() => import("./pages/BuscaRapida"));
 const Comparacao = lazy(() => import("./pages/Comparacao"));
 const ConfiguracaoEmpresa = lazy(() => import("./pages/ConfiguracaoEmpresa"));
+const SegurancaMFA = lazy(() => import("./pages/SegurancaMFA"));
+const Usuarios = lazy(() => import("./pages/Usuarios"));
+const Logs = lazy(() => import("./pages/Logs"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Categorias = lazy(() => import("./pages/Categorias"));
 const Equivalencias = lazy(() => import("./pages/Equivalencias"));
@@ -128,6 +131,21 @@ function Router() {
         <Route path="/configurador-fornecedores">
           <RequireAuth message="Configure fornecedores após fazer login." minRole="admin">
             <ConfiguradorFornecedores />
+          </RequireAuth>
+        </Route>
+        <Route path="/seguranca">
+          <RequireAuth message="Acesse a segurança da conta após fazer login.">
+            <SegurancaMFA />
+          </RequireAuth>
+        </Route>
+        <Route path="/usuarios">
+          <RequireAuth message="Gerencie usuários após fazer login." minRole="admin">
+            <Usuarios />
+          </RequireAuth>
+        </Route>
+        <Route path="/logs">
+          <RequireAuth message="Acesse os logs após fazer login." minRole="admin">
+            <Logs />
           </RequireAuth>
         </Route>
         <Route path="/aplicar-precificacao">
