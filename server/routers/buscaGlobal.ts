@@ -12,6 +12,7 @@ import {
   salesInvoices,
   suppliers,
 } from "../../drizzle/schema";
+import { logger } from "../_core/logger";
 
 /**
  * Busca Global (spec §28): um campo, todas as entidades.
@@ -179,7 +180,7 @@ export const buscaGlobalRouter = router({
       const settled = await Promise.allSettled(blocos);
       for (const s of settled) {
         if (s.status === "rejected") {
-          console.warn("[BuscaGlobal] Bloco falhou:", (s.reason as Error)?.message);
+          logger.warn("[BuscaGlobal] Bloco falhou:", (s.reason as Error)?.message);
         }
       }
 

@@ -1,6 +1,7 @@
 import { asc, eq, ne } from "drizzle-orm";
 import { proposalTemplates, type ProposalTemplate, type InsertProposalTemplate } from "../../drizzle/schema";
 import { getDb } from "./_client";
+import { logger } from "../_core/logger";
 
 export async function listProposalTemplates(): Promise<ProposalTemplate[]> {
   const db = await getDb();
@@ -8,7 +9,7 @@ export async function listProposalTemplates(): Promise<ProposalTemplate[]> {
   try {
     return await db.select().from(proposalTemplates).orderBy(asc(proposalTemplates.name));
   } catch (error) {
-    console.error("[listProposalTemplates] Error:", error);
+    logger.error("[listProposalTemplates] Error:", error);
     return [];
   }
 }
@@ -20,7 +21,7 @@ export async function getProposalTemplate(id: number): Promise<ProposalTemplate 
     const rows = await db.select().from(proposalTemplates).where(eq(proposalTemplates.id, id)).limit(1);
     return rows[0] ?? null;
   } catch (error) {
-    console.error("[getProposalTemplate] Error:", error);
+    logger.error("[getProposalTemplate] Error:", error);
     return null;
   }
 }
@@ -58,7 +59,7 @@ export async function getDefaultProposalTemplate(): Promise<ProposalTemplate | n
     const rows = await db.select().from(proposalTemplates).where(eq(proposalTemplates.isDefault, "yes")).limit(1);
     return rows[0] ?? null;
   } catch (error) {
-    console.error("[getDefaultProposalTemplate] Error:", error);
+    logger.error("[getDefaultProposalTemplate] Error:", error);
     return null;
   }
 }

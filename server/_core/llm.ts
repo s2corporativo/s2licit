@@ -1,4 +1,5 @@
 import { ENV } from "./env";
+import { logger } from "./logger";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -586,7 +587,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
         if (!isTransientLlmError(err)) {
           throw err; // erro de payload/schema/autorização: retry não ajuda
         }
-        console.warn(
+        logger.warn(
           `[LLM] ${provider.kind} falhou (tentativa ${attempt}/2): ${(err as Error).message.slice(0, 200)}`
         );
         if (attempt < 2) {

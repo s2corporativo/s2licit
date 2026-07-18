@@ -64,6 +64,13 @@
       "when": 1784406291082,
       "tag": "0008_easy_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1784406735565,
+      "tag": "0009_bright_valeria_richards",
+      "breakpoints": true
     }
   ]
 }

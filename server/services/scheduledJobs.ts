@@ -9,6 +9,7 @@ import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
 import { executarScraper } from "./scraperEngine";
 import { runDatabaseBackup, cleanupOldBackups } from "./backupService";
+import { logger } from "../_core/logger";
 
 /**
  * Agendador central de jobs recorrentes.
@@ -43,13 +44,13 @@ async function notifyJobFailure(title: string, detail: string): Promise<void> {
   try {
     await notifyOwner({ title, content: detail });
   } catch (err) {
-    console.error("[Scheduler] Falha ao enviar notificação de erro:", (err as Error).message);
+    logger.error("[Scheduler] Falha ao enviar notificação de erro:", (err as Error).message);
   }
   if (isWhatsappConfigured()) {
     try {
       await enviarWhatsapp(`⚠️ ${title}\n\n${detail}`);
     } catch (err) {
-      console.error("[Scheduler] Falha ao enviar WhatsApp de erro:", (err as Error).message);
+      logger.error("[Scheduler] Falha ao enviar WhatsApp de erro:", (err as Error).message);
     }
   }
 }
@@ -59,19 +60,19 @@ let emailSyncRunning = false;
 /** Roda a sincronização de e-mail uma vez, com log resumido e guarda de sobreposição. */
 async function runEmailSync(): Promise<void> {
   if (emailSyncRunning) {
-    console.warn("[Scheduler] Sincronização de e-mail anterior ainda em andamento — pulando este ciclo.");
+    logger.warn("[Scheduler] Sincronização de e-mail anterior ainda em andamento — pulando este ciclo.");
     return;
   }
   emailSyncRunning = true;
   try {
     const result = await syncEmailQuotations({ limit: 50 });
     if (result.imported > 0 || result.errors.length > 0) {
-      console.log(
+      logger.info(
         `[Scheduler] Cotações e-mail: ${result.imported} importadas, ${result.skipped} já existentes, ${result.errors.length} avisos.`,
       );
     }
   } catch (err) {
-    console.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
+    logger.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
   } finally {
     emailSyncRunning = false;
   }
@@ -99,7 +100,7 @@ export async function runDailyAlerts(): Promise<void> {
     if (vencidas.length) linhas.push(`Certidões VENCIDAS: ${vencidas.join("; ")}`);
     if (vencendo.length) linhas.push(`Certidões vencendo em ${ALERT_DAYS} dias: ${vencendo.join("; ")}`);
   } catch (err) {
-    console.error("[Scheduler] Falha ao verificar certidões:", (err as Error).message);
+    logger.error("[Scheduler] Falha ao verificar certidões:", (err as Error).message);
   }
 
   // Prazos de cotação — filtra no SQL: só pendentes com prazo definido
@@ -126,7 +127,7 @@ export async function runDailyAlerts(): Promise<void> {
     if (vencidos.length) linhas.push(`Cotações com prazo VENCIDO sem resposta: ${vencidos.join("; ")}`);
     if (proximos.length) linhas.push(`Cotações vencendo em ${DEADLINE_DAYS} dias: ${proximos.join("; ")}`);
   } catch (err) {
-    console.error("[Scheduler] Falha ao verificar prazos:", (err as Error).message);
+    logger.error("[Scheduler] Falha ao verificar prazos:", (err as Error).message);
   }
 
   if (linhas.length > 0) {
@@ -136,9 +137,9 @@ export async function runDailyAlerts(): Promise<void> {
     });
     if (isWhatsappConfigured()) {
       const enviado = await enviarWhatsapp(`📋 Alertas do dia — Sistema S2\n\n${linhas.join("\n")}`);
-      if (enviado) console.log("[Scheduler] Alertas diários também enviados por WhatsApp.");
+      if (enviado) logger.info("[Scheduler] Alertas diários também enviados por WhatsApp.");
     }
-    console.log(`[Scheduler] Alertas diários: ${linhas.length} pendência(s) notificada(s).`);
+    logger.info(`[Scheduler] Alertas diários: ${linhas.length} pendência(s) notificada(s).`);
   }
 }
 
@@ -184,7 +185,7 @@ async function runScheduledScrapers(): Promise<void> {
 
       executarScraper(cfg.id)
         .then((r) => {
-          console.log(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
+          logger.info(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
           if (!r.success) {
             const detalhe = r.errors?.length ? `\nErros: ${r.errors.slice(0, 3).join("; ")}` : "";
             void notifyJobFailure(
@@ -194,7 +195,7 @@ async function runScheduledScrapers(): Promise<void> {
           }
         })
         .catch((err) => {
-          console.error(`[Scheduler] Scraper #${cfg.id} falhou:`, (err as Error).message);
+          logger.error(`[Scheduler] Scraper #${cfg.id} falhou:`, (err as Error).message);
           void notifyJobFailure(
             "Falha na captura agendada — Sistema S2",
             `A captura do fornecedor (config #${cfg.id}) lançou erro: ${(err as Error).message}`,
@@ -206,7 +207,7 @@ async function runScheduledScrapers(): Promise<void> {
       await new Promise((r) => setTimeout(r, 3000));
     }
   } catch (err) {
-    console.error("[Scheduler] Falha ao verificar agendamentos de scraper:", (err as Error).message);
+    logger.error("[Scheduler] Falha ao verificar agendamentos de scraper:", (err as Error).message);
   }
 }
 
@@ -217,12 +218,12 @@ export async function runBackupJob(): Promise<void> {
   const result = await runDatabaseBackup({ destDir });
   if (result.success) {
     const removidos = cleanupOldBackups(destDir, keepDays, Date.now());
-    console.log(
+    logger.info(
       `[Scheduler] Backup concluído: ${result.file}` +
         (removidos > 0 ? ` (${removidos} backup(s) antigo(s) removido(s)).` : "."),
     );
   } else {
-    console.error(`[Scheduler] Backup falhou: ${result.error}`);
+    logger.error(`[Scheduler] Backup falhou: ${result.error}`);
     await notifyJobFailure(
       "Falha no backup automático — Sistema S2",
       `O backup diário do banco falhou: ${result.error ?? "erro desconhecido"}. ` +
@@ -238,7 +239,7 @@ export function initScheduledJobs(): void {
   void import("../jobs/aiJobRunner")
     .then(({ recoverStaleAiJobs }) => recoverStaleAiJobs())
     .then((n) => {
-      if (n > 0) console.warn(`[Scheduler] ${n} job(s) de IA interrompido(s) por restart foram marcados como erro.`);
+      if (n > 0) logger.warn(`[Scheduler] ${n} job(s) de IA interrompido(s) por restart foram marcados como erro.`);
     })
     .catch(() => undefined);
 
@@ -247,9 +248,9 @@ export function initScheduledJobs(): void {
     const expr = process.env.EMAIL_SYNC_CRON || DEFAULT_EMAIL_SYNC_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, runEmailSync);
-      console.log(`[Scheduler] Sincronização de cotações por e-mail agendada (${expr}).`);
+      logger.info(`[Scheduler] Sincronização de cotações por e-mail agendada (${expr}).`);
     } else {
-      console.warn(`[Scheduler] EMAIL_SYNC_CRON inválido: "${expr}" — sincronização automática desativada.`);
+      logger.warn(`[Scheduler] EMAIL_SYNC_CRON inválido: "${expr}" — sincronização automática desativada.`);
     }
   }
 
@@ -258,9 +259,9 @@ export function initScheduledJobs(): void {
     const expr = process.env.ALERTS_CRON || DEFAULT_ALERTS_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, runDailyAlerts);
-      console.log(`[Scheduler] Alertas diários agendados (${expr}).`);
+      logger.info(`[Scheduler] Alertas diários agendados (${expr}).`);
     } else {
-      console.warn(`[Scheduler] ALERTS_CRON inválido: "${expr}" — alertas diários desativados.`);
+      logger.warn(`[Scheduler] ALERTS_CRON inválido: "${expr}" — alertas diários desativados.`);
     }
   }
 
@@ -269,9 +270,9 @@ export function initScheduledJobs(): void {
     const expr = process.env.SCRAPER_SCHEDULE_CRON || DEFAULT_SCRAPER_SCHEDULE_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, runScheduledScrapers, { timezone: SCRAPER_TIMEZONE });
-      console.log(`[Scheduler] Execução automática de fornecedores agendada (verificação ${expr}, horário de Brasília).`);
+      logger.info(`[Scheduler] Execução automática de fornecedores agendada (verificação ${expr}, horário de Brasília).`);
     } else {
-      console.warn(`[Scheduler] SCRAPER_SCHEDULE_CRON inválido: "${expr}" — agendamento automático de fornecedores desativado.`);
+      logger.warn(`[Scheduler] SCRAPER_SCHEDULE_CRON inválido: "${expr}" — agendamento automático de fornecedores desativado.`);
     }
   }
 
@@ -280,9 +281,9 @@ export function initScheduledJobs(): void {
     const expr = process.env.BACKUP_CRON || DEFAULT_BACKUP_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, () => { void runBackupJob(); });
-      console.log(`[Scheduler] Backup automático do banco agendado (${expr}).`);
+      logger.info(`[Scheduler] Backup automático do banco agendado (${expr}).`);
     } else {
-      console.warn(`[Scheduler] BACKUP_CRON inválido: "${expr}" — backup automático desativado.`);
+      logger.warn(`[Scheduler] BACKUP_CRON inválido: "${expr}" — backup automático desativado.`);
     }
   }
 }

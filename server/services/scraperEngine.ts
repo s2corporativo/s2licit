@@ -22,6 +22,7 @@ import { supplierSessionService } from "./supplierSessionService";
 import { puppeteerCookiesToRecord, recordToPuppeteerCookies } from "./sessionCookies";
 import { storagePut } from "../storage";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
+import { logger } from "../_core/logger";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -374,7 +375,7 @@ export class ScraperEngine {
     const ts = new Date().toISOString().slice(11, 19);
     const linha = `[${ts}] ${msg}`;
     this.log.push(linha);
-    console.log(`[ScraperEngine] ${linha}`);
+    logger.info(`[ScraperEngine] ${linha}`);
   }
 
   async init(): Promise<void> {

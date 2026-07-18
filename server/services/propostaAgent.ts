@@ -18,6 +18,7 @@ import { proposals, proposalItems } from "../../drizzle/schema";
 import { eq, asc } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
+import { logger } from "../_core/logger";
 
 // ─── Conformidade: detecção de CAPTCHA (sem resolução) ─────────────────────────
 //
@@ -367,7 +368,7 @@ export class PropostaAgente {
   private addLog(msg: string) {
     const ts = new Date().toISOString().slice(11, 19);
     this.log.push(`[${ts}] ${msg}`);
-    console.log(`[PropostaAgente] ${msg}`);
+    logger.info(`[PropostaAgente] ${msg}`);
   }
 
   private addErro(msg: string) {

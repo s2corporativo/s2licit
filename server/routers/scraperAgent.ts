@@ -11,6 +11,7 @@ import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
 import { executarScraper, testarLoginFornecedor, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
+import { logger } from "../_core/logger";
 
 // Jobs em execução (em memória — suficiente para UI de progresso)
 const runningJobs = new Map<number, { status: string; log: string[]; startedAt: Date }>();
@@ -106,7 +107,7 @@ export const scraperAgentRouter = router({
         productsUpdatedCount: scraperConfigs.productsUpdatedCount,
       }).from(scraperConfigs).orderBy(desc(scraperConfigs.updatedAt));
     } catch (error) {
-      console.error('[ScraperAgent] Erro ao listar configs:', error);
+      logger.error('[ScraperAgent] Erro ao listar configs:', error);
       return [];
     }
   }),

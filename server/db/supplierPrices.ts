@@ -1,4 +1,5 @@
 import { getDb } from "./_client";
+import { logger } from "../_core/logger";
 
 export async function getProductSupplierPrices(productId: number) {
   const db = await getDb();
@@ -54,7 +55,7 @@ export async function upsertProductSupplierPrice(
       const { recordPriceHistory } = await import("./landedCost");
       await recordPriceHistory({ productId, supplierId, price, origem: extra?.origem ?? null });
     } catch (err) {
-      console.warn("[supplierPrices] Falha ao registrar histórico de preço:", (err as Error).message);
+      logger.warn("[supplierPrices] Falha ao registrar histórico de preço:", (err as Error).message);
     }
   }
 }

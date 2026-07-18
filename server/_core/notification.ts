@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { ENV } from "./env";
+import { logger } from "./logger";
 
 export type NotificationPayload = {
   title: string;
@@ -72,7 +73,7 @@ export async function notifyOwner(
   // Manus). Sem configuração, apenas registra no log do servidor — os
   // webhooks internos (Slack/e-mail) continuam funcionando por outra via.
   if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
-    console.log(`[Notification] (sem serviço externo configurado) ${title}: ${content.slice(0, 200)}`);
+    logger.info(`[Notification] (sem serviço externo configurado) ${title}: ${content.slice(0, 200)}`);
     return false;
   }
 
@@ -92,7 +93,7 @@ export async function notifyOwner(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      console.warn(
+      logger.warn(
         `[Notification] Failed to notify owner (${response.status} ${response.statusText})${
           detail ? `: ${detail}` : ""
         }`
@@ -102,7 +103,7 @@ export async function notifyOwner(
 
     return true;
   } catch (error) {
-    console.warn("[Notification] Error calling notification service:", error);
+    logger.warn("[Notification] Error calling notification service:", error);
     return false;
   }
 }

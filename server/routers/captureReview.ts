@@ -3,6 +3,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { productCaptureHistory, products, suppliers } from "../../drizzle/schema";
+import { logger } from "../_core/logger";
 
 export const captureReviewRouter = router({
   /**
@@ -59,7 +60,7 @@ export const captureReviewRouter = router({
           total: items.length,
         };
       } catch (error) {
-        console.error("Error listing pending captures:", error);
+        logger.error("Error listing pending captures:", error);
         return { items: [], total: 0 };
       }
     }),
@@ -83,7 +84,7 @@ export const captureReviewRouter = router({
 
         return product[0] || null;
       } catch (error) {
-        console.error("Error getting product preview:", error);
+        logger.error("Error getting product preview:", error);
         return null;
       }
     }),
@@ -120,7 +121,7 @@ export const captureReviewRouter = router({
           applied: filtered.filter((row) => row.status === "applied").length,
         };
       } catch (error) {
-        console.error("Error getting review stats:", error);
+        logger.error("Error getting review stats:", error);
         return { total: 0, pendingReview: 0, approved: 0, rejected: 0, applied: 0 };
       }
     }),
@@ -157,7 +158,7 @@ export const captureReviewRouter = router({
 
         return Array.from(grouped.values()).filter((row) => row.pendingCount > 0);
       } catch (error) {
-        console.error("Error getting suppliers with pending items:", error);
+        logger.error("Error getting suppliers with pending items:", error);
         return [];
       }
     }),
@@ -191,7 +192,7 @@ export const captureReviewRouter = router({
 
         return { success: true, approved: input.ids.length };
       } catch (error) {
-        console.error("Error approving batch:", error);
+        logger.error("Error approving batch:", error);
         return { success: false, approved: 0, error: String(error) };
       }
     }),
@@ -225,7 +226,7 @@ export const captureReviewRouter = router({
 
         return { success: true, rejected: input.ids.length };
       } catch (error) {
-        console.error("Error rejecting batch:", error);
+        logger.error("Error rejecting batch:", error);
         return { success: false, rejected: 0, error: String(error) };
       }
     }),
@@ -269,7 +270,7 @@ export const captureReviewRouter = router({
 
         return { success: true, restored: input.items.length };
       } catch (error) {
-        console.error("Error undoing batch action:", error);
+        logger.error("Error undoing batch action:", error);
         return { success: false, restored: 0, error: String(error) };
       }
     }),
@@ -299,7 +300,7 @@ export const captureReviewRouter = router({
           .where(inArray(productCaptureHistory.id, input.ids))
           .execute();
       } catch (error) {
-        console.error("Error getting capture items by ids:", error);
+        logger.error("Error getting capture items by ids:", error);
         return [];
       }
     }),
@@ -349,7 +350,7 @@ export const captureReviewRouter = router({
           try {
             // Validar campo permitido antes de atualizar
             if (!allowedFields.has(change.fieldChanged)) {
-              console.error(
+              logger.error(
                 `Campo não permitido para atualização dinâmica: ${change.fieldChanged}`
               );
               errorCount++;
@@ -387,14 +388,14 @@ export const captureReviewRouter = router({
 
             appliedCount++;
           } catch (err) {
-            console.error(`Error applying change ${change.id}:`, err);
+            logger.error(`Error applying change ${change.id}:`, err);
             errorCount++;
           }
         }
 
         return { success: true, applied: appliedCount, errors: errorCount };
       } catch (error) {
-        console.error("Error applying approved changes:", error);
+        logger.error("Error applying approved changes:", error);
         return { success: false, applied: 0, error: String(error) };
       }
     }),
@@ -414,7 +415,7 @@ export const captureReviewRouter = router({
         const csv = await buildCaptureCsv(input);
         return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
       } catch (error) {
-        console.error("Error exporting CSV:", error);
+        logger.error("Error exporting CSV:", error);
         return { csv: "", filename: "" };
       }
     }),
@@ -426,7 +427,7 @@ export const captureReviewRouter = router({
         const csv = await buildCaptureCsv(input);
         return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
       } catch (error) {
-        console.error("Error exporting CSV:", error);
+        logger.error("Error exporting CSV:", error);
         return { csv: "", filename: "" };
       }
     }),

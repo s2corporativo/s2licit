@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import { getDb } from "../db";
 import { auditLogs } from "../../drizzle/schema";
+import { logger } from "../_core/logger";
 
 /**
  * Registro server-side da trilha de auditoria (§18).
@@ -53,6 +54,6 @@ export async function recordAudit(entry: AuditEntry): Promise<void> {
     });
   } catch (err) {
     // Nunca propagar: auditoria não pode quebrar o fluxo auditado.
-    console.error("[Audit] Falha ao registrar evento de auditoria:", (err as Error).message);
+    logger.error("[Audit] Falha ao registrar evento de auditoria:", (err as Error).message);
   }
 }

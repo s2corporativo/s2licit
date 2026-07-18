@@ -10,6 +10,7 @@ import { decryptPassword } from "../utils/encryption";
 import { getSessionCookieOptions } from "./cookies";
 import { ENV } from "./env";
 import { sdk } from "./sdk";
+import { logger } from "./logger";
 
 /**
  * Política de bloqueio de conta (§16): após MAX_FAILED_LOGINS tentativas
@@ -62,7 +63,7 @@ export async function ensurePasswordColumn(): Promise<void> {
   const total = Number((rows as any)[0]?.total ?? 0);
   if (total === 0) {
     await db.execute(sql`ALTER TABLE users ADD COLUMN passwordHash VARCHAR(255) NULL`);
-    console.log("[LocalAuth] Coluna users.passwordHash criada.");
+    logger.info("[LocalAuth] Coluna users.passwordHash criada.");
   }
 }
 
@@ -88,13 +89,13 @@ export async function ensureAdminUser(): Promise<void> {
       passwordHash,
       role: "admin",
     });
-    console.log(`[LocalAuth] Usuário administrador criado: ${email}`);
+    logger.info(`[LocalAuth] Usuário administrador criado: ${email}`);
   } else if (!existing[0].passwordHash) {
     await db
       .update(users)
       .set({ passwordHash, role: "admin", loginMethod: "local" })
       .where(eq(users.id, existing[0].id));
-    console.log(`[LocalAuth] Senha definida para o administrador existente: ${email}`);
+    logger.info(`[LocalAuth] Senha definida para o administrador existente: ${email}`);
   } else if (!credentialEncryptionService.verifyPassword(ENV.adminPassword, existing[0].passwordHash)) {
     // ADMIN_PASSWORD do ambiente é a fonte de verdade: se mudou, sincroniza.
     // (Sistema de uso interno single-user — trocar a senha = trocar o env e reiniciar.)
@@ -102,7 +103,7 @@ export async function ensureAdminUser(): Promise<void> {
       .update(users)
       .set({ passwordHash })
       .where(eq(users.id, existing[0].id));
-    console.log(`[LocalAuth] Senha do administrador sincronizada com ADMIN_PASSWORD: ${email}`);
+    logger.info(`[LocalAuth] Senha do administrador sincronizada com ADMIN_PASSWORD: ${email}`);
   }
 }
 
@@ -219,6 +220,7 @@ export function registerLocalAuthRoutes(app: Express) {
       const sessionToken = await sdk.createSessionToken(user.openId, {
         name: user.name ?? "",
         expiresInMs: SESSION_TTL_MS,
+        sessionVersion: (user as { sessionVersion?: number }).sessionVersion ?? 0,
       });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: SESSION_TTL_MS });
@@ -233,7 +235,7 @@ export function registerLocalAuthRoutes(app: Express) {
         user: { id: user.id, name: user.name, email: user.email, role: user.role },
       });
     } catch (err) {
-      console.error("[LocalAuth] Falha no login:", err);
+      logger.error("[LocalAuth] Falha no login:", err);
       res.status(500).json({ error: "Erro interno ao processar o login." });
     }
   });

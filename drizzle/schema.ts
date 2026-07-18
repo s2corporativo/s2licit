@@ -32,6 +32,10 @@ export const users = mysqlTable("users", {
   // Conta desativada/revogada: bloqueia o acesso mesmo para usuários OAuth, cuja
   // linha seria recriada por uma sessão válida se apenas deletada.
   disabled: boolean("disabled").default(false).notNull(),
+  // Versão de sessão: o JWT carrega o valor vigente no login; o logout
+  // incrementa e invalida TODOS os tokens antigos do usuário — antes o token
+  // capturado seguia válido por 7 dias mesmo após logout.
+  sessionVersion: int("sessionVersion").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),

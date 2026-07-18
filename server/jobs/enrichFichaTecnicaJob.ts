@@ -9,6 +9,7 @@ import { products } from "../../drizzle/schema";
 import { isNull, sql } from "drizzle-orm";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
+import { logger } from "../_core/logger";
 
 export interface EnrichmentProgress {
   totalProducts: number;
@@ -105,7 +106,7 @@ Gere uma ficha técnica estruturada em JSON com os campos:
     const parsed = parseLlmJson(typeof content === "string" ? content : JSON.stringify(content));
     return parsed;
   } catch (error: any) {
-    console.error(`[EnrichFichaTecnica] Erro ao extrair ficha técnica para ${product.name}:`, error?.message);
+    logger.error(`[EnrichFichaTecnica] Erro ao extrair ficha técnica para ${product.name}:`, error?.message);
     throw error;
   }
 }
@@ -116,7 +117,7 @@ Gere uma ficha técnica estruturada em JSON com os campos:
 export async function runEnrichFichaTecnicaBatch() {
   const db = await getDb();
   if (!db) {
-    console.error("[EnrichFichaTecnica] Database não disponível");
+    logger.error("[EnrichFichaTecnica] Database não disponível");
     return enrichmentProgress;
   }
 
@@ -153,7 +154,7 @@ export async function runEnrichFichaTecnicaBatch() {
       return enrichmentProgress;
     }
 
-    console.log(`[EnrichFichaTecnica] Iniciando enriquecimento de ${totalToEnrich} produtos em ${enrichmentProgress.totalBatches} lotes`);
+    logger.info(`[EnrichFichaTecnica] Iniciando enriquecimento de ${totalToEnrich} produtos em ${enrichmentProgress.totalBatches} lotes`);
 
     const BATCH_SIZE = 50;
     let offset = 0;
@@ -185,7 +186,7 @@ export async function runEnrichFichaTecnicaBatch() {
 
             enrichmentProgress.successfulProducts++;
           } catch (error: any) {
-            console.error(`[EnrichFichaTecnica] Erro ao processar produto ${product.id}:`, error?.message);
+            logger.error(`[EnrichFichaTecnica] Erro ao processar produto ${product.id}:`, error?.message);
             enrichmentProgress.failedProducts++;
           }
 
@@ -201,7 +202,7 @@ export async function runEnrichFichaTecnicaBatch() {
         const remainingProducts = totalToEnrich - enrichmentProgress.processedProducts;
         enrichmentProgress.estimatedTimeRemaining = Math.round((avgTimePerProduct * remainingProducts) / 1000); // em segundos
 
-        console.log(
+        logger.info(
           `[EnrichFichaTecnica] Lote ${enrichmentProgress.currentBatch}/${enrichmentProgress.totalBatches} concluído: ` +
           `${enrichmentProgress.successfulProducts} sucesso, ${enrichmentProgress.failedProducts} erros. ` +
           `Progresso: ${enrichmentProgress.percentComplete}%`
@@ -210,7 +211,7 @@ export async function runEnrichFichaTecnicaBatch() {
         // Rate limit: 1 produto a cada 2 segundos para não sobrecarregar IA
         await new Promise((r) => setTimeout(r, 2000));
       } catch (batchError: any) {
-        console.error(`[EnrichFichaTecnica] Erro ao processar lote ${enrichmentProgress.currentBatch}:`, batchError?.message);
+        logger.error(`[EnrichFichaTecnica] Erro ao processar lote ${enrichmentProgress.currentBatch}:`, batchError?.message);
         enrichmentProgress.failedProducts += BATCH_SIZE;
         enrichmentProgress.processedProducts += BATCH_SIZE;
 
@@ -236,13 +237,13 @@ export async function runEnrichFichaTecnicaBatch() {
         `Duração: ${Math.round(duration / 60)} minutos`,
     });
 
-    console.log(`[EnrichFichaTecnica] Enriquecimento concluído em ${duration}s`);
+    logger.info(`[EnrichFichaTecnica] Enriquecimento concluído em ${duration}s`);
   } catch (error: any) {
     enrichmentProgress.status = "error";
     enrichmentProgress.lastError = error?.message;
     enrichmentProgress.completedAt = new Date();
 
-    console.error("[EnrichFichaTecnica] Erro fatal:", error?.message);
+    logger.error("[EnrichFichaTecnica] Erro fatal:", error?.message);
     await notifyOwner({
       title: "Erro no Enriquecimento de Fichas Técnicas",
       content: `Erro: ${error?.message}\n` +

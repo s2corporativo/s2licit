@@ -24,6 +24,7 @@ import {
   getProductsPerCategory,
   getProposalFinancialStats,
 } from "../db";
+import { logger } from "../_core/logger";
 
 // ─── Ferramentas disponíveis para o Agente ────────────────────────────────────
 
@@ -335,7 +336,7 @@ async function executarFerramenta(nome: string, args: Record<string, any>): Prom
         return `Ferramenta desconhecida: ${nome}`;
     }
   } catch (err: any) {
-    console.error(`[Agente] Erro ao executar ferramenta ${nome}:`, err?.message);
+    logger.error(`[Agente] Erro ao executar ferramenta ${nome}:`, err?.message);
     return `Erro ao executar ferramenta ${nome}: ${err?.message ?? "Erro desconhecido"}`;
   }
 }

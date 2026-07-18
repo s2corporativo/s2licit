@@ -10,6 +10,7 @@
 
 import { getDb } from "../db";
 import { apiLogs, syncRuns } from "../../drizzle/schema";
+import { logger } from "../_core/logger";
 
 export interface ConnectorFetchResult {
   source: string;
@@ -216,7 +217,7 @@ export async function robustFetch(
 
       if (attempt < MAX_RETRIES) {
         const backoff = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
-        console.warn(`[${source}] Tentativa ${attempt} falhou. Retry em ${backoff}ms. Erro: ${errorMessage}`);
+        logger.warn(`[${source}] Tentativa ${attempt} falhou. Retry em ${backoff}ms. Erro: ${errorMessage}`);
         await sleep(backoff);
       }
     }

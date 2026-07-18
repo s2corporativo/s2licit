@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { checkDuplicatesInRows, getProductPricesByMasterName, listMasterProducts, previewImportRows, previewImportRowsFuzzy, searchMasterProducts } from "../db";
+import { logger } from "../_core/logger";
 
 export const masterProductsRouter = router({
     list: protectedProcedure
@@ -29,7 +30,7 @@ export const masterProductsRouter = router({
           }
           return await previewImportRowsFuzzy(input.rows, input.supplierId);
         } catch (error: any) {
-          console.error("[previewImportFuzzy]", error?.message || error);
+          logger.error("[previewImportFuzzy]", error?.message || error);
           throw new Error(`Erro ao processar preview de importação: ${error?.message || "Erro desconhecido"}`);
         }
       }),
@@ -53,7 +54,7 @@ export const masterProductsRouter = router({
           }
           return await checkDuplicatesInRows(input.rows, input.supplierId);
         } catch (error: any) {
-          console.error("[checkDuplicatesInRows]", error?.message || error);
+          logger.error("[checkDuplicatesInRows]", error?.message || error);
           throw new Error(`Erro ao verificar duplicatas: ${error?.message || "Erro desconhecido"}`);
         }
       }),
@@ -66,7 +67,7 @@ export const masterProductsRouter = router({
           }
           return await getProductPricesByMasterName(input.name);
         } catch (error: any) {
-          console.error("[pricesByName]", error?.message || error);
+          logger.error("[pricesByName]", error?.message || error);
           throw new Error(`Erro ao buscar preços: ${error?.message || "Erro desconhecido"}`);
         }
       }),

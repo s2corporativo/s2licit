@@ -1,0 +1,72 @@
+# Rollback do Sistema S2 na VPS: volta o app para a imagem anterior
+# (registrada pelo deploy em S2_IMAGE_PREVIOUS) ou para uma tag informada.
+# Troca só a imagem do app — migrações de banco são forward-only e permanecem.
+name: Rollback VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Imagem exata (ghcr.io/org/repo:sha). Vazio = imagem anterior registrada na VPS."
+        required: false
+        default: ""
+      host:
+        description: "IP/host da VPS"
+        required: false
+        default: ""
+      password:
+        description: "Senha SSH (vazio para usar o secret VPS_PASSWORD)"
+        required: false
+        default: ""
+
+env:
+  DEPLOY_HOST: ${{ inputs.host || vars.VPS_HOST || '13.140.167.153' }}
+  DEPLOY_USER: ${{ vars.VPS_SSH_USER || 'root' }}
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Preparar ferramentas SSH
+        env:
+          VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          if [ -n "${{ inputs.password }}" ]; then echo "::add-mask::${{ inputs.password }}"; fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          mkdir -p ~/.ssh
+          if [ -n "$VPS_HOST_KEY" ]; then
+            printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20" >> "$GITHUB_ENV"
+          else
+            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20" >> "$GITHUB_ENV"
+            echo "::warning::Secret VPS_HOST_KEY ausente — conexão SSH sem verificação de host."
+          fi
+
+      - name: Executar rollback na VPS
+        env:
+          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "::error::Configure o secret VPS_PASSWORD ou informe a senha no Run workflow."
+            exit 1
+          fi
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null || true"
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash /opt/s2licit/scripts/vps-rollback.sh '${{ inputs.image }}'"
+
+      - name: Resumo
+        run: |
+          echo "### Rollback concluído ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Alvo: ${{ inputs.image || 'imagem anterior registrada na VPS (S2_IMAGE_PREVIOUS)' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Readiness validada em /readyz" >> "$GITHUB_STEP_SUMMARY"
