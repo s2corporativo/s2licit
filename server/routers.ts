@@ -41,6 +41,7 @@ import { emailQuotationsRouter } from "./routers/emailQuotations";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
 import { emailConfigRouter } from "./routers/emailConfig";
+import { legalAnalysisRouter } from "./routers/legalAnalysis";
 import { precificacaoRouter } from "./routers/precificacao";
 import { portalCredentialsRouter } from "./routers/portalCredentials";
 import { agendaRouter } from "./routers/agenda";
@@ -92,6 +93,7 @@ export const appRouter = router({
   certidoes: certidoesRouter,
   ai: aiRouter,
   emailConfig: emailConfigRouter,
+  legalAnalysis: legalAnalysisRouter,
   precificacao: precificacaoRouter,
   portalCredentials: portalCredentialsRouter,
   agenda: agendaRouter,

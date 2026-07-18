@@ -89,6 +89,7 @@ const navGroups: NavGroup[] = [
       { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
       { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações recebidas", minRole: "editor" },
       { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
+      { href: "/analise-juridica", icon: Scale, label: "Análise jurídica (IA)", minRole: "editor" },
       { href: "/diligencias", icon: MessageSquareWarning, label: "Diligências e recursos", minRole: "editor" },
     ],
   },

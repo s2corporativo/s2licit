@@ -32,6 +32,7 @@ const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
 const ImportarEdital = lazy(() => import("./pages/ImportarEdital"));
+const AnaliseJuridica = lazy(() => import("./pages/AnaliseJuridica"));
 const Sinonimos = lazy(() => import("./pages/Sinonimos"));
 const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
 const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
@@ -259,6 +260,11 @@ function Router() {
         <Route path="/edital">
           <RequireAuth message="Importe editais após fazer login." minRole="editor">
             <ImportarEdital />
+          </RequireAuth>
+        </Route>
+        <Route path="/analise-juridica">
+          <RequireAuth message="Faça login para usar a análise jurídica." minRole="editor">
+            <AnaliseJuridica />
           </RequireAuth>
         </Route>
         <Route path="/imagens">
