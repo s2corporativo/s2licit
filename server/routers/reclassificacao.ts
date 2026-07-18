@@ -4,6 +4,7 @@ import { and, count, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { categories, products } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
+import { logger } from "../_core/logger";
 
 const CATEGORIES = [
   "Medicamentos Veterinários",
@@ -480,7 +481,7 @@ Responda apenas com o nome da categoria, sem explicações.`;
             .where(eq(products.id, update.id));
           applied++;
         } catch (error) {
-          console.error(`Erro ao atualizar produto ${update.id}:`, error);
+          logger.error(`Erro ao atualizar produto ${update.id}:`, error);
           failures.push({
             id: update.id,
             error: error instanceof Error ? error.message : "Erro desconhecido",

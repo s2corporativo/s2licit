@@ -16,6 +16,7 @@ import {
   configuredEnvironmentNames,
   getIntegrationStatuses,
 } from "../services/integrationStatusService";
+import { logger } from "../_core/logger";
 
 /**
  * Central de Diagnóstico: verificações reais e somente leitura sobre banco,
@@ -258,7 +259,7 @@ export const diagnosticoRouter = router({
         codigo: "certificates",
       });
     } catch (error) {
-      console.error("[Diagnóstico] Falha ao consultar certidões:", error);
+      logger.error("[Diagnóstico] Falha ao consultar certidões:", error);
       itens.push({
         categoria: "Dados essenciais",
         item: "Certidões de habilitação",
@@ -359,7 +360,7 @@ export const diagnosticoRouter = router({
         codigo: "quotations",
       });
     } catch (error) {
-      console.error("[Diagnóstico] Falha ao consultar cotações:", error);
+      logger.error("[Diagnóstico] Falha ao consultar cotações:", error);
       itens.push({
         categoria: "Operação",
         item: "Cotações pendentes",

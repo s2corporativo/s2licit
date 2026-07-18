@@ -1,5 +1,6 @@
 import { getDb } from "../db";
 import { suppliers } from "../../drizzle/schema";
+import { logger } from "./logger";
 
 /**
  * Fornecedores com scraper pronto em FORNECEDOR_CONFIGS (scraperEngine.ts),
@@ -42,8 +43,8 @@ export async function ensureFornecedoresIniciais(): Promise<void> {
     const faltantes = fornecedoresFaltantes(existentes.map((s) => s.name));
     if (faltantes.length === 0) return;
     await db.insert(suppliers).values(faltantes.map((name) => ({ name })));
-    console.log(`[Seed] Fornecedores iniciais cadastrados: ${faltantes.join(", ")}.`);
+    logger.info(`[Seed] Fornecedores iniciais cadastrados: ${faltantes.join(", ")}.`);
   } catch (err) {
-    console.error("[Seed] Falha ao semear fornecedores iniciais:", err);
+    logger.error("[Seed] Falha ao semear fornecedores iniciais:", err);
   }
 }

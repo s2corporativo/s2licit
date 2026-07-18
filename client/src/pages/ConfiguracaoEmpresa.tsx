@@ -2,6 +2,8 @@ import { trpc } from "@/lib/trpc";
 import { Building2, Save, Upload, X, ImageIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { usePermission } from "@/components/RequireAuth";
+import { EmailConfigSection } from "@/components/EmailConfigSection";
 
 // ─── Logo Uploader Component ──────────────────────────────────────────────────
 function LogoUploader({
@@ -138,6 +140,7 @@ function LogoUploader({
 export default function ConfiguracaoEmpresa() {
   const { data, isLoading } = trpc.company.get.useQuery();
   const utils = trpc.useUtils();
+  const isAdmin = usePermission("admin");
 
   const [form, setForm] = useState({
     name: "",
@@ -413,6 +416,8 @@ export default function ConfiguracaoEmpresa() {
           </div>
         </form>
       )}
+
+      {isAdmin && <EmailConfigSection />}
     </div>
   );
 }

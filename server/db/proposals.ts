@@ -206,42 +206,46 @@ export async function duplicateProposal(id: number) {
   const original = await getProposalWithItems(id);
   if (!original) throw new Error("Proposal not found");
   const { items, ...proposalData } = original;
-  const [newResult] = await db.insert(proposals).values({
-    title: `Cópia de ${proposalData.title}`,
-    processNumber: proposalData.processNumber,
-    orgId: proposalData.orgId,
-    orgName: proposalData.orgName,
-    status: "draft",
-    validityDays: proposalData.validityDays,
-    paymentTerms: proposalData.paymentTerms,
-    deliveryTerms: proposalData.deliveryTerms,
-    notes: proposalData.notes,
-  });
-  const newId = (newResult as any).insertId as number;
-  if (items && items.length > 0) {
-    for (const item of items) {
-      await db.insert(proposalItems).values({
-        proposalId: newId,
-        productId: item.productId,
-        itemNumber: item.itemNumber,
-        productName: item.productName,
-        activeIngredient: item.activeIngredient,
-        manufacturer: item.manufacturer,
-        concentration: item.concentration,
-        presentation: item.presentation,
-        unit: item.unit,
-        supplierName: item.supplierName,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        totalPrice: item.totalPrice,
-        notes: item.notes,
-        imageUrl: item.imageUrl,
-        productUrl: item.productUrl,
-        sortOrder: item.sortOrder,
-      });
+  // Proposta + itens na MESMA transação: falha no meio não deixa uma cópia
+  // pela metade no banco.
+  return db.transaction(async (tx) => {
+    const [newResult] = await tx.insert(proposals).values({
+      title: `Cópia de ${proposalData.title}`,
+      processNumber: proposalData.processNumber,
+      orgId: proposalData.orgId,
+      orgName: proposalData.orgName,
+      status: "draft",
+      validityDays: proposalData.validityDays,
+      paymentTerms: proposalData.paymentTerms,
+      deliveryTerms: proposalData.deliveryTerms,
+      notes: proposalData.notes,
+    });
+    const newId = (newResult as any).insertId as number;
+    if (items && items.length > 0) {
+      for (const item of items) {
+        await tx.insert(proposalItems).values({
+          proposalId: newId,
+          productId: item.productId,
+          itemNumber: item.itemNumber,
+          productName: item.productName,
+          activeIngredient: item.activeIngredient,
+          manufacturer: item.manufacturer,
+          concentration: item.concentration,
+          presentation: item.presentation,
+          unit: item.unit,
+          supplierName: item.supplierName,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          totalPrice: item.totalPrice,
+          notes: item.notes,
+          imageUrl: item.imageUrl,
+          productUrl: item.productUrl,
+          sortOrder: item.sortOrder,
+        });
+      }
     }
-  }
-  return newId;
+    return newId;
+  });
 }
 
 export async function getExpiringProposals(daysAhead = 7) {

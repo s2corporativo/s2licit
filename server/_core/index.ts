@@ -26,6 +26,7 @@ import { inArray, sql } from "drizzle-orm";
 import { storagePut, localUploadDir } from "../storage";
 import multer from "multer";
 import { apiRateLimiter, authRateLimiter } from "./rateLimit";
+import { logger, installProcessErrorHandlers } from "./logger";
 
 const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
 
@@ -47,6 +48,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // Crash e rejeição não tratada ficam registrados de forma estruturada.
+  installProcessErrorHandlers();
+
   // Falhas de schema são fatais: nunca disponibilizar a aplicação parcialmente migrada.
   //
   // A ORDEM aqui importa: todas as colunas precisam existir ANTES de qualquer
@@ -175,7 +179,7 @@ async function startServer() {
       await upsertCompanySettings({ logoUrl: url } as any);
       res.json({ url });
     } catch (err) {
-      console.error("[Logo Upload] Error:", err);
+      logger.error("[Logo Upload] Error:", err);
       res.status(500).json({ error: "Erro ao fazer upload do logo" });
     }
   });
@@ -222,7 +226,7 @@ async function startServer() {
         res.status(422).json({ error: err.message, issues: err.issues });
         return;
       }
-      console.error("[PDF] Error generating proposal PDF:", err);
+      logger.error("[PDF] Error generating proposal PDF:", err);
       res.status(500).json({ error: "Erro ao gerar PDF" });
     }
   });
@@ -252,7 +256,7 @@ async function startServer() {
         res.status(422).json({ error: err.message, issues: err.issues });
         return;
       }
-      console.error("[XLSX] Erro ao gerar Excel da proposta:", err);
+      logger.error("[XLSX] Erro ao gerar Excel da proposta:", err);
       res.status(500).json({ error: "Erro ao gerar Excel" });
     }
   });
@@ -274,7 +278,7 @@ async function startServer() {
       res.setHeader("Content-Length", buffer.length);
       res.send(buffer);
     } catch (err: any) {
-      console.error("[Excel Export] Error:", err);
+      logger.error("[Excel Export] Error:", err);
       res.status(500).json({ error: "Erro ao exportar Excel" });
     }
   });
@@ -300,7 +304,7 @@ async function startServer() {
       const result = await importProductsFromExcel(req.file.buffer);
       res.json(result);
     } catch (err: any) {
-      console.error("[Excel Import] Error:", err);
+      logger.error("[Excel Import] Error:", err);
       res.status(500).json({ error: "Erro ao importar Excel" });
     }
   });
@@ -309,7 +313,7 @@ async function startServer() {
     const originalSend = res.send.bind(res);
     res.send = (body: any) => {
       if (typeof body === "string" && (body.trimStart().startsWith("<!DOCTYPE") || body.trimStart().startsWith("<html"))) {
-        console.error("[tRPC Guard] HTML response intercepted on", req.method, req.url, "— converting to JSON error");
+        logger.error("[tRPC Guard] HTML response intercepted on", req.method, req.url, "— converting to JSON error");
         res.setHeader("Content-Type", "application/json");
         return originalSend(JSON.stringify({ error: { message: "Internal server error", code: "INTERNAL_SERVER_ERROR" } }));
       }
@@ -323,7 +327,7 @@ async function startServer() {
       router: appRouter,
       createContext,
       onError({ error, path }) {
-        console.error(`[tRPC Error] ${path ?? "unknown"}:`, error.message);
+        logger.error(`[tRPC Error] ${path ?? "unknown"}:`, error.message);
       },
     }),
   );
@@ -337,11 +341,11 @@ async function startServer() {
     if (process.env.NODE_ENV === "production") {
       throw new Error(`Porta ${preferredPort} ocupada — em produção a porta deve ser a configurada (PORT).`);
     }
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+    logger.info(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    logger.info(`Server running on http://localhost:${port}/`);
     // Grava a porta real para o INICIAR.bat abrir o navegador no endereço certo
     // (em dev a porta pode variar quando a 3000 está ocupada).
     try {
@@ -355,6 +359,6 @@ async function startServer() {
 }
 
 startServer().catch(error => {
-  console.error("[Boot] Falha fatal ao iniciar o S2:", error);
+  logger.error("[Boot] Falha fatal ao iniciar o S2:", error);
   process.exit(1);
 });

@@ -13,6 +13,7 @@ import { invokeLLM } from "../_core/llm";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
 import { eq, and, like } from "drizzle-orm";
+import { logger } from "../_core/logger";
 
 export interface PregoItem {
   id: string;
@@ -131,7 +132,7 @@ Retorne APENAS o JSON, sem explicações.`,
       indicacoes: parsed.indicacoes,
     };
   } catch (error) {
-    console.error("Erro ao extrair atributos do item de pregão:", error);
+    logger.error("Erro ao extrair atributos do item de pregão:", error);
     return {};
   }
 }
@@ -317,7 +318,7 @@ export async function findEquivalentProducts(
       })
       .slice(0, limit);
   } catch (error) {
-    console.error("Erro ao buscar produtos equivalentes:", error);
+    logger.error("Erro ao buscar produtos equivalentes:", error);
     return [];
   }
 }

@@ -1,4 +1,5 @@
 import { JSDOM } from "jsdom";
+import { logger } from "../_core/logger";
 
 export interface CatalogPage {
   url: string;
@@ -54,7 +55,7 @@ export async function discoverCatalogPages(
       pageNumber++;
     }
   } catch (error) {
-    console.error("[catalogDiscoveryService] Erro ao descobrir páginas:", error);
+    logger.error("[catalogDiscoveryService] Erro ao descobrir páginas:", error);
   }
 
   return pages;
@@ -143,7 +144,7 @@ export async function fetchAndParsePage(
       categoryPath: categoryPath.length > 0 ? categoryPath : undefined,
     };
   } catch (error) {
-    console.error("[catalogDiscoveryService] Erro ao buscar página:", error);
+    logger.error("[catalogDiscoveryService] Erro ao buscar página:", error);
     return {
       productLinks: [],
     };
@@ -282,7 +283,7 @@ export async function extractProductData(
 
     return product;
   } catch (error) {
-    console.error("[catalogDiscoveryService] Erro ao extrair produto:", error);
+    logger.error("[catalogDiscoveryService] Erro ao extrair produto:", error);
     return {
       url,
       confidence: 0,

@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql2 from "mysql2/promise";
+import { logger } from "../_core/logger";
 
 let _db: ReturnType<typeof drizzle> | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -26,9 +27,9 @@ export async function getDb() {
       connectTimeout: 10000,
     });
     _db = drizzle(pool) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    console.log("[Database] Pool de conexões iniciado (limit=10)");
+    logger.info("[Database] Pool de conexões iniciado (limit=10)");
   } catch (error) {
-    console.warn("[Database] Falha ao criar pool:", error);
+    logger.warn("[Database] Falha ao criar pool:", error);
     _db = null;
   }
   return _db;

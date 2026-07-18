@@ -32,6 +32,10 @@ export const users = mysqlTable("users", {
   // Conta desativada/revogada: bloqueia o acesso mesmo para usuários OAuth, cuja
   // linha seria recriada por uma sessão válida se apenas deletada.
   disabled: boolean("disabled").default(false).notNull(),
+  // Versão de sessão: o JWT carrega o valor vigente no login; o logout
+  // incrementa e invalida TODOS os tokens antigos do usuário — antes o token
+  // capturado seguia válido por 7 dias mesmo após logout.
+  sessionVersion: int("sessionVersion").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -147,6 +151,11 @@ export const products = mysqlTable(
     tipoCatalogo: mysqlEnum("tipoCatalogo", ["medicamento_veterinario", "medicamento_humano", "produto_nao_medicamentoso", "material_insumo_equipamento"]).default("produto_nao_medicamentoso").notNull(),
     statusConfiabilidade: mysqlEnum("statusConfiabilidade", ["completo_validado", "completo_nao_validado", "parcial", "incompleto", "enriquecido_ia", "pendente_revisao"]).default("incompleto").notNull(),
     isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(),
+    // Soft-delete com carimbo: quando e por quê o produto saiu do catálogo.
+    // deletedAt marca exclusão/desativação; mergedIntoId aponta o produto
+    // vencedor quando a desativação veio de um merge de duplicatas.
+    deletedAt: timestamp("deletedAt"),
+    mergedIntoId: int("mergedIntoId"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -1665,37 +1674,8 @@ export const supplierConnectors = mysqlTable(
 export type SupplierConnector = typeof supplierConnectors.$inferSelect;
 export type InsertSupplierConnector = typeof supplierConnectors.$inferInsert;
 
-// ─── Log de Auditoria Unificado ──────────────────────────────────────────────
-
-export const auditLog = mysqlTable(
-  "auditLog",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    source: varchar("source", { length: 64 }).notNull(),
-    action: varchar("action", { length: 64 }).notNull(),
-    entityType: varchar("entityType", { length: 64 }),
-    entityId: varchar("entityId", { length: 128 }),
-    endpoint: text("endpoint"),
-    params: json("params"),
-    status: mysqlEnum("status", ["ok", "error", "partial", "skipped"]).notNull().default("ok"),
-    recordsAffected: int("recordsAffected").default(0),
-    payloadHash: varchar("payloadHash", { length: 64 }),
-    evidenceUrl: text("evidenceUrl"),
-    errorMessage: text("errorMessage"),
-    durationMs: int("durationMs"),
-    userId: varchar("userId", { length: 128 }),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_audit_source").on(table.source),
-    index("idx_audit_action").on(table.action),
-    index("idx_audit_status").on(table.status),
-    index("idx_audit_created").on(table.createdAt),
-  ]
-);
-
-export type AuditLog = typeof auditLog.$inferSelect;
-export type InsertAuditLog = typeof auditLog.$inferInsert;
+// A tabela legada `auditLog` foi removida: nenhum código escrevia ou lia nela
+// e a trilha de auditoria oficial é `audit_logs` (auditService.recordAudit).
 
 // ─── Histórico de Preços Públicos (PNCP/ComprasGov) ─────────────────────────
 
@@ -2094,6 +2074,9 @@ export const scraperConfigs = mysqlTable("scraper_configs", {
     waitForSelector?: string;
     navigationWait?: number;
   }>(),
+  // Governança: a captura só roda depois que um humano confirmou que os
+  // termos de uso do site do fornecedor foram revisados e a coleta autorizada.
+  tosAprovado: boolean("tosAprovado").default(false).notNull(),
   lastRunAt: timestamp("lastRunAt"),
   nextRunAt: timestamp("nextRunAt"),
   lastRunStatus: mysqlEnum("lastRunStatus", ["success", "failed", "pending"]).default("pending"),
@@ -3386,3 +3369,103 @@ export const payables = mysqlTable(
   (t) => [index("idx_pay_vencimento").on(t.vencimento), index("idx_pay_pago").on(t.pagoEm)]
 );
 export type Payable = typeof payables.$inferSelect;
+
+/**
+ * ai_usage_daily: consumo de IA agregado por dia/provedor/modelo.
+ * Persistido a cada chamada (upsert) — o consumo não some no restart e a
+ * Central de IA mostra custo estimado acumulado, não só desde o boot.
+ */
+export const aiUsageDaily = mysqlTable(
+  "ai_usage_daily",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Dia em UTC no formato YYYY-MM-DD
+    dia: varchar("dia", { length: 10 }).notNull(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    model: varchar("model", { length: 128 }).notNull(),
+    chamadas: int("chamadas").default(0).notNull(),
+    promptTokens: int("promptTokens").default(0).notNull(),
+    completionTokens: int("completionTokens").default(0).notNull(),
+    // Custo estimado em USD pela tabela de preços do provedor (0 quando o
+    // modelo não está na tabela — ex.: tier gratuito).
+    custoUsd: decimal("custoUsd", { precision: 12, scale: 6 }).default("0").notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_ai_usage_dia_prov_model").on(t.dia, t.provider, t.model)]
+);
+export type AiUsageDaily = typeof aiUsageDaily.$inferSelect;
+
+/**
+ * ai_jobs: execuções em segundo plano de operações de IA em massa
+ * (enriquecimento de ficha técnica, reclassificação). A mutation tRPC apenas
+ * cria o job e retorna o id; o processamento roda em background e o cliente
+ * acompanha por polling — nada de request de minutos segurando conexão.
+ * status: "executando" | "concluido" | "erro" | "cancelado"
+ */
+export const aiJobs = mysqlTable(
+  "ai_jobs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    tipo: varchar("tipo", { length: 64 }).notNull(), // ficha_tecnica | reclassificacao
+    status: varchar("status", { length: 32 }).default("executando").notNull(),
+    payload: json("payload"),
+    // { processed, total, updated, skipped, errors }
+    progresso: json("progresso").$type<{
+      processed: number;
+      total: number;
+      updated: number;
+      skipped: number;
+      errors: number;
+    }>(),
+    errorMessages: json("errorMessages").$type<string[]>(),
+    requestedBy: int("requestedBy"),
+    iniciadoEm: timestamp("iniciadoEm").defaultNow().notNull(),
+    concluidoEm: timestamp("concluidoEm"),
+  },
+  (t) => [index("idx_ai_jobs_status").on(t.status), index("idx_ai_jobs_tipo").on(t.tipo)]
+);
+export type AiJob = typeof aiJobs.$inferSelect;
+
+/**
+ * email_settings: configuração de IMAP/SMTP pela interface (linha única).
+ * Senhas criptografadas com o cofre (AES-256-GCM). Quando presente, tem
+ * precedência sobre as variáveis de ambiente — que seguem como fallback
+ * para instalações configuradas por .env.
+ */
+export const emailSettings = mysqlTable("email_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  imapHost: varchar("imapHost", { length: 256 }),
+  imapPort: int("imapPort"),
+  imapUser: varchar("imapUser", { length: 320 }),
+  imapPasswordEnc: text("imapPasswordEnc"),
+  imapTls: boolean("imapTls").default(true).notNull(),
+  imapMailbox: varchar("imapMailbox", { length: 128 }),
+  smtpHost: varchar("smtpHost", { length: 256 }),
+  smtpPort: int("smtpPort"),
+  smtpUser: varchar("smtpUser", { length: 320 }),
+  smtpPasswordEnc: text("smtpPasswordEnc"),
+  smtpSecure: boolean("smtpSecure").default(false).notNull(),
+  smtpFrom: varchar("smtpFrom", { length: 320 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type EmailSettings = typeof emailSettings.$inferSelect;
+
+/**
+ * ai_settings: chaves e preferências de IA configuráveis pela interface
+ * (linha única). Chaves criptografadas no cofre (AES-256-GCM). Quando
+ * presentes, têm precedência sobre as variáveis de ambiente — que seguem
+ * como fallback para instalações configuradas por .env.
+ */
+export const aiSettings = mysqlTable("ai_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  // "auto" | "anthropic" | "groq"
+  aiProvider: varchar("aiProvider", { length: 16 }),
+  anthropicApiKeyEnc: text("anthropicApiKeyEnc"),
+  anthropicModel: varchar("anthropicModel", { length: 128 }),
+  groqApiKeyEnc: text("groqApiKeyEnc"),
+  groqModel: varchar("groqModel", { length: 128 }),
+  forgeApiUrl: varchar("forgeApiUrl", { length: 512 }),
+  forgeApiKeyEnc: text("forgeApiKeyEnc"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type AiSettings = typeof aiSettings.$inferSelect;

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "../db";
+import { logger } from "./logger";
 
 /**
  * Garante colunas adicionadas fora do fluxo de migração do drizzle, de forma
@@ -17,7 +18,7 @@ async function ensureColumn(table: string, column: string, definition: string): 
   if (total === 0) {
     // table/column vêm de literais internos (não de input do usuário).
     await db.execute(sql.raw(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`));
-    console.log(`[Schema] Coluna ${table}.${column} criada.`);
+    logger.info(`[Schema] Coluna ${table}.${column} criada.`);
   }
 }
 
@@ -31,7 +32,7 @@ export async function ensureProductColumns(): Promise<void> {
     await ensureColumn("products", "viaAdministracao", "VARCHAR(128) NULL");
     await ensureColumn("products", "validadeMeses", "INT NULL");
   } catch (err) {
-    console.error("[Schema] Falha ao garantir colunas de produto:", err);
+    logger.error("[Schema] Falha ao garantir colunas de produto:", err);
   }
 }
 
@@ -47,10 +48,11 @@ export async function ensureAuthSecurityColumns(): Promise<void> {
     await ensureColumn("users", "mfaEnabled", "BOOLEAN NOT NULL DEFAULT FALSE");
     await ensureColumn("users", "mfaSecret", "TEXT NULL");
     await ensureColumn("users", "disabled", "BOOLEAN NOT NULL DEFAULT FALSE");
+    await ensureColumn("users", "sessionVersion", "INT NOT NULL DEFAULT 0");
     await ensureColumn("audit_logs", "ipAddress", "VARCHAR(64) NULL");
     await ensureColumn("audit_logs", "userAgent", "VARCHAR(512) NULL");
   } catch (err) {
-    console.error("[Schema] Falha ao garantir colunas de segurança/auditoria:", err);
+    logger.error("[Schema] Falha ao garantir colunas de segurança/auditoria:", err);
   }
 }
 
@@ -60,7 +62,7 @@ export async function ensureCompanySettingsColumns(): Promise<void> {
     await ensureColumn("company_settings", "priceValidityPreset", "VARCHAR(16) NULL DEFAULT '24h'");
     await ensureColumn("company_settings", "priceValidityCustomHours", "INT NULL");
   } catch (err) {
-    console.error("[Schema] Falha ao garantir colunas de company_settings:", err);
+    logger.error("[Schema] Falha ao garantir colunas de company_settings:", err);
   }
 }
 
@@ -70,7 +72,7 @@ export async function ensureOfferColumns(): Promise<void> {
     await ensureColumn("product_supplier_offers", "promoPrice", "DECIMAL(12,2) NULL");
     await ensureColumn("product_supplier_offers", "stock", "INT NULL");
   } catch (err) {
-    console.error("[Schema] Falha ao garantir colunas de ofertas:", err);
+    logger.error("[Schema] Falha ao garantir colunas de ofertas:", err);
   }
 }
 
@@ -85,8 +87,13 @@ export async function ensureScraperColumns(): Promise<void> {
   try {
     await ensureColumn("supplier_sessions", "localStorage", "TEXT NULL");
     await ensureColumn("scraper_logs", "evidenceUrl", "VARCHAR(512) NULL");
+    // Governança de ToS: DEFAULT TRUE aqui de propósito — configs que JÁ
+    // operavam antes da coluna existir são consideradas aprovadas
+    // (grandfathering); novos cadastros pela UI nascem com false e exigem a
+    // confirmação explícita do operador.
+    await ensureColumn("scraper_configs", "tosAprovado", "BOOLEAN NOT NULL DEFAULT TRUE");
   } catch (err) {
-    console.error("[Schema] Falha ao garantir colunas do conector de fornecedores:", err);
+    logger.error("[Schema] Falha ao garantir colunas do conector de fornecedores:", err);
   }
 }
 
@@ -111,9 +118,9 @@ export async function ensureTaxRuleTypes(): Promise<void> {
           "ENUM('simples_efetiva','icms','difal','st','fcp','iss','ipi','pis','cofins','outro') NOT NULL",
       ),
     );
-    console.log("[Schema] Enum tax_rules.tipo estendido com IPI/PIS/COFINS.");
+    logger.info("[Schema] Enum tax_rules.tipo estendido com IPI/PIS/COFINS.");
   } catch (err) {
-    console.error("[Schema] Falha ao estender tax_rules.tipo:", err);
+    logger.error("[Schema] Falha ao estender tax_rules.tipo:", err);
   }
 }
 
@@ -136,9 +143,9 @@ export async function ensureCaptureSourceTypes(): Promise<void> {
       const tipo = String((rows as any)[0]?.t ?? "");
       if (!tipo || tipo.includes("'image'")) continue;
       await db.execute(sql.raw(`ALTER TABLE \`${tabela}\` MODIFY COLUMN \`sourceType\` ${enumDef}`));
-      console.log(`[Schema] Enum ${tabela}.sourceType estendido com 'image'.`);
+      logger.info(`[Schema] Enum ${tabela}.sourceType estendido com 'image'.`);
     }
   } catch (err) {
-    console.error("[Schema] Falha ao estender sourceType das tabelas de captura:", err);
+    logger.error("[Schema] Falha ao estender sourceType das tabelas de captura:", err);
   }
 }

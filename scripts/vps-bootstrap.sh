@@ -85,11 +85,18 @@ URL:    http://$(hostname -I | awk '{print $1}')/
 Login:  adm@vetmg.com.br
 Senha:  ${ADMIN_PASSWORD}
 
+IMPORTANTE: apague este arquivo após o primeiro login
+(rm /root/s2licit-acesso.txt). Ele expira sozinho em 7 dias.
 (Os demais segredos estão em ${APP_DIR}/.env — não apague esse arquivo,
  é ele que guarda as senhas do banco entre atualizações.)
 EOF
-  chmod 600 /root/s2licit-acesso.txt
-  echo "Credenciais salvas em /root/s2licit-acesso.txt"
+  chmod 400 /root/s2licit-acesso.txt
+  # Expiração automática: senha em texto plano não fica na VPS para sempre.
+  cat > /etc/cron.d/s2licit-acesso-expira <<'CRON'
+0 3 * * * root find /root/s2licit-acesso.txt -mtime +7 -delete 2>/dev/null
+CRON
+  chmod 644 /etc/cron.d/s2licit-acesso-expira
+  echo "Credenciais salvas em /root/s2licit-acesso.txt (expira em 7 dias — apague após o primeiro login)"
 else
   echo ".env já existe — mantendo segredos atuais."
 fi
@@ -171,7 +178,27 @@ garantir_porta APP_LOCAL_PORT 3000 3001 3002 3010
 HTTP_PORT=$(grep '^APP_HTTP_PORT=' .env | cut -d= -f2)
 LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
 echo "Portas: pública :${HTTP_PORT} · local :${LOCAL_PORT}"
-docker compose up -d --build
+# Deploy por imagem publicada (rollback em 1 comando) ou build local:
+# - Com S2_IMAGE definido (via env do deploy ou já gravado no .env), o compose
+#   PUXA a imagem publicada por SHA no ghcr — o artefato que sobe é o mesmo
+#   validado no CI, e a imagem anterior fica registrada em S2_IMAGE_PREVIOUS
+#   para rollback (scripts/vps-rollback.sh ou workflow "Rollback VPS").
+# - Sem S2_IMAGE, mantém o build local na VPS (instalação manual).
+if [ -n "${S2_IMAGE:-}" ]; then
+  ATUAL=$(grep '^S2_IMAGE=' .env 2>/dev/null | cut -d= -f2- || true)
+  if [ -n "$ATUAL" ] && [ "$ATUAL" != "$S2_IMAGE" ]; then
+    grep -q '^S2_IMAGE_PREVIOUS=' .env \
+      && sed -i "s|^S2_IMAGE_PREVIOUS=.*|S2_IMAGE_PREVIOUS=${ATUAL}|" .env \
+      || echo "S2_IMAGE_PREVIOUS=${ATUAL}" >> .env
+  fi
+  grep -q '^S2_IMAGE=' .env \
+    && sed -i "s|^S2_IMAGE=.*|S2_IMAGE=${S2_IMAGE}|" .env \
+    || echo "S2_IMAGE=${S2_IMAGE}" >> .env
+  docker compose pull app
+  docker compose up -d
+else
+  docker compose up -d --build
+fi
 
 echo "==> [5/6] Aguardando o app ficar saudável (porta local ${LOCAL_PORT})"
 ok=0

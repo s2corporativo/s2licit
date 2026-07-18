@@ -14,6 +14,7 @@ import type {
   GetUserInfoWithJwtRequest,
   GetUserInfoWithJwtResponse,
 } from "./types/manusTypes";
+import { logger } from "./logger";
 // Utility function
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
@@ -22,6 +23,8 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  /** Versão de sessão do usuário no momento do login (revogação no logout). */
+  sessionVersion?: number;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -31,10 +34,10 @@ const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserI
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
     if (ENV.oAuthServerUrl) {
-      console.log("[OAuth] Habilitado com baseURL:", ENV.oAuthServerUrl);
+      logger.info("[OAuth] Habilitado com baseURL:", ENV.oAuthServerUrl);
     } else {
       // OAuth externo é opcional — o modo padrão é o login local (/login).
-      console.log("[Auth] OAuth externo não configurado — usando login local por e-mail/senha.");
+      logger.info("[Auth] OAuth externo não configurado — usando login local por e-mail/senha.");
     }
   }
 
@@ -166,13 +169,14 @@ class SDKServer {
    */
   async createSessionToken(
     openId: string,
-    options: { expiresInMs?: number; name?: string } = {}
+    options: { expiresInMs?: number; name?: string; sessionVersion?: number } = {}
   ): Promise<string> {
     return this.signSession(
       {
         openId,
         appId: ENV.appId,
         name: options.name || "",
+        sessionVersion: options.sessionVersion,
       },
       options
     );
@@ -191,6 +195,7 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      sv: payload.sessionVersion ?? 0,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -199,9 +204,9 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; sessionVersion: number } | null> {
     if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
+      logger.warn("[Auth] Missing session cookie");
       return null;
     }
 
@@ -210,20 +215,20 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, sv } = payload as Record<string, unknown>;
 
       // openId é o que identifica o usuário — o único obrigatório. appId e
       // name são metadados; exigi-los não-vazios trancava o login quando o
       // appId não vinha do ambiente (ou o usuário não tinha nome).
       if (!isNonEmptyString(openId)) {
-        console.warn("[Auth] Session payload sem openId");
+        logger.warn("[Auth] Session payload sem openId");
         return null;
       }
 
       // Um token assinado com o mesmo segredo mas emitido para OUTRA aplicação
       // não vale aqui: se ambos os lados declaram appId, eles precisam bater.
       if (isNonEmptyString(appId) && isNonEmptyString(ENV.appId) && appId !== ENV.appId) {
-        console.warn("[Auth] Session appId não corresponde à aplicação");
+        logger.warn("[Auth] Session appId não corresponde à aplicação");
         return null;
       }
 
@@ -231,9 +236,10 @@ class SDKServer {
         openId,
         appId: isNonEmptyString(appId) ? appId : "s2licit",
         name: isNonEmptyString(name) ? name : "",
+        sessionVersion: typeof sv === "number" ? sv : 0,
       };
     } catch (error) {
-      console.warn("[Auth] Session verification failed", String(error));
+      logger.warn("[Auth] Session verification failed", String(error));
       return null;
     }
   }
@@ -289,13 +295,21 @@ class SDKServer {
         });
         user = await db.getUserByOpenId(userInfo.openId);
       } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
+        logger.error("[Auth] Failed to sync user from OAuth:", error);
         throw ForbiddenError("Failed to sync user info");
       }
     }
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    // Revogação por logout: o token carrega a versão de sessão vigente no
+    // login; se o usuário deslogou depois disso, a versão no banco avançou e
+    // este token (mesmo capturado) deixa de valer.
+    const userVersion = (user as { sessionVersion?: number }).sessionVersion ?? 0;
+    if (session.sessionVersion !== userVersion) {
+      throw ForbiddenError("Session revoked");
     }
 
     await db.upsertUser({

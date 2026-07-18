@@ -42,11 +42,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Publica a imagem validada pelo CI no ghcr, etiquetada pelo SHA do commit.
+  # O deploy passa a ser "pull + up" — o artefato que sobe é exatamente o
+  # testado, o build não compete por CPU/RAM com o app na VPS e a imagem
+  # anterior fica disponível para rollback em 1 comando.
+  build-image:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - name: Login no ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Definir tag da imagem
+        id: meta
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ghcr.io/${{ github.repository }}:latest
+
   deploy:
     # Em disparo por workflow_run, exige CI verde; disparo manual sempre roda.
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    needs: build-image
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,9 +136,14 @@ jobs:
       - name: Instalar, migrar e subir
         env:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          S2_IMAGE: ${{ needs.build-image.outputs.image }}
         run: |
+          # Login temporário no ghcr para o pull da imagem publicada por SHA.
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DOMAIN='${DEPLOY_DOMAIN}' bash /opt/s2licit/scripts/vps-bootstrap.sh"
+            "echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DOMAIN='${DEPLOY_DOMAIN}' S2_IMAGE='${S2_IMAGE}' bash /opt/s2licit/scripts/vps-bootstrap.sh"
 
       - name: Validar aplicação e MySQL
         env:
@@ -126,7 +173,6 @@ jobs:
       # E-mail legado: EMAIL_USER, EMAIL_PASSWORD
       # E-mail avançado: IMAP_* e SMTP_*
       # WhatsApp: WHATSAPP_PHONE_ID/TOKEN/WEBHOOK_URL/TO
-      # Integrações futuras: PRODEMGE_API_KEY
       # Ajustes não sensíveis podem ser Repository Variables ou Secrets.
       - name: Aplicar integrações cadastradas no GitHub
         env:
@@ -136,7 +182,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BUILT_IN_FORGE_API_URL: ${{ secrets.BUILT_IN_FORGE_API_URL }}
           BUILT_IN_FORGE_API_KEY: ${{ secrets.BUILT_IN_FORGE_API_KEY }}
-          PRODEMGE_API_KEY: ${{ secrets.PRODEMGE_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           IMAP_HOST: ${{ secrets.IMAP_HOST }}
@@ -233,7 +278,7 @@ jobs:
 
           for key in \
             ADMIN_PASSWORD GROQ_API_KEY ANTHROPIC_API_KEY \
-            BUILT_IN_FORGE_API_URL BUILT_IN_FORGE_API_KEY PRODEMGE_API_KEY \
+            BUILT_IN_FORGE_API_URL BUILT_IN_FORGE_API_KEY \
             AI_PROVIDER GROQ_MODEL ANTHROPIC_MODEL LLM_TIMEOUT_MS \
             IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_TLS IMAP_MAILBOX \
             SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_SECURE SMTP_FROM \

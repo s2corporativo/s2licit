@@ -2,6 +2,7 @@
  * safeFetch — API wrapper com validação JSON, fallback para HTML e retry controlado.
  * Garante que respostas HTML (403/404/500/<!DOCTYPE) nunca causem "Unexpected token '<'".
  */
+import { logger } from "../_core/logger";
 
 export interface SafeFetchOptions {
   /** Timeout em ms (padrão: 30000) */
@@ -75,7 +76,7 @@ export async function safeFetch<T = unknown>(
       // Detectar HTML em vez de JSON
       if (isHtmlResponse(rawText)) {
         const msg = `[safeFetch] Resposta HTML recebida (status ${res.status}) de ${context}`;
-        console.warn(msg, rawText.slice(0, 100));
+        logger.warn(msg, rawText.slice(0, 100));
         return {
           ok: false,
           status: res.status,
@@ -92,7 +93,7 @@ export async function safeFetch<T = unknown>(
         data = JSON.parse(rawText) as T;
       } catch (parseErr) {
         const msg = `[safeFetch] JSON inválido de ${context}: ${rawText.slice(0, 100)}`;
-        console.warn(msg);
+        logger.warn(msg);
         return {
           ok: false,
           status: res.status,
@@ -105,7 +106,7 @@ export async function safeFetch<T = unknown>(
 
       if (!res.ok) {
         const errMsg = `[safeFetch] HTTP ${res.status} de ${context}`;
-        console.warn(errMsg);
+        logger.warn(errMsg);
         // Não retry em 4xx (erro do cliente)
         if (res.status >= 400 && res.status < 500) {
           return { ok: false, status: res.status, data, error: `HTTP ${res.status}`, wasHtml: false, attempts };
@@ -125,7 +126,7 @@ export async function safeFetch<T = unknown>(
         ? `Timeout após ${timeoutMs}ms`
         : (err?.message ?? "Erro de rede desconhecido");
 
-      console.warn(`[safeFetch] Tentativa ${attempts}/${maxRetries} falhou para ${context}: ${lastError}`);
+      logger.warn(`[safeFetch] Tentativa ${attempts}/${maxRetries} falhou para ${context}: ${lastError}`);
 
       if (attempts < maxRetries) {
         await delay(retryDelayMs * attempts);

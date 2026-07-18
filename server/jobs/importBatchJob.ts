@@ -7,6 +7,7 @@ import { products, importProgress } from "../../drizzle/schema";
 import { eq, isNull, and, sql, inArray, ne, or } from "drizzle-orm";
 import { getDb } from "../db";
 import { jaroWinklerSimilarity } from "../matching/productMatcher";
+import { logger } from "../_core/logger";
 
 export interface ImportBatchProgress {
   queueId: string;
@@ -97,7 +98,7 @@ export function tallyBatchResults(
       error += result.value.skipped;
       processed += result.value.batchSize;
     } else {
-      console.error("[importBatchJob] Lote falhou:", result.reason);
+      logger.error("[importBatchJob] Lote falhou:", result.reason);
       const failedSize = batchSizes[idx] ?? 0;
       error += failedSize;
       processed += failedSize;
@@ -139,7 +140,7 @@ export async function startImportBatchJob(
 
   // Disparar em background sem aguardar
   processImportBatchAsync(queueId, rows, supplierId, userId, enrichWithAI).catch((error) => {
-    console.error(`[importBatchJob] Erro na fila ${queueId}:`, error);
+    logger.error(`[importBatchJob] Erro na fila ${queueId}:`, error);
     updateProgress(queueId, { status: "failed" });
   });
 
@@ -170,7 +171,7 @@ async function processImportBatchAsync(
     });
     updateProgress(queueId, { batchId });
   } catch (e) {
-    console.warn("[importBatchJob] Não foi possível criar log de importação:", e);
+    logger.warn("[importBatchJob] Não foi possível criar log de importação:", e);
   }
 
   const sanitiseText = (v?: string, maxLen = 512) => {
@@ -276,7 +277,7 @@ async function processImportBatchAsync(
       }
     }
   } catch (e) {
-    console.warn("[importBatchJob] Erro ao detectar duplicados:", e);
+    logger.warn("[importBatchJob] Erro ao detectar duplicados:", e);
   }
 
   // Carregar o catálogo do fornecedor UMA vez para todos os lotes
@@ -284,7 +285,7 @@ async function processImportBatchAsync(
   try {
     supplierCatalog = await loadSupplierCatalog(supplierId);
   } catch (e) {
-    console.warn("[importBatchJob] Erro ao carregar catálogo do fornecedor:", e);
+    logger.warn("[importBatchJob] Erro ao carregar catálogo do fornecedor:", e);
   }
 
   // Dividir em lotes para processamento paralelo
@@ -394,7 +395,7 @@ async function processImportBatchAsync(
           .filter(d => d.imageUrl && d.productName);
 
         if (imageData.length > 0) {
-          console.log(`[importBatchJob] Auto-vinculando ${imageData.length} imagens com fuzzy matching`);
+          logger.info(`[importBatchJob] Auto-vinculando ${imageData.length} imagens com fuzzy matching`);
 
           // Carregar TODOS os produtos do lote uma única vez, fora do loop
           const batchProducts = await db
@@ -427,10 +428,10 @@ async function processImportBatchAsync(
                     .update(products)
                     .set({ imageUrl: item.imageUrl })
                     .where(eq(products.id, bestMatch.id));
-                  console.log(`[importBatchJob] Imagem vinculada a ${bestMatch.name} (score: ${bestScore.toFixed(2)})`);
+                  logger.info(`[importBatchJob] Imagem vinculada a ${bestMatch.name} (score: ${bestScore.toFixed(2)})`);
                 }
               } catch (e) {
-                console.warn(`[importBatchJob] Erro ao vincular imagem de ${item.productName}:`, e);
+                logger.warn(`[importBatchJob] Erro ao vincular imagem de ${item.productName}:`, e);
               }
             }
           }
@@ -438,7 +439,7 @@ async function processImportBatchAsync(
       }
     }
   } catch (e) {
-    console.warn("[importBatchJob] Erro ao auto-vincular imagens:", e);
+    logger.warn("[importBatchJob] Erro ao auto-vincular imagens:", e);
   }
 
   // Enriquecer com IA se solicitado
@@ -505,13 +506,13 @@ async function processImportBatchAsync(
               enrichedCount++;
             }
           } catch (e) {
-            console.warn(`[importBatchJob] Erro ao enriquecer ${prod.id}:`, e);
+            logger.warn(`[importBatchJob] Erro ao enriquecer ${prod.id}:`, e);
           }
         }
-        console.log(`[importBatchJob] ${enrichedCount} produtos enriquecidos`);
+        logger.info(`[importBatchJob] ${enrichedCount} produtos enriquecidos`);
       }
     } catch (e) {
-      console.warn("[importBatchJob] Erro ao enriquecer com IA:", e);
+      logger.warn("[importBatchJob] Erro ao enriquecer com IA:", e);
     }
   }
 
@@ -547,7 +548,7 @@ async function processImportBatchAsync(
         errorMessage,
       });
     } catch (e) {
-      console.warn("[importBatchJob] Não foi possível atualizar log:", e);
+      logger.warn("[importBatchJob] Não foi possível atualizar log:", e);
     }
   }
 

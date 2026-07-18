@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { formatBRL } from "@/lib/format";
 
 interface Product {
   id: number;
@@ -146,10 +147,10 @@ export default function AplicarPrecificacao() {
             <CardContent>
               <div className="text-3xl font-bold text-blue-600">
                 {selectedProducts.length > 0
-                  ? `R$ ${(
+                  ? `${formatBRL((
                       selectedProducts.reduce((acc, p) => acc + ((p.newPrice || p.price) - p.price), 0) /
                       selectedProducts.length
-                    ).toFixed(2)}`
+                    ))}`
                   : "R$ 0"}
               </div>
               <p className="text-xs text-gray-500 mt-1">por produto</p>
@@ -271,14 +272,14 @@ export default function AplicarPrecificacao() {
                         <div className="flex-1">
                           <p className="text-sm font-medium">{product.name}</p>
                           <p className="text-xs text-gray-500">
-                            Preço atual: R$ {product.price.toFixed(2)}
-                            {product.newPrice && ` → R$ ${product.newPrice.toFixed(2)}`}
+                            Preço atual: {formatBRL(product.price)}
+                            {product.newPrice && ` → ${formatBRL(product.newPrice)}`}
                           </p>
                         </div>
                         {product.newPrice && product.newPrice !== product.price && (
                           <div className="text-right">
                             <p className="text-xs font-medium text-green-600">
-                              +R$ {(product.newPrice - product.price).toFixed(2)}
+                              +{formatBRL((product.newPrice - product.price))}
                             </p>
                           </div>
                         )}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
+import { makeTestUser } from "./testUtils";
 
 const captureMocks = vi.hoisted(() => ({
   createCaptureBatch: vi.fn(),
@@ -22,17 +23,14 @@ function createContext(user: AuthenticatedUser | null): TrpcContext {
   };
 }
 
-const editorUser: AuthenticatedUser = {
+const editorUser: AuthenticatedUser = makeTestUser({
   id: 7,
   openId: "editor-open-id",
   email: "editor@example.com",
   name: "Editor",
   loginMethod: "google",
   role: "editor",
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  lastSignedIn: new Date(),
-};
+});
 
 describe("intelligentCaptureRouter", () => {
   beforeEach(() => {

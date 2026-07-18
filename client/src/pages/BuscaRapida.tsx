@@ -381,7 +381,9 @@ export default function BuscaRapida() {
   const { data: categories } = trpc.categories.list.useQuery();
   const { data: results, isLoading, error, refetch } = trpc.products.smartSearch.useQuery(
     { query: submitted, categoryId },
-    { enabled: submitted.length >= 2 }
+    // placeholderData mantém a lista anterior visível enquanto a nova busca
+    // carrega — sem derrubar a tabela para "loading" a cada tecla/filtro.
+    { enabled: submitted.length >= 2, placeholderData: (prev) => prev }
   );
   const { data: priceAlerts } = trpc.priceIntelligence.priceAlerts.useQuery(
     undefined,

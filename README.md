@@ -32,7 +32,6 @@ ORM** (backend), **MySQL** (banco).
    | `ENCRYPTION_KEY` | Chave para criptografar credenciais de fornecedores. Gere com `openssl rand -base64 48` |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Administrador inicial (login local), criado no primeiro boot |
    | `ANTHROPIC_API_KEY` | Chave da API da Anthropic para os recursos de IA (opcional) |
-   | `PRODEMGE_API_KEY` | Reservada para a API de Compras MG (ainda não consumida pelo código; solicite em api@prodemge.gov.br) |
 
 2. Instale as dependências:
 
@@ -122,8 +121,8 @@ Um provedor OAuth externo continua suportado (defina `OAUTH_SERVER_URL` e
 - **Compras MG / CATMAS**: produtos têm os campos `catmasCode` (catálogo
   estadual) e `catmatCode` (catálogo federal), base para o cruzamento
   determinístico de cotações por código. A API de dados de Compras MG
-  (Prodemge) exige chave (`PRODEMGE_API_KEY` — reservada; a integração direta ainda
-  não está implementada).
+  (Prodemge) exige chave e não está integrada; se a integração paga for
+  contratada um dia, solicite a chave em api@prodemge.gov.br.
 
 ## Deploy
 

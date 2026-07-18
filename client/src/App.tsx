@@ -5,7 +5,6 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch, Redirect } from "wouter";
 import AppLayout from "./components/AppLayout";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { ThemeProvider } from "./contexts/ThemeContext";
 import RequireAuth from "./components/RequireAuth";
 
 // Todas as telas são carregadas sob demanda (code-splitting): o navegador só
@@ -33,6 +32,7 @@ const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
 const ImportarEdital = lazy(() => import("./pages/ImportarEdital"));
+const AnaliseJuridica = lazy(() => import("./pages/AnaliseJuridica"));
 const Sinonimos = lazy(() => import("./pages/Sinonimos"));
 const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
 const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
@@ -262,6 +262,11 @@ function Router() {
             <ImportarEdital />
           </RequireAuth>
         </Route>
+        <Route path="/analise-juridica">
+          <RequireAuth message="Faça login para usar a análise jurídica." minRole="editor">
+            <AnaliseJuridica />
+          </RequireAuth>
+        </Route>
         <Route path="/imagens">
           <RequireAuth message="Gerencie imagens de produtos após fazer login.">
             <GestaoImagens />
@@ -315,12 +320,10 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Router />
+      </TooltipProvider>
     </ErrorBoundary>
   );
 }

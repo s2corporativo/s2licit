@@ -1,6 +1,7 @@
 import { readAllSheetsAsRows } from "../utils/spreadsheet";
 import { extractTextFromBinaryDocument } from "./intelligentCaptureIngestionService";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
+import { logger } from "../_core/logger";
 
 /**
  * Extração de itens de cotação a partir de anexos de e-mail.
@@ -182,7 +183,7 @@ export async function extractItemsFromText(text: string): Promise<ExtractedItem[
         codigoCatalogo: typeof i.codigoCatalogo === "string" ? i.codigoCatalogo : undefined,
       }));
   } catch (err) {
-    console.warn("[EmailQuotation] Extração por IA indisponível ou falhou:", (err as Error).message);
+    logger.warn("[EmailQuotation] Extração por IA indisponível ou falhou:", (err as Error).message);
     return [];
   }
 }

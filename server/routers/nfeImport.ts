@@ -9,6 +9,7 @@ import { validateProductsForImport } from "../services/nfeImportService";
 import { parseNfeXml, validateNfeData } from "../services/nfeParserService";
 import { createOrGetSupplier, createProductsFromNfe } from "../services/nfeProductImportService";
 import { validateSupplierData } from "../services/nfeSupplierService";
+import { logger } from "../_core/logger";
 
 const batchXmlFileSchema = z.object({
   fileName: z.string().min(1, "Nome do arquivo obrigatório").max(255),
@@ -211,7 +212,7 @@ async function importParsedNfe(options: {
         notes: error instanceof Error ? error.message : "Falha desconhecida",
       });
     } catch (historyError) {
-      console.error("[NFe] Falha adicional ao registrar erro no histórico:", historyError);
+      logger.error("[NFe] Falha adicional ao registrar erro no histórico:", historyError);
     }
     throw error;
   }

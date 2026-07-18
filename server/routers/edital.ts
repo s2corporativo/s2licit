@@ -17,43 +17,9 @@ export const editalRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        // 1. Extrair texto do arquivo
-        let rawText = "";
-        const buffer = Buffer.from(input.fileBase64, "base64");
-
-        if (input.mimeType === "application/pdf" || input.fileName.toLowerCase().endsWith(".pdf")) {
-          try {
-            const { PDFParse } = await import("pdf-parse");
-            // PDFParse v2 API: construtor recebe options com data
-            const parser = new (PDFParse as any)({ data: buffer });
-            const result = await parser.getText();
-            // PDFParse v2 retorna objeto { text, pages, total }
-            if (typeof result === "string") {
-              rawText = result;
-            } else if (result && typeof result === "object") {
-              rawText = result.text ?? result.pages?.map((p: any) => p.text).join("\n") ?? "";
-            }
-          } catch (e) {
-            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao ler PDF: " + String(e) });
-          }
-        } else if (
-          input.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-          input.fileName.toLowerCase().endsWith(".docx")
-        ) {
-          try {
-            const mammoth = (await import("mammoth"));
-            const result = await mammoth.extractRawText({ buffer });
-            rawText = result.value;
-          } catch (e) {
-            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Falha ao ler DOCX: " + String(e) });
-          }
-        } else {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Formato não suportado. Use PDF ou DOCX." });
-        }
-
-        if (!rawText || rawText.trim().length < 50) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Não foi possível extrair texto do arquivo. Verifique se o PDF não é uma imagem escaneada." });
-        }
+        // 1. Extrair texto do arquivo (serviço compartilhado com a análise jurídica)
+        const { extractDocumentText } = await import("../services/documentTextService");
+        const { text: rawText } = await extractDocumentText(input);
 
         // Limite aumentado para 120.000 chars (~100 itens de edital)
         // Para documentos maiores, processa em chunks e mescla os resultados

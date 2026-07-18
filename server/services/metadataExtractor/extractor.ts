@@ -10,6 +10,7 @@ import { getDb } from "../../db";
 import { productMetadata, products } from "../../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { normalizeProductName } from "./normalizer";
+import { logger } from "../../_core/logger";
 
 export interface ExtractedMetadata {
   key: string;
@@ -99,7 +100,7 @@ Extraia os metadados relevantes. Responda APENAS com JSON válido no formato:
 
     return items.filter((m) => m.key && m.value);
   } catch (err) {
-    console.error("[MetadataExtractor] Erro ao extrair metadados:", err);
+    logger.error("[MetadataExtractor] Erro ao extrair metadados:", err);
     return [];
   }
 }
@@ -168,7 +169,7 @@ Sugira até 8 sinônimos relevantes. Responda APENAS com JSON:
     const parsed = typeof content === "string" ? parseLlmJson<any>(content) : content;
     return (parsed.synonyms || []).filter((s: any) => s.synonym && s.synonym !== productName);
   } catch (err) {
-    console.error("[MetadataExtractor] Erro ao sugerir sinônimos:", err);
+    logger.error("[MetadataExtractor] Erro ao sugerir sinônimos:", err);
     return [];
   }
 }
@@ -320,7 +321,7 @@ export async function reindexCatalogFromFicha(options: {
           totalNeedsReview += result.needsReview;
           processed++;
         } catch (err) {
-          console.error(`[ReindexCatalog] Erro no produto #${p.id}:`, err);
+          logger.error(`[ReindexCatalog] Erro no produto #${p.id}:`, err);
           errors++;
         }
       })

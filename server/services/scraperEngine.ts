@@ -17,11 +17,12 @@ import {
 } from "../../drizzle/schema";
 import { eq, and, or, isNotNull } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
-import { normalizeText } from "../matching/productMatcher";
+import { normalizeText, combinedStringSimilarity, MATCH_THRESHOLD_AUTO } from "../matching/productMatcher";
 import { supplierSessionService } from "./supplierSessionService";
 import { puppeteerCookiesToRecord, recordToPuppeteerCookies } from "./sessionCookies";
 import { storagePut } from "../storage";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
+import { logger } from "../_core/logger";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -374,7 +375,7 @@ export class ScraperEngine {
     const ts = new Date().toISOString().slice(11, 19);
     const linha = `[${ts}] ${msg}`;
     this.log.push(linha);
-    console.log(`[ScraperEngine] ${linha}`);
+    logger.info(`[ScraperEngine] ${linha}`);
   }
 
   async init(): Promise<void> {
@@ -1038,14 +1039,25 @@ export class ScraperEngine {
         // 2. Match por código do fornecedor
         if (!productId && sp.code && codeMap.has(sp.code)) productId = codeMap.get(sp.code)!;
 
-        // 3. Match fuzzy por nome normalizado (bucket da primeira palavra)
+        // 3. Match por similaridade de nome (bucket da primeira palavra).
+        //    Só aceita correspondência forte (>= MATCH_THRESHOLD_AUTO = 0.90):
+        //    abaixo disso o item vira cadastro novo pendente de revisão em vez
+        //    de gravar o preço capturado no produto errado.
         if (!productId) {
           const normName = normalizeText(sp.name);
           if (normName.length >= 4) {
             const firstWord = normName.split(/\s+/).find((w) => w.length >= 3) ?? "";
             const bucket = nameBuckets.get(firstWord) ?? [];
-            const best = bucket.find((p) => p.nameNorm.includes(normName.slice(0, 20)));
-            if (best) productId = best.id;
+            let bestScore = 0;
+            let bestId: number | null = null;
+            for (const p of bucket) {
+              const score = combinedStringSimilarity(normName, p.nameNorm);
+              if (score > bestScore) {
+                bestScore = score;
+                bestId = p.id;
+              }
+            }
+            if (bestId != null && bestScore >= MATCH_THRESHOLD_AUTO) productId = bestId;
           }
         }
 

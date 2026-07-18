@@ -3,14 +3,13 @@ import { adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { precoFinalUnificado } from "../services/precoUnificado";
 import {
-  createBulkPricingApplication,
+  applyBulkPricingTransactional,
   listBulkPricingApplications,
   getBulkPricingApplication,
-  createBulkPricingDetails,
   getBulkPricingDetails,
-  applyPricesToProducts,
   revertBulkPricingApplication,
 } from "../db/bulkPricingQueries";
+import { recordAudit } from "../services/auditService";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
 import { inArray } from "drizzle-orm";
@@ -82,24 +81,19 @@ export const bulkPricingRouter = router({
           };
         });
 
-        // Aplicar preços no banco
-        const { updated, errors } = await applyPricesToProducts(
-          updates.map((u) => ({ productId: u.productId, newPrice: u.newPrice }))
-        );
-
         // Calcular estatísticas
         const avgIncrease =
           updates.reduce((sum, u) => sum + u.priceIncrease, 0) / updates.length;
         const minNewPrice = Math.min(...updates.map((u) => u.newPrice));
         const maxNewPrice = Math.max(...updates.map((u) => u.newPrice));
 
-        // Registrar aplicação no histórico
-        const application = await createBulkPricingApplication({
+        // Aplicar preços + registro da aplicação + detalhes na MESMA transação
+        const { application, updated } = await applyBulkPricingTransactional(updates, {
           categoryId: input.categoryId,
           totalProducts: productList.length,
-          updatedCount: updated,
+          updatedCount: 0, // preenchido pela transação
           skippedCount: 0,
-          errorCount: errors.length,
+          errorCount: 0,
           marginPercentage: String(input.marginPercentage),
           icmsPercentage: String(input.icmsPercentage),
           ipPercentage: String(input.ipPercentage),
@@ -111,19 +105,25 @@ export const bulkPricingRouter = router({
           minNewPrice: String(minNewPrice),
           maxNewPrice: String(maxNewPrice),
           appliedBy: ctx.user?.id,
-          status: errors.length > 0 ? "completed" : "completed",
+          status: "completed",
         });
 
-        // Registrar detalhes
-        await createBulkPricingDetails(application.id, updates);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "bulk_pricing_apply",
+          entity: "products",
+          entityId: application.id,
+          summary: `Precificação em massa: ${updated} produtos (margem ${input.marginPercentage}%)`,
+          changes: { productIds: input.productIds.slice(0, 200), marginPercentage: input.marginPercentage },
+        });
 
         return {
           success: true,
           totalProducts: productList.length,
           updatedCount: updated,
           skippedCount: 0,
-          errorCount: errors.length,
-          errors,
+          errorCount: 0,
+          errors: [] as string[],
           message: `${updated} produtos atualizados com sucesso`,
           details: {
             averagePriceIncrease: avgIncrease,
@@ -255,7 +255,7 @@ export const bulkPricingRouter = router({
    */
   revertApplication: adminProcedure
     .input(z.object({ applicationId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       try {
         const application = await getBulkPricingApplication(input.applicationId);
         if (!application) {
@@ -266,6 +266,14 @@ export const bulkPricingRouter = router({
         }
 
         const { reverted, errors } = await revertBulkPricingApplication(input.applicationId);
+
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "bulk_pricing_revert",
+          entity: "products",
+          entityId: input.applicationId,
+          summary: `Precificação em massa revertida: ${reverted} produtos`,
+        });
 
         return {
           success: true,

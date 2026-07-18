@@ -1,6 +1,27 @@
 import crypto from "crypto";
+import fs from "fs";
+import { logger } from "./logger";
 
 const isProduction = process.env.NODE_ENV === "production";
+
+/**
+ * Lê um segredo do ambiente com suporte a Docker/Compose secrets: se
+ * `NOME_FILE` estiver definido, o valor é lido do arquivo apontado (padrão
+ * `/run/secrets/...`) — a chave-mestra não precisa viver em variável de
+ * ambiente visível em `docker inspect`.
+ */
+function readSecret(name: string): string {
+  const filePath = process.env[`${name}_FILE`];
+  if (filePath) {
+    try {
+      return fs.readFileSync(filePath, "utf-8").trim();
+    } catch (err) {
+      logger.error(`[ENV] Falha ao ler ${name}_FILE (${filePath}):`, err);
+      return "";
+    }
+  }
+  return process.env[name] ?? "";
+}
 
 /**
  * Em desenvolvimento, sem JWT_SECRET definido, gera um segredo aleatório
@@ -9,7 +30,7 @@ const isProduction = process.env.NODE_ENV === "production";
  * vazio ou previsível.
  */
 function resolveCookieSecret(): string {
-  const configured = process.env.JWT_SECRET ?? "";
+  const configured = readSecret("JWT_SECRET");
   if (configured.length >= 32) return configured;
 
   if (isProduction) {
@@ -20,11 +41,11 @@ function resolveCookieSecret(): string {
   }
 
   if (configured) {
-    console.warn(
+    logger.warn(
       "[ENV] JWT_SECRET tem menos de 32 caracteres — usando segredo aleatório de desenvolvimento."
     );
   } else {
-    console.warn(
+    logger.warn(
       "[ENV] JWT_SECRET não definido — usando segredo aleatório de desenvolvimento (sessões expiram a cada restart)."
     );
   }
@@ -33,12 +54,12 @@ function resolveCookieSecret(): string {
 
 function warnIfMissingInProduction(name: string, value: string, hint: string) {
   if (isProduction && !value) {
-    console.warn(`[ENV] ${name} não definido em produção — ${hint}`);
+    logger.warn(`[ENV] ${name} não definido em produção — ${hint}`);
   }
 }
 
-const databaseUrl = process.env.DATABASE_URL ?? "";
-const encryptionKey = process.env.ENCRYPTION_KEY ?? "";
+const databaseUrl = readSecret("DATABASE_URL");
+const encryptionKey = readSecret("ENCRYPTION_KEY");
 
 warnIfMissingInProduction(
   "DATABASE_URL",

@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { appRouter } from '../routers';
 import { TRPCError } from '@trpc/server';
+import { makeTestUser } from '../testUtils';
 
 describe('auditRouter', () => {
-  const adminUser = { id: 1, email: 'admin@test.com', role: 'admin' as const };
-  const regularUser = { id: 2, email: 'user@test.com', role: 'user' as const };
+  const adminUser = makeTestUser({ id: 1, email: 'admin@test.com', role: 'admin' });
+  const regularUser = makeTestUser({ id: 2, email: 'user@test.com', role: 'user' });
 
   const createContext = (user?: typeof adminUser | typeof regularUser) => ({
-    user,
+    user: user ?? null,
     req: {} as any,
     res: {} as any,
   });
@@ -50,7 +51,7 @@ describe('auditRouter', () => {
         expect.fail('Should have thrown FORBIDDEN error');
       } catch (error) {
         expect(error).toBeInstanceOf(TRPCError);
-        expect((error as TRPCError<any>).code).toBe('FORBIDDEN');
+        expect((error as TRPCError).code).toBe('FORBIDDEN');
       }
     });
 
@@ -62,7 +63,7 @@ describe('auditRouter', () => {
         expect.fail('Should have thrown UNAUTHORIZED error');
       } catch (error) {
         expect(error).toBeInstanceOf(TRPCError);
-        expect((error as TRPCError<any>).code).toMatch(/UNAUTHORIZED|FORBIDDEN/);
+        expect((error as TRPCError).code).toMatch(/UNAUTHORIZED|FORBIDDEN/);
       }
     });
   });
@@ -84,7 +85,7 @@ describe('auditRouter', () => {
         expect.fail('Should have thrown FORBIDDEN error');
       } catch (error) {
         expect(error).toBeInstanceOf(TRPCError);
-        expect((error as TRPCError<any>).code).toBe('FORBIDDEN');
+        expect((error as TRPCError).code).toBe('FORBIDDEN');
       }
     });
   });
@@ -115,7 +116,7 @@ describe('auditRouter', () => {
         expect.fail('Should have thrown FORBIDDEN error');
       } catch (error) {
         expect(error).toBeInstanceOf(TRPCError);
-        expect((error as TRPCError<any>).code).toBe('FORBIDDEN');
+        expect((error as TRPCError).code).toBe('FORBIDDEN');
       }
     });
   });
@@ -132,7 +133,7 @@ describe('auditRouter', () => {
         expect.fail('Should have thrown UNAUTHORIZED error');
       } catch (error) {
         expect(error).toBeInstanceOf(TRPCError);
-        expect((error as TRPCError<any>).code).toMatch(/UNAUTHORIZED|FORBIDDEN/);
+        expect((error as TRPCError).code).toMatch(/UNAUTHORIZED|FORBIDDEN/);
       }
     });
   });

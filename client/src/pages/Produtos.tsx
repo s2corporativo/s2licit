@@ -32,6 +32,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
+import { formatBRL } from "@/lib/format";
 
 // ─── Score de Qualidade do Produto ──────────────────────────────────────────
 const QUALITY_FIELDS: { key: string; label: string }[] = [
@@ -138,9 +139,9 @@ function PriceHistorySection({ productId, suppliers }: { productId: number; supp
                 <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-2 py-1 text-gray-500">{h.recordedAt ? new Date(h.recordedAt).toLocaleDateString('pt-BR') : '-'}</td>
                   <td className="px-2 py-1 text-gray-700">{sup?.name ?? `#${h.supplierId}`}</td>
-                  <td className="px-2 py-1 text-right text-gray-400">{prev !== null ? `R$ ${prev.toFixed(2)}` : '-'}</td>
+                  <td className="px-2 py-1 text-right text-gray-400">{prev !== null ? `${formatBRL(prev)}` : '-'}</td>
                   <td className={`px-2 py-1 text-right font-semibold ${changed ? (curr! > prev! ? 'text-red-600' : 'text-green-600') : 'text-gray-700'}`}>
-                    {curr !== null ? `R$ ${curr.toFixed(2)}` : '-'}
+                    {curr !== null ? `${formatBRL(curr)}` : '-'}
                     {changed && <span className="ml-1">{curr! > prev! ? '↑' : '↓'}</span>}
                   </td>
                   <td className="px-2 py-1 text-gray-400">{h.origem ?? 'manual'}</td>
@@ -445,11 +446,11 @@ function EditModal({
               </div>
               {form.price && (form.freightValue || form.taxValue) && (
                 <div className="mt-2 text-xs font-bold text-blue-800">
-                  Preço Final (Landed): R$ {(
+                  Preço Final (Landed): {formatBRL((
                     parseFloat(form.price || "0") +
                     parseFloat(form.freightValue || "0") +
                     parseFloat(form.taxValue || "0")
-                  ).toFixed(2)}
+                  ))}
                 </div>
               )}
             </div>
@@ -617,7 +618,7 @@ function EditModal({
                           onClick={() => setEditingPrice({ supplierId: s.id, value: existing?.price ?? "" })}
                           title="Clique para editar"
                         >
-                          {existing?.price ? `R$ ${parseFloat(existing.price).toFixed(2)}` : <span className="text-gray-300 italic">-</span>}
+                          {existing?.price ? `${formatBRL(parseFloat(existing.price))}` : <span className="text-gray-300 italic">-</span>}
                         </span>
                         {existing && (
                           <button type="button" onClick={() => deletePriceMutation.mutate({ productId: product.id, supplierId: s.id })} className="text-red-300 hover:text-red-600 text-[10px]">excluir</button>
@@ -1074,28 +1075,38 @@ export default function Produtos() {
   const [enrichResult, setEnrichResult] = useState<{ updated: number; skipped: number; errors: number; total: number } | null>(null);
   const [enrichProgress, setEnrichProgress] = useState<{ processed: number; total: number; updated: number; errors: number } | null>(null);
   const [enrichRunning, setEnrichRunning] = useState(false);
-  const enrichMutation = trpc.enrichment.enrichFichaTecnica.useMutation({
+  // O processamento roda em job no servidor (ai_jobs): a tela só dispara e
+  // acompanha por polling — fechar/atualizar a página não interrompe o lote.
+  const [enrichJobId, setEnrichJobId] = useState<number | null>(null);
+  const enrichStartMutation = trpc.enrichment.enrichFichaTecnicaStartJob.useMutation({
+    onSuccess: (res) => setEnrichJobId(res.jobId),
     onError: (e) => { toast.error(e.message); setEnrichRunning(false); },
   });
-  const startEnrichLoop = async (scope: "withoutFicha" | "selected" | "all", overwrite: boolean, productIds?: number[]) => {
+  const enrichJobQuery = trpc.enrichment.aiJobStatus.useQuery(
+    { jobId: enrichJobId ?? 0 },
+    { enabled: enrichJobId != null, refetchInterval: 2000 }
+  );
+  useEffect(() => {
+    const job = enrichJobQuery.data;
+    if (!job || enrichJobId == null) return;
+    const p = job.progresso;
+    setEnrichProgress({ processed: p.processed, total: p.total, updated: p.updated, errors: p.errors });
+    if (job.status !== "executando") {
+      setEnrichRunning(false);
+      setEnrichJobId(null);
+      setEnrichResult({ updated: p.updated, skipped: p.skipped, errors: p.errors, total: p.total });
+      utils.products.list.invalidate();
+      if (job.status === "concluido") {
+        toast.success(`Ficha técnica enriquecida: ${p.updated} produtos atualizados.`);
+      } else {
+        toast.error(job.errorMessages[0] ?? "O enriquecimento foi interrompido antes de terminar.");
+      }
+    }
+  }, [enrichJobQuery.data]);
+  const startEnrichLoop = (scope: "withoutFicha" | "selected" | "all", overwrite: boolean, productIds?: number[]) => {
     setEnrichRunning(true);
     setEnrichProgress(null);
-    let offset = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0, grandTotal = 0;
-    try {
-      while (true) {
-        const res = await enrichMutation.mutateAsync({ scope, productIds: scope === "selected" ? productIds : undefined, overwrite, offset, pageSize: 150 });
-        grandTotal = res.total;
-        totalUpdated += res.updated;
-        totalSkipped += res.skipped;
-        totalErrors += res.errors;
-        offset = res.nextOffset;
-        setEnrichProgress({ processed: offset, total: grandTotal, updated: totalUpdated, errors: totalErrors });
-        if (!res.hasMore) break;
-      }
-      setEnrichResult({ updated: totalUpdated, skipped: totalSkipped, errors: totalErrors, total: grandTotal });
-      utils.products.list.invalidate();
-      toast.success(`Ficha técnica enriquecida: ${totalUpdated} produtos atualizados.`);
-    } catch (_) { /* tratado pelo onError */ } finally { setEnrichRunning(false); }
+    enrichStartMutation.mutate({ scope, productIds: scope === "selected" ? productIds : undefined, overwrite });
   };
 
   // Reclassificação em lote com IA — suporte a 30k produtos via loop paginado
@@ -1105,28 +1116,36 @@ export default function Produtos() {
   const [reclassifyResult, setReclassifyResult] = useState<{ updated: number; skipped: number; errors: number; total: number } | null>(null);
   const [reclassifyProgress, setReclassifyProgress] = useState<{ processed: number; total: number; updated: number; errors: number } | null>(null);
   const [reclassifyRunning, setReclassifyRunning] = useState(false);
-  const bulkReclassifyMutation = trpc.enrichment.bulkReclassifySelected.useMutation({
+  const [reclassifyJobId, setReclassifyJobId] = useState<number | null>(null);
+  const reclassifyStartMutation = trpc.enrichment.bulkReclassifyStartJob.useMutation({
+    onSuccess: (res) => setReclassifyJobId(res.jobId),
     onError: (e) => { toast.error(e.message); setReclassifyRunning(false); },
   });
-  const startReclassifyLoop = async (productIds?: number[], includeAlreadyCategorized?: boolean) => {
+  const reclassifyJobQuery = trpc.enrichment.aiJobStatus.useQuery(
+    { jobId: reclassifyJobId ?? 0 },
+    { enabled: reclassifyJobId != null, refetchInterval: 2000 }
+  );
+  useEffect(() => {
+    const job = reclassifyJobQuery.data;
+    if (!job || reclassifyJobId == null) return;
+    const p = job.progresso;
+    setReclassifyProgress({ processed: p.processed, total: p.total, updated: p.updated, errors: p.errors });
+    if (job.status !== "executando") {
+      setReclassifyRunning(false);
+      setReclassifyJobId(null);
+      setReclassifyResult({ updated: p.updated, skipped: p.skipped, errors: p.errors, total: p.total });
+      utils.products.list.invalidate();
+      if (job.status === "concluido") {
+        toast.success(`Reclassificação concluída: ${p.updated} produtos categorizados.`);
+      } else {
+        toast.error(job.errorMessages[0] ?? "A reclassificação foi interrompida antes de terminar.");
+      }
+    }
+  }, [reclassifyJobQuery.data]);
+  const startReclassifyLoop = (productIds?: number[], includeAlreadyCategorized?: boolean) => {
     setReclassifyRunning(true);
     setReclassifyProgress(null);
-    let offset = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0, grandTotal = 0;
-    try {
-      while (true) {
-        const res = await bulkReclassifyMutation.mutateAsync({ productIds, includeAlreadyCategorized: includeAlreadyCategorized ?? false, offset, pageSize: 200, batchSize: 50 });
-        grandTotal = res.total;
-        totalUpdated += res.updated;
-        totalSkipped += res.skipped;
-        totalErrors += res.errors;
-        offset = res.nextOffset;
-        setReclassifyProgress({ processed: offset, total: grandTotal, updated: totalUpdated, errors: totalErrors });
-        if (!res.hasMore) break;
-      }
-      setReclassifyResult({ updated: totalUpdated, skipped: totalSkipped, errors: totalErrors, total: grandTotal });
-      utils.products.list.invalidate();
-      toast.success(`Reclassificação concluída: ${totalUpdated} produtos categorizados.`);
-    } catch (_) { /* tratado pelo onError */ } finally { setReclassifyRunning(false); }
+    reclassifyStartMutation.mutate({ productIds, includeAlreadyCategorized: includeAlreadyCategorized ?? false });
   };
 
   const handleBulkDelete = async () => {

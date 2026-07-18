@@ -24,8 +24,15 @@ services:
       timeout: 5s
       retries: 10
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # Teto de memória: um scrape pesado no app não pode levar o MySQL junto
+    # num OOM da VPS inteira.
+    mem_limit: ${MYSQL_MEM_LIMIT:-1g}
 
   app:
+    # Em produção o deploy fixa S2_IMAGE na imagem publicada por SHA (ghcr) —
+    # rollback = apontar S2_IMAGE para a tag anterior e `docker compose up -d`.
+    # Sem S2_IMAGE (dev/local), o build local continua funcionando.
+    image: ${S2_IMAGE:-sistema-s2-app:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -58,6 +65,8 @@ services:
     volumes:
       - uploads_data:/app/uploads
       - backups_data:/app/backups
+    # Node + Chromium (scraper) com teto — protege o MySQL vizinho.
+    mem_limit: ${APP_MEM_LIMIT:-2g}
 
 volumes:
   mysql_data:

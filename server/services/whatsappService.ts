@@ -10,6 +10,7 @@
  * Alternativa genérica (webhook próprio/Twilio/Z-API):
  *   WHATSAPP_WEBHOOK_URL  — se definido, o texto é enviado como POST {to, message}
  */
+import { logger } from "../_core/logger";
 
 export function isWhatsappConfigured(): boolean {
   return Boolean(
@@ -48,7 +49,7 @@ export async function enviarWhatsapp(mensagem: string): Promise<boolean> {
       }
       return ok;
     } catch (err) {
-      console.warn("[WhatsApp] Falha no webhook:", (err as Error).message);
+      logger.warn("[WhatsApp] Falha no webhook:", (err as Error).message);
       return false;
     }
   }
@@ -73,9 +74,9 @@ export async function enviarWhatsapp(mensagem: string): Promise<boolean> {
         }),
       });
       if (res.ok) entregue = true;
-      else console.warn(`[WhatsApp] Envio para ${to} falhou (${res.status}).`);
+      else logger.warn(`[WhatsApp] Envio para ${to} falhou (${res.status}).`);
     } catch (err) {
-      console.warn(`[WhatsApp] Erro ao enviar para ${to}:`, (err as Error).message);
+      logger.warn(`[WhatsApp] Erro ao enviar para ${to}:`, (err as Error).message);
     }
   }
   return entregue;

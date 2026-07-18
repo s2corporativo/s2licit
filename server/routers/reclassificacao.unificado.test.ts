@@ -67,11 +67,11 @@ describe("reclassificacaoRouter (fluxo por produto unificado)", () => {
 
     it("deve validar tamanho máximo de batch", async () => {
       const largeArray = Array.from({ length: 51 }, (_, i) => i + 1);
-      await expect(caller().reclassifyBatch({ productIds: largeArray })).rejects.toBeDefined();
+      await expect(caller().suggestReclassification({ productIds: largeArray })).rejects.toBeDefined();
     });
 
     it("deve validar tamanho mínimo de batch", async () => {
-      await expect(caller().reclassifyBatch({ productIds: [] })).rejects.toBeDefined();
+      await expect(caller().suggestReclassification({ productIds: [] })).rejects.toBeDefined();
     });
   });
 
@@ -146,7 +146,7 @@ describe("reclassificacaoRouter (fluxo por produto unificado)", () => {
     });
 
     it("reclassifyBatch deve rejeitar array vazio", async () => {
-      await expect(caller().reclassifyBatch({ productIds: [] })).rejects.toBeDefined();
+      await expect(caller().suggestReclassification({ productIds: [] })).rejects.toBeDefined();
     });
 
     it("applySuggestions deve aceitar suggestions vazio", async () => {

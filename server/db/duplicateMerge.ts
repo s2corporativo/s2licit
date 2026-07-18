@@ -248,10 +248,11 @@ export async function mergeProductGroup(
         .where(inArray(table.productId, duplicateIds));
     }
 
-    // Desativar duplicatas (soft delete)
+    // Desativar duplicatas (soft delete com carimbo: quando e para onde
+    // foram fundidas — permite auditar e reverter um merge indevido)
     await tx
       .update(products)
-      .set({ isActive: "no" })
+      .set({ isActive: "no", deletedAt: new Date(), mergedIntoId: masterId })
       .where(inArray(products.id, duplicateIds));
   });
 

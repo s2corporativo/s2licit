@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { synonyms, type Synonym, type InsertSynonym } from "../../drizzle/schema";
 import { getDb } from "./_client";
+import { logger } from "../_core/logger";
 
 export async function listSynonyms(opts?: {
   category?: string;
@@ -28,7 +29,7 @@ export async function listSynonyms(opts?: {
       .orderBy(asc(synonyms.canonical), asc(synonyms.term));
     return rows as Synonym[];
   } catch (error) {
-    console.error("[listSynonyms] Error:", error);
+    logger.error("[listSynonyms] Error:", error);
     return [];
   }
 }
@@ -92,7 +93,7 @@ export async function loadSynonymMap(): Promise<Map<string, string[]>> {
     }
     return map;
   } catch (error) {
-    console.error("[loadSynonymMap] Error:", error);
+    logger.error("[loadSynonymMap] Error:", error);
     return new Map();
   }
 }

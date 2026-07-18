@@ -20,6 +20,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { toast } from "sonner";
+import { formatBRL } from "@/lib/format";
 
 // ─── Item Row ─────────────────────────────────────────────────────────────────
 function ItemRow({
@@ -195,7 +196,7 @@ function ItemRow({
           />
         ) : (
           <span className="text-xs text-gray-500">
-            {item.unitPrice ? `R$ ${parseFloat(item.unitPrice).toFixed(2)}` : "—"}
+            {item.unitPrice ? `${formatBRL(parseFloat(item.unitPrice))}` : "—"}
           </span>
         )}
         {costPrice !== null && !editing && (
@@ -215,7 +216,7 @@ function ItemRow({
           />
         ) : (
           <span className="text-xs text-amber-700 font-medium">
-            {item.editalRefPrice ? `R$ ${parseFloat(item.editalRefPrice).toFixed(2)}` : "—"}
+            {item.editalRefPrice ? `${formatBRL(parseFloat(item.editalRefPrice))}` : "—"}
           </span>
         )}
       </td>
@@ -233,7 +234,7 @@ function ItemRow({
         ) : (
           <div>
             <span className="text-sm font-bold text-blue-800">
-              {item.suggestedPrice ? `R$ ${parseFloat(item.suggestedPrice).toFixed(2)}` : "Não definido"}
+              {item.suggestedPrice ? `${formatBRL(parseFloat(item.suggestedPrice))}` : "Não definido"}
             </span>
             {/* Indicadores internos (margem, preço mínimo) — nunca na impressão (§11) */}
             <div className="print:hidden">
@@ -259,11 +260,11 @@ function ItemRow({
             {priceStatus === "danger" && (
               <div className="flex items-center gap-1 mt-0.5">
                 <TrendingDown size={9} className="text-red-600" />
-                <span className="text-[9px] text-red-700 font-bold">Abaixo do mínimo! (R$ {minSalePrice!.toFixed(2)})</span>
+                <span className="text-[9px] text-red-700 font-bold">Abaixo do mínimo! ({formatBRL(minSalePrice!)})</span>
               </div>
             )}
             {priceStatus === null && minSalePrice !== null && (
-              <div className="text-[9px] text-gray-400 mt-0.5">Mín: R$ {minSalePrice.toFixed(2)}</div>
+              <div className="text-[9px] text-gray-400 mt-0.5">Mín: {formatBRL(minSalePrice)}</div>
             )}
             {currentMarginPct !== null && (
               <div className={`text-[9px] font-bold mt-0.5 ${
@@ -280,7 +281,7 @@ function ItemRow({
       </td>
       {/* Total (baseado no preço sugerido) */}
       <td className="px-3 py-2 w-32 text-sm font-semibold text-gray-900">
-        {total ? `R$ ${parseFloat(total).toFixed(2)}` : item.totalPrice ? `R$ ${parseFloat(item.totalPrice).toFixed(2)}` : "—"}
+        {total ? `${formatBRL(parseFloat(total))}` : item.totalPrice ? `${formatBRL(parseFloat(item.totalPrice))}` : "—"}
       </td>
       <td className="px-3 py-2 w-24">
         {editing ? (
@@ -428,7 +429,7 @@ function ItemRow({
                       <div className="flex items-center gap-2 mt-0.5">
                         {sPrice !== null && (
                           <span className={`text-xs font-bold ${isCheaper ? "text-green-700" : "text-gray-700"}`}>
-                            R$ {sPrice.toFixed(2)}
+                            {formatBRL(sPrice)}
                           </span>
                         )}
                         {isCheaper && diffPct && (
@@ -1887,7 +1888,7 @@ export default function PropostaEditor() {
                 />
                 {installmentForm.nInstallments > 1 && (
                   <p className="text-[11px] text-blue-700 mt-1">
-                    {installmentForm.nInstallments}x de R$ {(totalGeral / installmentForm.nInstallments).toFixed(2)} (total: R$ {totalGeral.toFixed(2)})
+                    {installmentForm.nInstallments}x de {formatBRL((totalGeral / installmentForm.nInstallments))} (total: {formatBRL(totalGeral)})
                   </p>
                 )}
               </div>

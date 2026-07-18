@@ -20,6 +20,7 @@ import {
 } from "../../drizzle/schema";
 import { sql, eq } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
+import { logger } from "../_core/logger";
 
 export const importsRouter = router({
     list: protectedProcedure
@@ -881,7 +882,7 @@ Responda APENAS com JSON array no formato:
           const queueId = await startImportBatchJob(input.rows, input.supplierId, ctx.user.id);
           return { queueId, totalRows: input.rows.length, message: `Importação iniciada com ${input.rows.length} linhas` };
         } catch (error: any) {
-          console.error("[startBatchImport]", error?.message || error);
+          logger.error("[startBatchImport]", error?.message || error);
           throw new Error(`Erro ao iniciar importação: ${error?.message || "Erro desconhecido"}`);
         }
       }),
@@ -896,7 +897,7 @@ Responda APENAS com JSON array no formato:
           if (!progress) return { found: false, message: "Importação não encontrada ou expirada" };
           return { found: true, ...progress };
         } catch (error: any) {
-          console.error("[getImportProgress]", error?.message || error);
+          logger.error("[getImportProgress]", error?.message || error);
           throw new Error(`Erro ao obter progresso: ${error?.message || "Erro desconhecido"}`);
         }
       }),

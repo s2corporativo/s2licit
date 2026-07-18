@@ -2,6 +2,7 @@ import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { emailQuotations, certidoes, contractAlerts, postAwardContracts } from "../../drizzle/schema";
+import { logger } from "../_core/logger";
 
 /**
  * Agenda única: junta todos os prazos que importam ao operador numa lista só,
@@ -63,7 +64,7 @@ export const agendaRouter = router({
           link: "/cotacoes-recebidas",
         });
       }
-    } catch (err) { console.error("[Agenda] Erro ao buscar cotações:", (err as Error).message); }
+    } catch (err) { logger.error("[Agenda] Erro ao buscar cotações:", (err as Error).message); }
 
     // Certidões
     try {
@@ -82,7 +83,7 @@ export const agendaRouter = router({
           link: "/certidoes",
         });
       }
-    } catch (err) { console.error("[Agenda] Erro ao buscar certidões:", (err as Error).message); }
+    } catch (err) { logger.error("[Agenda] Erro ao buscar certidões:", (err as Error).message); }
 
     // Alertas de contrato (abertos)
     try {
@@ -100,7 +101,7 @@ export const agendaRouter = router({
           link: "/contratos-pos-licitacao",
         });
       }
-    } catch (err) { console.error("[Agenda] Erro ao buscar alertas de contrato:", (err as Error).message); }
+    } catch (err) { logger.error("[Agenda] Erro ao buscar alertas de contrato:", (err as Error).message); }
 
     // Fim de contratos
     try {
@@ -122,7 +123,7 @@ export const agendaRouter = router({
           link: "/contratos-pos-licitacao",
         });
       }
-    } catch (err) { console.error("[Agenda] Erro ao buscar fim de contratos:", (err as Error).message); }
+    } catch (err) { logger.error("[Agenda] Erro ao buscar fim de contratos:", (err as Error).message); }
 
     itens.sort((a, b) => a.diasRestantes - b.diasRestantes);
 

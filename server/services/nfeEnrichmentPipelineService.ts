@@ -4,6 +4,7 @@ import { products } from "../../drizzle/schema";
 import { eq, and, like, ne } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
+import { logger } from "../_core/logger";
 
 export interface EnrichmentTask {
   productId: number;
@@ -118,7 +119,7 @@ export async function processNfeEnrichmentPipeline(
       content: `${enriched} produto(s) enriquecido(s), ${matched} match(es) com catálogo, ${failed} erro(s)`,
     });
   } catch (error) {
-    console.warn("[EnrichmentPipeline] Falha ao enviar notificação:", error);
+    logger.warn("[EnrichmentPipeline] Falha ao enviar notificação:", error);
   }
 
   return {
@@ -194,7 +195,7 @@ Não presuma composição, indicação, contraindicação ou dose. Quando não h
         !parsed.concentration,
     };
   } catch (error) {
-    console.error("[EnrichmentPipeline] Erro ao enriquecer com IA:", error);
+    logger.error("[EnrichmentPipeline] Erro ao enriquecer com IA:", error);
     return null;
   }
 }
@@ -270,7 +271,7 @@ async function mergeWithCatalogProduct(
   if (Number.isFinite(sourcePrice) && sourcePrice > 0) mergedData.price = sourcePrice.toFixed(2);
 
   await db.update(products).set(mergedData).where(eq(products.id, catalogProduct.id));
-  console.info("[EnrichmentPipeline] Match confirmado", {
+  logger.info("[EnrichmentPipeline] Match confirmado", {
     nfeProductId: nfeProduct.id,
     catalogProductId: catalogProduct.id,
     matchConfidence: enrichmentResult.confidence,
