@@ -144,12 +144,16 @@ export async function runDailyAlerts(): Promise<void> {
 
 /**
  * Dispara os scrapers de fornecedores cujo `scheduleTime` (HH:mm, horário de
- * Brasília) coincide com o minuto atual. Chamado a cada minuto; como o
- * horário só bate uma vez por dia, cada config roda no máximo uma vez por
- * verificação. A proteção contra execução concorrente do mesmo fornecedor
- * (ex.: clique manual coincidindo com o horário agendado) vive em
- * `executarScraper` (scraperEngine.ts), não aqui.
+ * Brasília) já passou hoje e que ainda não rodaram no dia. A comparação por
+ * JANELA (scheduleTime <= agora, sem execução hoje) garante que um tick de
+ * minuto perdido — event loop ocupado com scraping/LLM — não faça o
+ * fornecedor pular o dia inteiro, como acontecia com a igualdade exata.
+ * A proteção contra execução concorrente do mesmo fornecedor (ex.: clique
+ * manual coincidindo com o horário agendado) vive em `executarScraper`
+ * (scraperEngine.ts), não aqui.
  */
+const scraperFiredOn = new Map<number, string>(); // configId → data (tz) do último disparo local
+
 async function runScheduledScrapers(): Promise<void> {
   const db = await getDb();
   if (!db) return;
@@ -158,21 +162,43 @@ async function runScheduledScrapers(): Promise<void> {
     new Date().toLocaleString("en-US", { timeZone: SCRAPER_TIMEZONE }),
   );
   const hhmm = `${String(agora.getHours()).padStart(2, "0")}:${String(agora.getMinutes()).padStart(2, "0")}`;
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: SCRAPER_TIMEZONE });
 
   try {
-    const ativos = await db.select({ id: scraperConfigs.id, scheduleTime: scraperConfigs.scheduleTime })
+    const ativos = await db.select({
+      id: scraperConfigs.id,
+      scheduleTime: scraperConfigs.scheduleTime,
+      lastRunAt: scraperConfigs.lastRunAt,
+    })
       .from(scraperConfigs)
       .where(eq(scraperConfigs.enabled, "yes"));
 
     for (const cfg of ativos) {
-      if (cfg.scheduleTime !== hhmm) continue;
+      if (!cfg.scheduleTime || cfg.scheduleTime > hhmm) continue;
+      // Já rodou hoje (pelo banco ou por disparo local ainda em andamento)?
+      const lastRunDay = cfg.lastRunAt
+        ? new Date(cfg.lastRunAt).toLocaleDateString("en-CA", { timeZone: SCRAPER_TIMEZONE })
+        : null;
+      if (lastRunDay === hoje || scraperFiredOn.get(cfg.id) === hoje) continue;
+      scraperFiredOn.set(cfg.id, hoje);
 
       executarScraper(cfg.id)
         .then((r) => {
           console.log(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
+          if (!r.success) {
+            const detalhe = r.errors?.length ? `\nErros: ${r.errors.slice(0, 3).join("; ")}` : "";
+            void notifyJobFailure(
+              "Falha na captura agendada — Sistema S2",
+              `A captura do fornecedor ${r.supplierName || `(config #${cfg.id})`} falhou.${detalhe}`,
+            );
+          }
         })
         .catch((err) => {
           console.error(`[Scheduler] Scraper #${cfg.id} falhou:`, (err as Error).message);
+          void notifyJobFailure(
+            "Falha na captura agendada — Sistema S2",
+            `A captura do fornecedor (config #${cfg.id}) lançou erro: ${(err as Error).message}`,
+          );
         });
 
       // Pequeno intervalo entre disparos para não sobrecarregar caso vários
@@ -197,6 +223,11 @@ export async function runBackupJob(): Promise<void> {
     );
   } else {
     console.error(`[Scheduler] Backup falhou: ${result.error}`);
+    await notifyJobFailure(
+      "Falha no backup automático — Sistema S2",
+      `O backup diário do banco falhou: ${result.error ?? "erro desconhecido"}. ` +
+        "Verifique o servidor — sem backup recente, um incidente pode causar perda de dados.",
+    );
   }
 }
 
