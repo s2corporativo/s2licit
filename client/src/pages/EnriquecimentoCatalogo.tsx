@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import AvisoIA from "@/components/AvisoIA";
 import {
   AlertCircle,
   AlertTriangle,
@@ -392,10 +393,14 @@ export default function EnriquecimentoCatalogo() {
       if (result && !("error" in result)) {
         setSuggestions((prev) => new Map(prev).set(product.id, result as Suggestion));
       } else {
-        toast.error(`Erro ao analisar "${product.name}": ${(result as any)?.error ?? "Sem resposta"}`);
+        toast.error(`A IA não conseguiu analisar "${product.name}". Tente novamente.`, {
+          description: (result as any)?.error ?? "Sem resposta do provedor de IA",
+        });
       }
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao chamar IA");
+      toast.error("A IA está indisponível no momento. Tente novamente em instantes.", {
+        description: e.message,
+      });
     } finally {
       setLoadingIds((prev) => { const n = new Set(prev); n.delete(product.id); return n; });
     }
@@ -456,15 +461,16 @@ export default function EnriquecimentoCatalogo() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-5">
+      <AvisoIA />
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-gray-900 flex items-center gap-2">
             <Sparkles size={22} className="text-blue-600" />
-            Enriquecimento de Catálogo
+            Completar dados com IA
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            Use IA para completar fichas técnicas: princípio ativo, concentração, apresentação, fabricante e mais.
+            Use IA para completar fichas técnicas: composição/princípio ativo, concentração, apresentação, fabricante e mais.
           </p>
         </div>
       </div>

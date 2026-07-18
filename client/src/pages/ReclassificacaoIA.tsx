@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import AvisoIA from "@/components/AvisoIA";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -392,6 +393,7 @@ export default function ReclassificacaoIA() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
+      <AvisoIA />
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">

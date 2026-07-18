@@ -79,7 +79,11 @@ export default function RadarPncp() {
   // Toast de erro num efeito (antes era disparado no corpo do render, empilhando
   // a cada re-render).
   useEffect(() => {
-    if (query.error) toast.error("Falha ao consultar o Radar: " + query.error.message);
+    if (query.error)
+      toast.error(
+        "Não foi possível consultar as fontes de licitações agora. Os portais do governo podem estar instáveis — tente novamente em alguns minutos.",
+        { description: query.error.message }
+      );
   }, [query.error]);
 
   return (

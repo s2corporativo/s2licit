@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import AvisoIA from "@/components/AvisoIA";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
@@ -178,6 +179,7 @@ export default function AgenteProposta() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
+      <AvisoIA />
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <div className="w-12 h-12 bg-gray-900 rounded-2xl flex items-center justify-center shadow-lg">

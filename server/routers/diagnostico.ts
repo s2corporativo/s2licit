@@ -1,6 +1,9 @@
 import cron from "node-cron";
+import fs from "fs";
+import path from "path";
 import { count } from "drizzle-orm";
-import { editorProcedure, router } from "../_core/trpc";
+import { adminProcedure, editorProcedure, router } from "../_core/trpc";
+import { isBackupFile, backupTimestamp, runDatabaseBackup, cleanupOldBackups } from "../services/backupService";
 import { getDb } from "../db";
 import {
   certidoes,
@@ -109,6 +112,39 @@ function schedulerDiagnostic(input: {
 }
 
 export const diagnosticoRouter = router({
+  /** Situação dos backups: último arquivo gerado e onde ficam gravados. */
+  backupStatus: editorProcedure.query(() => {
+    const destDir = process.env.BACKUP_DIR || "backups";
+    let ultimo: { arquivo: string; em: string } | null = null;
+    try {
+      const files = fs.readdirSync(destDir).filter(isBackupFile);
+      let best: { name: string; ts: number } | null = null;
+      for (const name of files) {
+        const ts = backupTimestamp(name);
+        if (ts != null && (!best || ts > best.ts)) best = { name, ts };
+      }
+      if (best) ultimo = { arquivo: best.name, em: new Date(best.ts).toISOString() };
+    } catch {
+      // diretório ainda não existe — nenhum backup foi feito
+    }
+    return { destDir, ultimo };
+  }),
+
+  /** Dispara um backup do banco agora (mysqldump + gzip + retenção). */
+  backupAgora: adminProcedure.mutation(async () => {
+    const destDir = process.env.BACKUP_DIR || "backups";
+    const result = await runDatabaseBackup({ destDir });
+    if (result.success) {
+      const removidos = cleanupOldBackups(destDir, 14, Date.now());
+      return {
+        ok: true as const,
+        arquivo: path.basename(result.file ?? ""),
+        removidosAntigos: removidos,
+      };
+    }
+    return { ok: false as const, erro: result.error ?? "Falha desconhecida no backup." };
+  }),
+
   // O frontend já restringe a tela a Editor, mas a autorização precisa existir
   // também no backend para impedir acesso direto ao endpoint por Viewer/User.
   verificar: editorProcedure.query(async () => {

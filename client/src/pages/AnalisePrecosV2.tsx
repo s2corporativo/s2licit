@@ -166,8 +166,13 @@ export function AnalisePrecosV2() {
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-80 flex items-center justify-center text-muted-foreground">
-                Sem dados disponíveis
+              <div className="h-80 flex flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                <span>Ainda não há histórico de preços para mostrar.</span>
+                <span className="max-w-md text-xs">
+                  O histórico é construído com o tempo, a cada importação de planilha/NF-e e a
+                  cada captura automática de fornecedores. Importe preços regularmente e este
+                  gráfico passa a mostrar a evolução.
+                </span>
               </div>
             )}
           </CardContent>
@@ -230,7 +235,7 @@ export function AnalisePrecosV2() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  Sem dados disponíveis
+                  Sem dados ainda — importe preços ou rode a captura automática para alimentar esta análise
                 </div>
               )}
             </CardContent>
@@ -275,7 +280,7 @@ export function AnalisePrecosV2() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  Sem dados disponíveis
+                  Sem dados ainda — importe preços ou rode a captura automática para alimentar esta análise
                 </div>
               )}
             </CardContent>
@@ -312,7 +317,7 @@ export function AnalisePrecosV2() {
               </div>
             ) : (
               <div className="text-center text-muted-foreground py-8">
-                Sem dados disponíveis
+                Sem dados ainda — os números aparecem conforme os preços dos fornecedores são importados
               </div>
             )}
           </CardContent>

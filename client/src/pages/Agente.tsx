@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import AvisoIA from "@/components/AvisoIA";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -59,7 +60,9 @@ export default function Agente() {
     },
     onError: (e) => {
       setMsgs(prev => prev.filter(m => !m.isLoading));
-      toast.error("Erro ao consultar o assistente: " + e.message);
+      toast.error("O assistente não conseguiu responder agora. Tente novamente em instantes.", {
+        description: e.message,
+      });
     },
   });
 
@@ -90,6 +93,7 @@ export default function Agente() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] max-w-3xl mx-auto px-4 py-4">
+      <AvisoIA />
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">

@@ -9,7 +9,6 @@ import {
   Brain,
   Building2,
   CalendarClock,
-  Calculator,
   ClipboardCheck,
   ClipboardList,
   DollarSign,
@@ -229,7 +228,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <p style={{ margin: 0, fontWeight: 900, fontSize: 13, textAlign: "center", letterSpacing: ".5px" }}>
           S2 LICIT
         </p>
-        <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(255,255,255,.4)", textAlign: "center" }}>
+        <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,.62)", textAlign: "center" }}>
           Licitações &amp; Fornecedores
         </p>
         <button
@@ -248,8 +247,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               style={{
                 margin: "8px 8px 3px",
                 paddingTop: gi > 0 ? 7 : 0,
-                fontSize: 9,
-                color: "rgba(255,255,255,.3)",
+                fontSize: 10,
+                color: "rgba(255,255,255,.62)",
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: ".5px",
@@ -278,7 +277,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     cursor: "pointer",
                     borderRadius: 7,
                     marginBottom: 1,
-                    fontSize: 11,
+                    fontSize: 12.5,
                     fontWeight: active ? 700 : 400,
                     textAlign: "left",
                     borderLeft: active ? `3px solid ${LARANJA_ATIVO}` : "3px solid transparent",
@@ -306,7 +305,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,.7)", fontWeight: 600 }}>
               {user?.name ?? "Usuário"}
             </p>
-            <p style={{ margin: "2px 0 5px", fontSize: 10, color: "rgba(255,255,255,.4)" }}>
+            <p style={{ margin: "2px 0 5px", fontSize: 10, color: "rgba(255,255,255,.62)" }}>
               {getRoleLabel(user?.role)}
             </p>
             <button
