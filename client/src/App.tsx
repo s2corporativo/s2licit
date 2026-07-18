@@ -33,6 +33,7 @@ const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
 const ImportarEdital = lazy(() => import("./pages/ImportarEdital"));
 const AnaliseJuridica = lazy(() => import("./pages/AnaliseJuridica"));
+const Integracoes = lazy(() => import("./pages/Integracoes"));
 const Sinonimos = lazy(() => import("./pages/Sinonimos"));
 const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
 const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
@@ -185,6 +186,11 @@ function Router() {
         <Route path="/central-ia">
           <RequireAuth message="Acesse a Central de IA após fazer login." minRole="admin">
             <CentralIA />
+          </RequireAuth>
+        </Route>
+        <Route path="/integracoes">
+          <RequireAuth message="Acesse as integrações após fazer login." minRole="admin">
+            <Integracoes />
           </RequireAuth>
         </Route>
         <Route path="/sala-disputa">

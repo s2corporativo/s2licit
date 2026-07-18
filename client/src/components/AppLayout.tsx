@@ -146,6 +146,7 @@ const navGroups: NavGroup[] = [
   {
     label: "SISTEMA",
     items: [
+      { href: "/integracoes", icon: PlugZap, label: "Integrações e credenciais", minRole: "admin" },
       { href: "/central-ia", icon: Brain, label: "Inteligência artificial", minRole: "admin" },
       { href: "/portais-licitacao", icon: PlugZap, label: "Portais de licitação", minRole: "editor" },
       { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
