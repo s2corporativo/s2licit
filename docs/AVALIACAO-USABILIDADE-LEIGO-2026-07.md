@@ -1,5 +1,13 @@
 # Avaliação de usabilidade — Sistema S2 pelos olhos de um leigo (Julho/2026)
 
+> **Status (atualizado no mesmo PR):** as críticas deste parecer foram
+> corrigidas em 4 lotes de commits — ver a seção
+> [Status das correções](#status-das-correções) no fim do documento.
+> O escopo do sistema foi confirmado como **multissegmento**: cotações de
+> produtos diversos (medicamentos veterinários e humanos, materiais de
+> construção, insumos e equipamentos) — o viés "farmácia veterinária" foi
+> removido dos prompts de IA e dos textos.
+
 Simulação de primeiro uso: um usuário inteligente, mas **sem manual, sem
 treinamento e sem conhecimento técnico**, recebe o S2 e tenta operá-lo de
 ponta a ponta. Cada achado tem referência `arquivo:linha` verificada em
@@ -425,3 +433,64 @@ hoje um leigo de outro ramo veria campos irrelevantes ("Princípio Ativo",
 - LEIA-ME.txt com a linguagem certa para o público leigo.
 - Backend resiliente: retry, guardas de jobs, failover de IA, guard
   anti-HTML no tRPC.
+
+---
+
+## Status das correções
+
+Implementadas neste mesmo branch, em 4 lotes (todos com `pnpm check`,
+`pnpm lint`, `pnpm test` — 610 testes — e `pnpm build` verdes):
+
+**Lote 1 — riscos reais de negócio**
+- ✅ Fórmula de margem unificada (margem sobre a venda, divisor) nas 3
+  telas; rótulos e exemplos ao vivo; validação de margem < 100%.
+- ✅ Rodapé da proposta lê Dados da empresa (`/configuracao`); aviso com
+  link quando não preenchido (fim do endereço/conta bancária hardcoded).
+- ✅ IA não se autovalida mais (`completo_validado` exige revisão humana).
+- ✅ Reclassificação/Migração em massa exigem confirmação com contagem.
+- ✅ Erros de lote de IA retornam `errorMessages` e aparecem no log da tela.
+- ✅ `INICIAR.bat` abre o navegador na porta real (arquivo `.port`);
+  `INSTALAR.bat` falha ruidosamente sem `.env`/MySQL; LEIA-ME cita o banco.
+- ✅ Dashboard: "sem produtos — importe o catálogo" em vez de "100% saudável".
+
+**Lote 2 — navegação e descoberta**
+- ✅ Órfãs no menu: novo grupo Preços e Tributos (Análise, Comparação,
+  Precificação em massa, Motor tributário, Custo total), Diligências,
+  Templates de proposta, Busca de menor preço.
+- ✅ Rótulos unificados menu×Dashboard (fim da colisão "Captura automática").
+- ✅ Dois botões "criar proposta" levam ao mesmo lugar (/propostas);
+  Dashboard sem links para redirects.
+- ✅ Checklist "Primeiros passos" no Dashboard (empresa → catálogo →
+  impostos → template → 1ª oportunidade), dispensável.
+- ✅ Fusões: Configurador de fornecedores → Captura automática de preços
+  (redirect; página removida); aba "Importar Preços" da NF-e removida
+  (caminho canônico: Importar planilha); botão de diagnóstico só p/ admin.
+
+**Lote 3 — linguagem e multissegmento**
+- ✅ Prompts de IA generalizados (vet + humano + construção + insumos).
+- ✅ Jargão removido: changelog do parser XML, "Jaro-Winkler/base mestre",
+  "Master Products", campos "(legado)", scraper personalizado marcado como
+  configuração avançada com texto leigo.
+- ✅ Link morto "Voltar às Licitações" corrigido; "Venda Direta"→"Cliente
+  Privado"; promessa pendente removida do Custo Total.
+- ✅ Manual reescrito: passo 0 de preparação, cobre catálogo/fornecedores/
+  administração, glossário com 17 termos.
+
+**Lote 4 — confiança, erros e acessibilidade**
+- ✅ Consumo de IA visível (chamadas + tokens por provedor na Central de IA).
+- ✅ Aviso preventivo "IA não configurada" nas 4 telas de IA.
+- ✅ Backup na UI: status do último backup + botão "Fazer backup agora"
+  (admin) no Diagnóstico.
+- ✅ Erros humanizados (Radar, Assistente, Enriquecimento, Produtos) e
+  estados vazios com CTA (Produtos, Análise de preços).
+- ✅ Acessibilidade: contraste/tamanho do menu (AA), aria-label na busca,
+  tooltip por teclado; texto do IMAP em linguagem leiga; "AES-256" vira
+  "senha criptografada".
+
+**Pendências conscientes (fora do escopo desta rodada, mapeadas para o
+futuro):** unificação total das 2 buscas numa tela só (ambas agora estão
+expostas e nomeadas de forma distinta); configuração de e-mail (IMAP/SMTP)
+por interface (hoje por variável de ambiente, com texto explicativo);
+decisão final do dark mode e paleta única (tokens × hex do shell);
+quebra dos 4 monólitos de frontend e fusão das famílias de routers de
+preço (já mapeadas em `AUDITORIA-CONSOLIDACAO.md`).

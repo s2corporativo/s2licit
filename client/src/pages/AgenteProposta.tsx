@@ -254,7 +254,7 @@ export default function AgenteProposta() {
             <h2 className="font-bold text-sm text-gray-900 mb-4 flex items-center gap-2">
               <Shield size={14} /> Credenciais do Portal
               <span className="text-[10px] font-normal text-gray-400 ml-auto flex items-center gap-1">
-                <Shield size={9} className="text-emerald-500" /> AES-256 em memória
+                <Shield size={9} className="text-emerald-500" /> Senha criptografada, nunca gravada em texto
               </span>
             </h2>
             <div className="space-y-3">
