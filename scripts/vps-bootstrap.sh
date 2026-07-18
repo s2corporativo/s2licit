@@ -207,13 +207,20 @@ for i in $(seq 1 60); do
     ok=1
     break
   fi
+  # Heartbeat: mantém a sessão SSH viva (a espera silenciosa de 5 min
+  # derrubava a conexão do deploy por timeout de inatividade) e mostra
+  # o estado do container enquanto espera.
+  if [ $((i % 6)) -eq 0 ]; then
+    echo "   ... aguardando (${i}x5s) — app: $(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' sistema-s2-app 2>/dev/null || echo desconhecido)"
+  fi
   sleep 5
 done
 if [ "$ok" = "1" ]; then
   echo "App respondendo em /healthz ✅"
 else
-  echo "App NÃO respondeu em 5 min — últimos logs:" >&2
-  docker compose logs --tail=80 app >&2 || true
+  echo "App NÃO respondeu em 5 min — estado e últimos logs:" >&2
+  docker compose ps >&2 || true
+  docker compose logs --tail=150 app >&2 || true
   exit 1
 fi
 
