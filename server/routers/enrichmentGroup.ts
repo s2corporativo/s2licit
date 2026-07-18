@@ -234,6 +234,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
       let batches = 0;
       let errors = 0;
       let offset = 0;
+      const errorMessages: string[] = [];
       // Process in batches until no more uncategorized products
       while (true) {
         const prods = await db
@@ -295,15 +296,19 @@ export const enrichmentRouter = router({  // INSIDE appRouter
             }
           }
           batches++;
-        } catch (_) {
+        } catch (err) {
           errors++;
+          // Não engolir o motivo: o cliente exibe as mensagens no log de execução.
+          errorMessages.push(
+            `Lote ${batches + errors}: ${err instanceof Error ? err.message : String(err)}`
+          );
           // Skip this batch and continue
           offset += batchSize;
         }
         // Safety: break if we've processed more than 300 batches (15k products)
         if (batches + errors > 300) break;
       }
-      return { updated, batches, errors };
+      return { updated, batches, errors, errorMessages: errorMessages.slice(0, 20) };
     }),
   // Apply: update categoryId for selected products
   batchReclassifyApply: protectedProcedure
@@ -389,6 +394,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
       let updated = 0;
       let skipped = 0;
       let errors = 0;
+      const errorMessages: string[] = [];
       // Processar em sub-lotes para a LLM
       const batchSize = input.batchSize;
       for (let i = 0; i < prods.length; i += batchSize) {
@@ -455,13 +461,16 @@ export const enrichmentRouter = router({  // INSIDE appRouter
               }
             }
           }
-        } catch (_) {
+        } catch (err) {
           errors += batch.length;
+          errorMessages.push(
+            `Produtos ${batch[0]?.id}–${batch[batch.length - 1]?.id}: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       }
       const nextOffset = input.offset + prods.length;
       const hasMore = nextOffset < totalCount;
-      return { updated, skipped, errors, total, nextOffset, hasMore };
+      return { updated, skipped, errors, total, nextOffset, hasMore, errorMessages: errorMessages.slice(0, 20) };
     }),
 
     // ── enrichFichaTecnica: extrai ficha técnica do nome do produto via IA ───────────────────────
@@ -517,6 +526,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
         let updated = 0;
         let skipped = 0;
         let errors = 0;
+        const errorMessages: string[] = [];
         // Processar em sub-lotes de 30 para a LLM (melhor qualidade de extração)
         const BATCH = 30;
         for (let i = 0; i < targets.length; i += BATCH) {
@@ -582,14 +592,17 @@ export const enrichmentRouter = router({  // INSIDE appRouter
               db.update(products).set({ ...fields, updatedAt: new Date() }).where(eq(products.id, id))
             ));
             updated += toUpdate.length;
-          } catch (_) {
+          } catch (err) {
             errors += batch.length;
+            errorMessages.push(
+              `Produtos ${batch[0]?.id}–${batch[batch.length - 1]?.id}: ${err instanceof Error ? err.message : String(err)}`
+            );
           }
         }
         // Retorna nextOffset para o frontend continuar de onde parou
         const nextOffset = input.offset + targets.length;
         const hasMore = nextOffset < totalCount;
-        return { updated, skipped, errors, total: totalCount, processedInPage: targets.length, nextOffset, hasMore };
+        return { updated, skipped, errors, total: totalCount, processedInPage: targets.length, nextOffset, hasMore, errorMessages: errorMessages.slice(0, 20) };
       }),
     // ── extractFichaTecnica: extrai ficha técnica de UM produto via IA (para modal de edição) ──
     extractFichaTecnica: protectedProcedure
@@ -802,7 +815,8 @@ Por favor, forneça em JSON:
             concentration: enriched.concentration,
             tipoCatalogo: enriched.category,
             manufacturer: enriched.manufacturer,
-            statusConfiabilidade: enriched.confidence > 0.7 ? "completo_validado" : "enriquecido_ia",
+            // IA nunca se autovalida: teto em enriquecido_ia; "completo_validado" exige revisão humana.
+            statusConfiabilidade: "enriquecido_ia",
           })
           .where(eq(products.id, input.productId));
 
@@ -894,7 +908,8 @@ Por favor, forneça em JSON:
                 activeIngredient: enriched.activeIngredient,
                 concentration: enriched.concentration,
                 tipoCatalogo: enriched.category,
-                statusConfiabilidade: enriched.confidence > 0.7 ? "completo_validado" : "enriquecido_ia",
+                // IA nunca se autovalida: teto em enriquecido_ia.
+                statusConfiabilidade: "enriquecido_ia",
               })
               .where(eq(products.id, productId));
 

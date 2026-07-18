@@ -11,6 +11,15 @@ ANTES DE TUDO - instale o Node.js:
    Próximo → Próximo → Instalar → Concluir
 
 
+O SISTEMA TAMBÉM PRECISA DE UM BANCO DE DADOS:
+-----------------------------------------------
+O S2 guarda tudo (produtos, propostas, preços) num
+banco de dados chamado MySQL. Essa parte é técnica:
+peça ao responsável técnico para instalar o MySQL e
+preencher o arquivo ".env" (linha DATABASE_URL).
+Sem isso, o sistema abre mas fica vazio.
+
+
 PRIMEIRA VEZ (instalar o sistema):
 ------------------------------------
 1. Clique duas vezes em:  INSTALAR.bat

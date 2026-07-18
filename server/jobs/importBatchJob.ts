@@ -498,7 +498,8 @@ async function processImportBatchAsync(
                   activeIngredient: enriched.activeIngredient,
                   concentration: enriched.concentration,
                   tipoCatalogo: enriched.category,
-                  statusConfiabilidade: enriched.confidence > 0.7 ? "completo_validado" : "enriquecido_ia",
+                  // IA nunca se autovalida: teto em enriquecido_ia; "completo_validado" exige revisão humana.
+                  statusConfiabilidade: "enriquecido_ia",
                 })
                 .where(eq(products.id, prod.id));
               enrichedCount++;

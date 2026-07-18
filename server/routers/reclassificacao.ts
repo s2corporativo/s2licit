@@ -108,6 +108,7 @@ export const reclassificacaoRouter = router({
 
         let updated = 0;
         let errors = 0;
+        const errorMessages: string[] = [];
 
         try {
           const llmResult = await invokeLLM({
@@ -147,17 +148,22 @@ export const reclassificacaoRouter = router({
                 await db.update(products).set(updateData).where(eq(products.id, c.id));
                 updated++;
               }
-            } catch {
+            } catch (err) {
               errors++;
+              errorMessages.push(`Produto ${c.id}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-        } catch {
+        } catch (err) {
           errors += batch.length;
+          errorMessages.push(
+            `Lote inteiro falhou (${batch.length} produtos): ${err instanceof Error ? err.message : String(err)}`
+          );
         }
 
         return {
           updated,
           errors,
+          errorMessages: errorMessages.slice(0, 10),
           processed: batch.length,
           nextOffset: input.offset + batch.length,
           done: batch.length < input.batchSize,
@@ -233,6 +239,7 @@ export const reclassificacaoRouter = router({
 
         let updated = 0;
         let errors = 0;
+        const errorMessages: string[] = [];
 
         try {
           const llmResult = await invokeLLM({
@@ -285,17 +292,22 @@ export const reclassificacaoRouter = router({
                 await db.update(products).set(updateData).where(eq(products.id, r.id));
                 updated++;
               }
-            } catch {
+            } catch (err) {
               errors++;
+              errorMessages.push(`Produto ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-        } catch {
+        } catch (err) {
           errors += batch.length;
+          errorMessages.push(
+            `Lote inteiro falhou (${batch.length} produtos): ${err instanceof Error ? err.message : String(err)}`
+          );
         }
 
         return {
           updated,
           errors,
+          errorMessages: errorMessages.slice(0, 10),
           processed: batch.length,
           nextOffset: offset + batch.length,
           done: batch.length < batchSize,

@@ -49,11 +49,22 @@ export default function AplicarPrecificacao() {
     setProducts(products.map((p) => (p.id === id ? { ...p, selected: checked } : p)));
   };
 
+  // Mesma fórmula do backend (precoFinalUnificado): margem sobre a venda,
+  // preço = custo ÷ (1 − margem). Nunca usar markup aqui — a prévia divergia
+  // do valor efetivamente gravado.
+  const margemValida = (() => {
+    const m = parseFloat(marginPercentage);
+    return Number.isFinite(m) && m >= 0 && m < 100 ? m : null;
+  })();
+
   const handleCalculatePreview = () => {
-    const margin = parseFloat(marginPercentage) || 30;
+    if (margemValida === null) {
+      toast.error("Informe uma margem entre 0 e 99,9%. Margem de 100% ou mais torna a venda inviável.");
+      return;
+    }
     const updatedProducts = products.map((p) => ({
       ...p,
-      newPrice: p.selected ? Math.round(p.price * (1 + margin / 100) * 100) / 100 : p.price,
+      newPrice: p.selected ? Math.round((p.price / (1 - margemValida / 100)) * 100) / 100 : p.price,
     }));
     setProducts(updatedProducts);
     toast.success(`Prévia calculada para ${totalSelected} produtos`);
@@ -66,12 +77,16 @@ export default function AplicarPrecificacao() {
       toast.error("Selecione pelo menos um produto");
       return;
     }
+    if (margemValida === null) {
+      toast.error("Informe uma margem entre 0 e 99,9% antes de aplicar.");
+      return;
+    }
 
     setIsApplying(true);
     try {
       const result = await applyBulkMutation.mutateAsync({
         productIds: selectedProducts.map((p) => p.id),
-        marginPercentage: parseFloat(marginPercentage) || 30,
+        marginPercentage: margemValida,
       });
       setAppliedCount(result.updatedCount);
       toast.success(`${result.updatedCount} produtos atualizados com sucesso!`);
@@ -106,7 +121,7 @@ export default function AplicarPrecificacao() {
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Margem de Lucro</CardTitle>
+              <CardTitle className="text-sm">Margem sobre a venda</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{marginPercentage}%</div>
@@ -151,32 +166,40 @@ export default function AplicarPrecificacao() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Margem de Lucro (%)</label>
+                <label htmlFor="margem-venda" className="block text-sm font-medium mb-2">
+                  Margem sobre a venda (%)
+                </label>
                 <Input
+                  id="margem-venda"
                   type="number"
                   step="0.01"
+                  min="0"
+                  max="99.9"
                   value={marginPercentage}
                   onChange={(e) => setMarginPercentage(e.target.value)}
                   placeholder="30"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Fórmula única do sistema: preço = custo ÷ (1 − margem). Não é markup.
+                  {margemValida !== null && (
+                    <>
+                      {" "}Exemplo: custo R$ 100,00 → preço R${" "}
+                      {(100 / (1 - margemValida / 100)).toFixed(2).replace(".", ",")}.
+                    </>
+                  )}
+                </p>
               </div>
 
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  A margem será aplicada ao preço base de cada produto selecionado.
+                  A margem será aplicada ao preço base de cada produto selecionado, pela
+                  mesma fórmula usada nas telas de edital e proposta.
                 </AlertDescription>
               </Alert>
 
               <Button onClick={handleCalculatePreview} className="w-full" variant="outline">
-                {isLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Calculando...
-                  </>
-                ) : (
-                  "Calcular Prévia"
-                )}
+                Calcular Prévia
               </Button>
 
               <Button

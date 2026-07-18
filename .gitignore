@@ -121,3 +121,6 @@ Pasted_content_*
 package-lock.json
 *.db
 data/
+
+# Porta real do servidor (gerado em runtime pelo boot; lido pelo INICIAR.bat)
+.port

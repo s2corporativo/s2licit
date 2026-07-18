@@ -321,13 +321,15 @@ export default function Dashboard() {
 
 
   const catalogTotal = catalogHealth?.total ?? stats?.totalProducts ?? 0;
+  // Com catálogo vazio não existe "saúde" a medir: null exibe "sem dados"
+  // em vez do antigo 100% enganoso no primeiro acesso.
   const healthScore = catalogTotal > 0
     ? Math.round(100 - ((
         (catalogHealth?.withoutFichaTecnica ?? catalogHealth?.withoutActiveIngredient ?? 0) +
         (catalogHealth?.withoutCategory ?? 0) +
         (catalogHealth?.withoutManufacturer ?? 0)
       ) / (catalogTotal * 3)) * 100)
-    : 100;
+    : null;
 
 
   return (
@@ -855,12 +857,13 @@ export default function Dashboard() {
               <Activity size={14} className="text-gray-400" />
               <span className="text-[11px] font-black tracking-widest uppercase text-gray-600">Saúde do Catálogo</span>
               <div className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 ${
-                healthScore >= 80 ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                healthScore === null ? "bg-gray-50 text-gray-500 border border-gray-200"
+                : healthScore >= 80 ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                 : healthScore >= 50 ? "bg-amber-50 text-amber-700 border border-amber-200"
                 : "bg-red-50 text-red-700 border border-red-200"
               }`}>
-                {healthScore >= 80 ? <CheckCircle2 size={9} /> : healthScore >= 50 ? <AlertTriangle size={9} /> : <XCircle size={9} />}
-                {healthScore}% saudável
+                {healthScore === null ? <AlertTriangle size={9} /> : healthScore >= 80 ? <CheckCircle2 size={9} /> : healthScore >= 50 ? <AlertTriangle size={9} /> : <XCircle size={9} />}
+                {healthScore === null ? "sem produtos — importe o catálogo" : `${healthScore}% saudável`}
               </div>
             </div>
             <ChevronDown size={14} className={`text-gray-400 transition-transform ${catalogCollapsed ? "-rotate-90" : ""}`} />
@@ -893,12 +896,12 @@ export default function Dashboard() {
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-bold text-gray-500">Completude cadastral estimada</span>
-                  <span className="text-[10px] font-black text-gray-700">{healthScore}%</span>
+                  <span className="text-[10px] font-black text-gray-700">{healthScore === null ? "—" : `${healthScore}%`}</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${healthScore >= 80 ? "bg-emerald-500" : healthScore >= 50 ? "bg-amber-400" : "bg-red-500"}`}
-                    style={{ width: `${healthScore}%` }}
+                    className={`h-full rounded-full transition-all ${healthScore === null ? "bg-gray-300" : healthScore >= 80 ? "bg-emerald-500" : healthScore >= 50 ? "bg-amber-400" : "bg-red-500"}`}
+                    style={{ width: `${healthScore ?? 0}%` }}
                   />
                 </div>
               </div>

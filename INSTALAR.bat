@@ -50,9 +50,43 @@ IF %ERRORLEVEL% NEQ 0 (
     call npm install --legacy-peer-deps
 )
 
+REM O sistema precisa do banco MySQL configurado no arquivo .env
+IF NOT EXIST ".env" (
+    color 0E
+    echo.
+    echo  [ATENCAO] Falta o arquivo de configuracao ".env".
+    echo.
+    echo  O sistema precisa de um banco de dados MySQL para funcionar.
+    echo  Peca ao responsavel tecnico para:
+    echo  1. Instalar o MySQL 8 (ou usar um banco na nuvem)
+    echo  2. Copiar o arquivo .env.example para .env
+    echo  3. Preencher a linha DATABASE_URL com o endereco do banco
+    echo.
+    echo  Depois disso, rode este INSTALAR.bat de novo.
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
 echo  Criando banco de dados...
-call pnpm db:push 2>nul || call npx drizzle-kit migrate 2>nul
+call pnpm db:push || call npx drizzle-kit migrate
+
+IF %ERRORLEVEL% NEQ 0 (
+    color 0C
+    echo.
+    echo  [ERRO] Nao consegui criar o banco de dados.
+    echo.
+    echo  Causas mais comuns:
+    echo  - O MySQL nao esta instalado ou nao esta rodando
+    echo  - A linha DATABASE_URL do arquivo .env esta errada
+    echo.
+    echo  Peca ajuda ao responsavel tecnico e rode este
+    echo  INSTALAR.bat novamente depois de corrigir.
+    echo.
+    pause
+    exit /b 1
+)
 echo.
 
 color 0A

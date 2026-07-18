@@ -10,14 +10,18 @@ echo =============================================
 echo.
 echo  Aguarde alguns segundos...
 echo.
-echo  O sistema vai abrir no seu navegador.
+echo  O sistema vai abrir no seu navegador
+echo  assim que terminar de carregar.
 echo  NAO feche esta tela enquanto usar!
 echo.
 echo =============================================
 echo.
 
-REM Abre o navegador na tela de login apos 5 segundos
-start /b cmd /c "timeout /t 5 /nobreak >nul && start http://localhost:3000/login"
+REM Remove o registro de porta da execucao anterior (o servidor grava o novo)
+del ".port" >nul 2>nul
+
+REM Abre o navegador na porta REAL assim que o servidor subir
+start /b "" "%~dp0scripts\abrir-navegador.bat"
 
 REM Inicia o servidor
 call pnpm dev || call npx tsx server/_core/index.ts

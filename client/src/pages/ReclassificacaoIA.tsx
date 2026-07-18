@@ -8,6 +8,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Bot, Play, Square, RefreshCw, Filter, Target,
@@ -106,6 +117,7 @@ function MigracaoV2Panel() {
         setProgress(Math.min(99, Math.round((processed / ESTIMATED_TOTAL) * 100)));
         if (result.errors > 0) {
           addLog(`Lote ${batchNum}: ${result.updated} atualizados, ${result.errors} erros`, "warning");
+          for (const msg of (result as any).errorMessages ?? []) addLog(`  ↳ ${msg}`, "error");
         } else {
           addLog(`Lote ${batchNum}: ${result.updated} produtos atualizados`, "success");
         }
@@ -179,10 +191,29 @@ function MigracaoV2Panel() {
         )}
         <div className="flex gap-2">
           {!running ? (
-            <Button onClick={handleStart} disabled={campos.length === 0} size="sm" className="bg-orange-500 hover:bg-orange-600 text-white">
-              <Play className="h-3.5 w-3.5 mr-1.5" />
-              {done ? "Reiniciar Migração" : "Iniciar Migração"}
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button disabled={campos.length === 0} size="sm" className="bg-orange-500 hover:bg-orange-600 text-white">
+                  <Play className="h-3.5 w-3.5 mr-1.5" />
+                  {done ? "Reiniciar Migração" : "Iniciar Migração"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Preencher campos com IA?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    A IA vai preencher {campos.map((c) => CAMPO_LABELS[c]).join(" e ")} nos
+                    produtos que ainda não têm esses campos, gravando direto no catálogo com o
+                    status "enriquecido por IA" (nunca como validado). Você pode interromper a
+                    qualquer momento e revisar depois pelo filtro de confiabilidade em Produtos.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleStart}>Iniciar preenchimento</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           ) : (
             <Button onClick={() => { stopRef.current = true; }} variant="outline" size="sm">
               <Square className="h-3.5 w-3.5 mr-1.5" />
@@ -317,6 +348,7 @@ export default function ReclassificacaoIA() {
 
         if (result.errors > 0) {
           addLog(`Lote ${batchNum}: ${result.updated} atualizados, ${result.errors} erros`, "warning");
+          for (const msg of (result as any).errorMessages ?? []) addLog(`  ↳ ${msg}`, "error");
         } else {
           addLog(`Lote ${batchNum}: ${result.updated} produtos atualizados com sucesso`, "success");
         }
@@ -647,18 +679,40 @@ export default function ReclassificacaoIA() {
               )}
 
               <div className="flex gap-3">
-                <Button
-                  onClick={handleStart}
-                  disabled={running || !preview || preview.total === 0}
-                  className="flex-1 gap-2"
-                >
-                  <Play className="h-4 w-4" />
-                  {running
-                    ? "Processando..."
-                    : done
-                    ? "Executar Novamente"
-                    : "Iniciar Reclassificação"}
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      disabled={running || !preview || preview.total === 0}
+                      className="flex-1 gap-2"
+                    >
+                      <Play className="h-4 w-4" />
+                      {running
+                        ? "Processando..."
+                        : done
+                        ? "Executar Novamente"
+                        : "Iniciar Reclassificação"}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        Reclassificar {preview?.total?.toLocaleString("pt-BR") ?? 0} produtos com IA?
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        O campo <strong>{CAMPO_ALVO_LABELS[campoAlvo]}</strong> será atualizado
+                        direto no catálogo para todos os produtos do filtro (amostra na tabela
+                        acima). Os produtos ficam com status "enriquecido por IA" e podem ser
+                        revisados depois. Você pode interromper a execução a qualquer momento.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleStart}>
+                        Confirmar e iniciar
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
                 {running && (
                   <Button variant="destructive" onClick={handleStop} className="gap-2">
                     <Square className="h-4 w-4" />
