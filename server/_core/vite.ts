@@ -3,11 +3,24 @@ import fs from "fs";
 import { type Server } from "http";
 import { nanoid } from "nanoid";
 import path from "path";
-import { createServer as createViteServer } from "vite";
-import viteConfig from "../../vite.config";
 import { logger } from "./logger";
 
+/**
+ * Import dinâmico OPACO para o esbuild: `vite` e o vite.config (com seus
+ * plugins) são devDependencies e NÃO existem na imagem de produção. Um import
+ * estático — mesmo nunca executado — entra no bundle ESM e derruba o boot com
+ * ERR_MODULE_NOT_FOUND (foi exatamente o que tirou o sistema do ar). Este
+ * wrapper só resolve em desenvolvimento, quando setupVite() é chamado.
+ */
+const importAtRuntime = new Function("m", "return import(m)") as (m: string) => Promise<any>;
+
 export async function setupVite(app: Express, server: Server) {
+  const { createServer: createViteServer } = await importAtRuntime("vite");
+  const viteConfigModule = await importAtRuntime(
+    path.resolve(import.meta.dirname, "../../vite.config.ts")
+  );
+  const viteConfig = viteConfigModule.default;
+
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
