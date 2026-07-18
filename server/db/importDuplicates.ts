@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { InsertProduct, products, suppliers } from "../../drizzle/schema";
+import { jaroWinklerSimilarity } from "../matching/productMatcher";
 import { getDb } from "./_client";
 
 export type DuplicateCheckResult = {
@@ -16,14 +17,53 @@ export type DuplicateCheckResult = {
   existingSupplierName: string | null;
 };
 
+export type SupplierCatalogRow = {
+  id: number;
+  name: string;
+  fichaTecnica: string | null;
+  presentation: string | null;
+  price: string | null;
+  supplierName: string | null;
+  ean: string | null;
+  gtin: string | null;
+  barcode: string | null;
+};
+
+/**
+ * Carrega o catálogo ativo de um fornecedor UMA vez, para reutilização entre
+ * lotes de uma mesma importação (evita repetir o SELECT a cada 100 linhas).
+ */
+export async function loadSupplierCatalog(supplierId: number): Promise<SupplierCatalogRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: products.id,
+      name: products.name,
+      fichaTecnica: products.fichaTecnica,
+      presentation: products.presentation,
+      price: products.price,
+      supplierName: suppliers.name,
+      ean: products.ean,
+      gtin: products.gtin,
+      barcode: products.barcode,
+    })
+    .from(products)
+    .innerJoin(suppliers, eq(products.supplierId, suppliers.id))
+    .where(and(eq(products.supplierId, supplierId), eq(products.isActive, "yes")));
+}
+
 /**
  * Verifica cada linha da planilha contra a base de produtos pelo tripé
  * Nome (normalizado) + FichaTécnica + Apresentação.
  * Produtos com FichaTécnica ou Apresentação diferentes são considerados DISTINTOS.
+ * Aceita o catálogo pré-carregado (loadSupplierCatalog) para não repetir a
+ * consulta a cada lote.
  */
 export async function checkDuplicatesInRows(
   rows: Array<{ name?: string; fichaTecnica?: string; presentation?: string; ean?: string }>,
-  supplierId: number
+  supplierId: number,
+  preloadedCatalog?: SupplierCatalogRow[]
 ): Promise<DuplicateCheckResult[]> {
   const db = await getDb();
   if (!db) return rows.map((r, i) => ({
@@ -40,22 +80,8 @@ export async function checkDuplicatesInRows(
     existingSupplierName: null,
   }));
 
-  // Busca todos os produtos ativos do fornecedor para comparação em memória
-  const existingProducts = await db
-    .select({
-      id: products.id,
-      name: products.name,
-      fichaTecnica: products.fichaTecnica,
-      presentation: products.presentation,
-      price: products.price,
-      supplierName: suppliers.name,
-      ean: products.ean,
-      gtin: products.gtin,
-      barcode: products.barcode,
-    })
-    .from(products)
-    .innerJoin(suppliers, eq(products.supplierId, suppliers.id))
-    .where(and(eq(products.supplierId, supplierId), eq(products.isActive, "yes")));
+  // Catálogo do fornecedor: usa o pré-carregado quando fornecido
+  const existingProducts = preloadedCatalog ?? (await loadSupplierCatalog(supplierId));
 
   // Normaliza string para comparação (lowercase, sem acentos, sem espaços extras)
   const normalize = (s: string | null | undefined): string => {
@@ -89,40 +115,15 @@ export async function checkDuplicatesInRows(
     tripleIndex.set(key, p);
   }
 
-  // Índice 3: por Nome normalizado (para fuzzy)
+  // Índice 3: por Nome normalizado (para fuzzy), com bucket por primeira
+  // palavra — evita comparar cada linha contra o catálogo inteiro.
   const nameIndex = existingProducts.map(p => ({ ...p, normName: normalize(p.name) }));
-
-  // Jaro-Winkler simplificado para fuzzy por nome
-  function jaroWinkler(s1: string, s2: string): number {
-    if (s1 === s2) return 1.0;
-    const len1 = s1.length, len2 = s2.length;
-    if (len1 === 0 || len2 === 0) return 0.0;
-    const matchDist = Math.floor(Math.max(len1, len2) / 2) - 1;
-    const s1Matches = new Array(len1).fill(false);
-    const s2Matches = new Array(len2).fill(false);
-    let matches = 0, transpositions = 0;
-    for (let i = 0; i < len1; i++) {
-      const start = Math.max(0, i - matchDist);
-      const end = Math.min(i + matchDist + 1, len2);
-      for (let j = start; j < end; j++) {
-        if (s2Matches[j] || s1[i] !== s2[j]) continue;
-        s1Matches[i] = true; s2Matches[j] = true; matches++; break;
-      }
-    }
-    if (matches === 0) return 0.0;
-    let k = 0;
-    for (let i = 0; i < len1; i++) {
-      if (!s1Matches[i]) continue;
-      while (!s2Matches[k]) k++;
-      if (s1[i] !== s2[k]) transpositions++;
-      k++;
-    }
-    const jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3;
-    let prefix = 0;
-    for (let i = 0; i < Math.min(4, Math.min(len1, len2)); i++) {
-      if (s1[i] === s2[i]) prefix++; else break;
-    }
-    return jaro + prefix * 0.1 * (1 - jaro);
+  const firstWordBuckets = new Map<string, typeof nameIndex>();
+  for (const p of nameIndex) {
+    const fw = p.normName.split(" ")[0] ?? "";
+    if (!fw) continue;
+    const bucket = firstWordBuckets.get(fw);
+    if (bucket) bucket.push(p); else firstWordBuckets.set(fw, [p]);
   }
 
   return rows.map((r, i) => {
@@ -167,8 +168,10 @@ export async function checkDuplicatesInRows(
       const normPres = normalize(presentation);
       let bestMatch: typeof existingProducts[0] | null = null;
       let bestScore = 0;
-      for (const p of nameIndex) {
-        const score = jaroWinkler(normName, p.normName);
+      const firstWord = normName.split(" ")[0] ?? "";
+      const candidates = firstWordBuckets.get(firstWord) ?? nameIndex;
+      for (const p of candidates) {
+        const score = jaroWinklerSimilarity(normName, p.normName);
         if (score > bestScore) { bestScore = score; bestMatch = p; }
       }
       if (bestScore >= 0.92 && bestMatch) {

@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import { Building2, Check, Pencil, Plus, X } from "lucide-react";
 import { useState } from "react";
 
@@ -21,6 +22,7 @@ const emptyForm: SupplierForm = {
 };
 
 export default function Fornecedores() {
+  const { confirm, confirmDialog } = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
@@ -259,9 +261,13 @@ export default function Fornecedores() {
                         <Pencil size={12} />
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Excluir fornecedor "${s.name}"? Todos os produtos serão removidos.`))
-                            deleteMutation.mutate({ id: s.id });
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: `Excluir fornecedor "${s.name}"?`,
+                            description: "Todos os produtos deste fornecedor serão removidos do catálogo, junto com seus preços. Esta ação não pode ser desfeita.",
+                            confirmLabel: "Excluir",
+                          });
+                          if (ok) deleteMutation.mutate({ id: s.id });
                         }}
                         className="text-gray-300 hover:text-blue-800 transition-colors"
                       >
@@ -282,6 +288,7 @@ export default function Fornecedores() {
           </p>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

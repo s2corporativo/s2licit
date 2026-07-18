@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   Edit2,
   FileText,
@@ -280,6 +281,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function Propostas() {
+  const { confirm, confirmDialog } = useConfirm();
   const [, navigate] = useLocation();
   const [showNew, setShowNew] = useState(false);
   const [radarDraft, setRadarDraft] = useState<Record<string, string> | null>(null);
@@ -404,8 +406,13 @@ export default function Propostas() {
                         <Edit2 size={13} />
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm("Excluir esta proposta?")) deleteProposal.mutate({ id: p.id });
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: "Excluir esta proposta?",
+                            description: `A proposta "${p.title}" e todos os seus itens serão excluídos permanentemente. Esta ação não pode ser desfeita.`,
+                            confirmLabel: "Excluir",
+                          });
+                          if (ok) deleteProposal.mutate({ id: p.id });
                         }}
                         className="text-gray-300 hover:text-blue-800 p-1"
                         title="Excluir"
@@ -420,6 +427,7 @@ export default function Propostas() {
           </table>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

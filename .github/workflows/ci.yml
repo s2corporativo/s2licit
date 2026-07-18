@@ -71,3 +71,14 @@ jobs:
 
       - name: Build de produção
         run: pnpm build
+
+  docker-image:
+    # Garante que a imagem usada no deploy sempre builda — o deploy na VPS
+    # reconstrói esta mesma imagem e não pode descobrir o erro em produção.
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build da imagem Docker
+        run: docker build -t s2licit-ci-check .

@@ -52,6 +52,7 @@ async function buildDownloadUrl(
   const response = await fetch(downloadApiUrl, {
     method: "GET",
     headers: buildAuthHeaders(apiKey),
+    signal: AbortSignal.timeout(30_000),
   });
   return (await response.json()).url;
 }
@@ -112,6 +113,7 @@ export async function storagePut(
     method: "POST",
     headers: buildAuthHeaders(apiKey),
     body: formData,
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!response.ok) {

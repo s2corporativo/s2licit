@@ -8,11 +8,14 @@ const PAGE = 50;
 export default function Logs() {
   const [offset, setOffset] = useState(0);
   const [entity, setEntity] = useState("");
-  const { data: rows = [], isLoading, isFetching } = trpc.audit.getLogs.useQuery({
-    limit: PAGE,
-    offset,
-    entity: entity || undefined,
-  });
+  const { data: rows = [], isLoading, isFetching } = trpc.audit.getLogs.useQuery(
+    {
+      limit: PAGE,
+      offset,
+      entity: entity || undefined,
+    },
+    { placeholderData: (prev) => prev }
+  );
 
   const fmt = (d: unknown) => (d ? new Date(d as string).toLocaleString("pt-BR") : "—");
 

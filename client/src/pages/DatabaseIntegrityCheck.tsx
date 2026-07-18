@@ -20,9 +20,9 @@ interface IntegrityStatus {
 
 export function DatabaseIntegrityCheck() {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const integrityQuery = trpc.audit.checkDatabaseIntegrity.useQuery(undefined, {
-    refetchInterval: 60000, // Refetch a cada 60 segundos
-  });
+  // Sem polling incondicional: a verificação é atualizada manualmente pelo botão
+  // "Atualizar" (handleRefresh) para não manter requisições a cada 60s em segundo plano.
+  const integrityQuery = trpc.audit.checkDatabaseIntegrity.useQuery();
   const statsQuery = trpc.audit.getDatabaseStats.useQuery();
 
   const handleRefresh = async () => {

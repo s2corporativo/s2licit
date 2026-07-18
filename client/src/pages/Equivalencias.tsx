@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertCircle,
   CheckCircle2,
@@ -37,6 +38,7 @@ type AutoEquivGroup = {
 
 // ─── Tab: Grupos Existentes ───────────────────────────────────────────────────
 function TabGrupos({ onSwitchToAuto }: { onSwitchToAuto?: () => void }) {
+  const { confirm: confirmAction, confirmDialog } = useConfirm();
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [filterCategory, setFilterCategory] = useState<number | undefined>();
   const [showCreate, setShowCreate] = useState(false);
@@ -259,7 +261,15 @@ function TabGrupos({ onSwitchToAuto }: { onSwitchToAuto?: () => void }) {
                     <div className="text-xs font-semibold text-gray-900 truncate">{g.activeIngredient}</div>
                     {g.notes && <div className="text-[10px] text-gray-400 truncate">{g.notes}</div>}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm("Excluir este grupo?")) deleteGroup.mutate({ id: g.id }); }}
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    const ok = await confirmAction({
+                      title: "Excluir este grupo?",
+                      description: `O grupo de equivalência "${g.activeIngredient}" e seus vínculos entre produtos serão excluídos permanentemente. Esta ação não pode ser desfeita.`,
+                      confirmLabel: "Excluir",
+                    });
+                    if (ok) deleteGroup.mutate({ id: g.id });
+                  }}
                     className="text-gray-200 hover:text-blue-800 transition-colors flex-shrink-0">
                     <Trash2 size={11} />
                   </button>
@@ -371,6 +381,7 @@ function TabGrupos({ onSwitchToAuto }: { onSwitchToAuto?: () => void }) {
           )}
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

@@ -1,12 +1,53 @@
 /**
  * Rebuild strategic category hierarchy v2
  * Construção | Agro | Veterinário | Rações | Medicamentos Humanos
+ *
+ * ATENÇÃO: este script APAGA todas as categorias e desvincula todos os
+ * produtos (products.categoryId = NULL). Ele NÃO recategoriza os produtos —
+ * isso precisa ser feito depois (ex.: scripts/migrate-categories.mjs ou
+ * reclassificação pela UI).
+ *
+ * SEGURANÇA: exige a flag --confirm para executar e, antes de apagar,
+ * grava um dump JSON do vínculo atual productId→categoryId e da árvore de
+ * categorias em scripts/backups/, permitindo restauração manual.
  */
 import { createConnection } from "mysql2/promise";
 import * as dotenv from "dotenv";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 dotenv.config();
 
+if (!process.argv.includes("--confirm")) {
+  console.error("Este script apaga TODAS as categorias e desvincula TODOS os produtos.");
+  console.error("Ele não recategoriza os produtos automaticamente.");
+  console.error("\nPara executar de verdade: node scripts/rebuild-categories-v2.mjs --confirm");
+  console.error("Recomendado antes: pnpm db:backup");
+  process.exit(1);
+}
+
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL não definido. Abortando.");
+  process.exit(1);
+}
+
 const db = await createConnection(process.env.DATABASE_URL);
+
+// 0. Dump de segurança do estado atual (vínculos + árvore de categorias)
+const [links] = await db.execute(
+  "SELECT id, categoryId FROM products WHERE categoryId IS NOT NULL"
+);
+const [oldCategories] = await db.execute(
+  "SELECT id, name, slug, parentId, sortOrder FROM categories"
+);
+const backupDir = path.join(process.cwd(), "scripts", "backups");
+mkdirSync(backupDir, { recursive: true });
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const backupFile = path.join(backupDir, `categories-backup-${stamp}.json`);
+writeFileSync(
+  backupFile,
+  JSON.stringify({ createdAt: stamp, categories: oldCategories, productLinks: links }, null, 2)
+);
+console.log(`Backup salvo em ${backupFile} (${oldCategories.length} categorias, ${links.length} vínculos de produto)`);
 
 // 1. Disable FK checks, null out product categories, delete all categories, re-enable FK
 await db.execute("SET FOREIGN_KEY_CHECKS = 0");
@@ -79,3 +120,4 @@ await insert("Insumos e Materiais", medHum, 4);
 
 await db.end();
 console.log("✅ Strategic category hierarchy rebuilt successfully!");
+console.log(`⚠️  Os produtos estão sem categoria. Recategorize-os e guarde o backup ${path.basename(backupFile)} até validar.`);

@@ -1,4 +1,5 @@
-import { trpc } from "@/lib/trpc";
+import { trpc, type RouterInputs } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -929,6 +930,7 @@ function BulkEditPanel({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Produtos() {
+  const { confirm, confirmDialog } = useConfirm();
   const [location] = useLocation();
   // Read categoryId from query string (e.g. /produtos?categoryId=3)
   const initialCategoryId = useMemo(() => {
@@ -1013,7 +1015,7 @@ export default function Produtos() {
   const { data: suppliers } = trpc.suppliers.list.useQuery({});
 
   // Memoizar queryInput para evitar re-fetches desnecessários a cada render
-  const queryInput = useMemo(() => ({
+  const queryInput = useMemo((): RouterInputs["products"]["list"] => ({
     categoryId: extraCategoryIds.length > 0 ? undefined : activeCategoryId,
     categoryIds: extraCategoryIds.length > 0 ? [activeCategoryId, ...extraCategoryIds].filter(Boolean) as number[] : undefined,
     supplierId: filterSupplier,
@@ -1032,7 +1034,9 @@ export default function Produtos() {
     offset: page * limit,
   }), [activeCategoryId, extraCategoryIds, filterSupplier, debouncedSearch, searchField, filterManufacturer, filterIsActive, filterPriceMin, filterPriceMax, filterHasImage, filterHasLink, filterWithoutFichaTecnica, sortField, sortDir, limit, page]);
 
-  const { data, isLoading } = trpc.products.list.useQuery(queryInput as any);
+  const { data, isLoading } = trpc.products.list.useQuery(queryInput, {
+    placeholderData: (prev) => prev,
+  });
 
   const utils = trpc.useUtils();
   const deleteProduct = trpc.products.delete.useMutation({
@@ -1119,9 +1123,14 @@ export default function Produtos() {
     } catch (_) { /* tratado pelo onError */ } finally { setReclassifyRunning(false); }
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     const count = selectedIds.size;
-    if (!window.confirm(`Excluir ${count} produto${count !== 1 ? "s" : ""} selecionado${count !== 1 ? "s" : ""}? Esta ação não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: `Excluir ${count} produto${count !== 1 ? "s" : ""}?`,
+      description: `${count} produto${count !== 1 ? "s" : ""} selecionado${count !== 1 ? "s" : ""} ser${count !== 1 ? "ão" : "á"} removido${count !== 1 ? "s" : ""} do catálogo, incluindo preços e histórico associados. Esta ação não pode ser desfeita.`,
+      confirmLabel: "Excluir",
+    });
+    if (!ok) return;
     bulkDeleteMutation.mutate({ ids: Array.from(selectedIds) });
   };
 
@@ -1921,7 +1930,14 @@ export default function Produtos() {
                         <Edit2 size={12} />
                       </button>
                       <button
-                        onClick={() => { if (confirm(`Excluir "${p.name}"?`)) deleteProduct.mutate({ id: p.id }); }}
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: `Excluir "${p.name}"?`,
+                            description: "O produto será removido do catálogo, junto com seus preços e histórico. Esta ação não pode ser desfeita.",
+                            confirmLabel: "Excluir",
+                          });
+                          if (ok) deleteProduct.mutate({ id: p.id });
+                        }}
                         className="text-gray-200 hover:text-blue-800 transition-colors p-1" title="Excluir"
                       >
                         <Trash2 size={12} />
@@ -2435,6 +2451,7 @@ export default function Produtos() {
           </div>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }
@@ -2679,6 +2696,7 @@ function DuplicatesModal({
   onClose: () => void;
   onMerged: () => void;
 }) {
+  const { confirm, confirmDialog } = useConfirm();
   const [threshold, setThreshold] = useState(0.82);
   const [enabled, setEnabled] = useState(false);
   const [masterIds, setMasterIds] = useState<Record<number, number>>({});
@@ -2706,11 +2724,16 @@ function DuplicatesModal({
     refetch();
   };
 
-  const handleMerge = (groupId: number, products: any[]) => {
+  const handleMerge = async (groupId: number, products: any[]) => {
     const masterId = masterIds[groupId] ?? products[0].id;
     const duplicateIds = products.filter((p) => p.id !== masterId).map((p) => p.id);
     if (duplicateIds.length === 0) { toast.error("Selecione um produto mestre diferente dos duplicados."); return; }
-    if (!window.confirm(`Fundir ${duplicateIds.length} produto${duplicateIds.length !== 1 ? "s" : ""} no mestre "${products.find(p => p.id === masterId)?.name}"?\n\nOs duplicados serão desativados e suas referências em propostas serão redirecionadas para o produto mestre.`)) return;
+    const ok = await confirm({
+      title: `Fundir ${duplicateIds.length} produto${duplicateIds.length !== 1 ? "s" : ""}?`,
+      description: `Os duplicados serão desativados e suas referências em propostas serão redirecionadas para o produto mestre "${products.find(p => p.id === masterId)?.name}".`,
+      confirmLabel: "Fundir",
+    });
+    if (!ok) return;
     mergeMutation.mutate({ masterId, duplicateIds });
   };
 
@@ -2891,6 +2914,7 @@ function DuplicatesModal({
           </button>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

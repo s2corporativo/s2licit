@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, FileText, Loader2, Upload } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
+import { formatBRL } from "@/lib/format";
 
 interface XmlBatchFile {
   fileName: string;
@@ -56,12 +57,7 @@ interface BatchImportResponse {
   error?: string;
 }
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
-}
+const formatCurrency = formatBRL;
 
 export function BatchXmlImportComponent() {
   const [xmlFiles, setXmlFiles] = useState<XmlBatchFile[]>([]);

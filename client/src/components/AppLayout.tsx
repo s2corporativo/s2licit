@@ -141,11 +141,17 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+/** Compara por segmento completo: "/importar" casa "/importar" e "/importar/x", mas não "/importar-nfe". */
+function isPathActive(location: string, href: string): boolean {
+  if (href === "/") return location === "/";
+  return location === href || location.startsWith(href + "/");
+}
+
 /** Título da página atual (para a topbar), derivado do item de menu ativo. */
 function currentPageLabel(location: string): string {
   for (const group of navGroups) {
     for (const item of group.items) {
-      if (item.href === "/" ? location === "/" : location.startsWith(item.href)) {
+      if (isPathActive(location, item.href)) {
         return item.label;
       }
     }
@@ -238,8 +244,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </p>
             {group.items.map((item) => {
               const Icon = item.icon;
-              const active =
-                item.href === "/" ? location === "/" : location.startsWith(item.href);
+              const active = isPathActive(location, item.href);
               return (
                 <Link
                   key={item.href}

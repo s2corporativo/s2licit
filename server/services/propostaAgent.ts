@@ -17,6 +17,7 @@ import { getDb } from "../db";
 import { proposals, proposalItems } from "../../drizzle/schema";
 import { eq, asc } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
+import { assertSafeExternalUrl } from "../utils/urlGuard";
 
 // ─── Conformidade: detecção de CAPTCHA (sem resolução) ─────────────────────────
 //
@@ -488,6 +489,7 @@ export class PropostaAgente {
 
     const url = cred.loginUrl || cfg.loginUrl;
     this.addLog(`🌐 Acessando ${cfg.nome}...`);
+    assertSafeExternalUrl(url, "URL do portal");
     await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     await new Promise(r => setTimeout(r, 1500));
 
@@ -547,6 +549,7 @@ export class PropostaAgente {
 
     if (urlDireta) {
       this.addLog(`🔗 Acessando URL direta...`);
+      assertSafeExternalUrl(urlDireta, "URL do portal");
       await this.page.goto(urlDireta, { waitUntil: "networkidle2", timeout: 30000 });
     } else if (numeroProcesso) {
       this.addLog(`🔍 Buscando processo: ${numeroProcesso}`);

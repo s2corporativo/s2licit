@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, XCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { formatBRL } from "@/lib/format";
 
 interface PriceRow {
   productName: string;
@@ -378,10 +379,10 @@ export function PriceImportComponent() {
                         </div>
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {row.currentPrice ? `R$ ${row.currentPrice.toFixed(2)}` : "-"}
+                        {row.currentPrice ? formatBRL(row.currentPrice) : "-"}
                       </td>
                       <td className="px-3 py-2 text-right font-medium">
-                        R$ {row.price.toFixed(2)}
+                        {formatBRL(row.price)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {row.priceChangePercent ? (

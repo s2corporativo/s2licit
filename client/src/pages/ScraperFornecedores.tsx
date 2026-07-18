@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -459,6 +460,7 @@ function LoginDialog({
 
 // ─── Card de Fornecedor ───────────────────────────────────────────────────────
 function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => void }) {
+  const { confirm: confirmAction, confirmDialog } = useConfirm();
   const [showLog, setShowLog] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
@@ -584,10 +586,13 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
           />
         )}
         <button
-          onClick={() => {
-            if (confirm(`Remover a configuração de scraping de "${config.scraperType}"? As credenciais salvas serão apagadas.`)) {
-              deletar.mutate({ id: config.id });
-            }
+          onClick={async () => {
+            const ok = await confirmAction({
+              title: `Remover a configuração de "${config.scraperType}"?`,
+              description: "A configuração de scraping, as credenciais salvas e o histórico de agendamento deste fornecedor serão apagados. Esta ação não pode ser desfeita.",
+              confirmLabel: "Remover",
+            });
+            if (ok) deletar.mutate({ id: config.id });
           }}
           disabled={isRunning || deletar.isPending}
           title="Remover fornecedor"
@@ -596,6 +601,7 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
           {deletar.isPending ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
         </button>
       </div>
+      {confirmDialog}
     </div>
   );
 }

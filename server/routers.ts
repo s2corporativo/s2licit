@@ -175,7 +175,10 @@ export const appRouter = router({
       const magic = buffer.slice(0, 4);
       const isJpeg = magic[0] === 0xFF && magic[1] === 0xD8;
       const isPng = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47;
-      const isWebp = magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46;
+      // RIFF (bytes 0-3) também é usado por AVI/WAV — exige "WEBP" nos bytes 8-11.
+      const isWebp =
+        magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46 &&
+        buffer.length > 12 && buffer.slice(8, 12).toString("ascii") === "WEBP";
       if (!isJpeg && !isPng && !isWebp) throw new TRPCError({ code: "BAD_REQUEST", message: "Formato inválido. Use JPEG, PNG ou WebP." });
       const ext = isJpeg ? "jpg" : isPng ? "png" : "webp";
       const key = `empresa/logo-${Date.now()}.${ext}`;

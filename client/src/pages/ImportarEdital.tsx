@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { formatBRL } from "@/lib/format";
 import {
   AlertCircle,
   AlertTriangle,
@@ -418,7 +419,7 @@ function SimilaresPanel({
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 {sPrice !== null && (
                   <span className={`text-xs font-bold ${isCheaper ? "text-green-700" : "text-gray-700"}`}>
-                    R$ {sPrice.toFixed(2)} {salePrice ? `→ R$ ${salePrice.toFixed(2)}` : ""}
+                    {formatBRL(sPrice)} {salePrice ? `→ ${formatBRL(salePrice)}` : ""}
                   </span>
                 )}
                 {isCheaper && diffPct && (

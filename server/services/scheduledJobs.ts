@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, notInArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
@@ -33,8 +33,36 @@ function enabled(flag: string | undefined, defaultOn: boolean): boolean {
   return flag !== "false" && flag !== "0";
 }
 
-/** Roda a sincronização de e-mail uma vez, com log resumido. */
+/**
+ * Notifica falhas de jobs (notificação interna + WhatsApp quando configurado).
+ * Cada canal é isolado em try/catch — um alerta nunca derruba o scheduler.
+ * Desligável com FAILURE_ALERTS_ENABLED=false.
+ */
+async function notifyJobFailure(title: string, detail: string): Promise<void> {
+  if (!enabled(process.env.FAILURE_ALERTS_ENABLED, true)) return;
+  try {
+    await notifyOwner({ title, content: detail });
+  } catch (err) {
+    console.error("[Scheduler] Falha ao enviar notificação de erro:", (err as Error).message);
+  }
+  if (isWhatsappConfigured()) {
+    try {
+      await enviarWhatsapp(`⚠️ ${title}\n\n${detail}`);
+    } catch (err) {
+      console.error("[Scheduler] Falha ao enviar WhatsApp de erro:", (err as Error).message);
+    }
+  }
+}
+
+let emailSyncRunning = false;
+
+/** Roda a sincronização de e-mail uma vez, com log resumido e guarda de sobreposição. */
 async function runEmailSync(): Promise<void> {
+  if (emailSyncRunning) {
+    console.warn("[Scheduler] Sincronização de e-mail anterior ainda em andamento — pulando este ciclo.");
+    return;
+  }
+  emailSyncRunning = true;
   try {
     const result = await syncEmailQuotations({ limit: 50 });
     if (result.imported > 0 || result.errors.length > 0) {
@@ -44,6 +72,8 @@ async function runEmailSync(): Promise<void> {
     }
   } catch (err) {
     console.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
+  } finally {
+    emailSyncRunning = false;
   }
 }
 
@@ -72,9 +102,17 @@ export async function runDailyAlerts(): Promise<void> {
     console.error("[Scheduler] Falha ao verificar certidões:", (err as Error).message);
   }
 
-  // Prazos de cotação
+  // Prazos de cotação — filtra no SQL: só pendentes com prazo definido
   try {
-    const cotacoes = await db.select().from(emailQuotations);
+    const cotacoes = await db
+      .select()
+      .from(emailQuotations)
+      .where(
+        and(
+          isNotNull(emailQuotations.prazoResposta),
+          notInArray(emailQuotations.status, ["respondida", "descartada"]),
+        ),
+      );
     const msPorDia = 24 * 60 * 60 * 1000;
     const vencidos: string[] = [];
     const proximos: string[] = [];

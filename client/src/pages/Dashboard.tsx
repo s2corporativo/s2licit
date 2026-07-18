@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { formatBRL, formatDateBR } from "@/lib/format";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -41,17 +42,11 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { hasMinimumRole, type Role } from "@/lib/access";
-import { useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Suspense, lazy, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
+
+// Recharts é pesado — carregado sob demanda apenas quando o gráfico renderiza
+const DashboardCharts = lazy(() => import("./dashboard/DashboardCharts"));
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -72,16 +67,14 @@ const S2_PALETTE = [
 
 type Period = "today" | "7d" | "30d" | "month";
 
+/** Versão compacta do formatador central: abrevia milhares/milhões nos cards do dashboard. */
 function fmtBRL(value: number) {
   if (value >= 1_000_000) return `R$ ${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `R$ ${(value / 1_000).toFixed(0)}K`;
-  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  return formatBRL(value);
 }
 
-function fmtDate(d: Date | string | null | undefined) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
-}
+const fmtDate = formatDateBR;
 
 function buildPncpUrl(externalId: string | null | undefined): string | null {
   if (!externalId) return null;
@@ -928,32 +921,22 @@ export default function Dashboard() {
             } />
             {categoryChartData.length > 0 ? (
               <>
-                <ResponsiveContainer width="100%" height={Math.max(220, categoryChartData.length * 28)}>
-                  <BarChart data={categoryChartData} layout="vertical" margin={{ left: 0, right: 60, top: 0, bottom: 0 }}>
-                    <XAxis type="number" tick={{ fontSize: 9, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 10, fill: "#6B7280" }} axisLine={false} tickLine={false} />
-                    <Tooltip
-                      formatter={(value: number, _: string, props: any) => [
-                        `${value.toLocaleString("pt-BR")} produtos (${props.payload?.pct ?? 0}%)`,
-                        props.payload?.fullName ?? "",
-                      ]}
-                      contentStyle={{ fontSize: 11, border: "1px solid #e5e7eb", borderRadius: 2 }}
+                <Suspense
+                  fallback={
+                    <div
+                      className="w-full animate-pulse bg-gray-100"
+                      style={{ height: Math.max(220, categoryChartData.length * 28) }}
                     />
-                    <Bar dataKey="count" radius={[0, 3, 3, 0]} onClick={(d: { categoryId?: number }) => {
-                      if (d.categoryId) setSelectedCategoryId(prev => prev === d.categoryId ? null : d.categoryId!);
-                    }}
-                      label={{ position: "right", fontSize: 10, fill: "#6B7280", formatter: (v: number, props: any) => `${v.toLocaleString("pt-BR")} (${props?.pct ?? ""}%)` }}
-                    >
-                      {categoryChartData.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={entry.color}
-                          opacity={selectedCategoryId ? (entry.categoryId === selectedCategoryId ? 1 : 0.3) : 1}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                  }
+                >
+                  <DashboardCharts
+                    data={categoryChartData}
+                    selectedCategoryId={selectedCategoryId}
+                    onSelectCategory={(categoryId) =>
+                      setSelectedCategoryId((prev) => (prev === categoryId ? null : categoryId))
+                    }
+                  />
+                </Suspense>
                 {selectedCategoryId && (
                   <button
                     onClick={() => navigate(`/produtos?categoryId=${selectedCategoryId}`)}

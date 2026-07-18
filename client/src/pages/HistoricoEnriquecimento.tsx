@@ -42,7 +42,7 @@ export default function HistoricoEnriquecimento() {
       source: sourceFilter,
       status: statusFilter,
     },
-    { enabled: !selectedExecution }
+    { enabled: !selectedExecution, placeholderData: (prev) => prev }
   );
 
   const executionDetailQuery = trpc.enrichmentHistory.getExecutionDetail.useQuery(
