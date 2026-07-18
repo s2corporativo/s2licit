@@ -3,7 +3,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { sql } from "drizzle-orm";
 import { calculateSalePrice } from "../services/pricingSafety";
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, parseLlmJson } from "../_core/llm";
 import { addProposalItem, createProposal, getDb, getProductById, getProposalTemplate, loadFeedbackMap, loadSynonymMap, normalizeEditalTerm, recordFeedback, upsertRequestingOrg } from "../db";
 
 export const editalRouter = router({
@@ -129,7 +129,7 @@ export const editalRouter = router({
 
         let parsed: { processo: { numero: string; modalidade: string; orgao: string; objeto: string }; itens: Array<{ numero: number; descricao: string; unidade: string; quantidade: number; precoUnitario: number | null; precoTotal: number | null }> };
         try {
-          parsed = JSON.parse(content);
+          parsed = parseLlmJson(content);
         } catch {
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Resposta da IA inválida" });
         }

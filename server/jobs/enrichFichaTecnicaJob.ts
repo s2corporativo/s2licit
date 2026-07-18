@@ -7,7 +7,7 @@
 import { getDb, resetDb } from "../db";
 import { products } from "../../drizzle/schema";
 import { isNull, sql } from "drizzle-orm";
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, parseLlmJson } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
 
 export interface EnrichmentProgress {
@@ -102,7 +102,7 @@ Gere uma ficha técnica estruturada em JSON com os campos:
     });
 
     const content = response.choices[0].message.content;
-    const parsed = JSON.parse(typeof content === "string" ? content : JSON.stringify(content));
+    const parsed = parseLlmJson(typeof content === "string" ? content : JSON.stringify(content));
     return parsed;
   } catch (error: any) {
     console.error(`[EnrichFichaTecnica] Erro ao extrair ficha técnica para ${product.name}:`, error?.message);

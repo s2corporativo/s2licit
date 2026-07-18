@@ -1,6 +1,6 @@
 import { readAllSheetsAsRows } from "../utils/spreadsheet";
 import { extractTextFromBinaryDocument } from "./intelligentCaptureIngestionService";
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, parseLlmJson } from "../_core/llm";
 
 /**
  * Extração de itens de cotação a partir de anexos de e-mail.
@@ -170,7 +170,7 @@ export async function extractItemsFromText(text: string): Promise<ExtractedItem[
 
     const content = result.choices?.[0]?.message?.content;
     const raw = typeof content === "string" ? content : "";
-    const parsed = JSON.parse(raw);
+    const parsed = parseLlmJson<any>(raw);
     const itens = Array.isArray(parsed?.itens) ? parsed.itens : [];
     return itens
       .filter((i: any) => typeof i?.descricao === "string" && i.descricao.trim().length >= 3)

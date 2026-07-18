@@ -333,9 +333,33 @@ const normalizeResponseFormat = ({
   };
 };
 
-export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  const provider = resolveProvider();
+/** Ordem de tentativa: provedor preferido primeiro, demais como fallback. */
+function orderedProviders(): LlmProvider[] {
+  const all = [anthropicProvider(), groqProvider(), forgeProvider()].filter(
+    (p): p is LlmProvider => p != null
+  );
+  const pref = ENV.aiProvider;
+  const rank = (p: LlmProvider) =>
+    (pref === "anthropic" && p.kind === "anthropic") || (pref === "groq" && p.kind === "groq")
+      ? 0
+      : p.kind === "anthropic"
+        ? 1
+        : p.kind === "groq"
+          ? 2
+          : 3;
+  return all.sort((a, b) => rank(a) - rank(b));
+}
 
+/** Erros transitórios que merecem retry/fallback (limite de taxa, 5xx, rede). */
+function isTransientLlmError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b(429|500|502|503|504|529)\b|timeout|fetch failed|ECONNRESET|ETIMEDOUT/i.test(msg);
+}
+
+async function invokeProvider(
+  provider: LlmProvider,
+  params: InvokeParams
+): Promise<InvokeResult> {
   const {
     messages,
     tools,
@@ -366,7 +390,6 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.model = provider.model;
   // Respeita o teto pedido pelo chamador (antes era fixo em 32768, inflando
   // custo/latência e ignorando a intenção de quem chamou).
   payload.max_tokens = Math.min(maxTokens ?? max_tokens ?? 8192, 32768);
@@ -425,4 +448,69 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   return (await response.json()) as InvokeResult;
+}
+
+/**
+ * Invoca o LLM com resiliência: erro transitório (429/5xx/timeout/rede) tenta
+ * mais uma vez no mesmo provedor e depois cai para o próximo configurado.
+ * Um pico de rate-limit no tier gratuito do Groq deixa de perder a extração.
+ */
+export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
+  const providers = orderedProviders();
+  if (providers.length === 0) {
+    resolveProvider(); // lança o erro padrão "nenhum provedor configurado"
+  }
+
+  let lastError: unknown;
+  for (const provider of providers) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        return await invokeProvider(provider, params);
+      } catch (err) {
+        lastError = err;
+        if (!isTransientLlmError(err)) {
+          throw err; // erro de payload/schema/autorização: retry não ajuda
+        }
+        console.warn(
+          `[LLM] ${provider.kind} falhou (tentativa ${attempt}/2): ${(err as Error).message.slice(0, 200)}`
+        );
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1500 * attempt));
+        }
+      }
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("LLM invoke failed em todos os provedores configurados");
+}
+
+/**
+ * Faz o parse tolerante do JSON devolvido por um LLM: aceita resposta com
+ * cerca de markdown (```json ... ```) ou texto ao redor do objeto/array.
+ * Lança se não houver JSON válido.
+ */
+export function parseLlmJson<T = unknown>(raw: string): T {
+  const text = raw.trim();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // segue para as heurísticas
+  }
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1].trim()) as T;
+    } catch {
+      // segue para o recorte bruto
+    }
+  }
+  const firstBrace = Math.min(
+    ...["{", "["].map((c) => (text.indexOf(c) === -1 ? Infinity : text.indexOf(c)))
+  );
+  const lastBrace = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
+  if (firstBrace !== Infinity && lastBrace > firstBrace) {
+    return JSON.parse(text.slice(firstBrace, lastBrace + 1)) as T;
+  }
+  throw new Error("Resposta do LLM não contém JSON válido");
 }

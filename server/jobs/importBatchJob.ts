@@ -1,5 +1,6 @@
 import { checkDuplicatesInRows, loadSupplierCatalog, bulkInsertProducts, mergeProductFromRow, createImportLog, updateImportLog } from "../db";
 import { randomUUID } from "crypto";
+import { parseLlmJson } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
 import type { InsertProduct } from "../../drizzle/schema";
 import { products, importProgress } from "../../drizzle/schema";
@@ -490,7 +491,7 @@ async function processImportBatchAsync(
             const content = response.choices[0]?.message?.content;
             if (content) {
               const contentStr = typeof content === "string" ? content : JSON.stringify(content);
-              const enriched = JSON.parse(contentStr);
+              const enriched = parseLlmJson<any>(contentStr);
               await db
                 .update(products)
                 .set({

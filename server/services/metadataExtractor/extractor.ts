@@ -5,7 +5,7 @@
  * Compatível com qualquer categoria de produto (medicamentos, materiais, serviços, etc.)
  */
 
-import { invokeLLM } from "../../_core/llm";
+import { invokeLLM, parseLlmJson } from "../../_core/llm";
 import { getDb } from "../../db";
 import { productMetadata, products } from "../../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
@@ -89,7 +89,7 @@ Extraia os metadados relevantes. Responda APENAS com JSON válido no formato:
     const content = response?.choices?.[0]?.message?.content;
     if (!content) return [];
 
-    const parsed = typeof content === "string" ? JSON.parse(content) : content;
+    const parsed = typeof content === "string" ? parseLlmJson<any>(content) : content;
     const items: ExtractedMetadata[] = (parsed.metadata || []).map((m: any) => ({
       key: String(m.key || "").toLowerCase().replace(/[^a-z0-9_]/g, "_"),
       value: String(m.value || "").trim(),
@@ -165,7 +165,7 @@ Sugira até 8 sinônimos relevantes. Responda APENAS com JSON:
 
     const content = response?.choices?.[0]?.message?.content;
     if (!content) return [];
-    const parsed = typeof content === "string" ? JSON.parse(content) : content;
+    const parsed = typeof content === "string" ? parseLlmJson<any>(content) : content;
     return (parsed.synonyms || []).filter((s: any) => s.synonym && s.synonym !== productName);
   } catch (err) {
     console.error("[MetadataExtractor] Erro ao sugerir sinônimos:", err);

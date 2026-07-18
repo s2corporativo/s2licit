@@ -3,7 +3,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { and, count, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { categories, products } from "../../drizzle/schema";
 import { getDb } from "../db";
-import { invokeLLM } from "../_core/llm";
+import { invokeLLM, parseLlmJson } from "../_core/llm";
 
 const CATEGORIES = [
   "Medicamentos Veterinários",
@@ -134,7 +134,7 @@ export const reclassificacaoRouter = router({
           const content = typeof rawContent === "string" ? rawContent : null;
           if (!content) throw new Error("IA sem resposta");
 
-          const parsed = JSON.parse(content) as { classificacoes: Array<{ id: number; categoryId?: number; activeIngredient?: string; pharmaceuticalForm?: string }> };
+          const parsed = parseLlmJson(content) as { classificacoes: Array<{ id: number; categoryId?: number; activeIngredient?: string; pharmaceuticalForm?: string }> };
           const classificacoes = Array.isArray(parsed.classificacoes) ? parsed.classificacoes : [];
 
           for (const c of classificacoes) {
@@ -273,7 +273,7 @@ export const reclassificacaoRouter = router({
           const rawContent = llmResult.choices?.[0]?.message?.content;
           const content = typeof rawContent === "string" ? rawContent : null;
           if (!content) throw new Error("IA sem resposta");
-          const parsed = JSON.parse(content) as { resultados: Array<{ id: number; subcategoria?: string | null; fichaTecnica?: string | null; codigoFornecedor?: string | null }> };
+          const parsed = parseLlmJson(content) as { resultados: Array<{ id: number; subcategoria?: string | null; fichaTecnica?: string | null; codigoFornecedor?: string | null }> };
           const resultados = Array.isArray(parsed.resultados) ? parsed.resultados : [];
 
           for (const r of resultados) {
