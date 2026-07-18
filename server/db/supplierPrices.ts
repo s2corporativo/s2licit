@@ -31,29 +31,45 @@ export async function upsertProductSupplierPrice(
   if (!db) return;
   const { productSupplierPrices } = await import("../../drizzle/schema");
   const { and, eq } = await import("drizzle-orm");
-  const existing = await db.select({ id: productSupplierPrices.id })
+  const existing = await db.select({ id: productSupplierPrices.id, price: productSupplierPrices.price })
     .from(productSupplierPrices)
     .where(and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId)))
     .limit(1);
   const now = new Date();
   if (existing.length > 0) {
+    // `undefined` é omitido pelo Drizzle — código/link existentes são
+    // preservados quando o chamador não os fornece (antes eram apagados).
     await db.update(productSupplierPrices)
-      .set({ price, codigoFornecedor: extra?.codigoFornecedor ?? null, linkProduto: extra?.linkProduto ?? null, updatedAt: now })
+      .set({ price, codigoFornecedor: extra?.codigoFornecedor ?? undefined, linkProduto: extra?.linkProduto ?? undefined, updatedAt: now })
       .where(and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId)));
   } else {
     await db.insert(productSupplierPrices).values({ productId, supplierId, price, codigoFornecedor: extra?.codigoFornecedor ?? null, linkProduto: extra?.linkProduto ?? null, updatedAt: now });
+  }
+  // Mudança de custo entra na trilha do price_history com a origem
+  // (upserts sem alteração de preço não geram ruído no histórico).
+  const previousPrice = existing[0]?.price != null ? Number(existing[0].price) : null;
+  const nextPrice = price != null ? Number(price) : null;
+  if (nextPrice !== null && nextPrice !== previousPrice) {
+    try {
+      const { recordPriceHistory } = await import("./landedCost");
+      await recordPriceHistory({ productId, supplierId, price, origem: extra?.origem ?? null });
+    } catch (err) {
+      console.warn("[supplierPrices] Falha ao registrar histórico de preço:", (err as Error).message);
+    }
   }
 }
 
 export async function getPriceHistory(productId: number, supplierId?: number, limit = 20) {
   const db = await getDb();
   if (!db) return [];
-  const { productSupplierPrices } = await import("../../drizzle/schema");
+  // Histórico real vem da tabela price_history (a product_supplier_prices
+  // guarda apenas o estado atual — 1 linha por par produto+fornecedor).
+  const { priceHistory } = await import("../../drizzle/schema");
   const { and, eq, desc } = await import("drizzle-orm");
   const conditions = supplierId
-    ? and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId))
-    : eq(productSupplierPrices.productId, productId);
-  return db.select().from(productSupplierPrices).where(conditions).orderBy(desc(productSupplierPrices.updatedAt)).limit(limit);
+    ? and(eq(priceHistory.productId, productId), eq(priceHistory.supplierId, supplierId))
+    : eq(priceHistory.productId, productId);
+  return db.select().from(priceHistory).where(conditions).orderBy(desc(priceHistory.recordedAt)).limit(limit);
 }
 
 export async function findProductByEan(ean: string) {

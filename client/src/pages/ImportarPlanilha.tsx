@@ -4,6 +4,7 @@ import Papa from "papaparse";
 import { useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { readObjects } from "@/lib/spreadsheet";
+import { formatBRL } from "@/lib/format";
 import { ImportDuplicatesReviewModal } from "@/components/ImportDuplicatesReviewModal";
 
 // ParsedRow V2: campos exatos conforme especificação
@@ -1046,7 +1047,7 @@ export default function ImportarPlanilha() {
                               {row.existingFichaTecnica && <div className="text-gray-400 text-[9px] truncate max-w-[160px]" title={row.existingFichaTecnica}>{row.existingFichaTecnica} · {row.existingPresentation}</div>}
                             </td>
                             <td className="px-2 py-1.5 font-mono text-gray-600">
-                              {row.existingPrice ? `R$ ${row.existingPrice}` : "—"}
+                              {formatBRL(row.existingPrice)}
                             </td>
                             <td className="px-2 py-1.5">
                               <select

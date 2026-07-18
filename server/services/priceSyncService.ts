@@ -86,14 +86,19 @@ export async function detectPriceUpdates(
     const beforePrices = beforeSnapshot.get(product.id);
     if (!beforePrices) continue;
 
-    const oldPrice = beforePrices.get(product.supplierId || 0) || null;
-    const newPrice = product.price || 0;
+    // O driver mysql2 devolve decimais como string — normaliza para número
+    // antes de comparar (comparar string com number marcava TODA linha como
+    // alterada e produzia aritmética inválida).
+    const oldPriceNum = beforePrices.has(product.supplierId || 0)
+      ? Number(beforePrices.get(product.supplierId || 0))
+      : null;
+    const newPriceNum = product.price != null ? Number(product.price) : 0;
 
-    if (oldPrice === null || oldPrice !== newPrice) {
-      const oldPriceNum = (oldPrice as any) as number | null;
-      const newPriceNum = (newPrice as any) as number;
+    if (oldPriceNum === null || oldPriceNum !== newPriceNum) {
       const priceChange =
-        oldPriceNum !== null ? ((newPriceNum - oldPriceNum) / oldPriceNum) * 100 : null;
+        oldPriceNum !== null && oldPriceNum !== 0
+          ? ((newPriceNum - oldPriceNum) / oldPriceNum) * 100
+          : null;
 
       const supplierId = product.supplierId ? Number(product.supplierId) : 0;
       updates.push({
@@ -102,9 +107,9 @@ export async function detectPriceUpdates(
         supplierId,
         supplierName: "Unknown", // Will be filled from supplier data
         oldPrice: oldPriceNum,
-        newPrice: newPrice as number,
+        newPrice: newPriceNum,
         priceChange,
-        isNewSupplier: oldPrice === null,
+        isNewSupplier: oldPriceNum === null,
         isNewProduct: false,
       });
     }

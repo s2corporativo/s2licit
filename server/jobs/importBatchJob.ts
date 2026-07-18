@@ -1,10 +1,12 @@
-import { checkDuplicatesInRows, bulkInsertProducts, mergeProductFromRow, createImportLog, updateImportLog } from "../db";
+import { checkDuplicatesInRows, loadSupplierCatalog, bulkInsertProducts, mergeProductFromRow, createImportLog, updateImportLog } from "../db";
 import { randomUUID } from "crypto";
+import { parseLlmJson } from "../_core/llm";
 import { notifyOwner } from "../_core/notification";
 import type { InsertProduct } from "../../drizzle/schema";
 import { products, importProgress } from "../../drizzle/schema";
-import { eq, isNull, and, sql } from "drizzle-orm";
+import { eq, isNull, and, sql, inArray, ne, or } from "drizzle-orm";
 import { getDb } from "../db";
+import { jaroWinklerSimilarity } from "../matching/productMatcher";
 
 export interface ImportBatchProgress {
   queueId: string;
@@ -48,6 +50,61 @@ export interface ImportBatchInput {
 const BATCH_SIZE = 100;       // 100 linhas por lote (era 50)
 const MAX_PARALLEL = 5;       // até 5 lotes em paralelo
 const PROGRESS_INTERVAL = 500; // atualizar progresso a cada 500ms
+
+/** Valores válidos do enum products.tipoCatalogo (drizzle/schema.ts). */
+const VALID_TIPO_CATALOGO = new Set([
+  "medicamento_veterinario",
+  "medicamento_humano",
+  "produto_nao_medicamentoso",
+  "material_insumo_equipamento",
+]);
+
+/**
+ * Sanitiza a resposta do LLM antes de gravar no produto:
+ * - tipoCatalogo: só grava se o valor estiver na whitelist do enum;
+ * - statusConfiabilidade: enriquecimento automático NUNCA marca como
+ *   validado por humano — sempre "enriquecido_ia".
+ */
+export function sanitizeEnrichmentUpdate(enriched: {
+  activeIngredient?: string;
+  concentration?: string;
+  category?: string;
+}): Record<string, unknown> {
+  const update: Record<string, unknown> = {
+    activeIngredient: enriched.activeIngredient,
+    concentration: enriched.concentration,
+    statusConfiabilidade: "enriquecido_ia",
+  };
+  if (enriched.category && VALID_TIPO_CATALOGO.has(enriched.category)) {
+    update.tipoCatalogo = enriched.category;
+  }
+  return update;
+}
+
+/**
+ * Consolida os resultados de um grupo de lotes processados em paralelo.
+ * Lotes rejeitados contam o tamanho REAL do lote (não BATCH_SIZE fixo).
+ */
+export function tallyBatchResults(
+  results: Array<PromiseSettledResult<{ inserted: number; updated: number; skipped: number; batchSize: number }>>,
+  batchSizes: number[]
+): { success: number; updated: number; error: number; processed: number } {
+  let success = 0, updated = 0, error = 0, processed = 0;
+  results.forEach((result, idx) => {
+    if (result.status === "fulfilled") {
+      success += result.value.inserted;
+      updated += result.value.updated;
+      error += result.value.skipped;
+      processed += result.value.batchSize;
+    } else {
+      console.error("[importBatchJob] Lote falhou:", result.reason);
+      const failedSize = batchSizes[idx] ?? 0;
+      error += failedSize;
+      processed += failedSize;
+    }
+  });
+  return { success, updated, error, processed };
+}
 
 // Armazenar progresso em memória
 const importProgressMap = new Map<string, ImportBatchProgress>();
@@ -168,6 +225,68 @@ async function processImportBatchAsync(
   let errorCount = 0;
   let processedCount = 0;
 
+  // Detectar duplicados por EAN/MAPA ANTES dos inserts, em consulta única por
+  // campo (inArray), excluindo produtos do próprio lote de importação.
+  try {
+    const db = await getDb();
+    if (db && rows.length > 0) {
+      const gtins = Array.from(new Set(rows.map((r) => r.gtin).filter((v): v is string => Boolean(v))));
+      const mapas = Array.from(new Set(rows.map((r) => r.mapa).filter((v): v is string => Boolean(v))));
+      const notOwnBatch = batchId
+        ? or(isNull(products.importBatchId), ne(products.importBatchId, batchId))
+        : undefined;
+
+      const gtinMap = new Map<string, number>();
+      if (gtins.length > 0) {
+        const found = await db
+          .select({ id: products.id, gtin: products.gtin })
+          .from(products)
+          .where(and(inArray(products.gtin, gtins), notOwnBatch));
+        for (const p of found) {
+          if (p.gtin && !gtinMap.has(p.gtin)) gtinMap.set(p.gtin, p.id);
+        }
+      }
+
+      const mapaMap = new Map<string, number>();
+      if (mapas.length > 0) {
+        const found = await db
+          .select({ id: products.id, mapa: products.mapa })
+          .from(products)
+          .where(and(inArray(products.mapa, mapas), notOwnBatch));
+        for (const p of found) {
+          if (p.mapa && !mapaMap.has(p.mapa)) mapaMap.set(p.mapa, p.id);
+        }
+      }
+
+      const duplicatesDetected: Array<{ product: any; existingId: number; matchType: string }> = [];
+      for (const row of rows) {
+        if (row.gtin && gtinMap.has(row.gtin)) {
+          duplicatesDetected.push({ product: row, existingId: gtinMap.get(row.gtin)!, matchType: "ean_exact" });
+          continue;
+        }
+        if (row.mapa && mapaMap.has(row.mapa)) {
+          duplicatesDetected.push({ product: row, existingId: mapaMap.get(row.mapa)!, matchType: "mapa_exact" });
+        }
+      }
+
+      if (duplicatesDetected.length > 0) {
+        updateProgress(queueId, {
+          duplicatesDetected: duplicatesDetected.slice(0, 50),
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[importBatchJob] Erro ao detectar duplicados:", e);
+  }
+
+  // Carregar o catálogo do fornecedor UMA vez para todos os lotes
+  let supplierCatalog: Awaited<ReturnType<typeof loadSupplierCatalog>> | undefined;
+  try {
+    supplierCatalog = await loadSupplierCatalog(supplierId);
+  } catch (e) {
+    console.warn("[importBatchJob] Erro ao carregar catálogo do fornecedor:", e);
+  }
+
   // Dividir em lotes para processamento paralelo
   const batches: InsertProduct[][] = [];
   for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
@@ -181,7 +300,7 @@ async function processImportBatchAsync(
     const results = await Promise.allSettled(
       group.map(async (batch, groupIdx) => {
         const batchStart = (groupStart + groupIdx) * BATCH_SIZE;
-        // Verificar duplicatas para o lote
+        // Verificar duplicatas para o lote (catálogo pré-carregado)
         const dupCheck = await checkDuplicatesInRows(
           batch.map((r) => ({
             name: r.name,
@@ -189,7 +308,8 @@ async function processImportBatchAsync(
             presentation: r.presentation ?? undefined,
             ean: r.gtin ?? r.barcode ?? undefined,
           })),
-          supplierId
+          supplierId,
+          supplierCatalog
         );
 
         const toInsertBatch: InsertProduct[] = [];
@@ -219,18 +339,11 @@ async function processImportBatchAsync(
       })
     );
 
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        successCount += result.value.inserted;
-        updatedCount += result.value.updated;
-        errorCount += result.value.skipped;
-        processedCount += result.value.batchSize;
-      } else {
-        console.error("[importBatchJob] Lote falhou:", result.reason);
-        errorCount += BATCH_SIZE;
-        processedCount += BATCH_SIZE;
-      }
-    }
+    const tally = tallyBatchResults(results, group.map((b) => b.length));
+    successCount += tally.success;
+    updatedCount += tally.updated;
+    errorCount += tally.error;
+    processedCount += tally.processed;
 
     // Atualizar progresso
     const elapsed = (Date.now() - startTime) / 1000;
@@ -251,59 +364,6 @@ async function processImportBatchAsync(
     if (groupStart + MAX_PARALLEL < batches.length) {
       await new Promise((r) => setTimeout(r, 50));
     }
-  }
-
-  // Detectar duplicados por EAN/MAPA
-  try {
-    const db = await getDb();
-    if (db && rows.length > 0) {
-      const duplicatesDetected: any[] = [];
-      
-      for (const row of rows) {
-        // Verificar por EAN
-        if (row.gtin) {
-          const existing = await db
-            .select()
-            .from(products)
-            .where(eq(products.gtin, row.gtin))
-            .limit(1);
-          if (existing.length > 0) {
-            duplicatesDetected.push({
-              product: row,
-              existingId: existing[0].id,
-              matchType: "ean_exact",
-            });
-            continue;
-          }
-        }
-        
-        // Verificar por MAPA
-        if (row.mapa) {
-          const existing = await db
-            .select()
-            .from(products)
-            .where(eq(products.mapa, row.mapa))
-            .limit(1);
-          if (existing.length > 0) {
-            duplicatesDetected.push({
-              product: row,
-              existingId: existing[0].id,
-              matchType: "mapa_exact",
-            });
-            continue;
-          }
-        }
-      }
-      
-      // Armazenar duplicados detectados no progresso
-      if (duplicatesDetected.length > 0) {
-        updateProgress(queueId, {
-          duplicatesDetected: duplicatesDetected.slice(0, 50),
-        });
-      }
-    }
-  } catch (e) {
-    console.warn("[importBatchJob] Erro ao detectar duplicados:", e);
   }
 
   // Auto-vincular imagens com fuzzy matching se houver coluna de imagem
@@ -335,67 +395,27 @@ async function processImportBatchAsync(
 
         if (imageData.length > 0) {
           console.log(`[importBatchJob] Auto-vinculando ${imageData.length} imagens com fuzzy matching`);
+
+          // Carregar TODOS os produtos do lote uma única vez, fora do loop
+          const batchProducts = await db
+            .select({ id: products.id, name: products.name })
+            .from(products)
+            .where(eq(products.importBatchId, batchId));
+
           // Auto-vincular em lotes
           for (let i = 0; i < imageData.length; i += 50) {
             const batch = imageData.slice(i, i + 50);
             for (const item of batch) {
               try {
-                // Buscar produto por nome com fuzzy match
-                const matchedProducts = await db
-                  .select({ id: products.id, name: products.name })
-                  .from(products)
-                  .where(eq(products.importBatchId, batchId))
-                  .limit(10);
-
-                // Calcular similaridade Jaro-Winkler
-                const jaroWinkler = (s1: string, s2: string): number => {
-                  const s1Lower = s1.toLowerCase();
-                  const s2Lower = s2.toLowerCase();
-                  if (s1Lower === s2Lower) return 1;
-                  
-                  const len1 = s1.length;
-                  const len2 = s2.length;
-                  const maxDist = Math.floor(Math.max(len1, len2) / 2) - 1;
-                  if (maxDist < 0) return 0;
-
-                  let matches = 0;
-                  const s1Matched = new Array(len1).fill(false);
-                  const s2Matched = new Array(len2).fill(false);
-
-                  for (let i = 0; i < len1; i++) {
-                    const start = Math.max(0, i - maxDist);
-                    const end = Math.min(i + maxDist + 1, len2);
-                    for (let j = start; j < end; j++) {
-                      if (s2Matched[j] || s1Lower[i] !== s2Lower[j]) continue;
-                      s1Matched[i] = true;
-                      s2Matched[j] = true;
-                      matches++;
-                      break;
-                    }
-                  }
-                  if (matches === 0) return 0;
-
-                  let transpositions = 0;
-                  let k = 0;
-                  for (let i = 0; i < len1; i++) {
-                    if (!s1Matched[i]) continue;
-                    while (!s2Matched[k]) k++;
-                    if (s1Lower[i] !== s2Lower[k]) transpositions++;
-                    k++;
-                  }
-
-                  const jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3;
-                  const s1Array = Array.from(s1Lower);
-                  const s2Array = Array.from(s2Lower);
-                  const prefix = Math.min(4, s1Array.findIndex((c, i) => c !== s2Array[i]));
-                  return jaro + prefix * 0.1 * (1 - jaro);
-                };
-
                 let bestMatch = null;
                 let bestScore = 0.7; // Threshold de 70%
 
-                for (const prod of matchedProducts) {
-                  const score = jaroWinkler(item.productName, prod.name);
+                for (const prod of batchProducts) {
+                  // Jaro-Winkler compartilhado (server/matching/productMatcher)
+                  const score = jaroWinklerSimilarity(
+                    item.productName.toLowerCase(),
+                    prod.name.toLowerCase()
+                  );
                   if (score > bestScore) {
                     bestScore = score;
                     bestMatch = prod;
@@ -471,7 +491,7 @@ async function processImportBatchAsync(
             const content = response.choices[0]?.message?.content;
             if (content) {
               const contentStr = typeof content === "string" ? content : JSON.stringify(content);
-              const enriched = JSON.parse(contentStr);
+              const enriched = parseLlmJson<any>(contentStr);
               await db
                 .update(products)
                 .set({

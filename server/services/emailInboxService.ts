@@ -40,6 +40,10 @@ function imapConfig() {
       user: process.env.IMAP_USER!,
       pass: process.env.IMAP_PASSWORD!,
     },
+    // Um servidor IMAP travado não pode pendurar o job de sincronização:
+    // limites explícitos de saudação e de socket.
+    greetingTimeout: 20_000,
+    socketTimeout: 60_000,
     // Silencia o logger verboso do imapflow
     logger: false as const,
   };

@@ -1,12 +1,15 @@
 import { router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { detectDuplicate } from "./deduplicationEngine";
-import { getDb, createProduct, updateProduct } from "./db";
-import { products, productSupplierOffers } from "../drizzle/schema";
+import { getDb, updateProduct } from "./db";
+import { products, productSupplierOffers, priceHistory } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 
 // ─── Tipos de ação do motor de deduplicação ───────────────────────────────────
 const BATCH_SIZE = 100; // processar em lotes de 100
+
+/** Executor de queries: o db padrão ou uma transação em andamento. */
+type DbExecutor = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
 // ─── Helper: upsert de oferta de fornecedor ───────────────────────────────────
 async function upsertSupplierOffer(
@@ -15,14 +18,15 @@ async function upsertSupplierOffer(
   price?: number,
   supplierCode?: string,
   link?: string,
-  image?: string
-) {
-  const db = await getDb();
+  image?: string,
+  executor?: DbExecutor
+): Promise<{ previousPrice: string | null } | undefined> {
+  const db = executor ?? (await getDb());
   if (!db) return;
 
   // Verificar se já existe oferta para este par produto+fornecedor
   const existing = await db
-    .select({ id: productSupplierOffers.id })
+    .select({ id: productSupplierOffers.id, price: productSupplierOffers.price })
     .from(productSupplierOffers)
     .where(
       and(
@@ -43,6 +47,7 @@ async function upsertSupplierOffer(
         image: image ?? undefined,
       })
       .where(eq(productSupplierOffers.id, existing[0].id));
+    return { previousPrice: existing[0].price ?? null };
   } else {
     // Criar nova oferta
     await db.insert(productSupplierOffers).values({
@@ -53,7 +58,28 @@ async function upsertSupplierOffer(
       link: link ?? undefined,
       image: image ?? undefined,
     });
+    return { previousPrice: null };
   }
+}
+
+// ─── Helper: registrar histórico de preço de fornecedor ───────────────────────
+async function recordPriceHistory(
+  productId: number,
+  supplierId: number,
+  newPrice: number,
+  previousPrice: string | null,
+  executor?: DbExecutor
+) {
+  const db = executor ?? (await getDb());
+  if (!db) return;
+  await db.insert(priceHistory).values({
+    productId,
+    supplierId,
+    price: String(newPrice),
+    precoAnterior: previousPrice,
+    precoNovo: String(newPrice),
+    origem: "import",
+  });
 }
 
 export const importSmartRouter = router({
@@ -126,55 +152,64 @@ export const importSmartRouter = router({
           await Promise.all(
             chunk.map(async (product) => {
               try {
-                const analysis = await detectDuplicate({
-                  name: product.name,
-                  principioAtivo: product.principioAtivo,
-                  concentracao: product.concentracao,
-                  formaFarmaceutica: product.formaFarmaceutica,
-                  fabricante: product.fabricante ?? product.manufacturer,
-                  categoria: product.categoria,
-                  fichaTecnica: product.fichaTecnica,
-                  tipoCatalogo: product.tipoCatalogo,
-                  ean: product.ean,
-                  supplierId: product.supplierId,
-                });
+                const analysis = await detectDuplicate(
+                  {
+                    name: product.name,
+                    principioAtivo: product.principioAtivo,
+                    concentracao: product.concentracao,
+                    formaFarmaceutica: product.formaFarmaceutica,
+                    fabricante: product.fabricante ?? product.manufacturer,
+                    categoria: product.categoria,
+                    fichaTecnica: product.fichaTecnica,
+                    tipoCatalogo: product.tipoCatalogo,
+                    ean: product.ean,
+                    supplierId: product.supplierId,
+                  },
+                  // Fluxos de atualização só podem casar produtos do mesmo fornecedor
+                  { supplierId: product.supplierId }
+                );
 
                 switch (analysis.action) {
                   case "criar_novo": {
-                    // Criar produto novo
-                    const created = await createProduct({
-                      name: product.name,
-                      activeIngredient: product.principioAtivo ?? null,
-                      concentration: product.concentracao ?? null,
-                      presentation: product.presentation ?? null,
-                      pharmaceuticalForm: product.formaFarmaceutica ?? null,
-                      manufacturer: product.fabricante ?? product.manufacturer ?? null,
-                      fichaTecnica: product.fichaTecnica ?? null,
-                      tipoCatalogo: product.tipoCatalogo ?? "produto_nao_medicamentoso",
-                      statusConfiabilidade: "incompleto",
-                      ean: product.ean ?? null,
-                      supplierId: product.supplierId ?? null,
-                      categoryId: product.categoryId ?? null,
-                      price: product.price !== undefined ? String(product.price) : null,
-                      code: product.code ?? null,
-                      imageUrl: product.imageUrl ?? null,
-                      productUrl: product.productUrl ?? null,
-                      isActive: "yes",
-                    } as any);
+                    const db = await getDb();
+                    if (!db) throw new Error("Database unavailable");
 
-                    // Se tem fornecedor e preço, criar oferta
-                    if (product.supplierId && product.price !== undefined) {
-                      const newId = (created as any).insertId;
-                      if (newId) {
+                    // Criar produto + oferta do fornecedor atomicamente
+                    await db.transaction(async (tx) => {
+                      const [created] = await tx.insert(products).values({
+                        name: product.name,
+                        activeIngredient: product.principioAtivo ?? null,
+                        concentration: product.concentracao ?? null,
+                        presentation: product.presentation ?? null,
+                        pharmaceuticalForm: product.formaFarmaceutica ?? null,
+                        manufacturer: product.fabricante ?? product.manufacturer ?? null,
+                        fichaTecnica: product.fichaTecnica ?? null,
+                        tipoCatalogo: product.tipoCatalogo ?? "produto_nao_medicamentoso",
+                        statusConfiabilidade: "incompleto",
+                        ean: product.ean ?? null,
+                        supplierId: product.supplierId ?? null,
+                        categoryId: product.categoryId ?? null,
+                        price: product.price !== undefined ? String(product.price) : null,
+                        code: product.code ?? null,
+                        imageUrl: product.imageUrl ?? null,
+                        productUrl: product.productUrl ?? null,
+                        isActive: "yes",
+                      } as any);
+
+                      // Se tem fornecedor e preço, criar oferta na mesma transação
+                      const newId = (created as any)?.insertId;
+                      if (product.supplierId && product.price !== undefined && newId) {
                         await upsertSupplierOffer(
                           newId,
                           product.supplierId,
                           product.price,
                           product.code,
-                          product.productUrl
+                          product.productUrl,
+                          undefined,
+                          tx as unknown as DbExecutor
                         );
                       }
-                    }
+                    });
 
                     results.created++;
                     results.details.push({
@@ -187,22 +222,47 @@ export const importSmartRouter = router({
 
                   case "atualizar_existente": {
                     if (!analysis.matchedProductId) break;
-                    // Atualizar produto existente com dados novos (sem sobrescrever campos preenchidos)
-                    await updateProduct(analysis.matchedProductId, {
-                      ...(product.principioAtivo && { activeIngredient: product.principioAtivo }),
-                      ...(product.concentracao && { concentration: product.concentracao }),
-                      ...(product.presentation && { presentation: product.presentation }),
-                      ...(product.formaFarmaceutica && { pharmaceuticalForm: product.formaFarmaceutica }),
-                      ...(product.fabricante || product.manufacturer
-                        ? { manufacturer: product.fabricante ?? product.manufacturer }
-                        : {}),
-                      ...(product.fichaTecnica && { fichaTecnica: product.fichaTecnica }),
-                      ...(product.imageUrl && { imageUrl: product.imageUrl }),
-                      ...(product.productUrl && { productUrl: product.productUrl }),
-                      statusConfiabilidade: "completo_nao_validado",
-                    } as any);
+                    const db = await getDb();
+                    if (!db) throw new Error("Database unavailable");
 
-                    // Atualizar oferta do fornecedor se houver
+                    const [existing] = await db
+                      .select()
+                      .from(products)
+                      .where(eq(products.id, analysis.matchedProductId))
+                      .limit(1);
+                    if (!existing) break;
+
+                    // Campos técnicos só podem ser alterados pelo próprio fornecedor do produto
+                    const sameSupplier =
+                      !product.supplierId || existing.supplierId === product.supplierId;
+
+                    if (sameSupplier) {
+                      // Preencher apenas campos VAZIOS do produto (fill-only-blank);
+                      // dados curados existentes nunca são sobrescritos.
+                      const fillOnlyBlank: Record<string, unknown> = {
+                        ...(!existing.activeIngredient && product.principioAtivo && { activeIngredient: product.principioAtivo }),
+                        ...(!existing.concentration && product.concentracao && { concentration: product.concentracao }),
+                        ...(!existing.presentation && product.presentation && { presentation: product.presentation }),
+                        ...(!existing.pharmaceuticalForm && product.formaFarmaceutica && { pharmaceuticalForm: product.formaFarmaceutica }),
+                        ...(!existing.manufacturer && (product.fabricante || product.manufacturer)
+                          ? { manufacturer: product.fabricante ?? product.manufacturer }
+                          : {}),
+                        ...(!existing.fichaTecnica && product.fichaTecnica && { fichaTecnica: product.fichaTecnica }),
+                        ...(!existing.imageUrl && product.imageUrl && { imageUrl: product.imageUrl }),
+                        ...(!existing.productUrl && product.productUrl && { productUrl: product.productUrl }),
+                      };
+
+                      // Nunca rebaixar statusConfiabilidade de um produto já validado
+                      if (existing.statusConfiabilidade !== "completo_validado") {
+                        fillOnlyBlank.statusConfiabilidade = "completo_nao_validado";
+                      }
+
+                      if (Object.keys(fillOnlyBlank).length > 0) {
+                        await updateProduct(analysis.matchedProductId, fillOnlyBlank as any);
+                      }
+                    }
+
+                    // Atualizar oferta do fornecedor se houver (sempre permitido)
                     if (product.supplierId) {
                       await upsertSupplierOffer(
                         analysis.matchedProductId,
@@ -246,19 +306,39 @@ export const importSmartRouter = router({
 
                   case "atualizar_preco": {
                     if (!analysis.matchedProductId || !product.supplierId) break;
-                    // Atualizar apenas o preço do fornecedor
-                    await upsertSupplierOffer(
+                    // Sempre atualizar a oferta do fornecedor (camada de custo real)
+                    const offerResult = await upsertSupplierOffer(
                       analysis.matchedProductId,
                       product.supplierId,
                       product.price,
                       product.code
                     );
 
-                    // Atualizar também o preço direto no produto (campo legado)
                     if (product.price !== undefined) {
-                      await updateProduct(analysis.matchedProductId, {
-                        price: String(product.price),
-                      } as any);
+                      // Sempre registrar histórico de preço do fornecedor
+                      await recordPriceHistory(
+                        analysis.matchedProductId,
+                        product.supplierId,
+                        product.price,
+                        offerResult?.previousPrice ?? null
+                      );
+
+                      // O preço legado do cadastro só pode ser alterado quando o
+                      // produto pertence ao MESMO fornecedor da importação —
+                      // nunca sobrescrever o cadastro de outro fornecedor.
+                      const db = await getDb();
+                      if (db) {
+                        const [existing] = await db
+                          .select({ supplierId: products.supplierId })
+                          .from(products)
+                          .where(eq(products.id, analysis.matchedProductId))
+                          .limit(1);
+                        if (existing && existing.supplierId === product.supplierId) {
+                          await updateProduct(analysis.matchedProductId, {
+                            price: String(product.price),
+                          } as any);
+                        }
+                      }
                     }
 
                     results.priceUpdated++;

@@ -220,6 +220,13 @@ class SDKServer {
         return null;
       }
 
+      // Um token assinado com o mesmo segredo mas emitido para OUTRA aplicação
+      // não vale aqui: se ambos os lados declaram appId, eles precisam bater.
+      if (isNonEmptyString(appId) && isNonEmptyString(ENV.appId) && appId !== ENV.appId) {
+        console.warn("[Auth] Session appId não corresponde à aplicação");
+        return null;
+      }
+
       return {
         openId,
         appId: isNonEmptyString(appId) ? appId : "s2licit",

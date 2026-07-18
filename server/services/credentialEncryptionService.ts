@@ -19,7 +19,14 @@ import {
 const LEGACY_CBC_ALGORITHM = "aes-256-cbc";
 
 function legacyCbcKey(): Buffer {
-  const secret = process.env.ENCRYPTION_KEY || "default-insecure-key-change-in-production-32-chars";
+  const secret = process.env.ENCRYPTION_KEY;
+  if (!secret) {
+    // Sem chave não há como decriptar com segurança — falhar é melhor do que
+    // usar uma chave conhecida publicamente no código-fonte.
+    throw new Error(
+      "ENCRYPTION_KEY não configurada — necessária para ler credenciais no formato legado"
+    );
+  }
   return Buffer.from(secret.padEnd(32, "0").slice(0, 32));
 }
 

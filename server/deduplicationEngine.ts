@@ -33,7 +33,33 @@ interface ProductCandidate {
 }
 
 /**
+ * Campos usados para buscar candidatos a duplicata.
+ * Apenas campos realmente presentes entram na busca — campos vazios nunca
+ * podem casar registros entre si (bug antigo: `eq(campo, valor || "")`).
+ */
+export function buildMatchFields(
+  importedProduct: { name?: string; principioAtivo?: string; ean?: string },
+  tipoCatalogo: string
+): Array<{ column: "activeIngredient" | "ean" | "name"; value: string }> {
+  const fields: Array<{ column: "activeIngredient" | "ean" | "name"; value: string }> = [];
+  if (tipoCatalogo === "medicamento_veterinario" || tipoCatalogo === "medicamento_humano") {
+    // Para medicamentos: buscar por princípio ativo + EAN
+    if (importedProduct.principioAtivo) fields.push({ column: "activeIngredient", value: importedProduct.principioAtivo });
+    if (importedProduct.ean) fields.push({ column: "ean", value: importedProduct.ean });
+  } else {
+    // Para não medicamentos: buscar por nome + EAN
+    if (importedProduct.name) fields.push({ column: "name", value: importedProduct.name });
+    if (importedProduct.ean) fields.push({ column: "ean", value: importedProduct.ean });
+  }
+  return fields;
+}
+
+/**
  * Motor de deduplicação inteligente por tipo de catálogo
+ *
+ * @param options.supplierId - quando informado, restringe os candidatos aos
+ *   produtos do mesmo fornecedor (usado pelos fluxos de atualização, para
+ *   nunca casar/alterar o cadastro de produto de outro fornecedor).
  */
 export async function detectDuplicate(
   importedProduct: {
@@ -47,7 +73,8 @@ export async function detectDuplicate(
     tipoCatalogo?: string;
     ean?: string;
     supplierId?: number;
-  }
+  },
+  options?: { supplierId?: number }
 ): Promise<DuplicateAnalysis> {
   const db = await getDb();
   if (!db) return { action: "criar_novo", confidence: 0, reason: "DB unavailable" };
@@ -57,42 +84,44 @@ export async function detectDuplicate(
 
   // Normalizar entrada
   const tipoCatalogo = importedProduct.tipoCatalogo || "produto_nao_medicamentoso";
-  const normalizedName = normalizeText(importedProduct.name);
 
-  // Buscar candidatos por tipo de catálogo
-  let candidates: any[] = [];
-
-  if (tipoCatalogo === "medicamento_veterinario" || tipoCatalogo === "medicamento_humano") {
-    // Para medicamentos: buscar por princípio ativo + concentração + forma farmacêutica
-    candidates = await db
-      .select()
-      .from(products)
-      .where(
-        and(
-          eq((products as any).tipoCatalogo, tipoCatalogo as any),
-          or(
-            eq((products as any).principioAtivo, importedProduct.principioAtivo || ""),
-            eq(products.ean, importedProduct.ean || "")
-          )
-        )
-      )
-      .limit(10);
-  } else {
-    // Para não medicamentos: buscar por nome + categoria + fabricante
-    candidates = await db
-      .select()
-      .from(products)
-      .where(
-        and(
-          eq((products as any).tipoCatalogo, tipoCatalogo as any),
-          or(
-            eq(products.name, importedProduct.name),
-            eq(products.ean, importedProduct.ean || "")
-          )
-        )
-      )
-      .limit(10);
+  // Montar condições apenas com campos realmente presentes
+  const matchFields = buildMatchFields(importedProduct, tipoCatalogo);
+  if (matchFields.length === 0) {
+    return {
+      action: "criar_novo",
+      confidence: 100,
+      reason: "Sem campos identificadores para busca de duplicatas",
+    };
   }
+
+  const matchConditions = matchFields.map((f) => eq((products as any)[f.column], f.value));
+  const conditions: any[] = [
+    eq(products.tipoCatalogo, tipoCatalogo as any),
+    matchConditions.length === 1 ? matchConditions[0] : or(...matchConditions),
+  ];
+  if (options?.supplierId) {
+    conditions.push(eq(products.supplierId, options.supplierId));
+  }
+
+  const rows = await db
+    .select()
+    .from(products)
+    .where(and(...conditions))
+    .limit(10);
+
+  // Mapear colunas do banco para o formato de comparação
+  const candidates: ProductCandidate[] = rows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    principioAtivo: r.activeIngredient ?? undefined,
+    concentracao: r.concentration ?? undefined,
+    formaFarmaceutica: r.pharmaceuticalForm ?? undefined,
+    fabricante: r.manufacturer ?? undefined,
+    fichaTecnica: r.fichaTecnica ?? undefined,
+    tipoCatalogo: r.tipoCatalogo ?? undefined,
+    ean: r.ean ?? r.gtin ?? undefined,
+  }));
 
   // Analisar candidatos
   if (candidates.length === 0) {

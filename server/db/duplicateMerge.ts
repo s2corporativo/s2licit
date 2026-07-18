@@ -138,8 +138,9 @@ export async function findDuplicateGroups(opts?: {
 
 /**
  * Funde um grupo de duplicatas: mantém o produto mestre (masterId),
- * redireciona todas as referências de proposal_items para o mestre,
- * e desativa (soft delete) os demais.
+ * redireciona TODAS as referências (proposal_items, quotation_items,
+ * equivalence_members, ofertas por fornecedor e histórico de preço) para o
+ * mestre — em transação — e desativa (soft delete) os demais.
  */
 export async function mergeProductGroup(
   masterId: number,
@@ -171,24 +172,88 @@ export async function mergeProductGroup(
     }
   }
 
-  // Atualizar mestre com campos enriquecidos
-  if (Object.keys(enriched).length > 0) {
-    await db.update(products).set(enriched as any).where(eq(products.id, masterId));
-  }
+  const {
+    proposalItems,
+    quotationItems,
+    equivalenceMembers,
+    productSupplierPrices,
+    productSupplierOffers,
+    priceHistory,
+  } = await import("../../drizzle/schema");
 
-  // Redirecionar proposal_items para o mestre
-  const { proposalItems } = await import("../../drizzle/schema");
-  const redirectResult = await db
-    .update(proposalItems)
-    .set({ productId: masterId })
-    .where(inArray(proposalItems.productId, duplicateIds));
-  const redirected = (redirectResult as any)[0]?.affectedRows ?? 0;
+  let redirected = 0;
 
-  // Desativar duplicatas (soft delete)
-  await db
-    .update(products)
-    .set({ isActive: "no" })
-    .where(inArray(products.id, duplicateIds));
+  await db.transaction(async (tx) => {
+    // Atualizar mestre com campos enriquecidos
+    if (Object.keys(enriched).length > 0) {
+      await tx.update(products).set(enriched as any).where(eq(products.id, masterId));
+    }
+
+    // Referências simples
+    const redirectResult = await tx
+      .update(proposalItems)
+      .set({ productId: masterId })
+      .where(inArray(proposalItems.productId, duplicateIds));
+    redirected = (redirectResult as any)[0]?.affectedRows ?? 0;
+
+    await tx
+      .update(quotationItems)
+      .set({ productId: masterId })
+      .where(inArray(quotationItems.productId, duplicateIds));
+
+    await tx
+      .update(priceHistory)
+      .set({ productId: masterId })
+      .where(inArray(priceHistory.productId, duplicateIds));
+
+    // Membros de equivalência: unique (groupId, productId) — remove colisões
+    // (grupos em que o mestre já participa) antes de redirecionar
+    const masterGroups = await tx
+      .select({ groupId: equivalenceMembers.groupId })
+      .from(equivalenceMembers)
+      .where(eq(equivalenceMembers.productId, masterId));
+    const masterGroupIds = masterGroups.map((g) => g.groupId);
+    if (masterGroupIds.length > 0) {
+      await tx.delete(equivalenceMembers).where(
+        and(
+          inArray(equivalenceMembers.productId, duplicateIds),
+          inArray(equivalenceMembers.groupId, masterGroupIds),
+        ),
+      );
+    }
+    await tx
+      .update(equivalenceMembers)
+      .set({ productId: masterId })
+      .where(inArray(equivalenceMembers.productId, duplicateIds));
+
+    // Ofertas por fornecedor: unique (productId, supplierId) — mantém a linha
+    // do mestre quando o fornecedor já existe nele; senão reaponta a do duplicado
+    for (const table of [productSupplierPrices, productSupplierOffers] as const) {
+      const masterOffers = await tx
+        .select({ supplierId: table.supplierId })
+        .from(table)
+        .where(eq(table.productId, masterId));
+      const masterSupplierIds = masterOffers.map((o) => o.supplierId);
+      if (masterSupplierIds.length > 0) {
+        await tx.delete(table).where(
+          and(
+            inArray(table.productId, duplicateIds),
+            inArray(table.supplierId, masterSupplierIds),
+          ),
+        );
+      }
+      await tx
+        .update(table)
+        .set({ productId: masterId })
+        .where(inArray(table.productId, duplicateIds));
+    }
+
+    // Desativar duplicatas (soft delete)
+    await tx
+      .update(products)
+      .set({ isActive: "no" })
+      .where(inArray(products.id, duplicateIds));
+  });
 
   return { merged: duplicateIds.length, redirected };
 }

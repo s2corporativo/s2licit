@@ -73,8 +73,22 @@ async function startServer() {
   const server = createServer(app);
   app.set("trust proxy", 1);
   app.use(compression());
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Cabeçalhos de segurança básicos em todas as respostas.
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "same-origin");
+    if (req.secure || req.headers["x-forwarded-proto"] === "https") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    next();
+  });
+  // Corpo grande (planilhas/PDFs em base64) só é aceito no endpoint tRPC, que
+  // exige autenticação nas mutations; o restante da superfície fica em 2mb
+  // para reduzir a janela de DoS por memória.
+  app.use("/api/trpc", express.json({ limit: "50mb" }));
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ limit: "2mb", extended: true }));
   app.use("/api", apiRateLimiter);
   app.use("/api/auth", authRateLimiter);
   app.use("/api/oauth", authRateLimiter);
@@ -259,7 +273,7 @@ async function startServer() {
       res.send(buffer);
     } catch (err: any) {
       console.error("[Excel Export] Error:", err);
-      res.status(500).json({ error: err?.message ?? "Erro ao exportar Excel" });
+      res.status(500).json({ error: "Erro ao exportar Excel" });
     }
   });
 
@@ -285,7 +299,7 @@ async function startServer() {
       res.json(result);
     } catch (err: any) {
       console.error("[Excel Import] Error:", err);
-      res.status(500).json({ error: err?.message ?? "Erro ao importar Excel" });
+      res.status(500).json({ error: "Erro ao importar Excel" });
     }
   });
 

@@ -29,6 +29,7 @@ import {
   Pie,
 } from "recharts";
 import { trpc } from "@/lib/trpc";
+import { formatBRL } from "@/lib/format";
 
 type EntryType = "income" | "expense";
 type IsPaid = "yes" | "no";
@@ -49,9 +50,7 @@ const EXPENSE_CATEGORIES = [
   "Outros",
 ];
 
-function formatCurrency(value: number) {
-  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+const formatCurrency = formatBRL;
 
 function SummaryCard({
   title,

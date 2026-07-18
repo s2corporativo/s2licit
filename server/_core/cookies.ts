@@ -46,6 +46,9 @@ export function getSessionCookieOptions(
     httpOnly: true,
     path: "/",
     sameSite: "lax",
-    secure: isSecureRequest(req),
+    // FORCE_SECURE_COOKIES=true força o atributo Secure independentemente do
+    // header x-forwarded-proto — recomendado quando há TLS (domínio + Caddy).
+    // Sem TLS (acesso por IP em HTTP puro) o atributo tornaria o login impossível.
+    secure: isSecureRequest(req) || process.env.FORCE_SECURE_COOKIES === "true",
   };
 }

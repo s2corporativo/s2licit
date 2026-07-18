@@ -1,5 +1,16 @@
 .git
+.github
 node_modules
 dist
 .env
+.env.*
+!.env.example
+!.env.production.example
 *.log
+uploads
+backups
+docs
+attached_assets
+*.md
+!README.md
+scripts/backups

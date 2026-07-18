@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -246,6 +247,7 @@ interface SynonymForm {
 const PAGE_SIZE = 50;
 
 export default function Sinonimos() {
+  const { confirm: confirmAction, confirmDialog } = useConfirm();
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -255,11 +257,14 @@ export default function Sinonimos() {
   const [form, setForm] = useState<SynonymForm>({ term: "", canonical: "", category: "geral" });
   const [loadingPreset, setLoadingPreset] = useState(false);
 
-  const { data: synonymsList = [], refetch } = trpc.synonyms.list.useQuery({
-    search: search || undefined,
-    category: filterCategory !== "all" ? filterCategory : undefined,
-    activeOnly: false,
-  });
+  const { data: synonymsList = [], refetch } = trpc.synonyms.list.useQuery(
+    {
+      search: search || undefined,
+      category: filterCategory !== "all" ? filterCategory : undefined,
+      activeOnly: false,
+    },
+    { placeholderData: (prev) => prev }
+  );
   const { data: stats } = trpc.synonyms.stats.useQuery();
 
   const createMutation = trpc.synonyms.create.useMutation({
@@ -354,8 +359,13 @@ export default function Sinonimos() {
     bulkToggleMutation.mutate({ ids: Array.from(selectedIds), isActive: "no" });
   }
 
-  function handleBulkDelete() {
-    if (!confirm(`Remover ${selectedIds.size} sinônimo${selectedIds.size !== 1 ? "s" : ""} permanentemente?`)) return;
+  async function handleBulkDelete() {
+    const ok = await confirmAction({
+      title: `Remover ${selectedIds.size} sinônimo${selectedIds.size !== 1 ? "s" : ""}?`,
+      description: `${selectedIds.size} sinônimo${selectedIds.size !== 1 ? "s" : ""} ser${selectedIds.size !== 1 ? "ão" : "á"} removido${selectedIds.size !== 1 ? "s" : ""} permanentemente e deixar${selectedIds.size !== 1 ? "ão" : "á"} de expandir buscas. Esta ação não pode ser desfeita.`,
+      confirmLabel: "Remover",
+    });
+    if (!ok) return;
     bulkDeleteMutation.mutate({ ids: Array.from(selectedIds) });
   }
 
@@ -579,10 +589,13 @@ export default function Sinonimos() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (confirm(`Remover sinônimo "${s.term}" → "${s.canonical}"?`)) {
-                            deleteMutation.mutate({ id: s.id });
-                          }
+                        onClick={async () => {
+                          const ok = await confirmAction({
+                            title: `Remover sinônimo "${s.term}" → "${s.canonical}"?`,
+                            description: "O sinônimo será removido permanentemente e deixará de expandir os resultados de busca. Esta ação não pode ser desfeita.",
+                            confirmLabel: "Remover",
+                          });
+                          if (ok) deleteMutation.mutate({ id: s.id });
                         }}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -706,6 +719,7 @@ export default function Sinonimos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </div>
   );
 }

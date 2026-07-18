@@ -37,6 +37,8 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: mysql://${MYSQL_USER:-s2user}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-sistema_s2}
+      # Backups automáticos gravados em volume persistente — sobrevivem a rebuilds.
+      BACKUP_DIR: /app/backups
     ports:
       # Porta pública (padrão 80; o vps-bootstrap.sh escolhe outra livre se
       # estiver ocupada e grava APP_HTTP_PORT no .env).
@@ -55,7 +57,9 @@ services:
       start_period: 60s
     volumes:
       - uploads_data:/app/uploads
+      - backups_data:/app/backups
 
 volumes:
   mysql_data:
   uploads_data:
+  backups_data:

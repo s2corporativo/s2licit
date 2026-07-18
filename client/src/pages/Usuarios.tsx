@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import { toast } from "sonner";
 import { UserPlus, Trash2, KeyRound, Unlock, Loader2, ShieldCheck, Ban, Power } from "lucide-react";
 
@@ -8,6 +9,7 @@ const ROLE_LABEL: Record<string, string> = { viewer: "Visualizador", user: "Usu�
 
 /** Gestão de usuários e permissões (§20) — somente admin. */
 export default function Usuarios() {
+  const { confirm, confirmDialog } = useConfirm();
   const utils = trpc.useUtils();
   const { data: usuarios = [], isLoading } = trpc.users.list.useQuery();
   const [form, setForm] = useState<{ name: string; email: string; role: (typeof ROLES)[number]; password: string }>({
@@ -118,8 +120,13 @@ export default function Usuarios() {
                           <button title="Reativar conta" onClick={() => disableM.mutate({ id: u.id, disabled: false })}
                             className="border border-green-200 text-green-700 p-1.5 hover:bg-green-50"><Power size={13} /></button>
                         ) : (
-                          <button title="Desativar conta (revogar acesso)" onClick={() => {
-                            if (window.confirm(`Desativar ${u.email}? O acesso será revogado (recomendado no lugar de remover).`)) disableM.mutate({ id: u.id, disabled: true });
+                          <button title="Desativar conta (revogar acesso)" onClick={async () => {
+                            const ok = await confirm({
+                              title: `Desativar ${u.email}?`,
+                              description: "O acesso deste usuário será revogado imediatamente. A conta pode ser reativada depois (recomendado no lugar de remover).",
+                              confirmLabel: "Desativar",
+                            });
+                            if (ok) disableM.mutate({ id: u.id, disabled: true });
                           }} className="border border-orange-200 text-orange-700 p-1.5 hover:bg-orange-50"><Ban size={13} /></button>
                         )}
                         <button title="Redefinir senha" onClick={() => {
@@ -127,8 +134,13 @@ export default function Usuarios() {
                           if (p && p.length >= 8) pwM.mutate({ id: u.id, password: p });
                           else if (p) toast.error("A senha deve ter ao menos 8 caracteres.");
                         }} className="border border-gray-300 p-1.5 hover:border-gray-900"><KeyRound size={13} /></button>
-                        <button title="Remover" onClick={() => {
-                          if (window.confirm(`Remover o usuário ${u.email}?`)) removeM.mutate({ id: u.id });
+                        <button title="Remover" onClick={async () => {
+                          const ok = await confirm({
+                            title: `Remover o usuário ${u.email}?`,
+                            description: "A conta será excluída permanentemente e o usuário perderá o acesso ao sistema. Esta ação não pode ser desfeita.",
+                            confirmLabel: "Remover",
+                          });
+                          if (ok) removeM.mutate({ id: u.id });
                         }} className="border border-red-200 text-red-600 p-1.5 hover:bg-red-50"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -139,6 +151,7 @@ export default function Usuarios() {
           </table>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

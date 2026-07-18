@@ -32,7 +32,7 @@ ORM** (backend), **MySQL** (banco).
    | `ENCRYPTION_KEY` | Chave para criptografar credenciais de fornecedores. Gere com `openssl rand -base64 48` |
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Administrador inicial (login local), criado no primeiro boot |
    | `ANTHROPIC_API_KEY` | Chave da API da Anthropic para os recursos de IA (opcional) |
-   | `PRODEMGE_API_KEY` | Chave da API de Compras MG (opcional; solicite em api@prodemge.gov.br) |
+   | `PRODEMGE_API_KEY` | Reservada para a API de Compras MG (ainda não consumida pelo código; solicite em api@prodemge.gov.br) |
 
 2. Instale as dependências:
 
@@ -122,7 +122,8 @@ Um provedor OAuth externo continua suportado (defina `OAUTH_SERVER_URL` e
 - **Compras MG / CATMAS**: produtos têm os campos `catmasCode` (catálogo
   estadual) e `catmatCode` (catálogo federal), base para o cruzamento
   determinístico de cotações por código. A API de dados de Compras MG
-  (Prodemge) exige chave (`PRODEMGE_API_KEY`).
+  (Prodemge) exige chave (`PRODEMGE_API_KEY` — reservada; a integração direta ainda
+  não está implementada).
 
 ## Deploy
 
@@ -131,7 +132,8 @@ para o passo a passo, ou use o workflow **Deploy VPS** (GitHub → Actions), que
 publica automaticamente a cada merge no `main`. Configure os segredos
 (`DATABASE_URL`/credenciais do banco, `JWT_SECRET`, `ENCRYPTION_KEY`,
 `ADMIN_EMAIL`, `ADMIN_PASSWORD`, chaves de IA) no `.env` da VPS. O health
-check responde em `/healthz`.
+check responde em `/healthz` (processo) e `/readyz` (aplicação + MySQL — é o
+gate usado pelo deploy).
 
 ## Integração contínua
 

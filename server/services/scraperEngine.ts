@@ -21,6 +21,7 @@ import { normalizeText } from "../matching/productMatcher";
 import { supplierSessionService } from "./supplierSessionService";
 import { puppeteerCookiesToRecord, recordToPuppeteerCookies } from "./sessionCookies";
 import { storagePut } from "../storage";
+import { assertSafeExternalUrl } from "../utils/urlGuard";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -442,6 +443,7 @@ export class ScraperEngine {
       if (cookies.length === 0) return false;
 
       await this.page!.setCookie(...cookies);
+      assertSafeExternalUrl(loginUrl, "URL de login do fornecedor");
       await this.page!.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
       // SPAs (Bartofil/Basso) guardam o token no localStorage, não em cookie.
@@ -449,6 +451,7 @@ export class ScraperEngine {
       const ls = supplierSessionService.parseLocalStorage(session);
       if (Object.keys(ls).length > 0) {
         await this.injetarLocalStorage(ls);
+        assertSafeExternalUrl(loginUrl, "URL de login do fornecedor");
         await this.page!.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 }).catch(() => {});
       }
       await new Promise((r) => setTimeout(r, 800));
@@ -560,6 +563,7 @@ export class ScraperEngine {
     }
 
     this.addLog(`Acessando ${loginUrl}...`);
+    assertSafeExternalUrl(loginUrl, "URL de login do fornecedor");
     await this.page.goto(loginUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
     // Alguns sites (ex.: plataforma F1 Soluções) só injetam o formulário de
@@ -660,6 +664,7 @@ export class ScraperEngine {
     const vistos = new Set<string>();
 
     this.addLog(`Raspando categoria: ${categoryUrl}`);
+    assertSafeExternalUrl(categoryUrl, "URL de categoria");
     await this.page.goto(categoryUrl, { waitUntil: "networkidle2", timeout: 30000 });
     await new Promise(r => setTimeout(r, cfg.navigationWait ?? 2000));
 
@@ -733,6 +738,7 @@ export class ScraperEngine {
     }
     const url = buildSearchUrl(cfg.searchUrlTemplate, termo);
     this.addLog(`Buscando "${termo}": ${url}`);
+    assertSafeExternalUrl(url, "URL de captura");
     await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     await new Promise((r) => setTimeout(r, cfg.navigationWait ?? 2000));
     if (cfg.waitForSelector) {

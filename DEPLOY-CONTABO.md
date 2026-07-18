@@ -84,7 +84,7 @@ O administrador (`ADMIN_EMAIL`/`ADMIN_PASSWORD`) é criado automaticamente.
 
 ## 6. Acessar
 
-Abra no navegador: `http://SEU_IP_DO_VPS:3000` e entre em **/login** com o
+Abra no navegador: `http://SEU_IP_DO_VPS` (porta padrão 80; ajuste se definiu `APP_HTTP_PORT` no `.env`) e entre em **/login** com o
 e-mail e senha do administrador.
 
 ## 7. Importar seu catálogo (opcional, uma vez)

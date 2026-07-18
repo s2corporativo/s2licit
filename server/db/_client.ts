@@ -9,7 +9,14 @@ let _db: ReturnType<typeof drizzle> | null = null; // eslint-disable-line @types
  */
 export async function getDb() {
   if (_db) return _db;
-  if (!process.env.DATABASE_URL) return null;
+  if (!process.env.DATABASE_URL) {
+    // Em produção, banco ausente é erro de configuração — falhar ruidosamente
+    // é melhor do que servir "catálogo vazio" como se fosse sucesso.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("DATABASE_URL não configurada — banco de dados indisponível");
+    }
+    return null;
+  }
   try {
     const pool = mysql2.createPool({
       uri: process.env.DATABASE_URL,

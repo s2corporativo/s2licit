@@ -34,6 +34,7 @@ export async function recordPriceHistory(data: {
   freightValue?: string | null;
   taxValue?: string | null;
   importBatchId?: number | null;
+  origem?: string | null; // import | scraping | manual
 }): Promise<{ priceAlert: boolean; alertPercent: number | null; landedCost: number | null }> {
   const db = await getDb();
   if (!db) return { priceAlert: false, alertPercent: null, landedCost: null };
@@ -78,6 +79,9 @@ export async function recordPriceHistory(data: {
     priceAlert: priceAlert ? "yes" : "no",
     alertPercent: alertPercent !== null ? String(alertPercent) : null,
     importBatchId: data.importBatchId ?? null,
+    origem: data.origem ?? null,
+    precoAnterior: lastRecord?.price ?? null,
+    precoNovo: data.price ?? null,
   });
 
   return { priceAlert, alertPercent, landedCost };

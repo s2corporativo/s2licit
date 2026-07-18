@@ -1,8 +1,22 @@
 import SearchAutocomplete from "@/components/SearchAutocomplete";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { trpc } from "@/lib/trpc";
-import { AlertCircle, AlertTriangle, ArrowDown, CheckCircle2, FilePlus, Package, Search, TrendingDown, TrendingUp, X, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useLocation } from "wouter";
+import { AlertCircle, AlertTriangle, ArrowDown, CheckCircle2, FilePlus, Package, RefreshCw, Search, TrendingDown, TrendingUp, X, Zap } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 
 type SearchResult = {
@@ -59,7 +73,11 @@ function CheaperAlternativesModal({
             <div className="w-3 h-3 bg-green-600" />
             <h2 className="text-base font-black text-gray-900">Alternativas Econômicas</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-900 p-1">
+          <button
+            onClick={onClose}
+            aria-label="Fechar alternativas econômicas"
+            className="text-gray-400 hover:text-gray-900 p-1"
+          >
             <X size={16} />
           </button>
         </div>
@@ -157,28 +175,34 @@ function CheaperSimilarModal({
   similars,
   onKeep,
   onReplace,
+  onCancel,
 }: {
   original: { name: string; price: string | null; supplierName: string | null };
   similars: SimilarProduct[];
   onKeep: () => void;
   onReplace: (s: SimilarProduct) => void;
+  onCancel: () => void;
 }) {
   const best = similars[0];
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
-      <div className="bg-white w-full max-w-lg shadow-2xl">
-        <div className="bg-amber-50 border-b border-amber-200 px-5 py-4 flex items-start gap-3">
-          <div className="w-8 h-8 bg-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-            <TrendingDown size={16} className="text-white" />
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+        <DialogHeader className="bg-amber-50 border-b border-amber-200 px-5 py-4 text-left">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 bg-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+              <TrendingDown size={16} className="text-white" />
+            </div>
+            <div>
+              <DialogTitle className="text-sm font-black text-amber-900">
+                Similar mais barato encontrado!
+              </DialogTitle>
+              <DialogDescription className="text-xs text-amber-700 mt-0.5">
+                Existe um produto com o mesmo princípio ativo por até{" "}
+                <span className="font-black">{best.savingPct}% menos</span>. Deseja substituir?
+              </DialogDescription>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-black text-amber-900">Similar mais barato encontrado!</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              Existe um produto com o mesmo princípio ativo por até{" "}
-              <span className="font-black">{best.savingPct}% menos</span>. Deseja substituir?
-            </p>
-          </div>
-        </div>
+        </DialogHeader>
         <div className="p-5 space-y-3">
           <div className="border border-gray-200 p-3">
             <div className="text-[9px] font-bold tracking-widest uppercase text-gray-400 mb-1">Produto selecionado</div>
@@ -223,8 +247,8 @@ function CheaperSimilarModal({
             Manter original
           </button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -293,41 +317,40 @@ function AddToProposalButton({ product }: { product: SearchResult }) {
 
   return (
     <>
-      <div className="relative">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 px-2 py-1 border border-gray-200 text-[10px] font-bold text-gray-600 hover:border-gray-900 hover:text-gray-900 transition-colors whitespace-nowrap"
-          title="Inserir na Proposta"
-        >
-          <FilePlus size={11} />
-          Proposta
-        </button>
-        {open && (
-          <div className="absolute right-0 top-full mt-1 bg-white border border-gray-900 shadow-lg z-50 min-w-48 max-h-60 overflow-y-auto">
-            <div className="px-3 py-2 text-[10px] font-bold tracking-widest uppercase text-gray-400 border-b border-gray-100">
-              Inserir em:
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="flex items-center gap-1 px-2 py-1 border border-gray-200 text-[10px] font-bold text-gray-600 hover:border-gray-900 hover:text-gray-900 transition-colors whitespace-nowrap"
+            title="Inserir na Proposta"
+          >
+            <FilePlus size={11} />
+            Proposta
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48 max-h-60 overflow-y-auto rounded-none border-gray-900 p-0">
+          <DropdownMenuLabel className="px-3 py-2 text-[10px] font-bold tracking-widest uppercase text-gray-400 border-b border-gray-100">
+            Inserir em:
+          </DropdownMenuLabel>
+          {draftProposals.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-gray-400">
+              Nenhuma proposta ativa.
+              <Link href="/propostas" className="block text-blue-800 font-bold mt-1 hover:underline">Criar proposta →</Link>
             </div>
-            {draftProposals.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-gray-400">
-                Nenhuma proposta ativa.
-                <a href="/propostas" className="block text-blue-800 font-bold mt-1 hover:underline">Criar proposta →</a>
-              </div>
-            ) : (
-              draftProposals.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handleSelectProposal(p.id)}
-                  disabled={addItem.isPending}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 border-b border-gray-100 last:border-0"
-                >
-                  <div className="font-semibold text-gray-900 truncate">{p.title}</div>
-                  {p.processNumber && <div className="text-[10px] text-gray-400">{p.processNumber}</div>}
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+          ) : (
+            draftProposals.map((p) => (
+              <DropdownMenuItem
+                key={p.id}
+                onSelect={() => handleSelectProposal(p.id)}
+                disabled={addItem.isPending}
+                className="w-full text-left px-3 py-2 text-xs rounded-none border-b border-gray-100 last:border-0 flex-col items-start gap-0"
+              >
+                <div className="font-semibold text-gray-900 truncate w-full">{p.title}</div>
+                {p.processNumber && <div className="text-[10px] text-gray-400">{p.processNumber}</div>}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {similarAlert && pendingProposalId && (
         <CheaperSimilarModal
@@ -335,6 +358,7 @@ function AddToProposalButton({ product }: { product: SearchResult }) {
           similars={similarAlert.similars}
           onKeep={() => { doAddItem(pendingProposalId); }}
           onReplace={(s) => { doAddItem(pendingProposalId, s); }}
+          onCancel={() => { setSimilarAlert(null); setPendingProposalId(null); }}
         />
       )}
     </>
@@ -355,26 +379,31 @@ export default function BuscaRapida() {
   }, [location]);
 
   const { data: categories } = trpc.categories.list.useQuery();
-  const { data: results, isLoading } = trpc.products.smartSearch.useQuery(
+  const { data: results, isLoading, error, refetch } = trpc.products.smartSearch.useQuery(
     { query: submitted, categoryId },
     { enabled: submitted.length >= 2 }
   );
   const { data: priceAlerts } = trpc.priceIntelligence.priceAlerts.useQuery(
     undefined,
-    { enabled: submitted.length >= 2 }
+    { enabled: submitted.length >= 2, staleTime: 5 * 60 * 1000 }
   );
-  const priceAlertMap = new Map<number, number>();
-  (priceAlerts ?? []).forEach((a) => {
-    if (a.alertPercent) priceAlertMap.set(a.productId, parseFloat(String(a.alertPercent)));
-  });
+  const priceAlertMap = useMemo(() => {
+    const map = new Map<number, number>();
+    (priceAlerts ?? []).forEach((a) => {
+      if (a.alertPercent) map.set(a.productId, parseFloat(String(a.alertPercent)));
+    });
+    return map;
+  }, [priceAlerts]);
 
   const handleSearch = (q: string) => {
     if (q.trim().length >= 2) setSubmitted(q.trim());
   };
 
   // Group results by activeIngredient
-  const grouped = groupByActiveIngredient(results ?? []);
-  const bestPerGroup = getBestPerGroup(grouped);
+  const bestPerGroup = useMemo(
+    () => getBestPerGroup(groupByActiveIngredient(results ?? [])),
+    [results]
+  );
 
   return (
     <div className="p-8 max-w-4xl">
@@ -446,6 +475,26 @@ export default function BuscaRapida() {
           <p className="text-xs text-gray-400 tracking-widest uppercase">
             Buscando...
           </p>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && submitted && (
+        <div className="border border-red-200 bg-red-50 p-8 text-center">
+          <AlertCircle size={20} className="text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-red-700">
+            Não foi possível concluir a busca
+          </p>
+          <p className="text-xs text-red-500 mt-1">
+            Ocorreu um erro de conexão com o servidor. Verifique sua internet e tente novamente.
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-xs font-bold hover:bg-blue-800 transition-colors"
+          >
+            <RefreshCw size={12} />
+            Tentar novamente
+          </button>
         </div>
       )}
 

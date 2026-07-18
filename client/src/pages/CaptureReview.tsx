@@ -74,12 +74,15 @@ export function CaptureReview() {
   const [lastBatchAction, setLastBatchAction] = useState<LastBatchAction | null>(null);
 
   const { data: pendingProducts, isLoading: loadingPending } =
-    trpc.captureReview.listPending.useQuery({
-      supplierId,
-      status,
-      limit,
-      offset,
-    });
+    trpc.captureReview.listPending.useQuery(
+      {
+        supplierId,
+        status,
+        limit,
+        offset,
+      },
+      { placeholderData: (prev) => prev }
+    );
 
   const { data: stats } = trpc.captureReview.getReviewStats.useQuery({
     supplierId,

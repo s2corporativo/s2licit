@@ -217,7 +217,8 @@ function SuggestionCard({
 
 function ProgressPanel({ onRefresh }: { onRefresh: () => void }) {
   const { data: progress, refetch } = trpc.products.getEnrichmentProgress.useQuery(undefined, {
-    refetchInterval: 3000,
+    // Polling apenas enquanto o enriquecimento estiver em execução
+    refetchInterval: (query) => (query.state.data?.status === "running" ? 3000 : false),
   });
   const startBatch = trpc.products.enrichFichaTecnicaBatch.useQuery(undefined, { enabled: false });
 
@@ -336,13 +337,16 @@ export default function EnriquecimentoCatalogo() {
   const [refreshKey, setRefreshKey] = useState(0);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data, isLoading, refetch: refetchProducts } = trpc.products.list.useQuery({
-    search: debouncedSearch || undefined,
-    isActive: "yes",
-    limit: PAGE_SIZE,
-    offset,
-    withoutFichaTecnica: onlySemFicha ? true : undefined,
-  });
+  const { data, isLoading, refetch: refetchProducts } = trpc.products.list.useQuery(
+    {
+      search: debouncedSearch || undefined,
+      isActive: "yes",
+      limit: PAGE_SIZE,
+      offset,
+      withoutFichaTecnica: onlySemFicha ? true : undefined,
+    },
+    { placeholderData: (prev) => prev }
+  );
 
   const utils = trpc.useUtils();
   const suggestMutation = trpc.enrichment.suggestFields.useMutation();

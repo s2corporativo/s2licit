@@ -1,6 +1,14 @@
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { trpc } from "@/lib/trpc";
-import { ArrowDown, BarChart3, FilePlus, Search } from "lucide-react";
+import { AlertCircle, ArrowDown, BarChart3, FilePlus, RefreshCw, Search } from "lucide-react";
 import { useState } from "react";
+import { Link } from "wouter";
 import { toast } from "sonner";
 
 // ─── Add to Proposal Button ───────────────────────────────────────────────────
@@ -35,34 +43,35 @@ function AddToProposalButton({ product }: { product: ProductResult }) {
 
   return (
     <div className="relative mt-2">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-xs font-bold text-gray-600 hover:border-gray-900 hover:text-gray-900 transition-colors whitespace-nowrap"
-        title="Inserir na Proposta"
-      >
-        <FilePlus size={12} />
-        Inserir na Proposta
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-900 shadow-xl z-50 min-w-52 max-h-64 overflow-y-auto">
-          <div className="px-3 py-2 text-[10px] font-bold tracking-widest uppercase text-gray-400 border-b border-gray-100 bg-gray-50">
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-xs font-bold text-gray-600 hover:border-gray-900 hover:text-gray-900 transition-colors whitespace-nowrap"
+            title="Inserir na Proposta"
+          >
+            <FilePlus size={12} />
+            Inserir na Proposta
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-52 max-h-64 overflow-y-auto rounded-none border-gray-900 p-0">
+          <DropdownMenuLabel className="px-3 py-2 text-[10px] font-bold tracking-widest uppercase text-gray-400 border-b border-gray-100 bg-gray-50">
             Inserir em qual proposta?
-          </div>
+          </DropdownMenuLabel>
           {activeProposals.length === 0 ? (
             <div className="px-3 py-4 text-xs text-gray-400">
               Nenhuma proposta ativa.
-              <a
+              <Link
                 href="/propostas"
                 className="block text-blue-800 font-bold mt-1 hover:underline"
               >
                 Criar nova proposta →
-              </a>
+              </Link>
             </div>
           ) : (
             activeProposals.map((p) => (
-              <button
+              <DropdownMenuItem
                 key={p.id}
-                onClick={() =>
+                onSelect={() =>
                   addItem.mutate({
                     proposalId: p.id,
                     productId: product.id,
@@ -79,9 +88,9 @@ function AddToProposalButton({ product }: { product: ProductResult }) {
                   })
                 }
                 disabled={addItem.isPending}
-                className="w-full text-left px-3 py-2.5 text-xs hover:bg-gray-50 border-b border-gray-100 last:border-0 transition-colors"
+                className="w-full text-left px-3 py-2.5 text-xs rounded-none border-b border-gray-100 last:border-0 transition-colors flex-col items-start gap-0"
               >
-                <div className="font-semibold text-gray-900 truncate">
+                <div className="font-semibold text-gray-900 truncate w-full">
                   {p.title}
                 </div>
                 {p.processNumber && (
@@ -89,11 +98,11 @@ function AddToProposalButton({ product }: { product: ProductResult }) {
                     {p.processNumber}
                   </div>
                 )}
-              </button>
+              </DropdownMenuItem>
             ))
           )}
-        </div>
-      )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -105,7 +114,7 @@ export default function Comparacao() {
   const [categoryId, setCategoryId] = useState<number | undefined>();
 
   const { data: categories } = trpc.categories.list.useQuery();
-  const { data: results, isLoading } =
+  const { data: results, isLoading, error, refetch } =
     trpc.products.compareByActiveIngredient.useQuery(
       { activeIngredient: submitted, categoryId },
       { enabled: submitted.length >= 2 }
@@ -201,6 +210,25 @@ export default function Comparacao() {
           <p className="text-xs text-gray-400 tracking-widest uppercase">
             Comparando...
           </p>
+        </div>
+      )}
+
+      {error && submitted && (
+        <div className="border border-red-200 bg-red-50 p-8 text-center">
+          <AlertCircle size={20} className="text-red-400 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-red-700">
+            Não foi possível carregar a comparação
+          </p>
+          <p className="text-xs text-red-500 mt-1">
+            Ocorreu um erro de conexão com o servidor. Verifique sua internet e tente novamente.
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-xs font-bold hover:bg-blue-800 transition-colors"
+          >
+            <RefreshCw size={12} />
+            Tentar novamente
+          </button>
         </div>
       )}
 

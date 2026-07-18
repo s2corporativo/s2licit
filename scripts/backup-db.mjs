@@ -14,8 +14,8 @@
 
 import "dotenv/config";
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
-import { createGzip } from "node:zlib";
+import { createReadStream, createWriteStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { createGunzip, createGzip } from "node:zlib";
 import path from "node:path";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -77,19 +77,61 @@ dump.on("error", (err) => {
   process.exit(1);
 });
 
-dump.on("close", (code) => {
-  if (code !== 0) {
-    console.error(`[backup] mysqldump saiu com código ${code}.`);
-    if (stderr) console.error(stderr.trim());
-    process.exit(1);
+/** Confere se o .gz gerado descomprime do início ao fim (integridade). */
+function verifyGzip(file) {
+  return new Promise((resolve, reject) => {
+    const gunzip = createGunzip();
+    createReadStream(file)
+      .pipe(gunzip)
+      .on("data", () => {})
+      .on("end", resolve)
+      .on("error", reject);
+    gunzip.on("error", reject);
+  });
+}
+
+/** Remove backups mais antigos que BACKUP_KEEP_DAYS (padrão 14). */
+function rotateOldBackups() {
+  const keepDays = Number(process.env.BACKUP_KEEP_DAYS) || 14;
+  const cutoff = Date.now() - keepDays * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  for (const name of readdirSync(destDir)) {
+    if (!/^s2-backup-.*\.sql\.gz$/.test(name)) continue;
+    const file = path.join(destDir, name);
+    try {
+      if (statSync(file).mtimeMs < cutoff) {
+        unlinkSync(file);
+        removed++;
+      }
+    } catch {
+      // arquivo pode ter sido removido em paralelo — ignorar
+    }
   }
+  if (removed > 0) console.log(`[backup] Retenção: ${removed} backup(s) com mais de ${keepDays} dias removido(s).`);
+}
+
+const dumpClosed = new Promise((resolve, reject) => {
+  dump.on("close", (code) => {
+    if (code !== 0) {
+      reject(new Error(`mysqldump saiu com código ${code}. ${stderr.trim()}`));
+    } else {
+      resolve();
+    }
+  });
 });
 
-out.on("finish", () => {
-  console.log(`[backup] Concluído: ${outFile}`);
+const fileWritten = new Promise((resolve, reject) => {
+  out.on("finish", resolve);
+  out.on("error", reject);
 });
 
-out.on("error", (err) => {
-  console.error("[backup] Erro ao escrever o arquivo:", err.message);
+try {
+  await Promise.all([dumpClosed, fileWritten]);
+  await verifyGzip(outFile);
+  rotateOldBackups();
+  console.log(`[backup] Concluído e verificado: ${outFile}`);
+} catch (err) {
+  console.error(`[backup] FALHOU: ${err.message}`);
+  try { unlinkSync(outFile); } catch { /* arquivo parcial pode nem existir */ }
   process.exit(1);
-});
+}

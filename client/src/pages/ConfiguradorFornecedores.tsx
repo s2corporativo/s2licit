@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useConfirm } from "@/hooks/useConfirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +17,7 @@ interface CredentialForm {
 }
 
 export default function ConfiguradorFornecedores() {
+  const { confirm: confirmAction, confirmDialog } = useConfirm();
   const [showPassword, setShowPassword] = useState<{ [key: number]: boolean }>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<Partial<CredentialForm>>({
@@ -372,10 +374,13 @@ export default function ConfiguradorFornecedores() {
                         <Button
                           size="sm"
                           variant="destructive"
-                          onClick={() => {
-                            if (confirm("Tem certeza que deseja deletar esta credencial?")) {
-                              deleteMutation.mutate({ id: cred.id });
-                            }
+                          onClick={async () => {
+                            const ok = await confirmAction({
+                              title: "Deletar esta credencial?",
+                              description: "A credencial de acesso a este fornecedor será apagada e as capturas automáticas que dependem dela deixarão de funcionar. Esta ação não pode ser desfeita.",
+                              confirmLabel: "Deletar",
+                            });
+                            if (ok) deleteMutation.mutate({ id: cred.id });
                           }}
                           disabled={deleteMutation.isPending}
                         >
@@ -390,6 +395,7 @@ export default function ConfiguradorFornecedores() {
           )}
         </div>
       </div>
+      {confirmDialog}
     </>
   );
 }
