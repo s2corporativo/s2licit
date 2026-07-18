@@ -3469,3 +3469,22 @@ export const aiSettings = mysqlTable("ai_settings", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 export type AiSettings = typeof aiSettings.$inferSelect;
+
+/**
+ * integration_settings: credenciais e parâmetros de integrações configurados
+ * pela interface (chave→valor, valores criptografados no cofre AES-256-GCM).
+ * Complementa ai_settings e email_settings cobrindo WhatsApp e demais
+ * integrações; aplicado em process.env no boot e a cada salvamento — a
+ * configuração vale para o sistema inteiro sem reiniciar.
+ */
+export const integrationSettings = mysqlTable(
+  "integration_settings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    chave: varchar("chave", { length: 64 }).notNull(),
+    valorEnc: text("valorEnc"),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_integration_chave").on(t.chave)]
+);
+export type IntegrationSetting = typeof integrationSettings.$inferSelect;

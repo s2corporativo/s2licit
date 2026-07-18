@@ -109,10 +109,10 @@ jobs:
           mkdir -p ~/.ssh
           if [ -n "$VPS_HOST_KEY" ]; then
             printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
-            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20" >> "$GITHUB_ENV"
+            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
             echo "Chave do host fixada (StrictHostKeyChecking=yes)."
           else
-            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20" >> "$GITHUB_ENV"
+            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
             echo "::warning::Secret VPS_HOST_KEY ausente — conexão SSH sem verificação de host (vulnerável a MITM). Configure-o com a saída de: ssh-keyscan $DEPLOY_HOST"
           fi
 
