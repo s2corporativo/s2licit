@@ -21,7 +21,6 @@ import { nfeImportRouter } from "./routers/nfeImport";
 import { priceSyncRouter } from "./routers/priceSync";
 import { priceImportRouter } from "./routers/priceImport";
 import { priceAnalysisRouter } from "./routers/priceAnalysis";
-import { supplierCredentialsRouter } from "./routers/supplierCredentials";
 import { pricingRouter } from "./routers/pricing";
 import { categoryPricingRouter } from "./routers/categoryPricing";
 import { bulkPricingRouter } from "./routers/bulkPricing";
@@ -73,7 +72,6 @@ export const appRouter = router({
   priceSync: priceSyncRouter,
   priceImport: priceImportRouter,
   priceAnalysis: priceAnalysisRouter,
-  supplierCredentials: supplierCredentialsRouter,
   pricing: pricingRouter,
   categoryPricing: categoryPricingRouter,
   bulkPricing: bulkPricingRouter,

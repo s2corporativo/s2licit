@@ -1,10 +1,10 @@
 import { BatchXmlImportComponent } from "@/components/BatchXmlImportComponent";
 import { NfeUploadComponent } from "@/components/NfeUploadComponent";
-import { PriceImportComponent } from "@/components/PriceImportComponent";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, DollarSign, FileText, History, Upload } from "lucide-react";
+import { AlertCircle, FileText, History, Upload } from "lucide-react";
 import { useState } from "react";
+import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 
 export function ImportarNfe() {
@@ -22,21 +22,22 @@ export function ImportarNfe() {
     <>
       <div className="container mx-auto py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Importar Dados</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Importar NF-e</h1>
           <p className="text-muted-foreground mt-2">
-            Importe Notas Fiscais Eletrônicas (XML) ou planilhas de preços para atualizar produtos e preços automaticamente
+            Importe Notas Fiscais Eletrônicas (XML) para cadastrar produtos e atualizar preços
+            automaticamente. Para planilhas de preços (CSV/XLSX), use{" "}
+            <Link href="/importar" className="font-medium underline">
+              Importar planilha
+            </Link>
+            .
           </p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="upload" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
               Upload NFe
-            </TabsTrigger>
-            <TabsTrigger value="prices" className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
-              Importar Preços
             </TabsTrigger>
             <TabsTrigger value="batch" className="flex items-center gap-2">
               <Upload className="h-4 w-4" />
@@ -80,7 +81,8 @@ export function ImportarNfe() {
                   <strong>2. Preview:</strong> Revise os produtos extraídos e selecione quais deseja importar
                 </p>
                 <p>
-                  <strong>3. Matching:</strong> O sistema identifica automaticamente produtos existentes via Master Products
+                  <strong>3. Reconhecimento:</strong> O sistema compara cada item da nota com o seu
+                  catálogo e reconhece automaticamente os produtos que você já tem
                 </p>
                 <p>
                   <strong>4. Importação:</strong> Produtos novos são criados e preços são atualizados por fornecedor
@@ -123,47 +125,6 @@ export function ImportarNfe() {
                 </p>
                 <p>
                   <strong>3. Seleção controlada:</strong> somente os XMLs marcados e validados seguem para gravação no histórico de importação.
-                </p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Upload Tab - Prices */}
-          <TabsContent value="prices" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Importar Planilha de Preços</CardTitle>
-                <CardDescription>
-                  Selecione um arquivo CSV ou XLSX com preços para atualizar produtos existentes
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <PriceImportComponent />
-              </CardContent>
-            </Card>
-
-            {/* Information Card */}
-            <Card className="border-green-200 bg-green-50">
-              <CardHeader>
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                  <div>
-                    <CardTitle className="text-base text-green-900">Formato da Planilha</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="text-sm text-green-800 space-y-2">
-                <p>
-                  <strong>Colunas Obrigatórias:</strong> Produto (nome), Preço
-                </p>
-                <p>
-                  <strong>Colunas Opcionais:</strong> EAN, Código do Fornecedor, Unidade
-                </p>
-                <p>
-                  <strong>Formato:</strong> CSV com separador vírgula ou XLSX
-                </p>
-                <p>
-                  <strong>Detecção:</strong> O sistema detecta automaticamente o fornecedor pelo nome do arquivo
                 </p>
               </CardContent>
             </Card>
