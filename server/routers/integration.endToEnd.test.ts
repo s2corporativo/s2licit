@@ -275,7 +275,7 @@ describe("Integration: End-to-End Complete Workflow", () => {
 
   describe("Error Recovery", () => {
     it("should handle missing edital items gracefully", () => {
-      const edital = { items: [] };
+      const edital = { items: [] as Array<{ description: string }> };
       const scraperData = [
         { product: "Amoxicilina 500mg", price: 0.85 },
       ];

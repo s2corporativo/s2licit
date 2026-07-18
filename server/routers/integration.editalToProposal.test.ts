@@ -126,7 +126,7 @@ describe("Integration: Edital → Matching → Proposal", () => {
           costPrice: parseFloat(costPrice.toFixed(2)),
           totalPrice: parseFloat((finalPrice * item.quantity).toFixed(2)),
         };
-      }).filter(Boolean);
+      }).filter((x): x is NonNullable<typeof x> => x != null);
 
       expect(proposalItems.length).toBe(2);
       expect(proposalItems[0].unitPrice).toBeGreaterThan(proposalItems[0].costPrice);

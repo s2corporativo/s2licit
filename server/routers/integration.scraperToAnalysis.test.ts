@@ -310,7 +310,7 @@ describe("Integration: Scraper → Consolidation → Price Analysis", () => {
 
       const results = Array.from(analysis.entries()).map(([ean, prices]) => ({
         ean,
-        avg: prices.reduce((a, b) => a + b, 0) / prices.length,
+        avg: prices.reduce((a: number, b: number) => a + b, 0) / prices.length,
         min: Math.min(...prices),
         max: Math.max(...prices),
       }));

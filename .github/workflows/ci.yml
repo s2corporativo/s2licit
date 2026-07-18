@@ -72,6 +72,60 @@ jobs:
       - name: Build de produção
         run: pnpm build
 
+  mysql-migrations:
+    # Exercita as migrações contra um MySQL REAL (efêmero): sem isto, um erro
+    # de migração só aparecia no deploy da VPS. Aplica toda a cadeia do zero
+    # e valida que o schema sobe limpo.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: s2licit_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/s2licit_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Habilitar pnpm
+        run: corepack enable
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
+
+      - name: Aguardar MySQL
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null; then
+              echo "MySQL pronto"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL não respondeu a tempo" >&2; exit 1
+
+      - name: Aplicar migrações de produção do zero
+        run: node scripts/migrate-production.mjs
+
+      - name: Reaplicar (idempotência) — segunda passada não pode falhar
+        run: node scripts/migrate-production.mjs
+
+      - name: Testes de integração contra MySQL real
+        run: pnpm exec vitest run server/**/*.integration-db.test.ts --passWithNoTests
+
   docker-image:
     # Garante que a imagem usada no deploy sempre builda — o deploy na VPS
     # reconstrói esta mesma imagem e não pode descobrir o erro em produção.
