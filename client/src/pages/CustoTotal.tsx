@@ -231,8 +231,8 @@ export default function CustoTotal() {
           </div>
         ) : (
           <div className="p-6 text-center text-sm text-gray-400 border border-dashed border-gray-200">
-            Nenhuma cotação de frete registrada. Registre os valores cotados com transportadoras
-            para usar na calculadora acima. (Integração com APIs de transportadoras: pendente — planejada.)
+            Nenhuma cotação de frete registrada. Registre aqui os valores que você cotar com as
+            transportadoras para usá-los na calculadora acima.
           </div>
         )}
       </section>

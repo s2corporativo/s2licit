@@ -464,7 +464,7 @@ async function processImportBatchAsync(
             const prompt = `Produto: "${prod.name}". Fabricante: ${prod.manufacturer || "desconhecido"}. Sugira: activeIngredient, concentration, category, subcategory, indication, confidence (0-1). JSON.`;
             const response = await invokeLLM({
               messages: [
-                { role: "system", content: "Especialista em farmacologia veterinária. JSON apenas." },
+                { role: "system", content: "Especialista em catálogo de produtos para cotações (medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos). JSON apenas." },
                 { role: "user", content: prompt },
               ],
               response_format: {

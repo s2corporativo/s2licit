@@ -112,7 +112,7 @@ export async function suggestSynonyms(
   fichaTecnica?: string,
   existingSynonyms?: string[]
 ): Promise<Array<{ synonym: string; confidence: number; reason: string }>> {
-  const systemPrompt = `Você é um especialista em nomenclatura de produtos veterinários e farmacêuticos.
+  const systemPrompt = `Você é um especialista em nomenclatura de produtos — veterinários, farmacêuticos, materiais de construção e insumos.
 Sugira sinônimos, nomes alternativos, nomes populares e variações do nome do produto.
 Inclua: nomes genéricos, nomes comerciais equivalentes, abreviações comuns, nomes em inglês se relevante.
 Seja conservador: sugira apenas sinônimos com alta probabilidade de serem usados em editais de licitação.`;

@@ -115,7 +115,7 @@ export const importsRouter = router({
                 {
                   role: "system" as const,
                   content:
-                    "Você é um especialista em farmacologia veterinária e humana. " +
+                    "Você é um especialista em produtos para cotações — medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos. " +
                     "Para cada produto listado, informe APENAS o princípio ativo principal (DCI/INN). " +
                     "Se não souber, responda com string vazia. Responda em JSON.",
                 },
@@ -352,7 +352,7 @@ export const importsRouter = router({
                 messages: [
                   {
                     role: "system",
-                    content: `Você é um especialista em classificação de produtos veterinários, agropecuários e farmacêuticos.
+                    content: `Você é um especialista em classificação de produtos veterinários, humanos, agropecuários, farmacêuticos e de construção.
                     Classifique cada produto em UMA das categorias: "Medicamentos Veterinários", "Medicamentos Humanos", "Produtos Agro", "Insumos", "Materiais Diversos".
                     Para Medicamentos Veterinários, use subcategorias como: Antiparasitários, Antibióticos, Vacinas, Anti-inflamatórios, Anestésicos, Vitaminas e Suplementos, Hormônios, Dermatológicos, Oftalmológicos, Outros.
                     Para Medicamentos Humanos: Antibióticos, Analgésicos, Anti-inflamatórios, Vitaminas, Outros.
@@ -704,7 +704,7 @@ export const importsRouter = router({
             `${idx + 1}. Nome: "${r.nome ?? ""}", Princípio Ativo: "${r.principioAtivo ?? ""}", Fabricante: "${r.fabricante ?? ""}", Apresentação: "${r.apresentacao ?? ""}"`
           ).join("\n");
 
-          const prompt = `Você é um especialista em classificação de produtos veterinários, agropecuários e farmacêuticos.
+          const prompt = `Você é um especialista em classificação de produtos veterinários, humanos, agropecuários, farmacêuticos e de construção.
 
 Categorias disponíveis no sistema: ${catNames || "Medicamentos Veterinários, Medicamentos Humanos, Produtos Agro, Rações, Insumos e Materiais"}
 

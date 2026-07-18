@@ -216,7 +216,7 @@ export const duplicatesRouter = router({
             messages: [
               {
                 role: "system",
-                content: "Você é um especialista em farmacologia veterinária. Consolide as informações dos produtos duplicados, retornando JSON.",
+                content: "Você é um especialista em catálogo de produtos (veterinários, humanos, materiais de construção e insumos). Consolide as informações dos produtos duplicados, retornando JSON.",
               },
               {
                 role: "user",
