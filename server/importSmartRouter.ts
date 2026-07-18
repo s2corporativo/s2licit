@@ -122,7 +122,7 @@ export const importSmartRouter = router({
           .max(3000),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const results = {
         total: input.products.length,
         created: 0,
@@ -382,6 +382,14 @@ export const importSmartRouter = router({
           );
         }
       }
+
+      const { recordAudit } = await import("./services/auditService");
+      await recordAudit({
+        userId: ctx.user?.id,
+        action: "import_products",
+        entity: "products",
+        summary: `Importação inteligente: ${results.created} criados, ${results.updated} atualizados, ${results.newSupplier} novos fornecedores (de ${results.total})`,
+      });
 
       return results;
     }),

@@ -24,6 +24,7 @@ import {
 } from "../../drizzle/schema";
 import { or, like, sql, eq, asc, and } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
+import { recordAudit } from "../services/auditService";
 
 export const productsRouter = router({
     list: protectedProcedure
@@ -81,7 +82,17 @@ export const productsRouter = router({
           isActive: z.enum(["yes", "no"]).optional(),
         })
       )
-      .mutation(({ input }) => createProduct(input as any)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await createProduct(input as any);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_create",
+          entity: "products",
+          entityId: Number((result as any)?.insertId) || null,
+          summary: `Produto criado: ${input.name}`,
+        });
+        return result;
+      }),
 
     update: protectedProcedure
       .input(
@@ -122,9 +133,17 @@ export const productsRouter = router({
           taxValue: z.string().optional().nullable(),
         })
       )
-      .mutation(({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
-        return updateProduct(id, data as any);
+        const result = await updateProduct(id, data as any);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_update",
+          entity: "products",
+          entityId: id,
+          summary: `Produto atualizado (campos: ${Object.keys(data).join(", ")})`,
+        });
+        return result;
       }),
 
     bulkUpdate: protectedProcedure
@@ -169,14 +188,30 @@ export const productsRouter = router({
 
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteProduct(input.id)),
+      .mutation(async ({ input, ctx }) => {
+        await deleteProduct(input.id);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_delete",
+          entity: "products",
+          entityId: input.id,
+          summary: `Produto excluído (id ${input.id})`,
+        });
+      }),
 
     bulkDelete: protectedProcedure
       .input(z.object({ ids: z.array(z.number()).min(1) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         for (const id of input.ids) {
           await deleteProduct(id);
         }
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_bulk_delete",
+          entity: "products",
+          summary: `${input.ids.length} produtos excluídos em massa`,
+          changes: { ids: input.ids.slice(0, 500) },
+        });
         return { deleted: input.ids.length };
       }),
 
@@ -627,7 +662,18 @@ export const productsRouter = router({
         masterId: z.number(),
         duplicateIds: z.array(z.number()).min(1),
       }))
-      .mutation(({ input }) => mergeProductGroup(input.masterId, input.duplicateIds)),
+      .mutation(async ({ input, ctx }) => {
+        const result = await mergeProductGroup(input.masterId, input.duplicateIds);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_merge",
+          entity: "products",
+          entityId: input.masterId,
+          summary: `Merge de duplicatas: ${input.duplicateIds.length} produtos fundidos no #${input.masterId}`,
+          changes: { duplicateIds: input.duplicateIds },
+        });
+        return result;
+      }),
 
     // ─── Enriquecimento em Lote de Fichas Técnicas ──────────────────────────────
     enrichFichaTecnicaBatch: protectedProcedure

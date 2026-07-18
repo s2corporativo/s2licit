@@ -147,6 +147,11 @@ export const products = mysqlTable(
     tipoCatalogo: mysqlEnum("tipoCatalogo", ["medicamento_veterinario", "medicamento_humano", "produto_nao_medicamentoso", "material_insumo_equipamento"]).default("produto_nao_medicamentoso").notNull(),
     statusConfiabilidade: mysqlEnum("statusConfiabilidade", ["completo_validado", "completo_nao_validado", "parcial", "incompleto", "enriquecido_ia", "pendente_revisao"]).default("incompleto").notNull(),
     isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(),
+    // Soft-delete com carimbo: quando e por quê o produto saiu do catálogo.
+    // deletedAt marca exclusão/desativação; mergedIntoId aponta o produto
+    // vencedor quando a desativação veio de um merge de duplicatas.
+    deletedAt: timestamp("deletedAt"),
+    mergedIntoId: int("mergedIntoId"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -1665,37 +1670,8 @@ export const supplierConnectors = mysqlTable(
 export type SupplierConnector = typeof supplierConnectors.$inferSelect;
 export type InsertSupplierConnector = typeof supplierConnectors.$inferInsert;
 
-// ─── Log de Auditoria Unificado ──────────────────────────────────────────────
-
-export const auditLog = mysqlTable(
-  "auditLog",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    source: varchar("source", { length: 64 }).notNull(),
-    action: varchar("action", { length: 64 }).notNull(),
-    entityType: varchar("entityType", { length: 64 }),
-    entityId: varchar("entityId", { length: 128 }),
-    endpoint: text("endpoint"),
-    params: json("params"),
-    status: mysqlEnum("status", ["ok", "error", "partial", "skipped"]).notNull().default("ok"),
-    recordsAffected: int("recordsAffected").default(0),
-    payloadHash: varchar("payloadHash", { length: 64 }),
-    evidenceUrl: text("evidenceUrl"),
-    errorMessage: text("errorMessage"),
-    durationMs: int("durationMs"),
-    userId: varchar("userId", { length: 128 }),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_audit_source").on(table.source),
-    index("idx_audit_action").on(table.action),
-    index("idx_audit_status").on(table.status),
-    index("idx_audit_created").on(table.createdAt),
-  ]
-);
-
-export type AuditLog = typeof auditLog.$inferSelect;
-export type InsertAuditLog = typeof auditLog.$inferInsert;
+// A tabela legada `auditLog` foi removida: nenhum código escrevia ou lia nela
+// e a trilha de auditoria oficial é `audit_logs` (auditService.recordAudit).
 
 // ─── Histórico de Preços Públicos (PNCP/ComprasGov) ─────────────────────────
 

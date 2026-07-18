@@ -246,10 +246,11 @@ export const duplicatesRouter = router({
         .set(merged)
         .where(eq(products.id, input.primaryProductId));
 
-      // Desativar produto secundário (não deletar para manter histórico)
+      // Desativar produto secundário (não deletar para manter histórico),
+      // com carimbo de quando e para onde foi fundido
       await db
         .update(products)
-        .set({ isActive: "no" })
+        .set({ isActive: "no", deletedAt: new Date(), mergedIntoId: input.primaryProductId })
         .where(eq(products.id, input.secondaryProductId));
 
       return {
@@ -273,10 +274,10 @@ export const duplicatesRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
 
-      // Desativar produto antigo
+      // Desativar produto antigo, com carimbo de quando e para onde apontou
       await db
         .update(products)
-        .set({ isActive: "no" })
+        .set({ isActive: "no", deletedAt: new Date(), mergedIntoId: input.newProductId })
         .where(eq(products.id, input.oldProductId));
 
       return {

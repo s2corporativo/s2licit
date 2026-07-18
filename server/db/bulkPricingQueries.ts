@@ -117,37 +117,58 @@ export async function getBulkPricingDetails(
 }
 
 /**
- * Aplicar preços em massa nos produtos
+ * Aplicar precificação em massa ATOMICAMENTE: atualização dos preços,
+ * registro da aplicação e detalhes na MESMA transação — falha no meio não
+ * deixa metade dos produtos reprecificados sem trilha.
  */
-export async function applyPricesToProducts(
-  updates: Array<{ productId: number; newPrice: number }>
-): Promise<{ updated: number; errors: string[] }> {
+export async function applyBulkPricingTransactional(
+  updates: Array<{ productId: number; oldPrice: number; newPrice: number; priceIncrease: number }>,
+  applicationData: InsertBulkPricingApplication
+): Promise<{ application: BulkPricingApplication; updated: number }> {
   const db = await getDb();
   if (!db) throw new Error("Database connection failed");
 
-  let updated = 0;
-  const errors: string[] = [];
-
-  for (const { productId, newPrice } of updates) {
-    try {
-      await db
+  return db.transaction(async (tx) => {
+    let updated = 0;
+    for (const { productId, newPrice } of updates) {
+      await tx
         .update(products)
-        .set({
-          price: String(newPrice),
-          updatedAt: new Date(),
-        })
+        .set({ price: String(newPrice), updatedAt: new Date() })
         .where(eq(products.id, productId));
       updated++;
-    } catch (err) {
-      errors.push(`Produto ${productId}: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
 
-  return { updated, errors };
+    const result = await tx
+      .insert(bulkPricingApplications)
+      .values({ ...applicationData, updatedCount: updated });
+    const id = Number((result as any).insertId);
+
+    if (updates.length > 0) {
+      await tx.insert(bulkPricingApplicationDetails).values(
+        updates.map((d) => ({
+          applicationId: id,
+          productId: d.productId,
+          oldPrice: String(d.oldPrice),
+          newPrice: String(d.newPrice),
+          priceIncrease: String(d.priceIncrease),
+          status: "success" as const,
+        }))
+      );
+    }
+
+    const created = await tx
+      .select()
+      .from(bulkPricingApplications)
+      .where(eq(bulkPricingApplications.id, id))
+      .limit(1);
+    if (!created[0]) throw new Error("Falha ao criar registro de aplicação");
+    return { application: created[0], updated };
+  });
 }
 
 /**
- * Reverter preços de uma aplicação
+ * Reverter preços de uma aplicação (transacional: ou reverte tudo e marca a
+ * aplicação como revertida, ou nada muda).
  */
 export async function revertBulkPricingApplication(applicationId: number): Promise<{
   reverted: number;
@@ -162,31 +183,21 @@ export async function revertBulkPricingApplication(applicationId: number): Promi
     throw new Error("Nenhum detalhe encontrado para esta aplicação");
   }
 
-  let reverted = 0;
-  const errors: string[] = [];
-
-  for (const detail of details) {
-    try {
-      await db
+  const reverted = await db.transaction(async (tx) => {
+    let count = 0;
+    for (const detail of details) {
+      await tx
         .update(products)
-        .set({
-          price: String(detail.oldPrice),
-          updatedAt: new Date(),
-        })
+        .set({ price: String(detail.oldPrice), updatedAt: new Date() })
         .where(eq(products.id, detail.productId));
-      reverted++;
-    } catch (err) {
-      errors.push(
-        `Produto ${detail.productId}: ${err instanceof Error ? err.message : String(err)}`
-      );
+      count++;
     }
-  }
+    await tx
+      .update(bulkPricingApplications)
+      .set({ status: "reverted" })
+      .where(eq(bulkPricingApplications.id, applicationId));
+    return count;
+  });
 
-  // Marcar aplicação como revertida
-  await db
-    .update(bulkPricingApplications)
-    .set({ status: "reverted" })
-    .where(eq(bulkPricingApplications.id, applicationId));
-
-  return { reverted, errors };
+  return { reverted, errors: [] };
 }

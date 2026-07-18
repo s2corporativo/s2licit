@@ -57,6 +57,13 @@
       "when": 1784405859816,
       "tag": "0007_curious_lyja",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1784406291082,
+      "tag": "0008_easy_expediter",
+      "breakpoints": true
     }
   ]
 }

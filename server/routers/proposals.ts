@@ -4,6 +4,7 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { products, proposals, suppliers } from "../../drizzle/schema";
 import { addProposalItem, advanceProposalStatus, createFinancialEntry, createProposal, deleteProposal, duplicateProposal, getDb, getProposalStatusHistory, getProposalWithItems, listProposals, listProposalsAdmin, removeProposalItem, suggestProductsFromList, updateProposal, updateProposalFreight, updateProposalItem } from "../db";
 import { validateEquivalenceForMultipleItems } from "../services/equivalenceValidationService";
+import { recordAudit } from "../services/auditService";
 
 export const proposalsRouter = router({
     list: protectedProcedure.query(() => listProposals()),
@@ -27,7 +28,17 @@ export const proposalsRouter = router({
           radarOpportunityId: z.number().optional().nullable(),
         })
       )
-      .mutation(({ input }) => createProposal(input as any)),
+      .mutation(async ({ input, ctx }) => {
+        const id = await createProposal(input as any);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "proposal_create",
+          entity: "proposals",
+          entityId: id,
+          summary: `Proposta criada: ${input.title}`,
+        });
+        return id;
+      }),
 
     update: protectedProcedure
       .input(
@@ -52,7 +63,16 @@ export const proposalsRouter = router({
 
      delete: editorProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => deleteProposal(input.id)),
+      .mutation(async ({ input, ctx }) => {
+        await deleteProposal(input.id);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "proposal_delete",
+          entity: "proposals",
+          entityId: input.id,
+          summary: `Proposta excluída (id ${input.id})`,
+        });
+      }),
 
     addItem: protectedProcedure
       .input(
@@ -196,7 +216,17 @@ export const proposalsRouter = router({
       .query(({ input }) => getProposalStatusHistory(input.id)),
     duplicate: protectedProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(({ input }) => duplicateProposal(input.id)),
+      .mutation(async ({ input, ctx }) => {
+        const newId = await duplicateProposal(input.id);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "proposal_duplicate",
+          entity: "proposals",
+          entityId: newId,
+          summary: `Proposta ${input.id} duplicada como ${newId}`,
+        });
+        return newId;
+      }),
 
     // Sugestão automática de produtos a partir de lista de texto/planilha
     suggestFromList: protectedProcedure
