@@ -451,33 +451,112 @@ async function invokeProvider(
 }
 
 /**
- * Contadores de consumo de IA desde o boot do servidor (em memória).
- * Dão visibilidade de uso/custo na Central de IA — antes o campo `usage`
- * retornado pelos provedores era simplesmente descartado.
+ * Tabela de preços por modelo (USD por 1M de tokens), usada para estimar o
+ * custo de cada chamada. Modelos fora da tabela (ex.: tier gratuito do Groq)
+ * contam custo 0 — o número de tokens continua registrado.
+ */
+const MODEL_PRICES_USD_PER_MTOK: Array<{ match: RegExp; input: number; output: number }> = [
+  { match: /claude-opus/i, input: 15, output: 75 },
+  { match: /claude-(3-7-|3-5-)?sonnet/i, input: 3, output: 15 },
+  { match: /claude-(3-5-)?haiku/i, input: 0.8, output: 4 },
+  { match: /llama-?3\.3-70b|llama-?3-70b/i, input: 0.59, output: 0.79 },
+  { match: /llama-?3\.1-8b|llama-?3-8b/i, input: 0.05, output: 0.08 },
+  { match: /gemini-2\.5-flash/i, input: 0.3, output: 2.5 },
+  { match: /gpt-oss-120b/i, input: 0.15, output: 0.6 },
+];
+
+export function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
+  const price = MODEL_PRICES_USD_PER_MTOK.find((p) => p.match.test(model));
+  if (!price) return 0;
+  return (promptTokens * price.input + completionTokens * price.output) / 1_000_000;
+}
+
+/** Cotação USD→BRL usada só para exibir o custo estimado em reais na UI. */
+export function usdBrlRate(): number {
+  const raw = Number(process.env.USD_BRL_RATE);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5.5;
+}
+
+/**
+ * Contadores de consumo de IA desde o boot do servidor (em memória) +
+ * persistência agregada por dia/provedor/modelo em `ai_usage_daily`.
+ * O acumulado histórico e o custo estimado ficam visíveis na Central de IA
+ * e sobrevivem a restart — antes o consumo zerava a cada boot.
  */
 const usageTotals = {
   desde: new Date().toISOString(),
   chamadas: 0,
   promptTokens: 0,
   completionTokens: 0,
-  porProvedor: {} as Record<string, { chamadas: number; promptTokens: number; completionTokens: number }>,
+  custoUsd: 0,
+  porProvedor: {} as Record<
+    string,
+    { chamadas: number; promptTokens: number; completionTokens: number; custoUsd: number }
+  >,
 };
 
-function recordUsage(providerKind: string, result: InvokeResult) {
+async function persistUsage(
+  providerKind: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+  custoUsd: number
+) {
+  try {
+    // Import dinâmico para não criar ciclo _core/llm → db → _core.
+    const [{ getDb }, { aiUsageDaily }, { sql }] = await Promise.all([
+      import("../db"),
+      import("../../drizzle/schema"),
+      import("drizzle-orm"),
+    ]);
+    const db = await getDb().catch(() => null);
+    if (!db) return;
+    const dia = new Date().toISOString().slice(0, 10);
+    await db
+      .insert(aiUsageDaily)
+      .values({
+        dia,
+        provider: providerKind,
+        model,
+        chamadas: 1,
+        promptTokens,
+        completionTokens,
+        custoUsd: custoUsd.toFixed(6),
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          chamadas: sql`${aiUsageDaily.chamadas} + 1`,
+          promptTokens: sql`${aiUsageDaily.promptTokens} + ${promptTokens}`,
+          completionTokens: sql`${aiUsageDaily.completionTokens} + ${completionTokens}`,
+          custoUsd: sql`${aiUsageDaily.custoUsd} + ${custoUsd.toFixed(6)}`,
+        },
+      });
+  } catch {
+    // Registrar consumo nunca pode derrubar a chamada de IA em si.
+  }
+}
+
+function recordUsage(provider: LlmProvider, result: InvokeResult) {
   usageTotals.chamadas += 1;
   const u = result.usage;
-  const porProv = (usageTotals.porProvedor[providerKind] ??= {
+  const promptTokens = u?.prompt_tokens ?? 0;
+  const completionTokens = u?.completion_tokens ?? 0;
+  const model = result.model || provider.model;
+  const custoUsd = estimateCostUsd(model, promptTokens, completionTokens);
+  const porProv = (usageTotals.porProvedor[provider.kind] ??= {
     chamadas: 0,
     promptTokens: 0,
     completionTokens: 0,
+    custoUsd: 0,
   });
   porProv.chamadas += 1;
-  if (u) {
-    usageTotals.promptTokens += u.prompt_tokens ?? 0;
-    usageTotals.completionTokens += u.completion_tokens ?? 0;
-    porProv.promptTokens += u.prompt_tokens ?? 0;
-    porProv.completionTokens += u.completion_tokens ?? 0;
-  }
+  usageTotals.promptTokens += promptTokens;
+  usageTotals.completionTokens += completionTokens;
+  usageTotals.custoUsd += custoUsd;
+  porProv.promptTokens += promptTokens;
+  porProv.completionTokens += completionTokens;
+  porProv.custoUsd += custoUsd;
+  void persistUsage(provider.kind, model, promptTokens, completionTokens, custoUsd);
 }
 
 export function getUsageTotals() {
@@ -500,7 +579,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const result = await invokeProvider(provider, params);
-        recordUsage(provider.kind, result);
+        recordUsage(provider, result);
         return result;
       } catch (err) {
         lastError = err;

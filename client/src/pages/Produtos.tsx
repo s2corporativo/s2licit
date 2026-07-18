@@ -1074,28 +1074,38 @@ export default function Produtos() {
   const [enrichResult, setEnrichResult] = useState<{ updated: number; skipped: number; errors: number; total: number } | null>(null);
   const [enrichProgress, setEnrichProgress] = useState<{ processed: number; total: number; updated: number; errors: number } | null>(null);
   const [enrichRunning, setEnrichRunning] = useState(false);
-  const enrichMutation = trpc.enrichment.enrichFichaTecnica.useMutation({
+  // O processamento roda em job no servidor (ai_jobs): a tela só dispara e
+  // acompanha por polling — fechar/atualizar a página não interrompe o lote.
+  const [enrichJobId, setEnrichJobId] = useState<number | null>(null);
+  const enrichStartMutation = trpc.enrichment.enrichFichaTecnicaStartJob.useMutation({
+    onSuccess: (res) => setEnrichJobId(res.jobId),
     onError: (e) => { toast.error(e.message); setEnrichRunning(false); },
   });
-  const startEnrichLoop = async (scope: "withoutFicha" | "selected" | "all", overwrite: boolean, productIds?: number[]) => {
+  const enrichJobQuery = trpc.enrichment.aiJobStatus.useQuery(
+    { jobId: enrichJobId ?? 0 },
+    { enabled: enrichJobId != null, refetchInterval: 2000 }
+  );
+  useEffect(() => {
+    const job = enrichJobQuery.data;
+    if (!job || enrichJobId == null) return;
+    const p = job.progresso;
+    setEnrichProgress({ processed: p.processed, total: p.total, updated: p.updated, errors: p.errors });
+    if (job.status !== "executando") {
+      setEnrichRunning(false);
+      setEnrichJobId(null);
+      setEnrichResult({ updated: p.updated, skipped: p.skipped, errors: p.errors, total: p.total });
+      utils.products.list.invalidate();
+      if (job.status === "concluido") {
+        toast.success(`Ficha técnica enriquecida: ${p.updated} produtos atualizados.`);
+      } else {
+        toast.error(job.errorMessages[0] ?? "O enriquecimento foi interrompido antes de terminar.");
+      }
+    }
+  }, [enrichJobQuery.data]);
+  const startEnrichLoop = (scope: "withoutFicha" | "selected" | "all", overwrite: boolean, productIds?: number[]) => {
     setEnrichRunning(true);
     setEnrichProgress(null);
-    let offset = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0, grandTotal = 0;
-    try {
-      while (true) {
-        const res = await enrichMutation.mutateAsync({ scope, productIds: scope === "selected" ? productIds : undefined, overwrite, offset, pageSize: 150 });
-        grandTotal = res.total;
-        totalUpdated += res.updated;
-        totalSkipped += res.skipped;
-        totalErrors += res.errors;
-        offset = res.nextOffset;
-        setEnrichProgress({ processed: offset, total: grandTotal, updated: totalUpdated, errors: totalErrors });
-        if (!res.hasMore) break;
-      }
-      setEnrichResult({ updated: totalUpdated, skipped: totalSkipped, errors: totalErrors, total: grandTotal });
-      utils.products.list.invalidate();
-      toast.success(`Ficha técnica enriquecida: ${totalUpdated} produtos atualizados.`);
-    } catch (_) { /* tratado pelo onError */ } finally { setEnrichRunning(false); }
+    enrichStartMutation.mutate({ scope, productIds: scope === "selected" ? productIds : undefined, overwrite });
   };
 
   // Reclassificação em lote com IA — suporte a 30k produtos via loop paginado
@@ -1105,28 +1115,36 @@ export default function Produtos() {
   const [reclassifyResult, setReclassifyResult] = useState<{ updated: number; skipped: number; errors: number; total: number } | null>(null);
   const [reclassifyProgress, setReclassifyProgress] = useState<{ processed: number; total: number; updated: number; errors: number } | null>(null);
   const [reclassifyRunning, setReclassifyRunning] = useState(false);
-  const bulkReclassifyMutation = trpc.enrichment.bulkReclassifySelected.useMutation({
+  const [reclassifyJobId, setReclassifyJobId] = useState<number | null>(null);
+  const reclassifyStartMutation = trpc.enrichment.bulkReclassifyStartJob.useMutation({
+    onSuccess: (res) => setReclassifyJobId(res.jobId),
     onError: (e) => { toast.error(e.message); setReclassifyRunning(false); },
   });
-  const startReclassifyLoop = async (productIds?: number[], includeAlreadyCategorized?: boolean) => {
+  const reclassifyJobQuery = trpc.enrichment.aiJobStatus.useQuery(
+    { jobId: reclassifyJobId ?? 0 },
+    { enabled: reclassifyJobId != null, refetchInterval: 2000 }
+  );
+  useEffect(() => {
+    const job = reclassifyJobQuery.data;
+    if (!job || reclassifyJobId == null) return;
+    const p = job.progresso;
+    setReclassifyProgress({ processed: p.processed, total: p.total, updated: p.updated, errors: p.errors });
+    if (job.status !== "executando") {
+      setReclassifyRunning(false);
+      setReclassifyJobId(null);
+      setReclassifyResult({ updated: p.updated, skipped: p.skipped, errors: p.errors, total: p.total });
+      utils.products.list.invalidate();
+      if (job.status === "concluido") {
+        toast.success(`Reclassificação concluída: ${p.updated} produtos categorizados.`);
+      } else {
+        toast.error(job.errorMessages[0] ?? "A reclassificação foi interrompida antes de terminar.");
+      }
+    }
+  }, [reclassifyJobQuery.data]);
+  const startReclassifyLoop = (productIds?: number[], includeAlreadyCategorized?: boolean) => {
     setReclassifyRunning(true);
     setReclassifyProgress(null);
-    let offset = 0, totalUpdated = 0, totalSkipped = 0, totalErrors = 0, grandTotal = 0;
-    try {
-      while (true) {
-        const res = await bulkReclassifyMutation.mutateAsync({ productIds, includeAlreadyCategorized: includeAlreadyCategorized ?? false, offset, pageSize: 200, batchSize: 50 });
-        grandTotal = res.total;
-        totalUpdated += res.updated;
-        totalSkipped += res.skipped;
-        totalErrors += res.errors;
-        offset = res.nextOffset;
-        setReclassifyProgress({ processed: offset, total: grandTotal, updated: totalUpdated, errors: totalErrors });
-        if (!res.hasMore) break;
-      }
-      setReclassifyResult({ updated: totalUpdated, skipped: totalSkipped, errors: totalErrors, total: grandTotal });
-      utils.products.list.invalidate();
-      toast.success(`Reclassificação concluída: ${totalUpdated} produtos categorizados.`);
-    } catch (_) { /* tratado pelo onError */ } finally { setReclassifyRunning(false); }
+    reclassifyStartMutation.mutate({ productIds, includeAlreadyCategorized: includeAlreadyCategorized ?? false });
   };
 
   const handleBulkDelete = async () => {

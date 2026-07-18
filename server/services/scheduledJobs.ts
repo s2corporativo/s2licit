@@ -233,6 +233,15 @@ export async function runBackupJob(): Promise<void> {
 
 /** Registra os jobs recorrentes. Chamado uma vez no boot. */
 export function initScheduledJobs(): void {
+  // 0. Jobs de IA que ficaram "executando" de um boot anterior → marcados como
+  //    interrompidos (o runner morre junto com o processo).
+  void import("../jobs/aiJobRunner")
+    .then(({ recoverStaleAiJobs }) => recoverStaleAiJobs())
+    .then((n) => {
+      if (n > 0) console.warn(`[Scheduler] ${n} job(s) de IA interrompido(s) por restart foram marcados como erro.`);
+    })
+    .catch(() => undefined);
+
   // 1. Sincronização de cotações por e-mail
   if (isImapConfigured() && enabled(process.env.EMAIL_SYNC_ENABLED, true)) {
     const expr = process.env.EMAIL_SYNC_CRON || DEFAULT_EMAIL_SYNC_CRON;

@@ -3386,3 +3386,59 @@ export const payables = mysqlTable(
   (t) => [index("idx_pay_vencimento").on(t.vencimento), index("idx_pay_pago").on(t.pagoEm)]
 );
 export type Payable = typeof payables.$inferSelect;
+
+/**
+ * ai_usage_daily: consumo de IA agregado por dia/provedor/modelo.
+ * Persistido a cada chamada (upsert) — o consumo não some no restart e a
+ * Central de IA mostra custo estimado acumulado, não só desde o boot.
+ */
+export const aiUsageDaily = mysqlTable(
+  "ai_usage_daily",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Dia em UTC no formato YYYY-MM-DD
+    dia: varchar("dia", { length: 10 }).notNull(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    model: varchar("model", { length: 128 }).notNull(),
+    chamadas: int("chamadas").default(0).notNull(),
+    promptTokens: int("promptTokens").default(0).notNull(),
+    completionTokens: int("completionTokens").default(0).notNull(),
+    // Custo estimado em USD pela tabela de preços do provedor (0 quando o
+    // modelo não está na tabela — ex.: tier gratuito).
+    custoUsd: decimal("custoUsd", { precision: 12, scale: 6 }).default("0").notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_ai_usage_dia_prov_model").on(t.dia, t.provider, t.model)]
+);
+export type AiUsageDaily = typeof aiUsageDaily.$inferSelect;
+
+/**
+ * ai_jobs: execuções em segundo plano de operações de IA em massa
+ * (enriquecimento de ficha técnica, reclassificação). A mutation tRPC apenas
+ * cria o job e retorna o id; o processamento roda em background e o cliente
+ * acompanha por polling — nada de request de minutos segurando conexão.
+ * status: "executando" | "concluido" | "erro" | "cancelado"
+ */
+export const aiJobs = mysqlTable(
+  "ai_jobs",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    tipo: varchar("tipo", { length: 64 }).notNull(), // ficha_tecnica | reclassificacao
+    status: varchar("status", { length: 32 }).default("executando").notNull(),
+    payload: json("payload"),
+    // { processed, total, updated, skipped, errors }
+    progresso: json("progresso").$type<{
+      processed: number;
+      total: number;
+      updated: number;
+      skipped: number;
+      errors: number;
+    }>(),
+    errorMessages: json("errorMessages").$type<string[]>(),
+    requestedBy: int("requestedBy"),
+    iniciadoEm: timestamp("iniciadoEm").defaultNow().notNull(),
+    concluidoEm: timestamp("concluidoEm"),
+  },
+  (t) => [index("idx_ai_jobs_status").on(t.status), index("idx_ai_jobs_tipo").on(t.tipo)]
+);
+export type AiJob = typeof aiJobs.$inferSelect;

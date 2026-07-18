@@ -9,9 +9,13 @@ const PROVIDER_LABELS: Record<string, { nome: string; nota: string }> = {
   forge: { nome: "Forge (legado)", nota: "Endpoint legado da plataforma" },
 };
 
+const formatBrl = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 });
+
 export default function CentralIA() {
   const isAdmin = usePermission("admin");
   const statusQuery = trpc.ai.status.useQuery();
+  const consumoQuery = trpc.ai.consumo.useQuery();
   const testarMutation = trpc.ai.testar.useMutation({
     onSuccess: (res) => {
       if (res.ok) toast.success(`${res.provedor} respondeu: ${res.resposta}`);
@@ -77,36 +81,72 @@ export default function CentralIA() {
 
           <div className="border border-gray-200 p-4 mb-4">
             <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
-              Consumo de IA desde o último reinício do servidor
+              Consumo de IA acumulado
             </div>
-            {(s as any).consumo && (s as any).consumo.chamadas > 0 ? (
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <div className="text-xl font-black text-gray-900">
-                    {(s as any).consumo.chamadas.toLocaleString("pt-BR")}
+            {consumoQuery.data?.totais && consumoQuery.data.totais.chamadas > 0 ? (
+              <>
+                <div className="grid grid-cols-4 gap-4 text-center">
+                  <div>
+                    <div className="text-xl font-black text-gray-900">
+                      {consumoQuery.data.totais.chamadas.toLocaleString("pt-BR")}
+                    </div>
+                    <div className="text-[11px] text-gray-500">chamadas à IA</div>
                   </div>
-                  <div className="text-[11px] text-gray-500">chamadas à IA</div>
-                </div>
-                <div>
-                  <div className="text-xl font-black text-gray-900">
-                    {(s as any).consumo.promptTokens.toLocaleString("pt-BR")}
+                  <div>
+                    <div className="text-xl font-black text-gray-900">
+                      {consumoQuery.data.totais.promptTokens.toLocaleString("pt-BR")}
+                    </div>
+                    <div className="text-[11px] text-gray-500">tokens enviados</div>
                   </div>
-                  <div className="text-[11px] text-gray-500">tokens enviados</div>
-                </div>
-                <div>
-                  <div className="text-xl font-black text-gray-900">
-                    {(s as any).consumo.completionTokens.toLocaleString("pt-BR")}
+                  <div>
+                    <div className="text-xl font-black text-gray-900">
+                      {consumoQuery.data.totais.completionTokens.toLocaleString("pt-BR")}
+                    </div>
+                    <div className="text-[11px] text-gray-500">tokens recebidos</div>
                   </div>
-                  <div className="text-[11px] text-gray-500">tokens recebidos</div>
+                  <div>
+                    <div className="text-xl font-black text-gray-900">
+                      {formatBrl(consumoQuery.data.totais.custoBrl)}
+                    </div>
+                    <div className="text-[11px] text-gray-500">custo estimado</div>
+                  </div>
                 </div>
-              </div>
+                {consumoQuery.data.porProvedor.length > 0 && (
+                  <table className="w-full mt-4 text-xs">
+                    <thead>
+                      <tr className="text-left text-gray-400 border-b border-gray-100">
+                        <th className="py-1 font-medium">Provedor / modelo</th>
+                        <th className="py-1 font-medium text-right">Chamadas</th>
+                        <th className="py-1 font-medium text-right">Tokens</th>
+                        <th className="py-1 font-medium text-right">Custo estimado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {consumoQuery.data.porProvedor.map((p) => (
+                        <tr key={`${p.provider}-${p.model}`} className="border-b border-gray-50">
+                          <td className="py-1 text-gray-700">
+                            {PROVIDER_LABELS[p.provider]?.nome ?? p.provider}
+                            <span className="text-gray-400"> · {p.model}</span>
+                          </td>
+                          <td className="py-1 text-right text-gray-700">{p.chamadas.toLocaleString("pt-BR")}</td>
+                          <td className="py-1 text-right text-gray-700">
+                            {(p.promptTokens + p.completionTokens).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="py-1 text-right text-gray-700">{formatBrl(p.custoBrl)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
             ) : (
               <div className="text-sm text-gray-400">Nenhuma chamada de IA registrada ainda.</div>
             )}
             <div className="text-[11px] text-gray-400 mt-3">
               Tokens são a unidade de cobrança dos provedores de IA (aprox. 3–4 letras por token).
-              Operações em massa (enriquecer/reclassificar milhares de produtos) consomem muitos
-              tokens — acompanhe aqui antes e depois de rodá-las.
+              O custo em reais é uma estimativa pela tabela de preços de cada provedor convertida
+              a US$ {consumoQuery.data?.cotacaoUsdBrl.toLocaleString("pt-BR") ?? "5,5"} — ajuste a
+              cotação em <code>USD_BRL_RATE</code>. Modelos de tier gratuito aparecem com custo zero.
             </div>
           </div>
 

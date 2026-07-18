@@ -126,7 +126,6 @@ jobs:
       # E-mail legado: EMAIL_USER, EMAIL_PASSWORD
       # E-mail avançado: IMAP_* e SMTP_*
       # WhatsApp: WHATSAPP_PHONE_ID/TOKEN/WEBHOOK_URL/TO
-      # Integrações futuras: PRODEMGE_API_KEY
       # Ajustes não sensíveis podem ser Repository Variables ou Secrets.
       - name: Aplicar integrações cadastradas no GitHub
         env:
@@ -136,7 +135,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BUILT_IN_FORGE_API_URL: ${{ secrets.BUILT_IN_FORGE_API_URL }}
           BUILT_IN_FORGE_API_KEY: ${{ secrets.BUILT_IN_FORGE_API_KEY }}
-          PRODEMGE_API_KEY: ${{ secrets.PRODEMGE_API_KEY }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           IMAP_HOST: ${{ secrets.IMAP_HOST }}
@@ -233,7 +231,7 @@ jobs:
 
           for key in \
             ADMIN_PASSWORD GROQ_API_KEY ANTHROPIC_API_KEY \
-            BUILT_IN_FORGE_API_URL BUILT_IN_FORGE_API_KEY PRODEMGE_API_KEY \
+            BUILT_IN_FORGE_API_URL BUILT_IN_FORGE_API_KEY \
             AI_PROVIDER GROQ_MODEL ANTHROPIC_MODEL LLM_TIMEOUT_MS \
             IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_TLS IMAP_MAILBOX \
             SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_SECURE SMTP_FROM \
