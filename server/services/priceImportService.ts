@@ -1,6 +1,8 @@
-import { getDb } from "../db";
+import { getDb, upsertProductSupplierPrice } from "../db";
 import { suppliers, products } from "../../drizzle/schema";
 import { eq, and, like } from "drizzle-orm";
+import { escapeLike } from "../db/_helpers";
+import { jaroWinklerSimilarity, normalizeText } from "../matching/productMatcher";
 import { parsePrecoBR } from "../utils/number";
 
 export interface PriceRow {
@@ -68,13 +70,14 @@ export async function detectSupplierFromFile(
       };
     }
 
-    // Tentar encontrar por padrão (primeiras letras)
+    // Tentar encontrar por padrão (primeiras letras). Sigla com menos de 3
+    // caracteres casa praticamente qualquer nome de arquivo — ignorada.
     const initials = supplier.name
       .split(" ")
       .map((w: string) => w[0])
       .join("")
       .toLowerCase();
-    if (fileNameLower.includes(initials)) {
+    if (initials.length >= 3 && fileNameLower.includes(initials)) {
       return {
         supplierId: supplier.id,
         supplierName: supplier.name,
@@ -130,20 +133,34 @@ export async function matchProductByIdentifier(
     }
   }
 
-  // Finalmente, tentar match por nome (fuzzy)
+  // Finalmente, match por nome: LIKE com escape (%/_ da planilha não viram
+  // curinga) e ranking por similaridade — nunca o "primeiro que aparecer".
   const byName = await db
     .select({ id: products.id, name: products.name })
     .from(products)
     .where(
       and(
-        like(products.name, `%${productName}%`),
+        like(products.name, `%${escapeLike(productName)}%`),
         eq(products.supplierId, supplierId)
       )
     )
-    .limit(1);
+    .limit(20);
 
   if (byName.length > 0) {
-    return { id: byName[0].id, name: byName[0].name };
+    const target = normalizeText(productName);
+    let best: { id: number; name: string } | null = null;
+    let bestScore = 0;
+    for (const candidate of byName) {
+      const score = jaroWinklerSimilarity(target, normalizeText(candidate.name));
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+    // Limiar conservador: match ambíguo NÃO recebe preço automaticamente.
+    if (best && bestScore >= 0.85) {
+      return best;
+    }
   }
 
   return null;
@@ -301,8 +318,9 @@ export async function importPricesWithSupplier(
       );
 
       if (!matchedProduct) {
-        // Criar novo produto
-        const result = await db
+        // Criar novo produto — o ID vem do insertId (buscar por nome devolvia
+        // o produto errado quando havia nomes repetidos)
+        const [result] = await db
           .insert(products)
           .values({
             name: row.productName,
@@ -311,25 +329,28 @@ export async function importPricesWithSupplier(
             price: row.price.toString(),
             supplierId,
           });
-        
-        // Obter o ID do produto inserido
-        const newProduct = await db
-          .select({ id: products.id })
-          .from(products)
-          .where(eq(products.name, row.productName))
-          .limit(1);
 
-        if (newProduct.length === 0) {
+        const newId = (result as { insertId?: number })?.insertId;
+        if (!newId) {
           throw new Error("Failed to create product");
         }
+        await upsertProductSupplierPrice(newId, supplierId, row.price.toString(), {
+          codigoFornecedor: row.productCode,
+          origem: "import",
+        });
 
         imported++;
       } else {
-        // Atualizar preço do produto existente
+        // Atualizar custo do produto existente (mesmo fornecedor) mantendo a
+        // oferta e o histórico de preço em dia
         await db
           .update(products)
           .set({ price: row.price.toString() })
           .where(eq(products.id, matchedProduct.id));
+        await upsertProductSupplierPrice(matchedProduct.id, supplierId, row.price.toString(), {
+          codigoFornecedor: row.productCode,
+          origem: "import",
+        });
 
         imported++;
       }

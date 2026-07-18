@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 >/dev/null
+chcp 65001 >nul
 title Sistema S2 - Rodando...
 color 0B
 
@@ -20,6 +20,6 @@ REM Abre o navegador na tela de login apos 5 segundos
 start /b cmd /c "timeout /t 5 /nobreak >nul && start http://localhost:3000/login"
 
 REM Inicia o servidor
-call pnpm dev 2>nul || call npx tsx server/_core/index.ts
+call pnpm dev || call npx tsx server/_core/index.ts
 
 pause

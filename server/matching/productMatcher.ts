@@ -462,15 +462,13 @@ export function parseEditalItemText(text: string): EditalItem {
     "adesivo", "patch", "implante", "pellet",
   ];
 
-  let nome = "";
   let concentracao = "";
   const apresentacaoParts: string[] = [];
+  const nomeParts: string[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (i === 0) {
-      nome = token; // Primeiro token = nome do produto
-    } else if (concPattern.test(token)) {
+    if (concPattern.test(token)) {
       concentracao = token;
     } else if (apresentacaoKeywords.some((k) => token.includes(k))) {
       apresentacaoParts.push(token);
@@ -479,11 +477,15 @@ export function parseEditalItemText(text: string): EditalItem {
         apresentacaoParts.push(tokens[i + 1]);
         i++;
       }
+    } else {
+      // Tudo que não é concentração nem apresentação compõe o nome — "Dipirona
+      // sódica" inteiro, não só a primeira palavra (o nome pesa 40% do score).
+      nomeParts.push(token);
     }
   }
 
   return {
-    nome: text.split(" ")[0] || text, // Nome original (não normalizado) para melhor matching
+    nome: nomeParts.join(" ") || text,
     concentracao: concentracao || undefined,
     apresentacao: apresentacaoParts.join(" ") || undefined,
   };

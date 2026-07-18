@@ -6,7 +6,6 @@ RUN npm install -g pnpm@10.4.1
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
-COPY patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY . .
@@ -20,7 +19,6 @@ RUN npm install -g pnpm@10.4.1
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
-COPY patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts --prod
 
 # ── Estágio 3: runtime enxuto ────────────────────────────────────────────────
