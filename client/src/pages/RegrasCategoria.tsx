@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Edit2, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
+import { formatBRL } from "@/lib/format";
 
 interface CategoryRule {
   categoryId: number;
@@ -129,7 +130,7 @@ export default function RegrasCategoria() {
                     <CardTitle>{rule.categoryName}</CardTitle>
                     <CardDescription>
                       Margem: {rule.marginPercentage}% | Impostos: {getTotalTaxPercentage(rule).toFixed(2)}% |
-                      Frete: {rule.freightType === "fixed" ? `R$ ${rule.freightValue.toFixed(2)}` : `${rule.freightValue}%`}
+                      Frete: {rule.freightType === "fixed" ? `${formatBRL(rule.freightValue)}` : `${rule.freightValue}%`}
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">

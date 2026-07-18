@@ -172,7 +172,8 @@ async function runScheduledScrapers(): Promise<void> {
       lastRunAt: scraperConfigs.lastRunAt,
     })
       .from(scraperConfigs)
-      .where(eq(scraperConfigs.enabled, "yes"));
+      // Governança: agendamento só considera fornecedores com termos de uso aprovados
+      .where(and(eq(scraperConfigs.enabled, "yes"), eq(scraperConfigs.tosAprovado, true)));
 
     for (const cfg of ativos) {
       if (!cfg.scheduleTime || cfg.scheduleTime > hhmm) continue;
@@ -234,6 +235,12 @@ export async function runBackupJob(): Promise<void> {
 
 /** Registra os jobs recorrentes. Chamado uma vez no boot. */
 export function initScheduledJobs(): void {
+  // 0a. Config de e-mail salva pela interface tem precedência sobre o .env —
+  //     aplicada antes de decidir se a sincronização IMAP liga.
+  void import("./emailConfigService")
+    .then(({ applyEmailConfigFromDb }) => applyEmailConfigFromDb())
+    .catch(() => undefined);
+
   // 0. Jobs de IA que ficaram "executando" de um boot anterior → marcados como
   //    interrompidos (o runner morre junto com o processo).
   void import("../jobs/aiJobRunner")
@@ -243,11 +250,17 @@ export function initScheduledJobs(): void {
     })
     .catch(() => undefined);
 
-  // 1. Sincronização de cotações por e-mail
-  if (isImapConfigured() && enabled(process.env.EMAIL_SYNC_ENABLED, true)) {
+  // 1. Sincronização de cotações por e-mail. O agendamento é feito sempre que
+  //    habilitado; a checagem "IMAP configurado?" acontece a CADA disparo —
+  //    assim a configuração salva pela interface (aplicada async no passo 0a,
+  //    ou a qualquer momento depois) passa a valer sem reiniciar o servidor.
+  if (enabled(process.env.EMAIL_SYNC_ENABLED, true)) {
     const expr = process.env.EMAIL_SYNC_CRON || DEFAULT_EMAIL_SYNC_CRON;
     if (cron.validate(expr)) {
-      cron.schedule(expr, runEmailSync);
+      cron.schedule(expr, () => {
+        if (!isImapConfigured()) return;
+        void runEmailSync();
+      });
       logger.info(`[Scheduler] Sincronização de cotações por e-mail agendada (${expr}).`);
     } else {
       logger.warn(`[Scheduler] EMAIL_SYNC_CRON inválido: "${expr}" — sincronização automática desativada.`);

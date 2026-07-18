@@ -40,6 +40,7 @@ import { pncpRadarRouter } from "./routers/pncpRadar";
 import { emailQuotationsRouter } from "./routers/emailQuotations";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
+import { emailConfigRouter } from "./routers/emailConfig";
 import { precificacaoRouter } from "./routers/precificacao";
 import { portalCredentialsRouter } from "./routers/portalCredentials";
 import { agendaRouter } from "./routers/agenda";
@@ -90,6 +91,7 @@ export const appRouter = router({
   emailQuotations: emailQuotationsRouter,
   certidoes: certidoesRouter,
   ai: aiRouter,
+  emailConfig: emailConfigRouter,
   precificacao: precificacaoRouter,
   portalCredentials: portalCredentialsRouter,
   agenda: agendaRouter,

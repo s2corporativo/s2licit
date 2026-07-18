@@ -71,6 +71,13 @@
       "when": 1784406735565,
       "tag": "0009_bright_valeria_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1784407312893,
+      "tag": "0010_windy_wolf_cub",
+      "breakpoints": true
     }
   ]
 }

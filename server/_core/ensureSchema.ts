@@ -87,6 +87,11 @@ export async function ensureScraperColumns(): Promise<void> {
   try {
     await ensureColumn("supplier_sessions", "localStorage", "TEXT NULL");
     await ensureColumn("scraper_logs", "evidenceUrl", "VARCHAR(512) NULL");
+    // Governança de ToS: DEFAULT TRUE aqui de propósito — configs que JÁ
+    // operavam antes da coluna existir são consideradas aprovadas
+    // (grandfathering); novos cadastros pela UI nascem com false e exigem a
+    // confirmação explícita do operador.
+    await ensureColumn("scraper_configs", "tosAprovado", "BOOLEAN NOT NULL DEFAULT TRUE");
   } catch (err) {
     logger.error("[Schema] Falha ao garantir colunas do conector de fornecedores:", err);
   }

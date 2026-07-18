@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar, TrendingDown, TrendingUp, BarChart3 } from "lucide-react";
+import { formatBRL } from "@/lib/format";
 import {
   LineChart,
   Line,
@@ -191,7 +192,7 @@ export function AnalisePrecosV2() {
                 <div className="space-y-2">
                   <div>
                     <p className="text-2xl font-bold text-foreground">
-                      R$ {v.averagePrice.toFixed(2)}
+                      {formatBRL(v.averagePrice)}
                     </p>
                     <p className="text-xs text-muted-foreground">Preço Médio</p>
                   </div>
@@ -306,7 +307,7 @@ export function AnalisePrecosV2() {
                     </div>
                     <div className="text-right">
                       <p className="font-medium text-foreground">
-                        R$ {product.price.toFixed(2)}
+                        {formatBRL(product.price)}
                       </p>
                       <p className="text-sm text-orange-500">
                         Var: {product.variation.toFixed(1)}%

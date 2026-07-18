@@ -141,7 +141,7 @@ function MigracaoV2Panel() {
   }, [campos, batchSize, migrateV2Mutation, addLog]);
 
   return (
-    <Card className="border-orange-200 dark:border-orange-800">
+    <Card className="border-orange-200">
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Zap className="h-4 w-4 text-orange-500" />
@@ -161,7 +161,7 @@ function MigracaoV2Panel() {
               className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors ${
                 campos.includes(campo)
                   ? "bg-orange-500 text-white border-orange-500"
-                  : "bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-orange-400"
+                  : "bg-white text-gray-600 border-gray-300 hover:border-orange-400"
               }`}
             >
               {CAMPO_LABELS[campo]}
@@ -223,7 +223,7 @@ function MigracaoV2Panel() {
           )}
         </div>
         {done && !running && (
-          <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-green-700 dark:text-green-400 text-sm">
+          <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg text-green-700 text-sm">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             <span>Migração concluída! <strong>{totalUpdated.toLocaleString("pt-BR")}</strong> produtos atualizados.</span>
           </div>
@@ -396,8 +396,8 @@ export default function ReclassificacaoIA() {
       <AvisoIA />
       {/* Header */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-          <Bot className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+        <div className="p-2 bg-purple-100 rounded-lg">
+          <Bot className="h-6 w-6 text-purple-600" />
         </div>
         <div>
           <h1 className="text-2xl font-bold">Reclassificação em Lote via IA</h1>
@@ -724,7 +724,7 @@ export default function ReclassificacaoIA() {
               </div>
 
               {done && !running && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-green-700 dark:text-green-400 text-sm">
+                <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg text-green-700 text-sm">
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
                   <span>
                     Concluído!{" "}

@@ -8,7 +8,7 @@ import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { getDb } from "../db";
 import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
 import { executarScraper, testarLoginFornecedor, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
 import { logger } from "../_core/logger";
@@ -51,6 +51,9 @@ const cadastrarSchema = z.object({
   scheduleTime: z.string().regex(/^\d{2}:\d{2}$/).default("02:00"),
   enabled: z.enum(["yes", "no"]).default("yes"),
   customSelectors: customSelectorsSchema.optional(),
+  // Governança: o operador confirma que os termos de uso do site foram
+  // revisados e a coleta está autorizada. Sem isso a captura não roda.
+  tosAprovado: z.boolean().default(false),
 });
 
 const atualizarCredenciaisSchema = z.object({
@@ -60,6 +63,7 @@ const atualizarCredenciaisSchema = z.object({
   scheduleTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   enabled: z.enum(["yes", "no"]).optional(),
   customSelectors: customSelectorsSchema.optional(),
+  tosAprovado: z.boolean().optional(),
 });
 
 const testarConexaoSchema = z.object({
@@ -102,6 +106,7 @@ export const scraperAgentRouter = router({
         scheduleTime: scraperConfigs.scheduleTime,
         lastRunAt: scraperConfigs.lastRunAt,
         lastRunStatus: scraperConfigs.lastRunStatus,
+        tosAprovado: scraperConfigs.tosAprovado,
         lastRunErrorMessage: scraperConfigs.lastRunErrorMessage,
         productsScrapedCount: scraperConfigs.productsScrapedCount,
         productsUpdatedCount: scraperConfigs.productsUpdatedCount,
@@ -141,6 +146,7 @@ export const scraperAgentRouter = router({
         scheduleTime: input.scheduleTime,
         enabled: input.enabled,
         customSelectors: input.customSelectors ?? null,
+        tosAprovado: input.tosAprovado ?? false,
       });
 
       return { id: (result as any).insertId, message: "Fornecedor configurado com sucesso" };
@@ -159,6 +165,7 @@ export const scraperAgentRouter = router({
       if (input.scheduleTime) updates.scheduleTime = input.scheduleTime;
       if (input.enabled) updates.enabled = input.enabled;
       if (input.customSelectors) updates.customSelectors = input.customSelectors;
+      if (input.tosAprovado !== undefined) updates.tosAprovado = input.tosAprovado;
 
       await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, input.id));
       return { message: "Credenciais atualizadas com sucesso" };
@@ -186,6 +193,24 @@ export const scraperAgentRouter = router({
     .input(executarSchema)
     .mutation(async ({ input }: { input: z.infer<typeof executarSchema> }) => {
       const { scraperConfigId } = input;
+
+      // Governança: captura só roda com os termos de uso do fornecedor
+      // revisados e aprovados por um humano (checkbox na tela de captura).
+      {
+        const db = await getDb();
+        if (!db) throw new Error("Banco indisponível");
+        const [cfg] = await db
+          .select({ tosAprovado: scraperConfigs.tosAprovado })
+          .from(scraperConfigs)
+          .where(eq(scraperConfigs.id, scraperConfigId))
+          .limit(1);
+        if (!cfg) throw new Error("Configuração de captura não encontrada.");
+        if (!cfg.tosAprovado) {
+          throw new Error(
+            "Captura bloqueada: confirme na configuração do fornecedor que os termos de uso do site foram revisados e a coleta está autorizada."
+          );
+        }
+      }
 
       // Confirmação de login: se o operador digitou credenciais novas, elas
       // são gravadas (senha criptografada) antes de iniciar a captura. Sem
@@ -259,9 +284,10 @@ export const scraperAgentRouter = router({
     const db = await getDb();
     if (!db) throw new Error("Banco indisponível");
 
+    // Só fornecedores habilitados E com termos de uso aprovados (governança)
     const ativos = await db.select({ id: scraperConfigs.id })
       .from(scraperConfigs)
-      .where(eq(scraperConfigs.enabled, "yes"));
+      .where(and(eq(scraperConfigs.enabled, "yes"), eq(scraperConfigs.tosAprovado, true)));
 
     let iniciados = 0;
     for (const { id } of ativos) {

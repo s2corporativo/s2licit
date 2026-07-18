@@ -32,6 +32,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Link, useLocation } from "wouter";
+import { formatBRL } from "@/lib/format";
 
 // ─── Score de Qualidade do Produto ──────────────────────────────────────────
 const QUALITY_FIELDS: { key: string; label: string }[] = [
@@ -138,9 +139,9 @@ function PriceHistorySection({ productId, suppliers }: { productId: number; supp
                 <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-2 py-1 text-gray-500">{h.recordedAt ? new Date(h.recordedAt).toLocaleDateString('pt-BR') : '-'}</td>
                   <td className="px-2 py-1 text-gray-700">{sup?.name ?? `#${h.supplierId}`}</td>
-                  <td className="px-2 py-1 text-right text-gray-400">{prev !== null ? `R$ ${prev.toFixed(2)}` : '-'}</td>
+                  <td className="px-2 py-1 text-right text-gray-400">{prev !== null ? `${formatBRL(prev)}` : '-'}</td>
                   <td className={`px-2 py-1 text-right font-semibold ${changed ? (curr! > prev! ? 'text-red-600' : 'text-green-600') : 'text-gray-700'}`}>
-                    {curr !== null ? `R$ ${curr.toFixed(2)}` : '-'}
+                    {curr !== null ? `${formatBRL(curr)}` : '-'}
                     {changed && <span className="ml-1">{curr! > prev! ? '↑' : '↓'}</span>}
                   </td>
                   <td className="px-2 py-1 text-gray-400">{h.origem ?? 'manual'}</td>
@@ -445,11 +446,11 @@ function EditModal({
               </div>
               {form.price && (form.freightValue || form.taxValue) && (
                 <div className="mt-2 text-xs font-bold text-blue-800">
-                  Preço Final (Landed): R$ {(
+                  Preço Final (Landed): {formatBRL((
                     parseFloat(form.price || "0") +
                     parseFloat(form.freightValue || "0") +
                     parseFloat(form.taxValue || "0")
-                  ).toFixed(2)}
+                  ))}
                 </div>
               )}
             </div>
@@ -617,7 +618,7 @@ function EditModal({
                           onClick={() => setEditingPrice({ supplierId: s.id, value: existing?.price ?? "" })}
                           title="Clique para editar"
                         >
-                          {existing?.price ? `R$ ${parseFloat(existing.price).toFixed(2)}` : <span className="text-gray-300 italic">-</span>}
+                          {existing?.price ? `${formatBRL(parseFloat(existing.price))}` : <span className="text-gray-300 italic">-</span>}
                         </span>
                         {existing && (
                           <button type="button" onClick={() => deletePriceMutation.mutate({ productId: product.id, supplierId: s.id })} className="text-red-300 hover:text-red-600 text-[10px]">excluir</button>

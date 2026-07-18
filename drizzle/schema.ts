@@ -2074,6 +2074,9 @@ export const scraperConfigs = mysqlTable("scraper_configs", {
     waitForSelector?: string;
     navigationWait?: number;
   }>(),
+  // Governança: a captura só roda depois que um humano confirmou que os
+  // termos de uso do site do fornecedor foram revisados e a coleta autorizada.
+  tosAprovado: boolean("tosAprovado").default(false).notNull(),
   lastRunAt: timestamp("lastRunAt"),
   nextRunAt: timestamp("nextRunAt"),
   lastRunStatus: mysqlEnum("lastRunStatus", ["success", "failed", "pending"]).default("pending"),
@@ -3422,3 +3425,27 @@ export const aiJobs = mysqlTable(
   (t) => [index("idx_ai_jobs_status").on(t.status), index("idx_ai_jobs_tipo").on(t.tipo)]
 );
 export type AiJob = typeof aiJobs.$inferSelect;
+
+/**
+ * email_settings: configuração de IMAP/SMTP pela interface (linha única).
+ * Senhas criptografadas com o cofre (AES-256-GCM). Quando presente, tem
+ * precedência sobre as variáveis de ambiente — que seguem como fallback
+ * para instalações configuradas por .env.
+ */
+export const emailSettings = mysqlTable("email_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  imapHost: varchar("imapHost", { length: 256 }),
+  imapPort: int("imapPort"),
+  imapUser: varchar("imapUser", { length: 320 }),
+  imapPasswordEnc: text("imapPasswordEnc"),
+  imapTls: boolean("imapTls").default(true).notNull(),
+  imapMailbox: varchar("imapMailbox", { length: 128 }),
+  smtpHost: varchar("smtpHost", { length: 256 }),
+  smtpPort: int("smtpPort"),
+  smtpUser: varchar("smtpUser", { length: 320 }),
+  smtpPasswordEnc: text("smtpPasswordEnc"),
+  smtpSecure: boolean("smtpSecure").default(false).notNull(),
+  smtpFrom: varchar("smtpFrom", { length: 320 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type EmailSettings = typeof emailSettings.$inferSelect;

@@ -75,6 +75,7 @@ function StatusBadge({ status }: { status: string | null }) {
 // ─── Modal de Cadastro ────────────────────────────────────────────────────────
 function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState({ supplierId: "", scraperType: "tambasa", email: "", password: "", scheduleTime: "02:00" });
+  const [tosAprovado, setTosAprovado] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [personalizado, setPersonalizado] = useState(false);
   const [customNome, setCustomNome] = useState("");
@@ -115,6 +116,10 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       toast.error("Preencha todos os campos obrigatórios");
       return;
     }
+    if (!tosAprovado) {
+      toast.error("Confirme que os termos de uso do site do fornecedor foram revisados e a coleta está autorizada.");
+      return;
+    }
     if (personalizado) {
       if (!customNome.trim()) { toast.error("Informe um nome para o fornecedor personalizado"); return; }
       const montado = montarCustomSelectors(sel, categoryUrlsRaw);
@@ -122,9 +127,10 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
       cadastrar.mutate({
         supplierId: parseInt(form.supplierId), scraperType, email: form.email, password: form.password,
         scheduleTime: form.scheduleTime, customSelectors: montado.customSelectors as any,
+        tosAprovado,
       });
     } else {
-      cadastrar.mutate({ ...form, supplierId: parseInt(form.supplierId) });
+      cadastrar.mutate({ ...form, supplierId: parseInt(form.supplierId), tosAprovado });
     }
   }
 
@@ -323,6 +329,23 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           </button>
         </div>
 
+        <div className="px-6 pb-4">
+          <label htmlFor="tos-aprovado" className="flex items-start gap-2 text-[12px] text-gray-600 cursor-pointer">
+            <input
+              id="tos-aprovado"
+              type="checkbox"
+              checked={tosAprovado}
+              onChange={(e) => setTosAprovado(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Confirmo que os <strong>termos de uso</strong> do site deste fornecedor foram
+              revisados e que a coleta automática de preços está autorizada (somos cliente
+              cadastrado). Sem esta confirmação a captura não roda.
+            </span>
+          </label>
+        </div>
+
         <div className="px-6 pb-6 flex gap-3">
           <button
             onClick={onClose}
@@ -469,6 +492,13 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
   const [showLog, setShowLog] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
 
+  const aprovarTos = trpc.scraperAgent.atualizarCredenciais.useMutation({
+    onSuccess: () => {
+      toast.success("Termos de uso registrados como aprovados para este fornecedor.");
+      onRefresh();
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const executar = trpc.scraperAgent.executar.useMutation({
     onSuccess: () => {
       toast.success("Login confirmado — captura iniciada!");
@@ -511,6 +541,30 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
           </span>
         </div>
       </div>
+
+      {/* Governança: sem termos aprovados a captura não roda */}
+      {!config.tosAprovado && (
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-amber-800">
+            Termos de uso do site ainda não revisados — a captura está bloqueada.
+          </span>
+          <button
+            onClick={async () => {
+              const ok = await confirmAction({
+                title: "Aprovar termos de uso deste fornecedor?",
+                description:
+                  "Confirme que os termos de uso do site foram revisados e que a coleta automática de preços está autorizada (empresa é cliente cadastrado do fornecedor).",
+                confirmLabel: "Aprovar",
+                destructive: false,
+              });
+              if (ok) aprovarTos.mutate({ id: config.id, tosAprovado: true });
+            }}
+            className="text-[11px] font-semibold text-amber-900 underline whitespace-nowrap"
+          >
+            Revisei e aprovo
+          </button>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
