@@ -1,8 +1,11 @@
 import { trpc } from "@/lib/trpc";
+import { usePermission } from "@/components/RequireAuth";
+import { toast } from "sonner";
 import {
   Activity,
   AlertTriangle,
   CheckCircle2,
+  DatabaseBackup,
   KeyRound,
   Loader2,
   RefreshCw,
@@ -32,10 +35,25 @@ const STATUS = {
 } as const;
 
 export default function Diagnostico() {
+  const isAdmin = usePermission("admin");
   const query = trpc.diagnostico.verificar.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
   const data = query.data;
+  const backupQuery = trpc.diagnostico.backupStatus.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+  const backupMutation = trpc.diagnostico.backupAgora.useMutation({
+    onSuccess: (res) => {
+      if (res.ok) {
+        toast.success(`Backup concluído: ${res.arquivo}`);
+        backupQuery.refetch();
+      } else {
+        toast.error("O backup falhou.", { description: res.erro });
+      }
+    },
+    onError: (e) => toast.error("Não foi possível executar o backup.", { description: e.message }),
+  });
 
   const groups = new Map<string, NonNullable<typeof data>["itens"]>();
   for (const item of data?.itens ?? []) {
@@ -83,6 +101,47 @@ export default function Diagnostico() {
             <div className="border border-red-200 bg-red-50 p-3 text-center">
               <div className="text-2xl font-bold text-red-700">{data.resumo.erro}</div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-red-600">Erros</div>
+            </div>
+          </div>
+
+          {/* Backup do banco — visível a qualquer editor; o botão exige admin */}
+          <div className="border border-gray-200 bg-white p-4 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <DatabaseBackup className="mt-0.5 h-5 w-5 text-blue-700" />
+                <div>
+                  <div className="text-sm font-bold text-gray-900">Backup do banco de dados</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {backupQuery.data?.ultimo ? (
+                      <>
+                        Último backup:{" "}
+                        <strong>
+                          {new Date(backupQuery.data.ultimo.em).toLocaleString("pt-BR")}
+                        </strong>{" "}
+                        ({backupQuery.data.ultimo.arquivo})
+                      </>
+                    ) : backupQuery.isLoading ? (
+                      "Verificando..."
+                    ) : (
+                      "Nenhum backup encontrado ainda. O backup automático roda todos os dias às 3h."
+                    )}
+                  </div>
+                </div>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => backupMutation.mutate()}
+                  disabled={backupMutation.isPending}
+                  className="flex items-center gap-2 border border-blue-700 px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {backupMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <DatabaseBackup className="h-3.5 w-3.5" />
+                  )}
+                  Fazer backup agora
+                </button>
+              )}
             </div>
           </div>
 

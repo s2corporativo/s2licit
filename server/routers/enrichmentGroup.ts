@@ -21,7 +21,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
     }))
     .mutation(async ({ input }) => {
       const { invokeLLM } = await import("../_core/llm");
-      const systemMsg = "Você é um especialista em farmácia veterinária. Responda apenas com JSON válido.";
+      const systemMsg = "Você é um especialista em produtos para cotações e licitações — medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos. Responda apenas com JSON válido.";
       const userMsg = `Produto: "${input.name}"${input.categoryName ? ` (categoria: ${input.categoryName})` : ""}. Sugira: activeIngredient, concentration, presentation, unit, manufacturer (ou null), description, confidence (0-1). JSON apenas.`;
 
       try {
@@ -77,7 +77,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
       const results: Array<{ id: number; name: string; suggestion: any }> = [];
       for (const p of prods) {
         try {
-          const sysMsg = "Você é um especialista em farmácia veterinária. Responda apenas com JSON válido.";
+          const sysMsg = "Você é um especialista em produtos para cotações e licitações — medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos. Responda apenas com JSON válido.";
           const usrMsg = `Produto: "${p.name}". Sugira: activeIngredient, concentration, presentation, unit, manufacturer (ou null), description, confidence (0-1). JSON apenas.`;
           const res = await invokeLLM({
             messages: [
@@ -234,6 +234,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
       let batches = 0;
       let errors = 0;
       let offset = 0;
+      const errorMessages: string[] = [];
       // Process in batches until no more uncategorized products
       while (true) {
         const prods = await db
@@ -295,15 +296,19 @@ export const enrichmentRouter = router({  // INSIDE appRouter
             }
           }
           batches++;
-        } catch (_) {
+        } catch (err) {
           errors++;
+          // Não engolir o motivo: o cliente exibe as mensagens no log de execução.
+          errorMessages.push(
+            `Lote ${batches + errors}: ${err instanceof Error ? err.message : String(err)}`
+          );
           // Skip this batch and continue
           offset += batchSize;
         }
         // Safety: break if we've processed more than 300 batches (15k products)
         if (batches + errors > 300) break;
       }
-      return { updated, batches, errors };
+      return { updated, batches, errors, errorMessages: errorMessages.slice(0, 20) };
     }),
   // Apply: update categoryId for selected products
   batchReclassifyApply: protectedProcedure
@@ -389,6 +394,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
       let updated = 0;
       let skipped = 0;
       let errors = 0;
+      const errorMessages: string[] = [];
       // Processar em sub-lotes para a LLM
       const batchSize = input.batchSize;
       for (let i = 0; i < prods.length; i += batchSize) {
@@ -455,13 +461,16 @@ export const enrichmentRouter = router({  // INSIDE appRouter
               }
             }
           }
-        } catch (_) {
+        } catch (err) {
           errors += batch.length;
+          errorMessages.push(
+            `Produtos ${batch[0]?.id}–${batch[batch.length - 1]?.id}: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       }
       const nextOffset = input.offset + prods.length;
       const hasMore = nextOffset < totalCount;
-      return { updated, skipped, errors, total, nextOffset, hasMore };
+      return { updated, skipped, errors, total, nextOffset, hasMore, errorMessages: errorMessages.slice(0, 20) };
     }),
 
     // ── enrichFichaTecnica: extrai ficha técnica do nome do produto via IA ───────────────────────
@@ -517,6 +526,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
         let updated = 0;
         let skipped = 0;
         let errors = 0;
+        const errorMessages: string[] = [];
         // Processar em sub-lotes de 30 para a LLM (melhor qualidade de extração)
         const BATCH = 30;
         for (let i = 0; i < targets.length; i += BATCH) {
@@ -526,7 +536,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
               messages: [
                 {
                   role: "system",
-                  content: `Você é um especialista em farmácia veterinária e humana. Para cada produto informado, extraia do nome do produto as informações técnicas: princípio ativo / composição, concentração, forma farmacêutica, espécie animal (se veterinário) e classe terapêutica. Se não for possível extrair algum campo, deixe null. Responda em JSON válido.`,
+                  content: `Você é um especialista técnico em produtos para cotações — medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos. Para cada produto informado, extraia do nome do produto as informações técnicas: princípio ativo / composição / especificação, concentração ou dimensão, forma farmacêutica ou apresentação, espécie animal (apenas se veterinário) e classe terapêutica ou categoria de uso. Se não for possível extrair algum campo, deixe null. Responda em JSON válido.`,
                 },
                 {
                   role: "user",
@@ -582,14 +592,17 @@ export const enrichmentRouter = router({  // INSIDE appRouter
               db.update(products).set({ ...fields, updatedAt: new Date() }).where(eq(products.id, id))
             ));
             updated += toUpdate.length;
-          } catch (_) {
+          } catch (err) {
             errors += batch.length;
+            errorMessages.push(
+              `Produtos ${batch[0]?.id}–${batch[batch.length - 1]?.id}: ${err instanceof Error ? err.message : String(err)}`
+            );
           }
         }
         // Retorna nextOffset para o frontend continuar de onde parou
         const nextOffset = input.offset + targets.length;
         const hasMore = nextOffset < totalCount;
-        return { updated, skipped, errors, total: totalCount, processedInPage: targets.length, nextOffset, hasMore };
+        return { updated, skipped, errors, total: totalCount, processedInPage: targets.length, nextOffset, hasMore, errorMessages: errorMessages.slice(0, 20) };
       }),
     // ── extractFichaTecnica: extrai ficha técnica de UM produto via IA (para modal de edição) ──
     extractFichaTecnica: protectedProcedure
@@ -610,7 +623,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
         ].filter(Boolean).join(" | ");
         const resp = await invokeLLM({
           messages: [
-            { role: "system", content: "Você é um especialista em medicamentos veterinários. Retorne APENAS um JSON com o campo 'fichaTecnica' contendo a ficha técnica completa do produto (princípio ativo, classe terapêutica, indicações, posologia, contraindicações, forma farmacêutica). Se não souber, retorne fichaTecnica como string vazia." },
+            { role: "system", content: "Você é um especialista técnico em produtos para cotações (medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos). Retorne APENAS um JSON com o campo 'fichaTecnica' contendo a ficha técnica completa do produto (composição/princípio ativo ou especificação, classe/categoria de uso, indicações/aplicações, posologia ou modo de uso quando couber, apresentação). Se não souber, retorne fichaTecnica como string vazia." },
             { role: "user", content: prompt },
           ],
           response_format: {
@@ -741,7 +754,7 @@ export const enrichmentRouter = router({  // INSIDE appRouter
 
       const prod = product[0];
 
-      const prompt = `Analise o seguinte produto veterinário/farmacêutico e extraia as informações solicitadas:
+      const prompt = `Analise o seguinte produto e extraia as informações solicitadas:
 
 Nome do Produto: ${input.productName}
 Fabricante Atual: ${prod.manufacturer || "Não informado"}
@@ -762,7 +775,7 @@ Por favor, forneça em JSON:
           messages: [
             {
               role: "system",
-              content: "Você é um especialista em farmacologia veterinária e medicamentos. Classifique produtos com precisão. Responda APENAS com JSON válido.",
+              content: "Você é um especialista em produtos para cotações — medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos. Classifique produtos com precisão. Responda APENAS com JSON válido.",
             },
             { role: "user", content: prompt },
           ],
@@ -802,7 +815,8 @@ Por favor, forneça em JSON:
             concentration: enriched.concentration,
             tipoCatalogo: enriched.category,
             manufacturer: enriched.manufacturer,
-            statusConfiabilidade: enriched.confidence > 0.7 ? "completo_validado" : "enriquecido_ia",
+            // IA nunca se autovalida: teto em enriquecido_ia; "completo_validado" exige revisão humana.
+            statusConfiabilidade: "enriquecido_ia",
           })
           .where(eq(products.id, input.productId));
 
@@ -857,7 +871,7 @@ Por favor, forneça em JSON:
 
             const response = await invokeLLM({
               messages: [
-                { role: "system", content: "Especialista em farmacologia veterinária. Responda APENAS com JSON válido." },
+                { role: "system", content: "Especialista em catálogo de produtos para cotações (medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos). Responda APENAS com JSON válido." },
                 { role: "user", content: prompt },
               ],
               response_format: {
@@ -894,7 +908,8 @@ Por favor, forneça em JSON:
                 activeIngredient: enriched.activeIngredient,
                 concentration: enriched.concentration,
                 tipoCatalogo: enriched.category,
-                statusConfiabilidade: enriched.confidence > 0.7 ? "completo_validado" : "enriquecido_ia",
+                // IA nunca se autovalida: teto em enriquecido_ia.
+                statusConfiabilidade: "enriquecido_ia",
               })
               .where(eq(products.id, productId));
 
@@ -942,7 +957,7 @@ Por favor, forneça em JSON:
       try {
         const response = await invokeLLM({
           messages: [
-            { role: "system", content: "Especialista em farmacologia veterinária. JSON apenas." },
+            { role: "system", content: "Especialista em catálogo de produtos para cotações (medicamentos veterinários e humanos, materiais de construção, insumos e equipamentos). JSON apenas." },
             { role: "user", content: prompt },
           ],
           response_format: {

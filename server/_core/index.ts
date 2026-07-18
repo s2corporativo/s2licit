@@ -3,6 +3,8 @@ import express from "express";
 import compression from "compression";
 import { createServer } from "http";
 import net from "net";
+import fs from "fs";
+import path from "path";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { ensureAdminUser, ensurePasswordColumn, registerLocalAuthRoutes } from "./localAuth";
@@ -340,6 +342,13 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Grava a porta real para o INICIAR.bat abrir o navegador no endereço certo
+    // (em dev a porta pode variar quando a 3000 está ocupada).
+    try {
+      fs.writeFileSync(path.resolve(process.cwd(), ".port"), String(port));
+    } catch {
+      /* informativo apenas — nunca impede o boot */
+    }
   });
 
   initScheduledJobs();

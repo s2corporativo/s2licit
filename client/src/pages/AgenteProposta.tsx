@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import AvisoIA from "@/components/AvisoIA";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
@@ -178,6 +179,7 @@ export default function AgenteProposta() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8">
+      <AvisoIA />
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <div className="w-12 h-12 bg-gray-900 rounded-2xl flex items-center justify-center shadow-lg">
@@ -252,7 +254,7 @@ export default function AgenteProposta() {
             <h2 className="font-bold text-sm text-gray-900 mb-4 flex items-center gap-2">
               <Shield size={14} /> Credenciais do Portal
               <span className="text-[10px] font-normal text-gray-400 ml-auto flex items-center gap-1">
-                <Shield size={9} className="text-emerald-500" /> AES-256 em memória
+                <Shield size={9} className="text-emerald-500" /> Senha criptografada, nunca gravada em texto
               </span>
             </h2>
             <div className="space-y-3">

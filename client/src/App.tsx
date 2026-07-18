@@ -37,7 +37,6 @@ const Sinonimos = lazy(() => import("./pages/Sinonimos"));
 const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
 const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
 const ImportarNfe = lazy(() => named(import("./pages/ImportarNfe"), "ImportarNfe"));
-const ConfiguradorFornecedores = lazy(() => import("./pages/ConfiguradorFornecedores"));
 const AplicarPrecificacao = lazy(() => import("./pages/AplicarPrecificacao"));
 const RegrasCategoria = lazy(() => import("./pages/RegrasCategoria"));
 const AnalisePrecosV2 = lazy(() => named(import("./pages/AnalisePrecosV2"), "AnalisePrecosV2"));
@@ -128,11 +127,8 @@ function Router() {
             <ImportarNfe />
           </RequireAuth>
         </Route>
-        <Route path="/configurador-fornecedores">
-          <RequireAuth message="Configure fornecedores após fazer login." minRole="admin">
-            <ConfiguradorFornecedores />
-          </RequireAuth>
-        </Route>
+        {/* Tela fundida na Captura automática de preços — mesmo dado (scraperConfigs), um só cadastro */}
+        <Route path="/configurador-fornecedores"><Redirect to="/scraper-fornecedores" /></Route>
         <Route path="/seguranca">
           <RequireAuth message="Acesse a segurança da conta após fazer login.">
             <SegurancaMFA />

@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 
 // ─── Score de Qualidade do Produto ──────────────────────────────────────────
 const QUALITY_FIELDS: { key: string; label: string }[] = [
@@ -228,7 +228,10 @@ function EditModal({
   const [fichaIaSugestao, setFichaIaSugestao] = useState<string | null>(null);
   const extractFichaMutation = trpc.enrichment.extractFichaTecnica.useMutation({
     onSuccess: (res: { fichaTecnica: string }) => setFichaIaSugestao(res.fichaTecnica),
-    onError: (e: any) => toast.error("IA: " + e.message),
+    onError: (e: any) =>
+      toast.error("A IA não conseguiu sugerir a ficha técnica agora. Tente novamente.", {
+        description: e.message,
+      }),
   });
   const enrichSingleMutation = trpc.enrichment.enrichFichaTecnica.useMutation({
     onSuccess: (res) => {
@@ -239,7 +242,10 @@ function EditModal({
         toast.error("Não foi possível extrair a ficha técnica deste produto.");
       }
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any) =>
+      toast.error("Não foi possível completar a ficha técnica agora. Tente novamente.", {
+        description: e.message,
+      }),
   });
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1669,11 +1675,35 @@ export default function Produtos() {
       ) : items.length === 0 ? (
         <div className="border border-gray-200 py-16 text-center">
           <Package size={24} className="text-gray-200 mx-auto mb-3" />
-          <p className="text-sm text-gray-400">Nenhum produto encontrado com os filtros aplicados.</p>
-          {hasActiveFilters && (
-            <button onClick={clearAllFilters} className="mt-3 text-xs text-blue-800 font-semibold hover:underline">
-              Limpar filtros
-            </button>
+          {hasActiveFilters ? (
+            <>
+              <p className="text-sm text-gray-400">Nenhum produto encontrado com os filtros aplicados.</p>
+              <button onClick={clearAllFilters} className="mt-3 text-xs text-blue-800 font-semibold hover:underline">
+                Limpar filtros
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-gray-600">Seu catálogo ainda está vazio.</p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-gray-400">
+                O catálogo é a base de tudo no S2: é com ele que o sistema compara preços e
+                monta propostas. Comece importando uma planilha (Excel/CSV) ou uma NF-e.
+              </p>
+              <div className="mt-4 flex justify-center gap-2">
+                <Link
+                  href="/importar"
+                  className="bg-blue-700 px-4 py-2 text-xs font-bold text-white hover:bg-blue-800"
+                >
+                  Importar planilha
+                </Link>
+                <Link
+                  href="/importar-nfe"
+                  className="border border-gray-300 px-4 py-2 text-xs font-bold text-gray-700 hover:border-blue-700 hover:text-blue-800"
+                >
+                  Importar NF-e
+                </Link>
+              </div>
+            </>
           )}
         </div>
       ) : (

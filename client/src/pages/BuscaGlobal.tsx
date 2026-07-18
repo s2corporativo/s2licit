@@ -45,6 +45,7 @@ export default function BuscaGlobal() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           autoFocus
+          aria-label="Buscar em todo o sistema"
           placeholder="Digite órgão, produto, processo, NF, fornecedor…"
           className="flex-1 border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 outline-none"
         />

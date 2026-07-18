@@ -330,7 +330,7 @@ export function CaptureReview() {
                 Última ação registrada: {lastBatchAction.actionType === "approve" ? "aprovação" : "rejeição"} em lote
               </div>
               <div className="mt-1 text-sm text-amber-800">
-                {lastBatchAction.itemCount} item(ns) alterado(s). Use o botão de desfazer enquanto esta sessão permanecer aberta.
+                {lastBatchAction.itemCount} item(ns) alterado(s). Se mudou de ideia, clique em desfazer agora — o desfazer fica disponível até você sair desta tela.
               </div>
             </div>
             <Button

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
-import { activeProvider, invokeLLM, listConfiguredProviders } from "../_core/llm";
+import { activeProvider, getUsageTotals, invokeLLM, listConfiguredProviders } from "../_core/llm";
 import { ENV } from "../_core/env";
 
 /**
@@ -14,6 +14,7 @@ export const aiRouter = router({
       ativo: active ? { kind: active.kind, model: active.model } : null,
       configurados: listConfiguredProviders(),
       algumConfigurado: active != null,
+      consumo: getUsageTotals(),
     };
   }),
 

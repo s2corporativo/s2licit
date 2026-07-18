@@ -365,7 +365,8 @@ Você tem acesso DIRETO ao banco de dados do sistema e pode consultar informaç�
 - Se não souber algo, diga claramente e sugira a ferramenta correta para buscar
 
 ## Contexto do negócio:
-A S2 participa de licitações públicas de produtos veterinários, medicamentos humanos e materiais. 
+A empresa participa de licitações e cotações públicas de produtos diversos — medicamentos
+veterinários e humanos, materiais de construção, insumos e equipamentos.
 O sistema controla o catálogo de fornecedores, gera propostas comerciais e acompanha o pipeline financeiro.`;
 
 // ─── Router ───────────────────────────────────────────────────────────────────

@@ -132,7 +132,7 @@ export async function processNfeEnrichmentPipeline(
 
 async function enrichProductWithAI(product: any): Promise<EnrichmentResult | null> {
   try {
-    const prompt = `Analise o produto veterinário abaixo e extraia somente os dados expressamente identificáveis.
+    const prompt = `Analise o produto abaixo e extraia somente os dados expressamente identificáveis.
 
 Produto: ${product.name}
 Descrição: ${product.description || ""}
@@ -145,7 +145,7 @@ Não presuma composição, indicação, contraindicação ou dose. Quando não h
       messages: [
         {
           role: "system",
-          content: "Extraia dados estruturados de produtos veterinários sem inventar informações. Dados incertos devem ficar vazios e exigir revisão humana.",
+          content: "Extraia dados estruturados de produtos sem inventar informações. Dados incertos devem ficar vazios e exigir revisão humana.",
         },
         { role: "user", content: prompt },
       ],

@@ -18,7 +18,7 @@ import {
     X,
   } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useLocation, useParams } from "wouter";
+import { Link, useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 
 // ─── Item Row ─────────────────────────────────────────────────────────────────
@@ -750,7 +750,8 @@ export default function PropostaEditor() {
   const totalImpostosPct = 0;
 
   // ── Painel de Margem ────────────────────────────────────────────
-  const [panelMarkup, setPanelMarkup] = useState(30);
+  // Margem sobre a venda (fórmula única do sistema: preço = custo ÷ (1 − margem)).
+  const [panelMargem, setPanelMargem] = useState(30);
   // ── Painel de Impostos e Frete ──────────────────────────────────
   const [panelIcms, setPanelIcms] = useState(0);
   const [panelSt, setPanelSt] = useState(0);
@@ -780,7 +781,8 @@ export default function PropostaEditor() {
   const valorImpostos = totalSugerido * (totalImpostosManualPct / 100);
   const totalFinal = totalSugerido + valorImpostos + panelFrete;
   const custoComImpostos = custoTotal * (1 + totalImpostosPct / 100);
-  const vendaTotal = custoComImpostos * (1 + panelMarkup / 100);
+  const margemDivisor = 1 - panelMargem / 100;
+  const vendaTotal = margemDivisor > 0 ? custoComImpostos / margemDivisor : 0;
   const lucroTotal = vendaTotal - custoComImpostos;
   const margemPct = vendaTotal > 0 ? (lucroTotal / vendaTotal) * 100 : 0;
 
@@ -1119,14 +1121,21 @@ export default function PropostaEditor() {
               <div className="flex items-center gap-3">
 
                 <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-gray-400 uppercase tracking-widest">Markup</label>
+                  <label
+                    htmlFor="panel-margem"
+                    className="text-[10px] text-gray-400 uppercase tracking-widest"
+                    title="Margem sobre a venda: preço = custo ÷ (1 − margem). Mesma fórmula das telas de edital e precificação."
+                  >
+                    Margem s/ venda
+                  </label>
                   <input
+                    id="panel-margem"
                     type="number"
                     min={0}
-                    max={999}
+                    max={99}
                     step={5}
-                    value={panelMarkup}
-                    onChange={(e) => setPanelMarkup(Number(e.target.value))}
+                    value={panelMargem}
+                    onChange={(e) => setPanelMargem(Math.min(99, Math.max(0, Number(e.target.value))))}
                     className="w-16 bg-gray-800 text-white text-center text-sm font-bold border border-gray-600 px-2 py-1 focus:outline-none focus:border-green-400"
                   />
                   <span className="text-gray-400 text-sm">%</span>
@@ -1149,7 +1158,7 @@ export default function PropostaEditor() {
                 <div className="text-xl font-black text-blue-800">
                   R$ {vendaTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className="text-[10px] text-gray-400 mt-0.5">Custo × {(1 + panelMarkup / 100).toFixed(2)}</div>
+                <div className="text-[10px] text-gray-400 mt-0.5">Custo ÷ {margemDivisor.toFixed(2)} (margem por dentro)</div>
               </div>
               {/* Lucro Esperado */}
               <div className="border-r border-gray-200 px-5 py-4">
@@ -1400,34 +1409,54 @@ export default function PropostaEditor() {
           </div>
         )}
 
-        {/* Dados da Empresa — Rodapé Fixo */}
+        {/* Dados da Empresa — Rodapé lido de Dados da empresa (/configuracao) */}
         <div className="mt-8 pt-6 border-t-2 border-gray-900">
+          {!company?.name && (
+            <div className="mb-4 border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 print:hidden">
+              Os dados da sua empresa ainda não foram preenchidos — o rodapé da proposta
+              sairá incompleto. Preencha em{" "}
+              <Link href="/configuracao" className="font-semibold underline">
+                Sistema → Dados da empresa
+              </Link>
+              .
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-6">
             <div>
               <div className="text-[9px] font-bold tracking-widest uppercase text-gray-400 mb-2">Empresa</div>
-              <div className="text-sm font-black text-gray-900">S2 ESTRATÉGIA E GESTÃO LTDA</div>
-              <div className="text-xs text-gray-600 mt-0.5">CNPJ: 12.537.474/0001-12</div>
-              <div className="text-xs text-gray-600">Rua 1 de Janeiro, 415 — Betim/MG</div>
-              <div className="text-xs text-gray-600">CEP 32685-066</div>
+              <div className="text-sm font-black text-gray-900">{company?.name || "—"}</div>
+              {company?.cnpj && <div className="text-xs text-gray-600 mt-0.5">CNPJ: {company.cnpj}</div>}
+              {(company?.address || company?.city) && (
+                <div className="text-xs text-gray-600">
+                  {[company?.address, [company?.city, company?.state].filter(Boolean).join("/")]
+                    .filter(Boolean)
+                    .join(" — ")}
+                </div>
+              )}
+              {company?.zipCode && <div className="text-xs text-gray-600">CEP {company.zipCode}</div>}
             </div>
             <div>
               <div className="text-[9px] font-bold tracking-widest uppercase text-gray-400 mb-2">Contato</div>
-              <div className="text-xs text-gray-600">Tel/WhatsApp: (31) 99907-4546</div>
-              <div className="text-xs text-gray-600">E-mail: adm@vetmg.com.br</div>
+              {company?.phone && <div className="text-xs text-gray-600">Tel/WhatsApp: {company.phone}</div>}
+              {company?.email && <div className="text-xs text-gray-600">E-mail: {company.email}</div>}
+              {company?.website && <div className="text-xs text-gray-600">{company.website}</div>}
+              {!company?.phone && !company?.email && <div className="text-xs text-gray-400">—</div>}
             </div>
             <div>
               <div className="text-[9px] font-bold tracking-widest uppercase text-gray-400 mb-2">Dados Bancários</div>
-              <div className="text-xs text-gray-600">Banco do Brasil</div>
-              <div className="text-xs text-gray-600">Agência: 750-1</div>
-              <div className="text-xs text-gray-600">Conta Corrente: 126941-0</div>
+              {company?.bankInfo ? (
+                <div className="text-xs text-gray-600 whitespace-pre-line">{company.bankInfo}</div>
+              ) : (
+                <div className="text-xs text-gray-400">—</div>
+              )}
             </div>
           </div>
           {/* Assinatura */}
           <div className="mt-8 flex justify-end print:mt-12">
             <div className="text-center">
               <div className="w-56 border-t border-gray-400 pt-2">
-                <div className="text-xs font-semibold text-gray-700">S2 Estratégia e Gestão Ltda</div>
-                <div className="text-[10px] text-gray-400">CNPJ: 12.537.474/0001-12</div>
+                <div className="text-xs font-semibold text-gray-700">{company?.name || "—"}</div>
+                {company?.cnpj && <div className="text-[10px] text-gray-400">CNPJ: {company.cnpj}</div>}
               </div>
             </div>
           </div>

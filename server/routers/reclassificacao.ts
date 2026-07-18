@@ -90,12 +90,12 @@ export const reclassificacaoRouter = router({
         let schemaRequired: string[] = [];
 
         if (input.campoAlvo === "categoryId") {
-          systemPrompt = `Você é um especialista em classificação de produtos veterinários e agrícolas. Para cada produto, escolha o categoryId mais adequado da lista: ${catList}. Responda APENAS com JSON válido.`;
+          systemPrompt = `Você é um especialista em classificação de produtos — veterinários, humanos, materiais de construção, insumos e agrícolas. Para cada produto, escolha o categoryId mais adequado da lista: ${catList}. Responda APENAS com JSON válido.`;
           userPrompt = `Classifique cada produto abaixo com o categoryId correto:\n${batch.map(p => `ID ${p.id}: ${p.name}${p.activeIngredient ? " | " + p.activeIngredient : ""}`).join("\n")}`;
           schemaProps = { classificacoes: { type: "array", items: { type: "object", properties: { id: { type: "number" }, categoryId: { type: "number" } }, required: ["id", "categoryId"], additionalProperties: false } } };
           schemaRequired = ["classificacoes"];
         } else if (input.campoAlvo === "activeIngredient") {
-          systemPrompt = "Você é um farmacologista especializado em produtos veterinários. Para cada produto, identifique o princípio ativo (substancia ativa) principal. Se não souber, use \"Não identificado\". Responda APENAS com JSON válido.";
+          systemPrompt = "Você é um especialista técnico em produtos — medicamentos veterinários e humanos, materiais de construção e insumos. Para cada produto, identifique o princípio ativo (medicamentos) ou o componente/especificação principal (demais produtos). Se não souber, use \"Não identificado\". Responda APENAS com JSON válido.";
           userPrompt = `Identifique o princípio ativo de cada produto:\n${batch.map(p => `ID ${p.id}: ${p.name}`).join("\n")}`;
           schemaProps = { classificacoes: { type: "array", items: { type: "object", properties: { id: { type: "number" }, activeIngredient: { type: "string" } }, required: ["id", "activeIngredient"], additionalProperties: false } } };
           schemaRequired = ["classificacoes"];
@@ -108,6 +108,7 @@ export const reclassificacaoRouter = router({
 
         let updated = 0;
         let errors = 0;
+        const errorMessages: string[] = [];
 
         try {
           const llmResult = await invokeLLM({
@@ -147,17 +148,22 @@ export const reclassificacaoRouter = router({
                 await db.update(products).set(updateData).where(eq(products.id, c.id));
                 updated++;
               }
-            } catch {
+            } catch (err) {
               errors++;
+              errorMessages.push(`Produto ${c.id}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-        } catch {
+        } catch (err) {
           errors += batch.length;
+          errorMessages.push(
+            `Lote inteiro falhou (${batch.length} produtos): ${err instanceof Error ? err.message : String(err)}`
+          );
         }
 
         return {
           updated,
           errors,
+          errorMessages: errorMessages.slice(0, 10),
           processed: batch.length,
           nextOffset: input.offset + batch.length,
           done: batch.length < input.batchSize,
@@ -233,6 +239,7 @@ export const reclassificacaoRouter = router({
 
         let updated = 0;
         let errors = 0;
+        const errorMessages: string[] = [];
 
         try {
           const llmResult = await invokeLLM({
@@ -285,17 +292,22 @@ export const reclassificacaoRouter = router({
                 await db.update(products).set(updateData).where(eq(products.id, r.id));
                 updated++;
               }
-            } catch {
+            } catch (err) {
               errors++;
+              errorMessages.push(`Produto ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-        } catch {
+        } catch (err) {
           errors += batch.length;
+          errorMessages.push(
+            `Lote inteiro falhou (${batch.length} produtos): ${err instanceof Error ? err.message : String(err)}`
+          );
         }
 
         return {
           updated,
           errors,
+          errorMessages: errorMessages.slice(0, 10),
           processed: batch.length,
           nextOffset: offset + batch.length,
           done: batch.length < batchSize,

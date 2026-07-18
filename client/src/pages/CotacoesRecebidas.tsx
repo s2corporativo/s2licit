@@ -84,8 +84,12 @@ export default function CotacoesRecebidas() {
         <div className="mb-6 flex items-start gap-3 border border-amber-200 bg-amber-50 p-4">
           <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
           <div className="text-sm text-amber-800">
-            <strong>IMAP não configurado.</strong> Para receber cotações automaticamente, defina no servidor as
-            variáveis <code>IMAP_HOST</code>, <code>IMAP_USER</code> e <code>IMAP_PASSWORD</code> (porta e TLS opcionais).
+            <strong>A caixa de e-mail ainda não foi conectada.</strong> Esta tela lê automaticamente
+            os pedidos de cotação que chegam no e-mail da empresa, mas isso exige uma configuração
+            única no servidor. Peça ao responsável técnico para definir as variáveis{" "}
+            <code>IMAP_HOST</code>, <code>IMAP_USER</code> e <code>IMAP_PASSWORD</code> no ambiente
+            (porta e TLS opcionais). Enquanto isso, você pode importar cotações manualmente pela
+            tela Importar edital.
           </div>
         </div>
       )}

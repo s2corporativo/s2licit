@@ -377,8 +377,8 @@ export default function IntelligentCaptureCenter() {
                   </Button>
                 </div>
                 <div className="border border-dashed border-slate-200 p-4 text-sm leading-6 text-slate-600">
-                  <p>O parser XML foi ajustado para remover BOM e qualquer lixo textual antes da primeira tag, eliminando o erro <strong>“Non-whitespace before first tag”</strong>.</p>
-                  <p>Para NF-e, o número real da nota é priorizado e o XML sanitizado é persistido no histórico da importação.</p>
+                  <p>Pode colar o arquivo exatamente como recebeu: o sistema limpa automaticamente caracteres invisíveis e texto solto antes de ler o conteúdo.</p>
+                  <p>Para NF-e, o número real da nota é identificado e guardado no histórico da importação.</p>
                 </div>
               </TabsContent>
 
@@ -409,7 +409,7 @@ export default function IntelligentCaptureCenter() {
           <div className="rounded-none border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-6 py-4">
               <h2 className="text-lg font-semibold text-slate-900">Lotes recentes</h2>
-              <p className="mt-1 text-sm text-slate-600">Execuções multi-origem já consolidadas no backend desta central.</p>
+              <p className="mt-1 text-sm text-slate-600">Capturas já processadas, de todas as origens. Aprove os itens em Revisão de capturas.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">

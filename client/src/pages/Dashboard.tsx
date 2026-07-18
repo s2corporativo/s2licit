@@ -106,14 +106,14 @@ const FUNCTION_GROUPS: FuncGroup[] = [
     items: [
       { href: "/agenda", label: "Agenda", desc: "Prazos e compromissos" },
       { href: "/funil", label: "Funil", desc: "Oportunidades por estágio" },
-      { href: "/busca", label: "Busca rápida", desc: "Encontrar um produto" },
+      { href: "/busca", label: "Busca de menor preço", desc: "Encontrar um produto" },
     ],
   },
   {
     label: "Oportunidades", icon: <FileScan size={11} />, head: "text-orange-700",
     hoverBg: "hover:bg-orange-50", hoverText: "group-hover:text-orange-700", dot: "group-hover:text-orange-500",
     items: [
-      { href: "/radar-pncp", label: "Radar PNCP", desc: "Editais públicos", minRole: "editor" },
+      { href: "/radar-pncp", label: "Radar de licitações", desc: "Editais públicos", minRole: "editor" },
       { href: "/cotacoes-recebidas", label: "Cotações recebidas", desc: "Pedidos por e-mail", minRole: "editor" },
       { href: "/edital", label: "Importar edital", desc: "PDF/DOCX com IA", minRole: "editor" },
     ],
@@ -134,19 +134,30 @@ const FUNCTION_GROUPS: FuncGroup[] = [
     items: [
       { href: "/produtos", label: "Produtos", desc: "Catálogo completo" },
       { href: "/fornecedores", label: "Fornecedores", desc: "Cadastro de fornecedores", minRole: "editor" },
-      { href: "/equivalencias", label: "Equivalências", desc: "Produtos similares" },
+      { href: "/equivalencias", label: "Produtos equivalentes", desc: "Produtos similares" },
       { href: "/importar", label: "Importar planilha", desc: "Excel ou CSV", minRole: "editor" },
       { href: "/importar-nfe", label: "Importar NF-e", desc: "XML de nota fiscal", minRole: "editor" },
+    ],
+  },
+  {
+    label: "Preços e tributos", icon: <DollarSign size={11} />, head: "text-teal-700",
+    hoverBg: "hover:bg-teal-50", hoverText: "group-hover:text-teal-700", dot: "group-hover:text-teal-500",
+    items: [
+      { href: "/analise-precos", label: "Análise de preços", desc: "Evolução e tendências", minRole: "editor" },
+      { href: "/comparacao", label: "Comparação de preços", desc: "Entre fornecedores" },
+      { href: "/aplicar-precificacao", label: "Precificação em massa", desc: "Margem sobre a venda", minRole: "admin" },
+      { href: "/tributos", label: "Motor tributário", desc: "Impostos por UF" },
+      { href: "/custo-total", label: "Custo total e fretes", desc: "Piso de venda" },
     ],
   },
   {
     label: "Automação e IA", icon: <Sparkles size={11} />, head: "text-violet-700",
     hoverBg: "hover:bg-violet-50", hoverText: "group-hover:text-violet-700", dot: "group-hover:text-violet-500",
     items: [
-      { href: "/scraper-fornecedores", label: "Agente de preços", desc: "Login e importação de fornecedores", minRole: "admin" },
-      { href: "/captura-inteligente", label: "Captura automática", desc: "Multi-origem com IA", minRole: "editor" },
-      { href: "/portais-licitacao", label: "Acessos aos portais", desc: "Credenciais de portais", minRole: "editor" },
-      { href: "/central-ia", label: "Central de IA", desc: "Modelos e chaves", minRole: "admin" },
+      { href: "/scraper-fornecedores", label: "Captura automática de preços", desc: "Login e importação de fornecedores", minRole: "admin" },
+      { href: "/captura-inteligente", label: "Central de captura", desc: "Multi-origem com IA", minRole: "editor" },
+      { href: "/portais-licitacao", label: "Portais de licitação", desc: "Credenciais de portais", minRole: "editor" },
+      { href: "/central-ia", label: "Inteligência artificial", desc: "Modelos e chaves", minRole: "admin" },
       { href: "/agente", label: "Assistente IA", desc: "Pergunte ao sistema" },
     ],
   },
@@ -167,7 +178,7 @@ const FUNCTION_GROUPS: FuncGroup[] = [
       { href: "/configuracao", label: "Dados da empresa", desc: "Cadastro e logo", minRole: "admin" },
       { href: "/usuarios", label: "Usuários e permissões", desc: "Papéis de acesso", minRole: "admin" },
       { href: "/logs", label: "Logs de auditoria", desc: "Trilha de ações", minRole: "admin" },
-      { href: "/seguranca", label: "Segurança (MFA)", desc: "2 fatores da conta" },
+      { href: "/seguranca", label: "Segurança da conta", desc: "Verificação em duas etapas" },
       { href: "/diagnostico", label: "Diagnóstico", desc: "Saúde do sistema", minRole: "editor" },
     ],
   },
@@ -205,7 +216,15 @@ function EmptyState({ icon, title, desc, action }: { icon?: React.ReactNode; tit
 function Tooltip2({ text, children }: { text: string; children: React.ReactNode }) {
   const [show, setShow] = useState(false);
   return (
-    <span className="relative inline-flex" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span
+      className="relative inline-flex"
+      tabIndex={0}
+      aria-label={text}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onFocus={() => setShow(true)}
+      onBlur={() => setShow(false)}
+    >
       {children}
       {show && (
         <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-48 bg-gray-900 text-white text-[10px] px-2 py-1.5 rounded shadow-lg leading-relaxed pointer-events-none">
@@ -271,6 +290,13 @@ export default function Dashboard() {
   const { data: proposalPipeline = [] } = trpc.dashboard.proposalPipeline.useQuery();
   const { data: actionQueue = [] } = trpc.dashboard.actionQueue.useQuery();
   const { data: marginData = [] } = trpc.dashboard.marginByCategory.useQuery();
+  // Checklist de primeiros passos (só pesa nas queries enquanto não foi dispensado)
+  const [primeirosPassosDispensado, setPrimeirosPassosDispensado] = useState(
+    () => localStorage.getItem("s2.primeirosPassos.dispensado") === "1"
+  );
+  const { data: companyData } = trpc.company.get.useQuery(undefined, { enabled: !primeirosPassosDispensado });
+  const { data: taxRulesData } = trpc.taxRules.listar.useQuery(undefined, { enabled: !primeirosPassosDispensado });
+  const { data: templatesData } = trpc.proposalTemplates.list.useQuery(undefined, { enabled: !primeirosPassosDispensado });
   const [integrityOpen, setIntegrityOpen] = useState(false);
   const diagQuery = trpc.system.diagnose.useQuery(undefined, { enabled: diagOpen, staleTime: 0 });
   const sysErrorsQuery = trpc.system.getSystemErrors.useQuery(undefined, { enabled: diagOpen, staleTime: 0 });
@@ -321,13 +347,15 @@ export default function Dashboard() {
 
 
   const catalogTotal = catalogHealth?.total ?? stats?.totalProducts ?? 0;
+  // Com catálogo vazio não existe "saúde" a medir: null exibe "sem dados"
+  // em vez do antigo 100% enganoso no primeiro acesso.
   const healthScore = catalogTotal > 0
     ? Math.round(100 - ((
         (catalogHealth?.withoutFichaTecnica ?? catalogHealth?.withoutActiveIngredient ?? 0) +
         (catalogHealth?.withoutCategory ?? 0) +
         (catalogHealth?.withoutManufacturer ?? 0)
       ) / (catalogTotal * 3)) * 100)
-    : 100;
+    : null;
 
 
   return (
@@ -393,7 +421,7 @@ export default function Dashboard() {
                 className="flex items-center gap-2 rounded-xl border border-purple-300/40 bg-purple-600/30 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-purple-600/50"
               >
                 <Tag size={15} />
-                Agente de Preços
+                Captura de Preços
               </Link>
             )}
             <Link
@@ -403,16 +431,19 @@ export default function Dashboard() {
               <Search size={15} />
               Buscar Produto
             </Link>
-            <button
-              onClick={() => setDiagOpen((v) => !v)}
-              className="flex items-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-600/20 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-cyan-600/38"
-            >
-              <Stethoscope size={15} />
-              {diagOpen ? "Fechar Diagnóstico" : "Rodar Diagnóstico"}
-            </button>
+            {/* Ferramenta de manutenção (reset de jobs, limpeza) — só para admin */}
+            {hasMinimumRole(user?.role, "admin") && (
+              <button
+                onClick={() => setDiagOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-xl border border-cyan-300/35 bg-cyan-600/20 px-5 py-3 text-sm font-bold text-white transition-all hover:-translate-y-0.5 hover:bg-cyan-600/38"
+              >
+                <Stethoscope size={15} />
+                {diagOpen ? "Fechar Diagnóstico" : "Rodar Diagnóstico"}
+              </button>
+            )}
             {/* Alertas rápidos no header */}
             {(expiringProposals?.length ?? 0) > 0 && (
-              <Link href="/propostas-admin" className="ml-auto flex items-center gap-2 rounded-xl border border-amber-300/35 bg-amber-400/18 px-3 py-2 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-400/28">
+              <Link href="/propostas" className="ml-auto flex items-center gap-2 rounded-xl border border-amber-300/35 bg-amber-400/18 px-3 py-2 text-xs font-bold text-amber-100 transition-colors hover:bg-amber-400/28">
                 <Clock size={12} />
                 {expiringProposals!.length} proposta{expiringProposals!.length > 1 ? "s" : ""} vencendo
               </Link>
@@ -423,6 +454,100 @@ export default function Dashboard() {
       </div>
 
       <div className="mx-auto max-w-7xl space-y-7 px-6 py-7">
+
+        {/* ── Primeiros passos: trilha guiada para quem está começando ── */}
+        {(() => {
+          if (primeirosPassosDispensado) return null;
+          const passos = [
+            {
+              done: Boolean((companyData as any)?.name),
+              label: "Preencha os dados da sua empresa",
+              desc: "Nome, CNPJ, contato e dados bancários — saem no rodapé das propostas.",
+              href: "/configuracao",
+              minRole: "admin" as Role,
+            },
+            {
+              done: (stats?.totalProducts ?? 0) > 0,
+              label: "Importe seu catálogo de produtos",
+              desc: "Traga uma planilha (Excel/CSV) ou uma NF-e para começar a cotar.",
+              href: "/importar",
+              minRole: "editor" as Role,
+            },
+            {
+              done: ((taxRulesData as any[]) ?? []).length > 0,
+              label: "Cadastre suas regras de impostos",
+              desc: "Sem elas, o cálculo de preço mínimo sai sem impostos.",
+              href: "/tributos",
+            },
+            {
+              done: ((templatesData as any[]) ?? []).length > 0,
+              label: "Crie um template de proposta",
+              desc: "Preenche impostos, frete e declarações automaticamente em toda proposta.",
+              href: "/templates-proposta",
+            },
+            {
+              done: totalPipelineCount > 0,
+              label: "Traga sua primeira oportunidade",
+              desc: "Importe um edital ou busque no Radar de licitações.",
+              href: "/edital",
+              minRole: "editor" as Role,
+            },
+          ].filter((p) => hasMinimumRole(user?.role, p.minRole));
+          const feitos = passos.filter((p) => p.done).length;
+          if (passos.length === 0 || feitos === passos.length) return null;
+          return (
+            <div className="border border-blue-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-blue-100 bg-blue-50/60 px-5 py-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={14} className="text-blue-700" />
+                  <span className="text-[12px] font-black uppercase tracking-widest text-blue-900">
+                    Primeiros passos — {feitos} de {passos.length} concluídos
+                  </span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <Link href="/manual" className="text-[11px] font-bold text-blue-700 hover:underline">
+                    Como operar o S2 →
+                  </Link>
+                  <button
+                    onClick={() => {
+                      localStorage.setItem("s2.primeirosPassos.dispensado", "1");
+                      setPrimeirosPassosDispensado(true);
+                    }}
+                    className="text-[11px] font-semibold text-gray-400 hover:text-gray-600"
+                    aria-label="Dispensar checklist de primeiros passos"
+                  >
+                    Dispensar
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-0 sm:grid-cols-2 lg:grid-cols-5">
+                {passos.map((p, i) => (
+                  <Link
+                    key={p.href}
+                    href={p.href}
+                    className={`group border-b border-gray-100 px-5 py-4 transition-colors last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0 ${
+                      p.done ? "bg-emerald-50/40" : "hover:bg-blue-50/50"
+                    }`}
+                  >
+                    <div className="mb-1 flex items-center gap-2">
+                      {p.done ? (
+                        <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
+                      ) : (
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-blue-300 text-[9px] font-black text-blue-700">
+                          {i + 1}
+                        </span>
+                      )}
+                      <span className={`text-[12px] font-bold ${p.done ? "text-emerald-800 line-through decoration-emerald-300" : "text-gray-800 group-hover:text-blue-800"}`}>
+                        {p.label}
+                      </span>
+                    </div>
+                    <p className="pl-6 text-[11px] leading-snug text-gray-500">{p.desc}</p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ══════════════════════════════════════════════════════════════════
             PAINEL DE AUTODIAGNÓSTICO
@@ -720,7 +845,7 @@ export default function Dashboard() {
         ══════════════════════════════════════════════════════════════════ */}
         <div>
           <SectionHeader icon={<DollarSign size={14} />} title="Operação Comercial" action={
-            <Link href="/propostas-admin" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
+            <Link href="/propostas" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
               Ver todas <ArrowRight size={9} />
             </Link>
           } />
@@ -731,7 +856,7 @@ export default function Dashboard() {
               subtitle={`${fmtBRL(totalPipelineValue)} em carteira`}
               icon={<FileText size={16} className="text-blue-700" />}
               iconBg="bg-blue-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Total de propostas em qualquer estágio do pipeline"
             />
             <KpiCard
@@ -740,7 +865,7 @@ export default function Dashboard() {
               subtitle="status entregue"
               icon={<CheckCircle2 size={16} className="text-emerald-700" />}
               iconBg="bg-emerald-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Propostas com status Entregue"
               status={(extStats?.wonProposals ?? 0) > 0 ? "ok" : "neutral" as any}
             />
@@ -750,7 +875,7 @@ export default function Dashboard() {
               subtitle="pedidos + trânsito + entregues"
               icon={<TrendingUp size={16} className="text-violet-700" />}
               iconBg="bg-violet-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Soma dos valores de propostas em status Pedido, Em Trânsito e Entregue"
             />
             <KpiCard
@@ -759,7 +884,7 @@ export default function Dashboard() {
               subtitle="por proposta ganha"
               icon={<BarChart2 size={16} className="text-orange-700" />}
               iconBg="bg-orange-50"
-              href="/propostas-admin"
+              href="/propostas"
               tooltip="Valor médio das propostas com status Entregue"
             />
           </div>
@@ -787,7 +912,7 @@ export default function Dashboard() {
                   icon={<FileText size={28} />}
                   title="Nenhuma proposta cadastrada"
                   desc="Crie sua primeira proposta para visualizar o pipeline"
-                  action={<Link href="/proposta-rapida" className="text-xs font-bold text-blue-700 hover:underline">Criar proposta →</Link>}
+                  action={<Link href="/propostas" className="text-xs font-bold text-blue-700 hover:underline">Criar proposta →</Link>}
                 />
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -797,7 +922,7 @@ export default function Dashboard() {
                     const count = d?.count ?? 0;
                     const val = d?.totalValue ?? 0;
                     return (
-                      <Link key={stage.status} href="/propostas-admin" className={`p-3 border ${stage.border} ${stage.bg} hover:shadow-sm transition-all block group`}>
+                      <Link key={stage.status} href="/propostas" className={`p-3 border ${stage.border} ${stage.bg} hover:shadow-sm transition-all block group`}>
                         <div className="flex items-center justify-between mb-2">
                           <span className={`text-[10px] font-black uppercase tracking-wider ${stage.text}`}>{stage.label}</span>
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: stage.color }} />
@@ -811,7 +936,7 @@ export default function Dashboard() {
                 </div>
               )}
               <div className="mt-3 flex justify-end">
-                <Link href="/propostas-admin" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
+                <Link href="/propostas" className="text-[10px] font-bold text-blue-700 hover:underline flex items-center gap-1">
                   Administrar propostas <ArrowRight size={9} />
                 </Link>
               </div>
@@ -855,12 +980,13 @@ export default function Dashboard() {
               <Activity size={14} className="text-gray-400" />
               <span className="text-[11px] font-black tracking-widest uppercase text-gray-600">Saúde do Catálogo</span>
               <div className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 ${
-                healthScore >= 80 ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                healthScore === null ? "bg-gray-50 text-gray-500 border border-gray-200"
+                : healthScore >= 80 ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                 : healthScore >= 50 ? "bg-amber-50 text-amber-700 border border-amber-200"
                 : "bg-red-50 text-red-700 border border-red-200"
               }`}>
-                {healthScore >= 80 ? <CheckCircle2 size={9} /> : healthScore >= 50 ? <AlertTriangle size={9} /> : <XCircle size={9} />}
-                {healthScore}% saudável
+                {healthScore === null ? <AlertTriangle size={9} /> : healthScore >= 80 ? <CheckCircle2 size={9} /> : healthScore >= 50 ? <AlertTriangle size={9} /> : <XCircle size={9} />}
+                {healthScore === null ? "sem produtos — importe o catálogo" : `${healthScore}% saudável`}
               </div>
             </div>
             <ChevronDown size={14} className={`text-gray-400 transition-transform ${catalogCollapsed ? "-rotate-90" : ""}`} />
@@ -893,12 +1019,12 @@ export default function Dashboard() {
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-bold text-gray-500">Completude cadastral estimada</span>
-                  <span className="text-[10px] font-black text-gray-700">{healthScore}%</span>
+                  <span className="text-[10px] font-black text-gray-700">{healthScore === null ? "—" : `${healthScore}%`}</span>
                 </div>
                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${healthScore >= 80 ? "bg-emerald-500" : healthScore >= 50 ? "bg-amber-400" : "bg-red-500"}`}
-                    style={{ width: `${healthScore}%` }}
+                    className={`h-full rounded-full transition-all ${healthScore === null ? "bg-gray-300" : healthScore >= 80 ? "bg-emerald-500" : healthScore >= 50 ? "bg-amber-400" : "bg-red-500"}`}
+                    style={{ width: `${healthScore ?? 0}%` }}
                   />
                 </div>
               </div>

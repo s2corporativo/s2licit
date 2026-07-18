@@ -16,20 +16,24 @@ import {
   FileSpreadsheet,
   FileText,
   Gavel,
+  GitCompareArrows,
   GitMerge,
   Image,
   KanbanSquare,
-  KeyRound,
   LayoutGrid,
+  LayoutTemplate,
   Lock,
   LogOut,
   MailCheck,
   Menu,
+  MessageSquareWarning,
   Package,
   PackageCheck,
+  Percent,
   PlugZap,
   Radar,
   Receipt,
+  Scale,
   ScrollText,
   Search,
   Settings,
@@ -37,6 +41,7 @@ import {
   Sparkles,
   Tag,
   Trophy,
+  Truck,
   Users,
   X,
 } from "lucide-react";
@@ -81,37 +86,48 @@ const navGroups: NavGroup[] = [
   {
     label: "OPORTUNIDADES",
     items: [
-      { href: "/radar-pncp", icon: Radar, label: "Radar PNCP", minRole: "editor" },
+      { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
       { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações recebidas", minRole: "editor" },
       { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
+      { href: "/diligencias", icon: MessageSquareWarning, label: "Diligências e recursos", minRole: "editor" },
     ],
   },
   {
-    label: "CATÁLOGO E PREÇOS",
+    label: "CATÁLOGO",
     items: [
       { href: "/produtos", icon: Package, label: "Produtos" },
-      { href: "/equivalencias", icon: GitMerge, label: "Equivalências" },
-      { href: "/analise-precos", icon: BarChart3, label: "Análise de preços", minRole: "editor" },
-      { href: "/enriquecimento", icon: Sparkles, label: "Enriquecimento" },
+      { href: "/busca", icon: Search, label: "Busca de menor preço" },
+      { href: "/equivalencias", icon: GitMerge, label: "Produtos equivalentes" },
+      { href: "/enriquecimento", icon: Sparkles, label: "Completar dados (IA)" },
       { href: "/imagens", icon: Image, label: "Imagens de produtos" },
+    ],
+  },
+  {
+    label: "PREÇOS E TRIBUTOS",
+    items: [
+      { href: "/analise-precos", icon: BarChart3, label: "Análise de preços", minRole: "editor" },
+      { href: "/comparacao", icon: GitCompareArrows, label: "Comparação de preços" },
+      { href: "/aplicar-precificacao", icon: Percent, label: "Precificação em massa", minRole: "admin" },
+      { href: "/tributos", icon: Scale, label: "Motor tributário" },
+      { href: "/custo-total", icon: Truck, label: "Custo total e fretes" },
     ],
   },
   {
     label: "FORNECEDORES E CAPTURA",
     items: [
       { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
-      { href: "/scraper-fornecedores", icon: Bot, label: "Captura automática", minRole: "admin" },
-      { href: "/captura-inteligente", icon: Brain, label: "Captura multi-origem", minRole: "editor" },
+      { href: "/scraper-fornecedores", icon: Bot, label: "Captura automática de preços", minRole: "admin" },
+      { href: "/captura-inteligente", icon: Brain, label: "Central de captura", minRole: "editor" },
       { href: "/captura-revisao", icon: ClipboardCheck, label: "Revisão de capturas", minRole: "editor" },
       { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
       { href: "/importar-nfe", icon: Receipt, label: "Importar NF-e", minRole: "editor" },
-      { href: "/configurador-fornecedores", icon: KeyRound, label: "Acessos e credenciais", minRole: "admin" },
     ],
   },
   {
     label: "PROPOSTAS E DISPUTA",
     items: [
       { href: "/propostas", icon: FileText, label: "Propostas" },
+      { href: "/templates-proposta", icon: LayoutTemplate, label: "Templates de proposta" },
       { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
       { href: "/certidoes", icon: ScrollText, label: "Certidões", minRole: "editor" },
       { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
@@ -135,8 +151,8 @@ const navGroups: NavGroup[] = [
       { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
       { href: "/usuarios", icon: Users, label: "Usuários e permissões", minRole: "admin" },
       { href: "/logs", icon: ClipboardList, label: "Logs de auditoria", minRole: "admin" },
-      { href: "/seguranca", icon: Lock, label: "Segurança (MFA)" },
-      { href: "/manual", icon: BookOpen, label: "Manual do sistema" },
+      { href: "/seguranca", icon: Lock, label: "Segurança da conta" },
+      { href: "/manual", icon: BookOpen, label: "Manual e glossário" },
     ],
   },
 ];
@@ -212,7 +228,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <p style={{ margin: 0, fontWeight: 900, fontSize: 13, textAlign: "center", letterSpacing: ".5px" }}>
           S2 LICIT
         </p>
-        <p style={{ margin: "2px 0 0", fontSize: 9, color: "rgba(255,255,255,.4)", textAlign: "center" }}>
+        <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,.62)", textAlign: "center" }}>
           Licitações &amp; Fornecedores
         </p>
         <button
@@ -231,8 +247,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               style={{
                 margin: "8px 8px 3px",
                 paddingTop: gi > 0 ? 7 : 0,
-                fontSize: 9,
-                color: "rgba(255,255,255,.3)",
+                fontSize: 10,
+                color: "rgba(255,255,255,.62)",
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: ".5px",
@@ -261,7 +277,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     cursor: "pointer",
                     borderRadius: 7,
                     marginBottom: 1,
-                    fontSize: 11,
+                    fontSize: 12.5,
                     fontWeight: active ? 700 : 400,
                     textAlign: "left",
                     borderLeft: active ? `3px solid ${LARANJA_ATIVO}` : "3px solid transparent",
@@ -289,7 +305,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,.7)", fontWeight: 600 }}>
               {user?.name ?? "Usuário"}
             </p>
-            <p style={{ margin: "2px 0 5px", fontSize: 10, color: "rgba(255,255,255,.4)" }}>
+            <p style={{ margin: "2px 0 5px", fontSize: 10, color: "rgba(255,255,255,.62)" }}>
               {getRoleLabel(user?.role)}
             </p>
             <button

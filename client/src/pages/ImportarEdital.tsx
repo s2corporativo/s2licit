@@ -21,7 +21,7 @@ import {
   Brain,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -837,11 +837,12 @@ export default function ImportarEdital() {
             <span className="font-bold text-green-800">Dados importados do PNCP (Compras.gov.br)</span>
             <span className="text-green-700 ml-2">— Itens e vinculações ao catálogo já estão pré-preenchidos.</span>
           </div>
-          <a
+          <Link
+            href="/radar-pncp"
             className="text-xs text-green-700 underline hover:text-green-900 shrink-0"
           >
-            Voltar às Licitações
-          </a>
+            Voltar ao Radar de licitações
+          </Link>
         </div>
       )}
       {/* Processo Info */}

@@ -75,6 +75,41 @@ export default function CentralIA() {
             )}
           </div>
 
+          <div className="border border-gray-200 p-4 mb-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
+              Consumo de IA desde o último reinício do servidor
+            </div>
+            {(s as any).consumo && (s as any).consumo.chamadas > 0 ? (
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <div className="text-xl font-black text-gray-900">
+                    {(s as any).consumo.chamadas.toLocaleString("pt-BR")}
+                  </div>
+                  <div className="text-[11px] text-gray-500">chamadas à IA</div>
+                </div>
+                <div>
+                  <div className="text-xl font-black text-gray-900">
+                    {(s as any).consumo.promptTokens.toLocaleString("pt-BR")}
+                  </div>
+                  <div className="text-[11px] text-gray-500">tokens enviados</div>
+                </div>
+                <div>
+                  <div className="text-xl font-black text-gray-900">
+                    {(s as any).consumo.completionTokens.toLocaleString("pt-BR")}
+                  </div>
+                  <div className="text-[11px] text-gray-500">tokens recebidos</div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-400">Nenhuma chamada de IA registrada ainda.</div>
+            )}
+            <div className="text-[11px] text-gray-400 mt-3">
+              Tokens são a unidade de cobrança dos provedores de IA (aprox. 3–4 letras por token).
+              Operações em massa (enriquecer/reclassificar milhares de produtos) consomem muitos
+              tokens — acompanhe aqui antes e depois de rodá-las.
+            </div>
+          </div>
+
           {isAdmin && (
             <button
               onClick={() => testarMutation.mutate({})}

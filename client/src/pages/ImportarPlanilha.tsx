@@ -137,24 +137,24 @@ const FIELD_LABELS: Record<keyof ColumnMapping, string> = {
   linkProduto: "Link do Produto",
   urlImagem: "URL da Imagem",
   // Campos legados (compatibilidade)
-  name: "Produto (legado)",
+  name: "Produto (nome alternativo)",
   code: "Código Interno",
   description: "Descrição",
   activeIngredient: "Princípio Ativo",
-  manufacturer: "Fabricante (legado)",
+  manufacturer: "Fabricante (alternativo)",
   unit: "Unidade",
   concentration: "Concentração",
-  presentation: "Apresentação (legado)",
-  price: "Preço (legado)",
+  presentation: "Apresentação (alternativa)",
+  price: "Preço (alternativo)",
   priceUnit: "Unidade de Preço",
   stock: "Estoque",
-  imageUrl: "URL da Imagem (legado)",
-  productUrl: "Link do Produto (legado)",
-  barcode: "EAN/GTIN (legado)",
-  gtin: "GTIN (legado)",
+  imageUrl: "URL da Imagem (alternativa)",
+  productUrl: "Link do Produto (alternativo)",
+  barcode: "Código de barras (alternativo)",
+  gtin: "GTIN (alternativo)",
   informacaoTecnica: "Informação Técnica",
-  mapa: "MAPA/ANVISA (legado)",
-  categoryName: "Categoria (legado)",
+  mapa: "Registro MAPA/ANVISA (alternativo)",
+  categoryName: "Categoria (nome alternativo)",
 };
 
 const MATCH_LABELS: Record<string, string> = {
@@ -469,7 +469,7 @@ export default function ImportarPlanilha() {
       });
       setFuzzyPreview(result as FuzzyPreviewRow[]);
     } catch (e: any) {
-      setError("Erro ao verificar base mestre: " + e?.message);
+      setError("Não foi possível comparar com o catálogo. Detalhe técnico: " + e?.message);
     } finally {
       setLoadingFuzzy(false);
     }
@@ -1095,7 +1095,7 @@ export default function ImportarPlanilha() {
               </button>
             </div>
             <p className="text-xs text-blue-600">
-              Verifica os primeiros 30 produtos contra a base mestre usando algoritmo fuzzy (Jaro-Winkler). Campos vazios como Composição, Categoria e Marca serão preenchidos automaticamente.
+              Compara os primeiros 30 produtos da planilha com o seu catálogo por semelhança de nome e código. Campos vazios como Composição, Categoria e Marca serão preenchidos automaticamente a partir do que já existe.
             </p>
 
             {/* Fuzzy Results Summary */}

@@ -451,6 +451,40 @@ async function invokeProvider(
 }
 
 /**
+ * Contadores de consumo de IA desde o boot do servidor (em memória).
+ * Dão visibilidade de uso/custo na Central de IA — antes o campo `usage`
+ * retornado pelos provedores era simplesmente descartado.
+ */
+const usageTotals = {
+  desde: new Date().toISOString(),
+  chamadas: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  porProvedor: {} as Record<string, { chamadas: number; promptTokens: number; completionTokens: number }>,
+};
+
+function recordUsage(providerKind: string, result: InvokeResult) {
+  usageTotals.chamadas += 1;
+  const u = result.usage;
+  const porProv = (usageTotals.porProvedor[providerKind] ??= {
+    chamadas: 0,
+    promptTokens: 0,
+    completionTokens: 0,
+  });
+  porProv.chamadas += 1;
+  if (u) {
+    usageTotals.promptTokens += u.prompt_tokens ?? 0;
+    usageTotals.completionTokens += u.completion_tokens ?? 0;
+    porProv.promptTokens += u.prompt_tokens ?? 0;
+    porProv.completionTokens += u.completion_tokens ?? 0;
+  }
+}
+
+export function getUsageTotals() {
+  return usageTotals;
+}
+
+/**
  * Invoca o LLM com resiliência: erro transitório (429/5xx/timeout/rede) tenta
  * mais uma vez no mesmo provedor e depois cai para o próximo configurado.
  * Um pico de rate-limit no tier gratuito do Groq deixa de perder a extração.
@@ -465,7 +499,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   for (const provider of providers) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        return await invokeProvider(provider, params);
+        const result = await invokeProvider(provider, params);
+        recordUsage(provider.kind, result);
+        return result;
       } catch (err) {
         lastError = err;
         if (!isTransientLlmError(err)) {

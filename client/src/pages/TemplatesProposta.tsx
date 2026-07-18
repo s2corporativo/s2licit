@@ -567,7 +567,7 @@ export default function TemplatesProposta() {
               {seedMutation.isPending ? "Importando..." : "Importar Todos os Modelos de Uma Vez"}
             </Button>
             <p className="text-xs text-muted-foreground text-center mt-1.5">
-              Cria os 4 templates padrão (Federal, Estadual, Municipal e Venda Direta) diretamente no banco.
+              Cria os 4 templates padrão (Prefeitura, Estadual, Federal e Cliente Privado) diretamente no banco.
             </p>
           </div>
           <DialogFooter>

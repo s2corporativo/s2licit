@@ -187,10 +187,15 @@ function ModalCadastro({ onClose, onSaved }: { onClose: () => void; onSaved: () 
               </>
             ) : (
               <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-relaxed font-semibold">
+                  Configuração avançada — normalmente feita uma única vez com apoio técnico.
+                  Se o seu fornecedor está na lista de modelos prontos acima, use o modelo e ignore esta parte.
+                </p>
                 <p className="text-[10px] text-gray-500 leading-relaxed">
-                  Cadastre qualquer site de fornecedor informando a URL e os seletores CSS dos campos
-                  (nome, preço, login). Se não souber onde achar os seletores, peça ajuda a alguém que
-                  consiga inspecionar o site do fornecedor (botão direito → Inspecionar).
+                  Para cadastrar um site que não tem modelo pronto, é preciso indicar onde ficam o
+                  nome, o preço e o login dentro da página do fornecedor (os chamados "seletores").
+                  Isso exige conhecimento técnico: peça a quem der suporte ao sistema para preencher
+                  estes campos uma vez — depois a captura roda sozinha todos os dias.
                 </p>
                 <input
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
