@@ -241,6 +241,11 @@ export function initScheduledJobs(): void {
     .then(({ applyEmailConfigFromDb }) => applyEmailConfigFromDb())
     .catch(() => undefined);
 
+  // 0b. Config de IA (chaves/provedor) salva pela interface → process.env.
+  void import("./aiConfigService")
+    .then(({ applyAiConfigFromDb }) => applyAiConfigFromDb())
+    .catch(() => undefined);
+
   // 0. Jobs de IA que ficaram "executando" de um boot anterior → marcados como
   //    interrompidos (o runner morre junto com o processo).
   void import("../jobs/aiJobRunner")

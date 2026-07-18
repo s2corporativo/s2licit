@@ -3449,3 +3449,23 @@ export const emailSettings = mysqlTable("email_settings", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 export type EmailSettings = typeof emailSettings.$inferSelect;
+
+/**
+ * ai_settings: chaves e preferências de IA configuráveis pela interface
+ * (linha única). Chaves criptografadas no cofre (AES-256-GCM). Quando
+ * presentes, têm precedência sobre as variáveis de ambiente — que seguem
+ * como fallback para instalações configuradas por .env.
+ */
+export const aiSettings = mysqlTable("ai_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  // "auto" | "anthropic" | "groq"
+  aiProvider: varchar("aiProvider", { length: 16 }),
+  anthropicApiKeyEnc: text("anthropicApiKeyEnc"),
+  anthropicModel: varchar("anthropicModel", { length: 128 }),
+  groqApiKeyEnc: text("groqApiKeyEnc"),
+  groqModel: varchar("groqModel", { length: 128 }),
+  forgeApiUrl: varchar("forgeApiUrl", { length: 512 }),
+  forgeApiKeyEnc: text("forgeApiKeyEnc"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type AiSettings = typeof aiSettings.$inferSelect;

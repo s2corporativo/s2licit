@@ -11,6 +11,8 @@ import {
 import { ENV } from "../_core/env";
 import { getDb } from "../db";
 import { aiUsageDaily } from "../../drizzle/schema";
+import { getAiConfigView, saveAiConfig } from "../services/aiConfigService";
+import { recordAudit } from "../services/auditService";
 
 /**
  * Central de IA: status dos provedores, teste de conexão e consumo
@@ -97,6 +99,33 @@ export const aiRouter = router({
       cotacaoUsdBrl: rate,
     };
   }),
+
+  /** Configuração de chaves/preferências de IA para a tela (admin). */
+  getConfig: adminProcedure.query(() => getAiConfigView()),
+
+  /** Salva chaves/preferências de IA vindas da interface (admin). */
+  saveConfig: adminProcedure
+    .input(
+      z.object({
+        aiProvider: z.enum(["auto", "anthropic", "groq"]).optional(),
+        anthropicApiKey: z.string().max(512).optional().nullable(),
+        anthropicModel: z.string().max(128).optional().nullable(),
+        groqApiKey: z.string().max(512).optional().nullable(),
+        groqModel: z.string().max(128).optional().nullable(),
+        forgeApiUrl: z.string().max(512).optional().nullable(),
+        forgeApiKey: z.string().max(512).optional().nullable(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      await saveAiConfig(input);
+      await recordAudit({
+        userId: ctx.user?.id,
+        action: "ai_config_save",
+        entity: "ai_settings",
+        summary: "Configuração de IA (chaves/provedor) atualizada pela interface",
+      });
+      return { ok: true };
+    }),
 
   /** Testa o provedor ativo com um prompt mínimo (admin). */
   testar: adminProcedure

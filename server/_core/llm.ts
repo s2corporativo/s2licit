@@ -233,32 +233,53 @@ interface LlmProvider {
   jsonObjectOnly: boolean;
 }
 
+/**
+ * Config de IA em tempo de EXECUÇÃO: prioriza process.env (onde a config
+ * salva pela interface é aplicada por aiConfigService), com ENV — capturado no
+ * boot a partir do .env — como fallback. Assim colar a chave na Central de IA
+ * passa a valer sem reiniciar o servidor.
+ */
+function aiEnv() {
+  return {
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || ENV.anthropicApiKey,
+    anthropicModel: process.env.ANTHROPIC_MODEL || ENV.anthropicModel,
+    groqApiKey: process.env.GROQ_API_KEY || ENV.groqApiKey,
+    groqModel: process.env.GROQ_MODEL || ENV.groqModel,
+    forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL || ENV.forgeApiUrl,
+    forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY || ENV.forgeApiKey,
+    aiProvider: (process.env.AI_PROVIDER || ENV.aiProvider || "auto").toLowerCase(),
+  };
+}
+
 function anthropicProvider(): LlmProvider | null {
-  if (!ENV.anthropicApiKey) return null;
+  const env = aiEnv();
+  if (!env.anthropicApiKey) return null;
   return {
     kind: "anthropic",
     url: "https://api.anthropic.com/v1/chat/completions",
-    apiKey: ENV.anthropicApiKey,
-    model: ENV.anthropicModel,
+    apiKey: env.anthropicApiKey,
+    model: env.anthropicModel,
     jsonObjectOnly: false,
   };
 }
 function groqProvider(): LlmProvider | null {
-  if (!ENV.groqApiKey) return null;
+  const env = aiEnv();
+  if (!env.groqApiKey) return null;
   return {
     kind: "groq",
     url: "https://api.groq.com/openai/v1/chat/completions",
-    apiKey: ENV.groqApiKey,
-    model: ENV.groqModel,
+    apiKey: env.groqApiKey,
+    model: env.groqModel,
     jsonObjectOnly: true,
   };
 }
 function forgeProvider(): LlmProvider | null {
-  if (!ENV.forgeApiUrl || !ENV.forgeApiKey) return null;
+  const env = aiEnv();
+  if (!env.forgeApiUrl || !env.forgeApiKey) return null;
   return {
     kind: "forge",
-    url: `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
-    apiKey: ENV.forgeApiKey,
+    url: `${env.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
+    apiKey: env.forgeApiKey,
     model: "gemini-2.5-flash",
     jsonObjectOnly: false,
   };
@@ -273,7 +294,7 @@ export function listConfiguredProviders(): Array<{ kind: LlmProviderKind; model:
 
 /** Retorna o provedor ativo (respeitando AI_PROVIDER) ou null se nenhum. */
 export function activeProvider(): LlmProvider | null {
-  const pref = ENV.aiProvider;
+  const pref = aiEnv().aiProvider;
   if (pref === "anthropic") return anthropicProvider() ?? groqProvider() ?? forgeProvider();
   if (pref === "groq") return groqProvider() ?? anthropicProvider() ?? forgeProvider();
   // auto
@@ -339,7 +360,7 @@ function orderedProviders(): LlmProvider[] {
   const all = [anthropicProvider(), groqProvider(), forgeProvider()].filter(
     (p): p is LlmProvider => p != null
   );
-  const pref = ENV.aiProvider;
+  const pref = aiEnv().aiProvider;
   const rank = (p: LlmProvider) =>
     (pref === "anthropic" && p.kind === "anthropic") || (pref === "groq" && p.kind === "groq")
       ? 0
