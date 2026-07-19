@@ -351,7 +351,7 @@ export async function expandAndSyncTambasaCatalog(
 
     await db
       .update(scraperConfigs)
-      .set({ customSelectors: expandedSelectors as unknown as Record<string, unknown> })
+      .set({ customSelectors: expandedSelectors })
       .where(eq(scraperConfigs.id, config.id));
 
     logger.info(
