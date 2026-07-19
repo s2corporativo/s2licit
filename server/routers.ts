@@ -26,6 +26,7 @@ import { categoryPricingRouter } from "./routers/categoryPricing";
 import { bulkPricingRouter } from "./routers/bulkPricing";
 import { agenteRouter } from "./routers/agente";
 import { scraperAgentRouter } from "./routers/scraperAgent";
+import { tambasaCatalogRouter } from "./routers/tambasaCatalog";
 import { propostaAgentRouter } from "./routers/propostaAgentRouter";
 import { captureReviewRouter } from "./routers/captureReview";
 import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
@@ -78,6 +79,7 @@ export const appRouter = router({
   bulkPricing: bulkPricingRouter,
   agente: agenteRouter,
   scraperAgent: scraperAgentRouter,
+  tambasaCatalog: tambasaCatalogRouter,
   propostaAgent: propostaAgentRouter,
   audit: auditRouter,
   mfa: mfaRouter,
