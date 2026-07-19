@@ -164,7 +164,7 @@ function ReadinessTab({ isAdmin }: { isAdmin: boolean }) {
 function CertificationsTab() {
   const utils = trpc.useUtils();
   const query = trpc.operationalGovernance.listCertifications.useQuery();
-  const rows = (query.data ?? []) as CertificationRow[];
+  const rows = (query.data ?? []) as unknown as CertificationRow[];
   const [entityType, setEntityType] = useState<"supplier" | "portal">("supplier");
   const [entityName, setEntityName] = useState("");
   const [status, setStatus] = useState<CertificationStatus>("pending");
@@ -191,7 +191,7 @@ function RankingTab() {
 function ContractsTab() {
   const utils = trpc.useUtils();
   const query = trpc.operationalGovernance.listContracts.useQuery();
-  const rows = (query.data ?? []) as ContractRow[];
+  const rows = (query.data ?? []) as unknown as ContractRow[];
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ orgao: "", numeroContrato: "", valorContratado: "", saldoContratual: "", inicioVigencia: "", fimVigencia: "", status: "draft" as ContractStatus });
   const save = trpc.operationalGovernance.saveContract.useMutation({ onSuccess: async () => { toast.success("Contrato salvo."); setShow(false); await Promise.all([utils.operationalGovernance.listContracts.invalidate(), utils.operationalGovernance.summary.invalidate()]); }, onError: (error) => toast.error(error.message) });
@@ -204,7 +204,7 @@ function DecisionTab() {
   const [metrics, setMetrics] = useState({ marginPercent: 15, supplierCoveragePercent: 80, documentationReadinessPercent: 80, deliveryConfidencePercent: 80, workingCapitalCoveragePercent: 80, competitionLevel: "medium" as RiskChoice, legalRisk: "medium" as RiskChoice, taxRisk: "medium" as RiskChoice, operationalRisk: "medium" as RiskChoice });
   const id = Number(opportunityId);
   const historyQuery = trpc.operationalGovernance.assessmentHistory.useQuery({ opportunityId: id }, { enabled: Number.isInteger(id) && id > 0 });
-  const history = (historyQuery.data ?? []) as AssessmentRow[];
+  const history = (historyQuery.data ?? []) as unknown as AssessmentRow[];
   const evaluate = trpc.operationalGovernance.evaluateOpportunity.useMutation({ onSuccess: (data) => { setResult(data); toast.success("Avaliação registrada."); }, onError: (error) => toast.error(error.message) });
   return <div className="grid gap-5 xl:grid-cols-2"><section className="border bg-white p-5"><h2 className="mb-4 font-bold">Avaliar oportunidade</h2><Field label="ID"><input type="number" min="1" value={opportunityId} onChange={(event) => setOpportunityId(event.target.value)} className={INPUT} /></Field><div className="grid gap-3 sm:grid-cols-2"><NumberField label="Margem (%)" value={metrics.marginPercent} onChange={(value) => setMetrics({ ...metrics, marginPercent: value })} /><NumberField label="Fornecedores (%)" value={metrics.supplierCoveragePercent} onChange={(value) => setMetrics({ ...metrics, supplierCoveragePercent: value })} /><NumberField label="Documentação (%)" value={metrics.documentationReadinessPercent} onChange={(value) => setMetrics({ ...metrics, documentationReadinessPercent: value })} /><NumberField label="Entrega (%)" value={metrics.deliveryConfidencePercent} onChange={(value) => setMetrics({ ...metrics, deliveryConfidencePercent: value })} /><NumberField label="Capital de giro (%)" value={metrics.workingCapitalCoveragePercent} onChange={(value) => setMetrics({ ...metrics, workingCapitalCoveragePercent: value })} /><RiskField label="Concorrência" value={metrics.competitionLevel} onChange={(value) => setMetrics({ ...metrics, competitionLevel: value })} /><RiskField label="Risco jurídico" value={metrics.legalRisk} onChange={(value) => setMetrics({ ...metrics, legalRisk: value })} /><RiskField label="Risco tributário" value={metrics.taxRisk} onChange={(value) => setMetrics({ ...metrics, taxRisk: value })} /><RiskField label="Risco operacional" value={metrics.operationalRisk} onChange={(value) => setMetrics({ ...metrics, operationalRisk: value })} /></div><button disabled={evaluate.isPending || id <= 0} onClick={() => evaluate.mutate({ opportunityId: id, metrics })} className="flex items-center gap-2 bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><ClipboardCheck className="h-4 w-4" />Avaliar</button></section><section className="border bg-white p-5"><h2 className="mb-4 font-bold">Resultado</h2>{result ? <div className="space-y-3"><div className="border p-4"><div className="text-xs uppercase text-gray-500">Recomendação</div><div className="text-2xl font-black uppercase">{result.recommendation.replace("_", "-")}</div><div>Score: {result.score.toFixed(2)}</div></div><Result title="Bloqueios" items={result.blockers} /><Result title="Fundamentos" items={result.reasons} /><Result title="Ações" items={result.actions} /></div> : history.length ? <div className="space-y-2">{history.map((row) => <div key={row.id} className="border p-3"><div className="flex justify-between"><span className="font-semibold uppercase">{row.recommendation.replace("_", "-")}</span><span className="font-bold">{row.score.toFixed(2)}</span></div><div className="text-xs text-gray-500">{formatDate(row.createdAt)} · {row.createdBy ?? "sistema"}</div></div>)}</div> : <Empty text="Execute uma avaliação." />}</section></div>;
 }
