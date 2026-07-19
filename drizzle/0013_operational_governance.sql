@@ -18,8 +18,9 @@ ON DUPLICATE KEY UPDATE
   `price` = COALESCE(VALUES(`price`), `product_supplier_offers`.`price`),
   `link` = COALESCE(VALUES(`link`), `product_supplier_offers`.`link`),
   `updatedAt` = GREATEST(VALUES(`updatedAt`), `product_supplier_offers`.`updatedAt`);
-
+--> statement-breakpoint
 DROP VIEW IF EXISTS `canonical_product_costs`;
+--> statement-breakpoint
 CREATE VIEW `canonical_product_costs` AS
 SELECT
   o.`productId`,
@@ -57,7 +58,7 @@ JOIN (
    ELSE o.`price`
  END
 WHERE s.`isActive` = 'yes';
-
+--> statement-breakpoint
 CREATE TABLE `operational_certifications` (
   `id` int AUTO_INCREMENT NOT NULL,
   `entityType` enum('supplier','portal') NOT NULL,
@@ -77,7 +78,7 @@ CREATE TABLE `operational_certifications` (
   INDEX `idx_operational_certification_status` (`status`),
   INDEX `idx_operational_certification_type` (`entityType`)
 );
-
+--> statement-breakpoint
 CREATE TABLE `contract_lifecycle` (
   `id` int AUTO_INCREMENT NOT NULL,
   `funilId` int,
@@ -104,7 +105,7 @@ CREATE TABLE `contract_lifecycle` (
   INDEX `idx_contract_end_date` (`fimVigencia`),
   INDEX `idx_contract_funil` (`funilId`)
 );
-
+--> statement-breakpoint
 CREATE TABLE `contract_item_balances` (
   `id` int AUTO_INCREMENT NOT NULL,
   `contractId` int NOT NULL,
@@ -120,7 +121,7 @@ CREATE TABLE `contract_item_balances` (
   CONSTRAINT `fk_contract_item_contract` FOREIGN KEY (`contractId`) REFERENCES `contract_lifecycle`(`id`) ON DELETE CASCADE,
   INDEX `idx_contract_item_contract` (`contractId`)
 );
-
+--> statement-breakpoint
 CREATE TABLE `executive_assessments` (
   `id` int AUTO_INCREMENT NOT NULL,
   `opportunityId` int NOT NULL,
