@@ -118,7 +118,23 @@ jobs:
           echo "MySQL não respondeu a tempo" >&2; exit 1
 
       - name: Aplicar migrações de produção do zero
-        run: node scripts/migrate-production.mjs
+        id: migrations
+        continue-on-error: true
+        run: node scripts/migrate-production.mjs > migration.log 2>&1
+
+      - name: Publicar diagnóstico das migrações
+        if: steps.migrations.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-errors
+          path: migration.log
+          retention-days: 3
+
+      - name: Interromper em falha de migração
+        if: steps.migrations.outcome == 'failure'
+        run: |
+          tail -n 300 migration.log
+          exit 1
 
       - name: Reaplicar (idempotência) — segunda passada não pode falhar
         run: node scripts/migrate-production.mjs

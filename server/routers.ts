@@ -53,15 +53,13 @@ import { fretesRouter } from "./routers/fretes";
 import { posVendaRouter } from "./routers/posVenda";
 import { buscaGlobalRouter } from "./routers/buscaGlobal";
 import { diagnosticoRouter } from "./routers/diagnostico";
+import { operationalGovernanceRouter } from "./routers/operationalGovernance";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 
-
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-
-
 
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, router } from "./_core/trpc";
@@ -106,17 +104,15 @@ export const appRouter = router({
   posVenda: posVendaRouter,
   buscaGlobal: buscaGlobalRouter,
   diagnostico: diagnosticoRouter,
+  operationalGovernance: operationalGovernanceRouter,
 
   auth: authRouter,
-
 
   // ─── Categories ───────────────────────────────────────────────────────────
   categories: categoriesRouter,
 
-
   // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: suppliersRouter,
-
 
   // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
@@ -124,45 +120,40 @@ export const appRouter = router({
   // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: equivalencesRouter,
 
-
   // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: importsRouter,
-   // ─── Dashboard ────────────────────────────────────────────────────────────
+  // ─── Dashboard ────────────────────────────────────────────────────────────
   dashboard: dashboardRouter,
 
   // ─── Quotations ───────────────────────────────────────────────────────────
 
-  // ─── Company Settings ────────────────────────────────────────────────────────
+  // ─── Company Settings ─────────────────────────────────────────────────────
   company: companyRouter,
 
-
-  // ─── Requesting Orgs ─────────────────────────────────────────────────────────
+  // ─── Requesting Orgs ──────────────────────────────────────────────────────
   orgs: orgsRouter,
 
-
-  // ─── Proposals ───────────────────────────────────────────────────────────────
+  // ─── Proposals ────────────────────────────────────────────────────────────
   proposals: proposalsRouter,
 
-
-  // ─── Financial Entries ────────────────────────────────────────────────
+  // ─── Financial Entries ────────────────────────────────────────────────────
   financial: financialRouter,
 
   masterProducts: masterProductsRouter,
 
-
   priceIntelligence: priceIntelligenceRouter,
 
-  // ─── Catalog Enrichment ────────────────────────────────────────────────────
+  // ─── Catalog Enrichment ───────────────────────────────────────────────────
   enrichment: enrichmentInlineRouter,
-  // ─── Reclassificação em Lote via IA ──────────────────────────────────────────────────────
-  // ─── Importação com Consolidação Automática ──────────────────────────────────────────────────
-  // ─── Reconhecimento Inteligente de Produtos ──────────────────────────────────────────────────
-  // ─── Importação com Matching Automático ──────────────────────────────────────────────────────
-  // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────────────────────────
-  // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────────────────────
+  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
+  // ─── Importação com Consolidação Automática ───────────────────────────────
+  // ─── Reconhecimento Inteligente de Produtos ───────────────────────────────
+  // ─── Importação com Matching Automático ───────────────────────────────────
+  // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────
+  // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────
   edital: editalRouter,
 
-  // ─── (A) Upload seguro de logo ──────────────────────────────────────────────
+  // ─── (A) Upload seguro de logo ────────────────────────────────────────────
   uploadLogo: protectedProcedure
     .input(z.object({
       base64: z.string().max(8_000_000), // ~6MB base64
@@ -190,28 +181,25 @@ export const appRouter = router({
       return { url };
     }),
 
-  // ─── (E) Declarações fixas (templates) ───────────────────────────────────────
+  // ─── (E) Declarações fixas (templates) ────────────────────────────────────
   declarations: declarationsRouter,
-
 
   // ─── Reclassificação em Lote via IA ───────────────────────────────────────
   reclassificacao: reclassificacaoRouter,
 
-  // ─── Sinônimos para Matching ───────────────────────────────────────────────
+  // ─── Sinônimos para Matching ──────────────────────────────────────────────
   synonyms: synonymsRouter,
 
-
-  // ─── Templates de Proposta ──────────────────────────────────────────────────
+  // ─── Templates de Proposta ────────────────────────────────────────────────
   proposalTemplates: proposalTemplatesRouter,
 
-  // ─── Metadados e apoio operacional ───────────────────────────────────────────
+  // ─── Metadados e apoio operacional ────────────────────────────────────────
 
-  // ─── Motor Universal de Equivalência e duplicidades ──────────────────────────
+  // ─── Motor Universal de Equivalência e duplicidades ───────────────────────
   duplicates: duplicatesRouter,
   intelligentCapture: intelligentCaptureRouter,
 
-  // ─── Módulos complementares ───────────────────────────────────────────────────
+  // ─── Módulos complementares ───────────────────────────────────────────────
   images: imagesRouter,
 });
 export type AppRouter = typeof appRouter;
-
