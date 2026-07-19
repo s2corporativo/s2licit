@@ -8,6 +8,7 @@ import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
 import { executarScraper } from "./scraperEngine";
+import { expandAndSyncTambasaCatalog } from "./tambasaCatalogService";
 import { runDatabaseBackup, cleanupOldBackups } from "./backupService";
 import { logger } from "../_core/logger";
 
@@ -26,6 +27,7 @@ const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
 const DEFAULT_BACKUP_CRON = "0 3 * * *"; // backup diário às 3h
 const DEFAULT_BACKUP_KEEP_DAYS = 14;
 const SCRAPER_TIMEZONE = "America/Sao_Paulo";
+const TAMBASA_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // catálogo completo: semanal
 const ALERT_DAYS = 30; // certidões
 const DEADLINE_DAYS = 3; // prazos de cotação
 
@@ -145,13 +147,9 @@ export async function runDailyAlerts(): Promise<void> {
 
 /**
  * Dispara os scrapers de fornecedores cujo `scheduleTime` (HH:mm, horário de
- * Brasília) já passou hoje e que ainda não rodaram no dia. A comparação por
- * JANELA (scheduleTime <= agora, sem execução hoje) garante que um tick de
- * minuto perdido — event loop ocupado com scraping/LLM — não faça o
- * fornecedor pular o dia inteiro, como acontecia com a igualdade exata.
- * A proteção contra execução concorrente do mesmo fornecedor (ex.: clique
- * manual coincidindo com o horário agendado) vive em `executarScraper`
- * (scraperEngine.ts), não aqui.
+ * Brasília) já passou hoje e que ainda não rodaram no período aplicável. A
+ * Tambasa executa a descoberta e sincronização completa no máximo uma vez a
+ * cada sete dias; os demais fornecedores mantêm o ciclo diário já existente.
  */
 const scraperFiredOn = new Map<number, string>(); // configId → data (tz) do último disparo local
 
@@ -168,6 +166,7 @@ async function runScheduledScrapers(): Promise<void> {
   try {
     const ativos = await db.select({
       id: scraperConfigs.id,
+      scraperType: scraperConfigs.scraperType,
       scheduleTime: scraperConfigs.scheduleTime,
       lastRunAt: scraperConfigs.lastRunAt,
     })
@@ -177,6 +176,13 @@ async function runScheduledScrapers(): Promise<void> {
 
     for (const cfg of ativos) {
       if (!cfg.scheduleTime || cfg.scheduleTime > hhmm) continue;
+
+      const isTambasa = cfg.scraperType.toLowerCase() === "tambasa";
+      const lastRunAtMs = cfg.lastRunAt ? new Date(cfg.lastRunAt).getTime() : null;
+      if (isTambasa && lastRunAtMs != null && Date.now() - lastRunAtMs < TAMBASA_MIN_INTERVAL_MS) {
+        continue;
+      }
+
       // Já rodou hoje (pelo banco ou por disparo local ainda em andamento)?
       const lastRunDay = cfg.lastRunAt
         ? new Date(cfg.lastRunAt).toLocaleDateString("en-CA", { timeZone: SCRAPER_TIMEZONE })
@@ -184,7 +190,11 @@ async function runScheduledScrapers(): Promise<void> {
       if (lastRunDay === hoje || scraperFiredOn.get(cfg.id) === hoje) continue;
       scraperFiredOn.set(cfg.id, hoje);
 
-      executarScraper(cfg.id)
+      const runPromise = isTambasa
+        ? expandAndSyncTambasaCatalog(cfg.id).then((result) => result.scraper)
+        : executarScraper(cfg.id);
+
+      runPromise
         .then((r) => {
           logger.info(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
           if (!r.success) {
