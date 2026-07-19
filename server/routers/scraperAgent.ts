@@ -11,6 +11,7 @@ import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
 import { and, eq, desc } from "drizzle-orm";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
 import { executarScraper, testarLoginFornecedor, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
+import { expandAndSyncTambasaCatalog } from "../services/tambasaCatalogService";
 import { logger } from "../_core/logger";
 
 // Jobs em execução (em memória — suficiente para UI de progresso)
@@ -193,6 +194,7 @@ export const scraperAgentRouter = router({
     .input(executarSchema)
     .mutation(async ({ input }: { input: z.infer<typeof executarSchema> }) => {
       const { scraperConfigId } = input;
+      let scraperType = "";
 
       // Governança: captura só roda com os termos de uso do fornecedor
       // revisados e aprovados por um humano (checkbox na tela de captura).
@@ -200,7 +202,10 @@ export const scraperAgentRouter = router({
         const db = await getDb();
         if (!db) throw new Error("Banco indisponível");
         const [cfg] = await db
-          .select({ tosAprovado: scraperConfigs.tosAprovado })
+          .select({
+            tosAprovado: scraperConfigs.tosAprovado,
+            scraperType: scraperConfigs.scraperType,
+          })
           .from(scraperConfigs)
           .where(eq(scraperConfigs.id, scraperConfigId))
           .limit(1);
@@ -210,6 +215,7 @@ export const scraperAgentRouter = router({
             "Captura bloqueada: confirme na configuração do fornecedor que os termos de uso do site foram revisados e a coleta está autorizada."
           );
         }
+        scraperType = cfg.scraperType.toLowerCase();
       }
 
       // Confirmação de login: se o operador digitou credenciais novas, elas
@@ -235,11 +241,15 @@ export const scraperAgentRouter = router({
 
       runningJobs.set(scraperConfigId, {
         status: "running",
-        log: ["Job iniciado..."],
+        log: [scraperType === "tambasa" ? "Descobrindo todo o catálogo Tambasa..." : "Job iniciado..."],
         startedAt: new Date(),
       });
 
-      executarScraper(scraperConfigId)
+      const runPromise = scraperType === "tambasa"
+        ? expandAndSyncTambasaCatalog(scraperConfigId).then((result) => result.scraper)
+        : executarScraper(scraperConfigId);
+
+      runPromise
         .then((r) => {
           runningJobs.set(scraperConfigId, {
             status: r.success ? "success" : "failed",
@@ -255,7 +265,11 @@ export const scraperAgentRouter = router({
           });
         });
 
-      return { message: "Scraper iniciado em background" };
+      return {
+        message: scraperType === "tambasa"
+          ? "Descoberta e sincronização completa da Tambasa iniciadas em background"
+          : "Scraper iniciado em background",
+      };
     }),
 
   /** Consultar status de um job em execução */
@@ -285,15 +299,28 @@ export const scraperAgentRouter = router({
     if (!db) throw new Error("Banco indisponível");
 
     // Só fornecedores habilitados E com termos de uso aprovados (governança)
-    const ativos = await db.select({ id: scraperConfigs.id })
+    const ativos = await db.select({
+      id: scraperConfigs.id,
+      scraperType: scraperConfigs.scraperType,
+    })
       .from(scraperConfigs)
       .where(and(eq(scraperConfigs.enabled, "yes"), eq(scraperConfigs.tosAprovado, true)));
 
     let iniciados = 0;
-    for (const { id } of ativos) {
+    for (const { id, scraperType } of ativos) {
       if (!runningJobs.has(id) || runningJobs.get(id)?.status !== "running") {
-        runningJobs.set(id, { status: "running", log: ["Job iniciado..."], startedAt: new Date() });
-        executarScraper(id)
+        const isTambasa = scraperType.toLowerCase() === "tambasa";
+        runningJobs.set(id, {
+          status: "running",
+          log: [isTambasa ? "Descobrindo todo o catálogo Tambasa..." : "Job iniciado..."],
+          startedAt: new Date(),
+        });
+
+        const runPromise = isTambasa
+          ? expandAndSyncTambasaCatalog(id).then((result) => result.scraper)
+          : executarScraper(id);
+
+        runPromise
           .then((r) => {
             runningJobs.set(id, {
               status: r.success ? "success" : "failed",
