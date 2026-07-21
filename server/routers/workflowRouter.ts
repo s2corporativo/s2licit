@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   auditLogs,
@@ -61,7 +61,7 @@ export const workflowRouter = router({
       return { success: true, mode: "create" };
     }),
 
-  remove: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input, ctx }) => {
+  remove: editorProcedure.input(z.object({ id: z.number() })).mutation(async ({ input, ctx }) => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
     await db.delete(diligenciaWorkflows).where(eq(diligenciaWorkflows.id, input.id));

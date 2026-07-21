@@ -1,4 +1,4 @@
-import { router, protectedProcedure } from "../_core/trpc";
+import { router, protectedProcedure, editorProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { processNfeEnrichmentPipeline } from "../services/nfeEnrichmentPipelineService";
 
@@ -49,7 +49,7 @@ export const nfeEnrichmentPipelineRouter = router({
   /**
    * Cancela pipeline em execução
    */
-  cancelPipeline: protectedProcedure.mutation(async () => {
+  cancelPipeline: editorProcedure.mutation(async () => {
     // TODO: Implementar cancelamento
     return { success: true, message: "Pipeline cancelado" };
   }),

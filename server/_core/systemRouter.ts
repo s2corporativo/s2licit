@@ -4,6 +4,12 @@ import { adminProcedure, publicProcedure, protectedProcedure, router } from "./t
 import { getDb } from "../db";
 import { importLogs, products, categories } from "../../drizzle/schema";
 import { desc, eq, or, sql, isNull, count } from "drizzle-orm";
+import mysql from "mysql2/promise";
+import https from "https";
+
+// Cache de status de saúde para evitar sobrecarga
+let lastHealthCheck: { timestamp: number; result: any } | null = null;
+const HEALTH_CACHE_TTL_MS = 10000; // 10 segundos
 
 export const systemRouter = router({
   health: publicProcedure
@@ -12,9 +18,114 @@ export const systemRouter = router({
         timestamp: z.number().min(0, "timestamp cannot be negative"),
       })
     )
-    .query(() => ({
-      ok: true,
-    })),
+    .query(async ({ ctx }) => {
+      const now = Date.now();
+      
+      // Retorna cache se válido
+      if (lastHealthCheck && (now - lastHealthCheck.timestamp) < HEALTH_CACHE_TTL_MS) {
+        return lastHealthCheck.result;
+      }
+      
+      const checks: Array<{ check: string; status: "ok" | "warn" | "error"; detail: string; latencyMs?: number }> = [];
+      let overallStatus: "ok" | "warn" | "error" = "ok";
+      
+      // 1. Verificar conexão MySQL real
+      try {
+        const startTime = Date.now();
+        const db = await getDb();
+        if (!db) {
+          checks.push({ check: "MySQL", status: "error", detail: "getDb() retornou null" });
+          overallStatus = "error";
+        } else {
+          // Teste real de conexão com query simples
+          const [rows] = await db.execute("SELECT 1 AS ping");
+          const latency = Date.now() - startTime;
+          checks.push({ check: "MySQL", status: "ok", detail: `Conexão ativa (${latency}ms)`, latencyMs: latency });
+        }
+      } catch (e: any) {
+        checks.push({ check: "MySQL", status: "error", detail: e?.message ?? "Erro desconhecido" });
+        overallStatus = "error";
+      }
+      
+      // 2. Verificar APIs externas críticas (PNCP)
+      try {
+        const startTime = Date.now();
+        const pncpOk = await new Promise<boolean>((resolve) => {
+          const timeout = setTimeout(() => { resolve(false); }, 5000);
+          https.get("https://api.pncp.gov.br/api-publico/v1/organos?pagina=1&tamanho=1", { timeout: 5000 }, (res) => {
+            clearTimeout(timeout);
+            resolve(res.statusCode === 200);
+          }).on("error", () => { resolve(false); });
+        });
+        const latency = Date.now() - startTime;
+        if (pncpOk) {
+          checks.push({ check: "API PNCP", status: "ok", detail: `Disponível (${latency}ms)`, latencyMs: latency });
+        } else {
+          checks.push({ check: "API PNCP", status: "warn", detail: "Indisponível ou timeout (>5s)" });
+          if (overallStatus === "ok") overallStatus = "warn";
+        }
+      } catch (e: any) {
+        checks.push({ check: "API PNCP", status: "error", detail: e?.message ?? "Erro desconhecido" });
+        overallStatus = "error";
+      }
+      
+      // 3. Verificar jobs travados
+      try {
+        const db = await getDb();
+        if (db) {
+          const stuckJobs = await db
+            .select({ id: importLogs.id, fileName: importLogs.fileName, updatedAt: importLogs.updatedAt })
+            .from(importLogs)
+            .where(
+              sql`${importLogs.status} = 'processing' AND ${importLogs.updatedAt} < DATE_SUB(NOW(), INTERVAL 30 MINUTE)`
+            )
+            .limit(5);
+          if (stuckJobs.length > 0) {
+            checks.push({
+              check: "Jobs de importação",
+              status: "warn",
+              detail: `${stuckJobs.length} job(s) travado(s): ${stuckJobs.map(j => j.fileName).join(", ")}`,
+            });
+            if (overallStatus === "ok") overallStatus = "warn";
+          } else {
+            checks.push({ check: "Jobs de importação", status: "ok", detail: "Nenhum job travado" });
+          }
+        }
+      } catch (e: any) {
+        checks.push({ check: "Jobs de importação", status: "warn", detail: "Não foi possível verificar: " + e?.message });
+        if (overallStatus === "ok") overallStatus = "warn";
+      }
+      
+      // 4. Verificar integridade básica do catálogo
+      try {
+        const db = await getDb();
+        if (db) {
+          const [{ total }] = await db.select({ total: count() }).from(products);
+          const [{ semCat }] = await db.select({ semCat: count() }).from(products).where(isNull(products.categoryId));
+          const pctSemCat = total > 0 ? Math.round((Number(semCat) / Number(total)) * 100) : 0;
+          if (pctSemCat > 10) {
+            checks.push({ check: "Integridade do catálogo", status: "warn", detail: `${pctSemCat}% produtos sem categoria` });
+            if (overallStatus === "ok") overallStatus = "warn";
+          } else {
+            checks.push({ check: "Integridade do catálogo", status: "ok", detail: `${Number(total)} produtos, ${pctSemCat}% sem categoria` });
+          }
+        }
+      } catch (e: any) {
+        checks.push({ check: "Integridade do catálogo", status: "warn", detail: "Não foi possível verificar: " + e?.message });
+        if (overallStatus === "ok") overallStatus = "warn";
+      }
+      
+      const result = {
+        ok: overallStatus === "ok",
+        status: overallStatus,
+        timestamp: new Date().toISOString(),
+        checks,
+        version: process.env.npm_package_version ?? "unknown",
+      };
+      
+      lastHealthCheck = { timestamp: now, result };
+      return result;
+    }),
 
   notifyOwner: adminProcedure
     .input(

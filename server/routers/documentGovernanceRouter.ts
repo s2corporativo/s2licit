@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { asc, desc, eq } from "drizzle-orm";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { auditLogs, documentosHabilitacao } from "../../drizzle/schema";
 
@@ -86,7 +86,7 @@ export const documentGovernanceRouter = router({
       return { success: true, mode: "create" };
     }),
 
-  remove: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input, ctx }) => {
+  remove: editorProcedure.input(z.object({ id: z.number() })).mutation(async ({ input, ctx }) => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
     await db.delete(documentosHabilitacao).where(eq(documentosHabilitacao.id, input.id));

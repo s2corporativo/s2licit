@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, editorProcedure, router } from "../_core/trpc";
 import {
   createPriceVariationAlert,
   calculateAlertStats,
@@ -229,7 +229,7 @@ export const priceAlertsRouter = router({
   /**
    * Send alert summary notification
    */
-  sendAlertSummary: protectedProcedure.mutation(async ({ ctx }) => {
+  sendAlertSummary: editorProcedure.mutation(async ({ ctx }) => {
     const key = `alerts-${ctx.user.id}`;
     const alerts = alertsStore.get(key) || [];
 
@@ -254,7 +254,7 @@ export const priceAlertsRouter = router({
   /**
    * Clear all alerts
    */
-  clearAlerts: protectedProcedure.mutation(({ ctx }) => {
+  clearAlerts: editorProcedure.mutation(({ ctx }) => {
     const key = `alerts-${ctx.user.id}`;
     alertsStore.delete(key);
     return { success: true };
