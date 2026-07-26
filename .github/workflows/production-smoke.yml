@@ -50,6 +50,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Quando disparado pelo deploy, testa exatamente o release implantado.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -95,7 +98,9 @@ jobs:
             '',
             `- URL: ${summary.baseUrl}`,
             `- Endpoints públicos validados: ${summary.endpoints?.length ?? 0}`,
-            `- Rotas autenticadas validadas: ${summary.routes?.length ?? 0}`,
+            `- Rotas estáticas validadas: ${summary.routes?.filter((route) => !route.route?.includes(':')).length ?? 0}`,
+            `- Rotas dinâmicas resolvidas: ${summary.dynamicRoutes?.resolved?.length ?? 0}`,
+            `- Rotas dinâmicas não exercitadas: ${summary.dynamicRoutes?.skipped?.length ?? 0}`,
             `- Escopo/papel: ${summary.scope ?? 'n/d'} / ${summary.role ?? 'n/d'}`,
             `- Autenticação: ${summary.authentication?.skipped ? 'não configurada; smoke público executado' : 'executada'}`,
             `- Resultado: ${summary.error ? 'falha' : 'sucesso'}`,
@@ -173,24 +178,41 @@ jobs:
               return;
             }
 
-            if (incident) {
-              const authNote = summary.authentication?.skipped
-                ? " O smoke autenticado ficou pendente por ausência de credenciais, mas domínio, identidade e saúde pública foram validados."
-                : " O smoke autenticado e as rotas configuradas foram validados.";
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: incident.number,
-                body: `✅ Produção voltou a passar em ${checkedAt}.${authNote} Evidências: ${runUrl}`,
-              });
+            if (!incident) return;
+
+            if (summary.authentication?.skipped) {
+              const body = [
+                "A identidade pública, `/healthz` e `/readyz` estão saudáveis, mas o incidente autenticado não pode ser encerrado sem retestar login, permissões e rotas.",
+                "",
+                `- URL: ${process.env.BASE_URL}`,
+                `- Verificado em: ${checkedAt}`,
+                `- Evidências: ${runUrl}`,
+                "",
+                "### Pendência objetiva",
+                "Cadastrar `SMOKE_USER_EMAIL` e `SMOKE_USER_PASSWORD` de uma conta dedicada e executar novamente o workflow.",
+              ].join("\n");
               await github.rest.issues.update({
                 owner,
                 repo,
                 issue_number: incident.number,
-                state: "closed",
-                state_reason: "completed",
+                body,
               });
+              return;
             }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: incident.number,
+              body: `✅ Recuperação confirmada em ${checkedAt}. Login, permissões e rotas configuradas foram validados. Evidências: ${runUrl}`,
+            });
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number: incident.number,
+              state: "closed",
+              state_reason: "completed",
+            });
 
       - name: Falhar o workflow quando o smoke falhar
         if: steps.smoke.outcome != 'success'
