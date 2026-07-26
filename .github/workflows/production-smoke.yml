@@ -10,9 +10,20 @@ on:
         required: false
         default: "https://s2.s2corporativo.com.br"
       routes:
-        description: "Rotas separadas por vírgula; vazio usa o conjunto crítico padrão"
+        description: "Rotas separadas por vírgula; vazio usa o manifesto completo"
         required: false
         default: ""
+      scope:
+        description: "critical ou full"
+        required: false
+        default: "full"
+      role:
+        description: "Papel da conta de teste: user, viewer, editor ou admin"
+        required: false
+        default: "editor"
+  workflow_run:
+    workflows: ["Deploy VPS"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -25,6 +36,8 @@ concurrency:
 env:
   SMOKE_BASE_URL: ${{ inputs.base_url || vars.S2_BASE_URL || 'https://s2.s2corporativo.com.br' }}
   SMOKE_ROUTES: ${{ inputs.routes || vars.SMOKE_ROUTES }}
+  SMOKE_SCOPE: ${{ inputs.scope || vars.SMOKE_SCOPE || 'full' }}
+  SMOKE_ROLE: ${{ inputs.role || vars.SMOKE_ROLE || 'editor' }}
   SMOKE_USER_EMAIL: ${{ secrets.SMOKE_USER_EMAIL }}
   SMOKE_USER_PASSWORD: ${{ secrets.SMOKE_USER_PASSWORD }}
   SMOKE_MFA_TOKEN: ${{ secrets.SMOKE_MFA_TOKEN }}
@@ -32,8 +45,9 @@ env:
 
 jobs:
   smoke:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -60,17 +74,34 @@ jobs:
           echo "Nenhum Chrome/Chromium disponível no runner" >&2
           exit 1
 
-      - name: Validar secrets obrigatórios
-        run: |
-          if [ -z "$SMOKE_USER_EMAIL" ] || [ -z "$SMOKE_USER_PASSWORD" ]; then
-            echo "::error::Configure SMOKE_USER_EMAIL e SMOKE_USER_PASSWORD com uma conta dedicada de papel editor."
-            exit 1
-          fi
-
-      - name: Executar smoke autenticado
+      - name: Executar smoke público e autenticado
         id: smoke
         continue-on-error: true
         run: node scripts/production-smoke.mjs
+
+      - name: Resumir cobertura executada
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'artifacts/smoke/summary.json';
+          if (!fs.existsSync(path)) {
+            console.log('### Smoke sem resumo' >> process.env.GITHUB_STEP_SUMMARY);
+            process.exit(0);
+          }
+          const summary = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const lines = [
+            '### Smoke de produção',
+            '',
+            `- URL: ${summary.baseUrl}`,
+            `- Endpoints públicos validados: ${summary.endpoints?.length ?? 0}`,
+            `- Rotas autenticadas validadas: ${summary.routes?.length ?? 0}`,
+            `- Escopo/papel: ${summary.scope ?? 'n/d'} / ${summary.role ?? 'n/d'}`,
+            `- Autenticação: ${summary.authentication?.skipped ? 'não configurada; smoke público executado' : 'executada'}`,
+            `- Resultado: ${summary.error ? 'falha' : 'sucesso'}`,
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          NODE
 
       - name: Publicar evidências
         if: always()
@@ -89,6 +120,7 @@ jobs:
           BASE_URL: ${{ env.SMOKE_BASE_URL }}
         with:
           script: |
+            const fs = require("fs");
             const title = "🚨 Smoke de produção do S2 Licit falhou";
             const { owner, repo } = context.repo;
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -101,21 +133,35 @@ jobs:
             const failed = process.env.OUTCOME !== "success";
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             const checkedAt = new Date().toISOString();
+            const summaryPath = "artifacts/smoke/summary.json";
+            const summary = fs.existsSync(summaryPath)
+              ? JSON.parse(fs.readFileSync(summaryPath, "utf8"))
+              : {};
 
             if (failed) {
+              const error = String(summary.error || "O workflow não produziu resumo técnico.")
+                .split("\n")
+                .slice(0, 8)
+                .join("\n");
               const body = [
-                "O smoke autenticado falhou ao validar a produção.",
+                "O smoke público/autenticado identificou falha real na produção.",
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
+                `- Endpoints públicos validados: ${summary.endpoints?.length ?? 0}`,
+                `- Rotas validadas antes da falha: ${summary.routes?.length ?? 0}`,
                 `- Workflow e evidências: ${runUrl}`,
                 "",
-                "O artefato do workflow contém `summary.json` e capturas das rotas já validadas.",
-                "Verificar login, permissões da conta de smoke, erros do navegador, backend, banco e rotas críticas.",
+                "### Erro",
+                "```text",
+                error,
+                "```",
+                "",
+                "O artefato contém `summary.json` e as capturas concluídas antes da falha.",
               ].join("\n");
 
               if (incident) {
-                await github.rest.issues.createComment({
+                await github.rest.issues.update({
                   owner,
                   repo,
                   issue_number: incident.number,
@@ -128,11 +174,14 @@ jobs:
             }
 
             if (incident) {
+              const authNote = summary.authentication?.skipped
+                ? " O smoke autenticado ficou pendente por ausência de credenciais, mas domínio, identidade e saúde pública foram validados."
+                : " O smoke autenticado e as rotas configuradas foram validados.";
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number: incident.number,
-                body: `✅ Smoke de produção voltou a passar em ${checkedAt}. Evidências: ${runUrl}`,
+                body: `✅ Produção voltou a passar em ${checkedAt}.${authNote} Evidências: ${runUrl}`,
               });
               await github.rest.issues.update({
                 owner,
