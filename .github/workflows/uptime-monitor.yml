@@ -78,9 +78,13 @@ jobs:
             code=$?
             body=$(head -c 20000 "$body_file" 2>/dev/null)
             diagnostic+=$'\n'"[/login identidade]"$'\n'"$metrics"$'\n'"BODY:${body:0:1000}"$'\n'
+            has_root=false
+            if grep -Fq 'id="root"' <<<"$body" || grep -Fq "id='root'" <<<"$body"; then
+              has_root=true
+            fi
             if [ "$code" -ne 0 ] || ! grep -q 'HTTP_STATUS:2' <<<"$metrics" \
               || ! grep -Fq '<title>Sistema S2 — Licitações e Cotações</title>' <<<"$body" \
-              || ! grep -Eq '<div[[:space:]]+id=["'"']root["'"'][[:space:]]*></div>' <<<"$body"; then
+              || [ "$has_root" != true ]; then
               healthy=false
             fi
             rm -f "$body_file"
