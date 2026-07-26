@@ -63,6 +63,10 @@ function sanitizeRoute(route) {
   return route.replace(/^\//, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "route";
 }
 
+function routePath(route) {
+  return route.split("?")[0];
+}
+
 function expectedRedirect(route) {
   return manifest.redirects[route] || null;
 }
@@ -88,7 +92,7 @@ function routesForConfiguredRole() {
 
   if (smokeScope === "full") {
     for (const [source, target] of Object.entries(manifest.redirects)) {
-      if (accessible.has(target)) routes.push(source);
+      if (accessible.has(routePath(target))) routes.push(source);
     }
   }
   return [...new Set(routes)];
@@ -207,6 +211,7 @@ async function inspectLoadedPage({
 }) {
   const currentUrl = new URL(page.url());
   const currentPath = currentUrl.pathname;
+  const currentLocation = `${currentUrl.pathname}${currentUrl.search}`;
   const title = await page.title();
   const text = (await page.evaluate(() => document.body?.innerText || "")).trim();
   const normalizedText = text.toLocaleLowerCase("pt-BR");
@@ -214,12 +219,13 @@ async function inspectLoadedPage({
   const routeErrors = summary.browserErrors.slice(routeErrorsBefore);
   const pathMatches = expectedPath instanceof RegExp
     ? expectedPath.test(currentPath)
-    : currentPath === expectedPath;
+    : currentLocation === expectedPath;
 
   const result = {
     route,
     expectedPath: expectedPath instanceof RegExp ? expectedPath.source : expectedPath,
     currentPath,
+    currentLocation,
     status: response?.status() ?? null,
     title,
     browserErrors: routeErrors,
@@ -233,7 +239,7 @@ async function inspectLoadedPage({
     throw new Error(`${route}: respondeu HTTP ${response.status()}`);
   }
   if (!pathMatches) {
-    throw new Error(`${route}: abriu ${currentPath}; esperado ${String(expectedPath)}`);
+    throw new Error(`${route}: abriu ${currentLocation}; esperado ${String(expectedPath)}`);
   }
   if (!text || text.length < 20) {
     throw new Error(`${route}: página sem conteúdo suficiente`);
