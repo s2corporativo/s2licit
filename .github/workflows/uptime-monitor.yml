@@ -15,102 +15,44 @@ concurrency:
 
 env:
   S2_BASE_URL: ${{ vars.S2_BASE_URL || 'https://s2.s2corporativo.com.br' }}
+  S2_VERIFY_OUTPUT: artifacts/uptime/public-verification.json
 
 jobs:
   uptime:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Verificar identidade, health e readiness
         id: check
-        shell: bash
-        run: |
-          set +e
-          base="${S2_BASE_URL%/}"
-          diagnostic=""
-          healthy=true
+        continue-on-error: true
+        run: node scripts/verify-public-s2.mjs
 
-          check_json_endpoint() {
-            endpoint="$1"
-            expected_status="$2"
-            ok=false
-            for attempt in 1 2 3 4; do
-              body_file=$(mktemp)
-              headers_file=$(mktemp)
-              metrics=$(curl -sS --connect-timeout 8 --max-time 15 \
-                -H 'User-Agent: S2-Licit-Uptime-Monitor/2.0' \
-                -D "$headers_file" -o "$body_file" \
-                -w 'HTTP_STATUS:%{http_code}\nTOTAL_TIME:%{time_total}\n' \
-                "$base$endpoint" 2>&1)
-              code=$?
-              body=$(head -c 1000 "$body_file" 2>/dev/null)
-              content_type=$(grep -i '^content-type:' "$headers_file" | tail -1 | tr -d '\r' || true)
-              diagnostic+=$'\n'"[$endpoint tentativa $attempt]"$'\n'"$metrics"$'\n'"$content_type"$'\n'"BODY:${body}"$'\n'
-
-              if [ "$code" -eq 0 ] && grep -q 'HTTP_STATUS:2' <<<"$metrics"; then
-                actual_status=$(BODY="$body" python3 - <<'PY'
-          import json, os
-          try:
-              data = json.loads(os.environ.get("BODY", ""))
-              print(data.get("status", ""))
-          except Exception:
-              print("")
-          PY
-                )
-                if [ "$actual_status" = "$expected_status" ]; then
-                  ok=true
-                  rm -f "$body_file" "$headers_file"
-                  break
-                fi
-              fi
-              rm -f "$body_file" "$headers_file"
-              sleep 5
-            done
-            [ "$ok" = true ] || healthy=false
-          }
-
-          check_identity() {
-            body_file=$(mktemp)
-            metrics=$(curl -sS --connect-timeout 8 --max-time 15 \
-              -H 'User-Agent: S2-Licit-Uptime-Monitor/2.0' \
-              -o "$body_file" -w 'HTTP_STATUS:%{http_code}\nTOTAL_TIME:%{time_total}\n' \
-              "$base/login" 2>&1)
-            code=$?
-            body=$(head -c 20000 "$body_file" 2>/dev/null)
-            diagnostic+=$'\n'"[/login identidade]"$'\n'"$metrics"$'\n'"BODY:${body:0:1000}"$'\n'
-            has_root=false
-            if grep -Fq 'id="root"' <<<"$body" || grep -Fq "id='root'" <<<"$body"; then
-              has_root=true
-            fi
-            if [ "$code" -ne 0 ] || ! grep -q 'HTTP_STATUS:2' <<<"$metrics" \
-              || ! grep -Fq '<title>Sistema S2 — Licitações e Cotações</title>' <<<"$body" \
-              || [ "$has_root" != true ]; then
-              healthy=false
-            fi
-            rm -f "$body_file"
-          }
-
-          check_json_endpoint /healthz ok
-          check_json_endpoint /readyz ready
-          check_identity
-
-          {
-            echo "healthy=$healthy"
-            echo "checked_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo "diagnostic<<EOF"
-            printf '%s\n' "$diagnostic"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+      - name: Publicar diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uptime-diagnostic-${{ github.run_id }}
+          path: artifacts/uptime
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Abrir, atualizar ou encerrar incidente
+        if: always()
         uses: actions/github-script@v7
         env:
-          HEALTHY: ${{ steps.check.outputs.healthy }}
-          CHECKED_AT: ${{ steps.check.outputs.checked_at }}
-          DIAGNOSTIC: ${{ steps.check.outputs.diagnostic }}
+          OUTCOME: ${{ steps.check.outcome }}
           BASE_URL: ${{ env.S2_BASE_URL }}
+          SUMMARY_PATH: ${{ env.S2_VERIFY_OUTPUT }}
         with:
           script: |
+            const fs = require("fs");
             const title = "🚨 S2 Licit indisponível — incidente automático";
             const { owner, repo } = context.repo;
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -120,13 +62,27 @@ jobs:
               per_page: 100,
             });
             const incident = issues.find((issue) => !issue.pull_request && issue.title === title);
-            const healthy = process.env.HEALTHY === "true";
-            const checkedAt = process.env.CHECKED_AT;
+            const checkedAt = new Date().toISOString();
             const baseUrl = process.env.BASE_URL;
-            const diagnostic = (process.env.DIAGNOSTIC || "").slice(0, 12000);
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const summary = fs.existsSync(process.env.SUMMARY_PATH)
+              ? JSON.parse(fs.readFileSync(process.env.SUMMARY_PATH, "utf8"))
+              : { ok: false, fatalError: "O verificador não produziu relatório.", checks: [] };
+            const healthy = process.env.OUTCOME === "success" && summary.ok === true;
 
             if (!healthy) {
+              const diagnostics = (summary.checks || []).map((check) => {
+                const attempt = check.attempts?.at(-1) || {};
+                return [
+                  `#### ${check.name || "verificação"}`,
+                  `- URL: ${check.url || "não registrada"}`,
+                  `- HTTP: ${attempt.status ?? "sem resposta"}`,
+                  `- URL final: ${attempt.finalUrl || "não registrada"}`,
+                  `- Erro: ${attempt.error || summary.fatalError || "sem diagnóstico"}`,
+                  attempt.bodyPreview ? `- Resposta: \`${String(attempt.bodyPreview).replace(/`/g, "'").slice(0, 500)}\`` : "",
+                ].filter(Boolean).join("\n");
+              }).join("\n\n");
+
               const body = [
                 "O monitor não confirmou a identidade e a prontidão do Sistema S2.",
                 "",
@@ -134,21 +90,19 @@ jobs:
                 `- Última verificação: ${checkedAt}`,
                 `- Workflow: ${runUrl}`,
                 "",
-                "### O que foi validado",
-                "1. `/healthz` precisa responder JSON com `status: ok`.",
-                "2. `/readyz` precisa responder JSON com `status: ready`.",
-                "3. `/login` precisa conter a identidade HTML do Sistema S2.",
+                "### Critérios obrigatórios",
+                "1. `/healthz` deve responder JSON com `status: ok`.",
+                "2. `/readyz` deve responder JSON com `status: ready`.",
+                "3. `/login` deve conter a identidade HTML do Sistema S2.",
                 "",
                 "### Diagnóstico mais recente",
-                "```text",
-                diagnostic,
-                "```",
+                diagnostics || `- Erro fatal: ${summary.fatalError || "não identificado"}`,
                 "",
                 "### Ações imediatas",
                 "1. Conferir DNS do subdomínio e o `server_name` do Nginx/Caddy.",
                 "2. Verificar `docker compose ps` e `docker compose logs --tail=200 app db`.",
                 "3. Confirmar certificado TLS, proxy para a porta local e variável `DOMAIN`.",
-                "4. Executar o deploy ou rollback somente após identificar o componente incorreto.",
+                "4. Executar deploy ou rollback somente após identificar o componente incorreto.",
               ].join("\n");
 
               if (incident) {
@@ -161,7 +115,6 @@ jobs:
               } else {
                 await github.rest.issues.create({ owner, repo, title, body });
               }
-              core.setFailed("S2 Licit indisponível, não pronto ou domínio com identidade incorreta");
               return;
             }
 
@@ -180,3 +133,7 @@ jobs:
                 state_reason: "completed",
               });
             }
+
+      - name: Falhar o workflow em indisponibilidade real
+        if: steps.check.outcome != 'success'
+        run: exit 1
