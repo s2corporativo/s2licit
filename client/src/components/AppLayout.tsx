@@ -210,7 +210,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {isAuthenticated ? (
           <>
             <p className="m-0 text-[11px] font-semibold text-white/75">{user?.name ?? "Usuário"}</p>
-            <p className="mb-1 mt-0.5 text-[10px] text-white/60">{getRoleLabel(user?.role)}</p>
+            <p data-s2-user-role={user?.role ?? "user"} className="mb-1 mt-0.5 text-[10px] text-white/60">{getRoleLabel(user?.role)}</p>
             <button onClick={() => logout()} className="flex w-full items-center justify-center gap-1.5 rounded-md border border-white/10 bg-white/10 p-1.5 text-[11px] text-white"><LogOut size={12} /> Sair</button>
           </>
         ) : (
