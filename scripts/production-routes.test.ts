@@ -22,6 +22,14 @@ function extractDeclaredRoutes(source: string): string[] {
   return [...source.matchAll(/<Route\s+path="([^"]+)"/g)].map((match) => match[1]);
 }
 
+function extractDeclaredRedirects(source: string): Record<string, string> {
+  return Object.fromEntries(
+    [...source.matchAll(
+      /<Route\s+path="([^"]+)">\s*<Redirect\s+to="([^"]+)"\s*\/>\s*<\/Route>/gs,
+    )].map((match) => [match[1], match[2]]),
+  );
+}
+
 function allManifestRoutes(): string[] {
   return [
     ...manifest.public,
@@ -55,7 +63,9 @@ describe("manifesto de rotas do smoke de produção", () => {
     }
   });
 
-  it("mantém redirecionamentos com origem e destino válidos", () => {
+  it("preserva exatamente os destinos e parâmetros dos redirecionamentos", () => {
+    expect(manifest.redirects).toEqual(extractDeclaredRedirects(appSource));
+
     const knownTargets = new Set([
       ...manifest.public,
       ...manifest.authenticated,
@@ -65,9 +75,10 @@ describe("manifesto de rotas do smoke de produção", () => {
     ]);
 
     for (const [source, target] of Object.entries(manifest.redirects)) {
+      const targetPath = target.split("?")[0];
       expect(source.startsWith("/")).toBe(true);
       expect(target.startsWith("/")).toBe(true);
-      expect(knownTargets.has(target), `${source} aponta para rota não catalogada: ${target}`).toBe(true);
+      expect(knownTargets.has(targetPath), `${source} aponta para rota não catalogada: ${target}`).toBe(true);
     }
   });
 });
