@@ -18,12 +18,9 @@ on:
         required: false
         default: "full"
       role:
-        description: "Papel da conta de teste: user, viewer, editor ou admin"
+        description: "Papel exato da conta: user, viewer, editor ou admin"
         required: false
         default: "editor"
-  workflow_run:
-    workflows: ["Deploy VPS"]
-    types: [completed]
 
 permissions:
   contents: read
@@ -45,14 +42,10 @@ env:
 
 jobs:
   smoke:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Quando disparado pelo deploy, testa exatamente o release implantado.
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -83,30 +76,35 @@ jobs:
         run: node scripts/production-smoke.mjs
 
       - name: Resumir cobertura executada
-        if: always()
+        if: always() && hashFiles('artifacts/smoke/summary.json') != ''
         run: |
           node <<'NODE'
           const fs = require('fs');
-          const path = 'artifacts/smoke/summary.json';
-          if (!fs.existsSync(path)) {
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### Smoke sem resumo\n');
-            process.exit(0);
-          }
-          const summary = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const summary = JSON.parse(fs.readFileSync('artifacts/smoke/summary.json', 'utf8'));
+          const publicOk = summary.publicVerification?.checks?.filter((check) => check.ok).length ?? 0;
           const lines = [
             '### Smoke de produção',
             '',
             `- URL: ${summary.baseUrl}`,
-            `- Endpoints públicos validados: ${summary.endpoints?.length ?? 0}`,
+            `- Verificações públicas aprovadas: ${publicOk}/3`,
             `- Rotas estáticas validadas: ${summary.routes?.filter((route) => !route.route?.includes(':')).length ?? 0}`,
             `- Rotas dinâmicas resolvidas: ${summary.dynamicRoutes?.resolved?.length ?? 0}`,
-            `- Rotas dinâmicas não exercitadas: ${summary.dynamicRoutes?.skipped?.length ?? 0}`,
-            `- Escopo/papel: ${summary.scope ?? 'n/d'} / ${summary.role ?? 'n/d'}`,
-            `- Autenticação: ${summary.authentication?.skipped ? 'não configurada; smoke público executado' : 'executada'}`,
+            `- Rotas dinâmicas sem dados: ${summary.dynamicRoutes?.skipped?.length ?? 0}`,
+            `- Rotas dinâmicas não solicitadas: ${summary.dynamicRoutes?.notRequested?.length ?? 0}`,
+            `- Escopo: ${summary.scope ?? 'n/d'}`,
+            `- Papel configurado/real: ${summary.configuredRole ?? 'n/d'} / ${summary.authentication?.actualRole ?? 'não verificado'}`,
+            `- Autenticação: ${summary.authentication?.skipped ? 'não configurada; apenas verificação pública' : 'executada'}`,
             `- Resultado: ${summary.error ? 'falha' : 'sucesso'}`,
           ];
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
           NODE
+
+      - name: Sinalizar falha do runner sem acusar a produção
+        if: always() && hashFiles('artifacts/smoke/summary.json') == ''
+        run: |
+          echo "::error::O workflow falhou antes de produzir o resumo do smoke. Nenhum incidente de produção será criado ou alterado."
+          echo "### Falha de infraestrutura do smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "Não houve evidência suficiente para concluir sobre a produção." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publicar evidências
         if: always()
@@ -118,7 +116,7 @@ jobs:
           retention-days: 14
 
       - name: Abrir, atualizar ou encerrar incidente
-        if: always()
+        if: always() && hashFiles('artifacts/smoke/summary.json') != ''
         uses: actions/github-script@v7
         env:
           OUTCOME: ${{ steps.smoke.outcome }}
@@ -128,6 +126,10 @@ jobs:
             const fs = require("fs");
             const title = "🚨 Smoke de produção do S2 Licit falhou";
             const { owner, repo } = context.repo;
+            const summary = JSON.parse(fs.readFileSync("artifacts/smoke/summary.json", "utf8"));
+            const failed = process.env.OUTCOME !== "success" || Boolean(summary.error);
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const checkedAt = new Date().toISOString();
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner,
               repo,
@@ -135,25 +137,18 @@ jobs:
               per_page: 100,
             });
             const incident = issues.find((issue) => !issue.pull_request && issue.title === title);
-            const failed = process.env.OUTCOME !== "success";
-            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
-            const checkedAt = new Date().toISOString();
-            const summaryPath = "artifacts/smoke/summary.json";
-            const summary = fs.existsSync(summaryPath)
-              ? JSON.parse(fs.readFileSync(summaryPath, "utf8"))
-              : {};
 
             if (failed) {
-              const error = String(summary.error || "O workflow não produziu resumo técnico.")
+              const error = String(summary.error || "O smoke retornou falha sem mensagem.")
                 .split("\n")
-                .slice(0, 8)
+                .slice(0, 10)
                 .join("\n");
               const body = [
-                "O smoke público/autenticado identificou falha real na produção.",
+                "O smoke produziu evidências e identificou falha real na validação do S2.",
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
-                `- Endpoints públicos validados: ${summary.endpoints?.length ?? 0}`,
+                `- Papel configurado/real: ${summary.configuredRole || "n/d"} / ${summary.authentication?.actualRole || "não identificado"}`,
                 `- Rotas validadas antes da falha: ${summary.routes?.length ?? 0}`,
                 `- Workflow e evidências: ${runUrl}`,
                 "",
@@ -161,17 +156,10 @@ jobs:
                 "```text",
                 error,
                 "```",
-                "",
-                "O artefato contém `summary.json` e as capturas concluídas antes da falha.",
               ].join("\n");
 
               if (incident) {
-                await github.rest.issues.update({
-                  owner,
-                  repo,
-                  issue_number: incident.number,
-                  body,
-                });
+                await github.rest.issues.update({ owner, repo, issue_number: incident.number, body });
               } else {
                 await github.rest.issues.create({ owner, repo, title, body });
               }
@@ -182,21 +170,16 @@ jobs:
 
             if (summary.authentication?.skipped) {
               const body = [
-                "A identidade pública, `/healthz` e `/readyz` estão saudáveis, mas o incidente autenticado não pode ser encerrado sem retestar login, permissões e rotas.",
+                "A origem, identidade, `/healthz` e `/readyz` estão saudáveis, mas o incidente autenticado não pode ser encerrado sem retestar login, papel e rotas.",
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
                 `- Evidências: ${runUrl}`,
                 "",
                 "### Pendência objetiva",
-                "Cadastrar `SMOKE_USER_EMAIL` e `SMOKE_USER_PASSWORD` de uma conta dedicada e executar novamente o workflow.",
+                "Cadastrar `SMOKE_USER_EMAIL`, `SMOKE_USER_PASSWORD` e `SMOKE_ROLE` correspondentes à mesma conta.",
               ].join("\n");
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: incident.number,
-                body,
-              });
+              await github.rest.issues.update({ owner, repo, issue_number: incident.number, body });
               return;
             }
 
@@ -204,7 +187,7 @@ jobs:
               owner,
               repo,
               issue_number: incident.number,
-              body: `✅ Recuperação confirmada em ${checkedAt}. Login, permissões e rotas configuradas foram validados. Evidências: ${runUrl}`,
+              body: `✅ Recuperação confirmada em ${checkedAt}. Origem, login, papel e rotas foram validados. Evidências: ${runUrl}`,
             });
             await github.rest.issues.update({
               owner,
