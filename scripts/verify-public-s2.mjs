@@ -40,6 +40,14 @@ export function validateS2Html(html) {
   return true;
 }
 
+export function validateFinalOrigin(finalUrl, expectedOrigin) {
+  const finalOrigin = new URL(finalUrl).origin;
+  if (finalOrigin !== expectedOrigin) {
+    throw new Error(`Redirecionamento para outro host: ${finalOrigin}; esperado ${expectedOrigin}`);
+  }
+  return finalOrigin;
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -51,7 +59,7 @@ async function fetchText(fetchImpl, url, timeoutMs) {
     const response = await fetchImpl(url, {
       redirect: "follow",
       signal: controller.signal,
-      headers: { "user-agent": "S2-Licit-Public-Verifier/1.0" },
+      headers: { "user-agent": "S2-Licit-Public-Verifier/2.0" },
     });
     const body = await response.text();
     return {
@@ -66,7 +74,7 @@ async function fetchText(fetchImpl, url, timeoutMs) {
   }
 }
 
-async function runCheck({ name, url, validate, fetchImpl, retries, delayMs, timeoutMs }) {
+async function runCheck({ name, url, validate, fetchImpl, retries, delayMs, timeoutMs, expectedOrigin }) {
   const attempts = [];
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     const startedAt = Date.now();
@@ -82,6 +90,7 @@ async function runCheck({ name, url, validate, fetchImpl, retries, delayMs, time
       };
       attempts.push(record);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      validateFinalOrigin(response.finalUrl, expectedOrigin);
       const details = validate(response.body);
       return { name, url, ok: true, attempts, details };
     } catch (error) {
@@ -102,6 +111,7 @@ export async function verifyPublicS2(options = {}) {
   const baseUrl = normalizeBaseUrl(
     options.baseUrl || process.env.S2_BASE_URL || process.env.SMOKE_BASE_URL,
   );
+  const expectedOrigin = new URL(baseUrl).origin;
   const retries = Number(options.retries ?? process.env.S2_VERIFY_RETRIES ?? 4);
   const delayMs = Number(options.delayMs ?? process.env.S2_VERIFY_DELAY_MS ?? 5000);
   const timeoutMs = Number(options.timeoutMs ?? process.env.S2_VERIFY_TIMEOUT_MS ?? 15000);
@@ -118,6 +128,7 @@ export async function verifyPublicS2(options = {}) {
     retries,
     delayMs,
     timeoutMs,
+    expectedOrigin,
   }));
   checks.push(await runCheck({
     name: "readiness",
@@ -127,6 +138,7 @@ export async function verifyPublicS2(options = {}) {
     retries,
     delayMs,
     timeoutMs,
+    expectedOrigin,
   }));
   checks.push(await runCheck({
     name: "identity",
@@ -136,10 +148,12 @@ export async function verifyPublicS2(options = {}) {
     retries,
     delayMs,
     timeoutMs,
+    expectedOrigin,
   }));
 
   return {
     baseUrl,
+    expectedOrigin,
     startedAt,
     finishedAt: new Date().toISOString(),
     ok: checks.every((check) => check.ok),
