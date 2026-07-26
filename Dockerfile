@@ -21,7 +21,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts --prod
 
-# ── Estágio 3: runtime enxuto e sem privilégio ───────────────────────────────
+# ── Estágio 3: runtime enxuto ────────────────────────────────────────────────
 FROM node:22-bookworm-slim
 
 # Chromium do sistema para o Puppeteer (automação de portais) — evita o
@@ -61,6 +61,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl --fail --silent "http://127.0.0.1:${PORT:-3000}/readyz" > /dev/null || exit 1
 
-# O processo, o entrypoint e o Chromium executam sem privilégios de root.
-USER node
+# O entrypoint começa como root somente para reparar a posse de volumes legados
+# e imediatamente executa migração + aplicação como usuário node via runuser.
 CMD ["/app/scripts/docker-entrypoint.sh"]
