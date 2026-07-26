@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verificar health e readiness
+      - name: Verificar identidade, health e readiness
         id: check
         shell: bash
         run: |
@@ -30,25 +30,65 @@ jobs:
           diagnostic=""
           healthy=true
 
-          for endpoint in /healthz /readyz; do
+          check_json_endpoint() {
+            endpoint="$1"
+            expected_status="$2"
             ok=false
             for attempt in 1 2 3 4; do
-              response=$(curl -fsS --connect-timeout 8 --max-time 15 \
-                -H 'User-Agent: S2-Licit-Uptime-Monitor/1.0' \
-                -w '\nHTTP_STATUS:%{http_code}\nTOTAL_TIME:%{time_total}\n' \
+              body_file=$(mktemp)
+              headers_file=$(mktemp)
+              metrics=$(curl -sS --connect-timeout 8 --max-time 15 \
+                -H 'User-Agent: S2-Licit-Uptime-Monitor/2.0' \
+                -D "$headers_file" -o "$body_file" \
+                -w 'HTTP_STATUS:%{http_code}\nTOTAL_TIME:%{time_total}\n' \
                 "$base$endpoint" 2>&1)
               code=$?
-              diagnostic+=$'\n'"[$endpoint tentativa $attempt]"$'\n'"$response"$'\n'
-              if [ "$code" -eq 0 ] && grep -q 'HTTP_STATUS:2' <<<"$response"; then
-                ok=true
-                break
+              body=$(head -c 1000 "$body_file" 2>/dev/null)
+              content_type=$(grep -i '^content-type:' "$headers_file" | tail -1 | tr -d '\r' || true)
+              diagnostic+=$'\n'"[$endpoint tentativa $attempt]"$'\n'"$metrics"$'\n'"$content_type"$'\n'"BODY:${body}"$'\n'
+
+              if [ "$code" -eq 0 ] && grep -q 'HTTP_STATUS:2' <<<"$metrics"; then
+                actual_status=$(BODY="$body" python3 - <<'PY'
+          import json, os
+          try:
+              data = json.loads(os.environ.get("BODY", ""))
+              print(data.get("status", ""))
+          except Exception:
+              print("")
+          PY
+                )
+                if [ "$actual_status" = "$expected_status" ]; then
+                  ok=true
+                  rm -f "$body_file" "$headers_file"
+                  break
+                fi
               fi
+              rm -f "$body_file" "$headers_file"
               sleep 5
             done
-            if [ "$ok" != true ]; then
+            [ "$ok" = true ] || healthy=false
+          }
+
+          check_identity() {
+            body_file=$(mktemp)
+            metrics=$(curl -sS --connect-timeout 8 --max-time 15 \
+              -H 'User-Agent: S2-Licit-Uptime-Monitor/2.0' \
+              -o "$body_file" -w 'HTTP_STATUS:%{http_code}\nTOTAL_TIME:%{time_total}\n' \
+              "$base/login" 2>&1)
+            code=$?
+            body=$(head -c 20000 "$body_file" 2>/dev/null)
+            diagnostic+=$'\n'"[/login identidade]"$'\n'"$metrics"$'\n'"BODY:${body:0:1000}"$'\n'
+            if [ "$code" -ne 0 ] || ! grep -q 'HTTP_STATUS:2' <<<"$metrics" \
+              || ! grep -Fq '<title>Sistema S2 — Licitações e Cotações</title>' <<<"$body" \
+              || ! grep -Eq '<div[[:space:]]+id=["'"']root["'"'][[:space:]]*></div>' <<<"$body"; then
               healthy=false
             fi
-          done
+            rm -f "$body_file"
+          }
+
+          check_json_endpoint /healthz ok
+          check_json_endpoint /readyz ready
+          check_identity
 
           {
             echo "healthy=$healthy"
@@ -58,7 +98,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Abrir ou encerrar incidente
+      - name: Abrir, atualizar ou encerrar incidente
         uses: actions/github-script@v7
         env:
           HEALTHY: ${{ steps.check.outputs.healthy }}
@@ -80,38 +120,44 @@ jobs:
             const checkedAt = process.env.CHECKED_AT;
             const baseUrl = process.env.BASE_URL;
             const diagnostic = (process.env.DIAGNOSTIC || "").slice(0, 12000);
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
 
             if (!healthy) {
               const body = [
-                "O monitor automático não conseguiu validar `/healthz` e/ou `/readyz` após quatro tentativas.",
+                "O monitor não confirmou a identidade e a prontidão do Sistema S2.",
                 "",
                 `- URL: ${baseUrl}`,
-                `- Verificado em: ${checkedAt}`,
-                `- Workflow: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+                `- Última verificação: ${checkedAt}`,
+                `- Workflow: ${runUrl}`,
                 "",
-                "### Diagnóstico",
+                "### O que foi validado",
+                "1. `/healthz` precisa responder JSON com `status: ok`.",
+                "2. `/readyz` precisa responder JSON com `status: ready`.",
+                "3. `/login` precisa conter a identidade HTML do Sistema S2.",
+                "",
+                "### Diagnóstico mais recente",
                 "```text",
                 diagnostic,
                 "```",
                 "",
                 "### Ações imediatas",
-                "1. Verificar `docker compose ps` na VPS.",
-                "2. Consultar `docker compose logs --tail=200 app db`.",
-                "3. Confirmar espaço em disco, memória, banco e migrações.",
-                "4. Se necessário, executar o workflow `Rollback VPS`.",
+                "1. Conferir DNS do subdomínio e o `server_name` do Nginx/Caddy.",
+                "2. Verificar `docker compose ps` e `docker compose logs --tail=200 app db`.",
+                "3. Confirmar certificado TLS, proxy para a porta local e variável `DOMAIN`.",
+                "4. Executar o deploy ou rollback somente após identificar o componente incorreto.",
               ].join("\n");
 
               if (incident) {
-                await github.rest.issues.createComment({
+                await github.rest.issues.update({
                   owner,
                   repo,
                   issue_number: incident.number,
-                  body: `Nova falha detectada em ${checkedAt}.\n\n${body}`,
+                  body,
                 });
               } else {
                 await github.rest.issues.create({ owner, repo, title, body });
               }
-              core.setFailed("S2 Licit indisponível ou não pronto");
+              core.setFailed("S2 Licit indisponível, não pronto ou domínio com identidade incorreta");
               return;
             }
 
@@ -120,7 +166,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: incident.number,
-                body: `✅ Recuperação confirmada automaticamente em ${checkedAt}. Os endpoints /healthz e /readyz responderam com sucesso.`,
+                body: `✅ Recuperação confirmada automaticamente em ${checkedAt}. Identidade do S2, /healthz e /readyz foram validados. Evidência: ${runUrl}`,
               });
               await github.rest.issues.update({
                 owner,
