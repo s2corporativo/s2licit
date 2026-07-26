@@ -57,6 +57,14 @@ raise SystemExit(0 if payload.get("status") == os.environ["EXPECTED"] else 1)
 '
 }
 
+valid_email() {
+  case "$1" in
+    ''|*' '*|*$'\n'*|*$'\r'*) return 1 ;;
+    *@*.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 echo "==> [1/6] Docker"
 if ! command -v docker >/dev/null 2>&1; then
   echo "Instalando Docker..."
@@ -74,13 +82,10 @@ if [ ! -f .env ]; then
   ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-16)
   ADMIN_EMAIL_BOOTSTRAP=${ADMIN_EMAIL:-admin@s2.example}
 
-  case "$ADMIN_EMAIL_BOOTSTRAP" in
-    *' '*|*$'\n'*|*$'\r'*|''|*@*.*) ;;
-    *)
-      echo "❌ ADMIN_EMAIL inválido para a instalação inicial." >&2
-      exit 1
-      ;;
-  esac
+  if ! valid_email "$ADMIN_EMAIL_BOOTSTRAP"; then
+    echo "❌ ADMIN_EMAIL inválido para a instalação inicial." >&2
+    exit 1
+  fi
 
   cat > .env <<EOF
 # Gerado automaticamente pelo vps-bootstrap.sh em $(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -175,13 +180,10 @@ if [ -n "${DOMAIN:-}" ]; then
 fi
 
 if [ -n "${CERTBOT_EMAIL:-}" ]; then
-  case "$CERTBOT_EMAIL" in
-    *' '*|*$'\n'*|*$'\r'*|''|*@*.*) ;;
-    *)
-      echo "❌ CERTBOT_EMAIL inválido." >&2
-      exit 1
-      ;;
-  esac
+  if ! valid_email "$CERTBOT_EMAIL"; then
+    echo "❌ CERTBOT_EMAIL inválido." >&2
+    exit 1
+  fi
   set_env_value CERTBOT_EMAIL "$CERTBOT_EMAIL"
 fi
 
