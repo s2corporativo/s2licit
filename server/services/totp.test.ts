@@ -54,13 +54,12 @@ describe("generateTotpSecret / otpauthUri", () => {
     const b = generateTotpSecret();
     expect(a).not.toBe(b);
     expect(/^[A-Z2-7]+$/.test(a)).toBe(true);
-    // O segredo gerado produz um TOTP verificável.
     const t = 1_700_000_000_000;
     expect(verifyTotp(a, totp(a, t), t)).toBe(true);
   });
 
   it("monta a URI otpauth com emissor e conta", () => {
-    const uri = otpauthUri("ABC234", { issuer: "Sistema S2", account: "adm@vetmg.com.br" });
+    const uri = otpauthUri("ABC234", { issuer: "Sistema S2", account: "admin@example.com" });
     expect(uri).toContain("otpauth://totp/");
     expect(uri).toContain("secret=ABC234");
     expect(uri).toContain("issuer=Sistema+S2");
