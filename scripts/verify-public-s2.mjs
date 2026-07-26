@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
@@ -10,7 +11,7 @@ export function normalizeBaseUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) throw new Error("URL pública do S2 não informada");
   const parsed = new URL(raw);
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
+  if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error(`Protocolo inválido para o S2: ${parsed.protocol}`);
   }
   return parsed.toString().replace(/\/$/, "");
@@ -98,7 +99,9 @@ async function runCheck({ name, url, validate, fetchImpl, retries, delayMs, time
 }
 
 export async function verifyPublicS2(options = {}) {
-  const baseUrl = normalizeBaseUrl(options.baseUrl || process.env.S2_BASE_URL || process.env.SMOKE_BASE_URL);
+  const baseUrl = normalizeBaseUrl(
+    options.baseUrl || process.env.S2_BASE_URL || process.env.SMOKE_BASE_URL,
+  );
   const retries = Number(options.retries ?? process.env.S2_VERIFY_RETRIES ?? 4);
   const delayMs = Number(options.delayMs ?? process.env.S2_VERIFY_DELAY_MS ?? 5000);
   const timeoutMs = Number(options.timeoutMs ?? process.env.S2_VERIFY_TIMEOUT_MS ?? 15000);
@@ -111,29 +114,37 @@ export async function verifyPublicS2(options = {}) {
     name: "health",
     url: `${baseUrl}/healthz`,
     validate: (body) => validateStatusPayload(body, "ok", "/healthz"),
-    fetchImpl, retries, delayMs, timeoutMs,
+    fetchImpl,
+    retries,
+    delayMs,
+    timeoutMs,
   }));
   checks.push(await runCheck({
     name: "readiness",
     url: `${baseUrl}/readyz`,
     validate: (body) => validateStatusPayload(body, "ready", "/readyz"),
-    fetchImpl, retries, delayMs, timeoutMs,
+    fetchImpl,
+    retries,
+    delayMs,
+    timeoutMs,
   }));
   checks.push(await runCheck({
     name: "identity",
     url: `${baseUrl}/login`,
     validate: (body) => validateS2Html(body),
-    fetchImpl, retries, delayMs, timeoutMs,
+    fetchImpl,
+    retries,
+    delayMs,
+    timeoutMs,
   }));
 
-  const summary = {
+  return {
     baseUrl,
     startedAt,
     finishedAt: new Date().toISOString(),
     ok: checks.every((check) => check.ok),
     checks,
   };
-  return summary;
 }
 
 async function main() {
@@ -152,14 +163,13 @@ async function main() {
   }
 
   const outputPath = process.env.S2_VERIFY_OUTPUT || "artifacts/public-verification.json";
-  await fs.mkdir(new URL(".", pathToFileURL(`${process.cwd()}/${outputPath}`)), { recursive: true }).catch(async () => {
-    const directory = outputPath.includes("/") ? outputPath.slice(0, outputPath.lastIndexOf("/")) : ".";
-    await fs.mkdir(directory, { recursive: true });
-  });
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, JSON.stringify(summary, null, 2));
 
   for (const check of summary.checks || []) {
-    const suffix = check.ok ? "OK" : `FALHOU: ${check.attempts?.at(-1)?.error || "sem diagnóstico"}`;
+    const suffix = check.ok
+      ? "OK"
+      : `FALHOU: ${check.attempts?.at(-1)?.error || "sem diagnóstico"}`;
     console.log(`${check.name}: ${suffix}`);
   }
   if (summary.fatalError) console.error(summary.fatalError);
