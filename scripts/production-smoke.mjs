@@ -29,12 +29,6 @@ const manifestPath = new URL("./production-routes.json", import.meta.url);
 const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
 
 const roleRank = { user: 0, viewer: 1, editor: 2, admin: 3 };
-const roleByLabel = {
-  Usuário: "user",
-  Visualizador: "viewer",
-  Editor: "editor",
-  Administrador: "admin",
-};
 if (!(smokeRole in roleRank)) throw new Error(`SMOKE_ROLE inválido: ${smokeRole}`);
 if (!["critical", "full"].includes(smokeScope)) throw new Error(`SMOKE_SCOPE inválido: ${smokeScope}`);
 
@@ -111,19 +105,12 @@ async function settlePage(page) {
 }
 
 async function detectActualRole(page) {
-  const labels = Object.keys(roleByLabel);
-  await page.waitForFunction(
-    (expectedLabels) => [...document.querySelectorAll("aside p")]
-      .some((element) => expectedLabels.includes((element.textContent || "").trim())),
-    { timeout: 15_000 },
-    labels,
+  await page.waitForSelector("[data-s2-user-role]", { timeout: 15_000 });
+  const role = await page.$eval(
+    "[data-s2-user-role]",
+    (element) => element.getAttribute("data-s2-user-role") || "",
   );
-  const label = await page.evaluate((expectedLabels) =>
-    [...document.querySelectorAll("aside p")]
-      .map((element) => (element.textContent || "").trim())
-      .find((value) => expectedLabels.includes(value)) || "",
-  labels);
-  return roleByLabel[label] || null;
+  return role in roleRank ? role : null;
 }
 
 async function inspectLoadedPage({ page, route, expectedPath, response, routeErrorsBefore, summary }) {
