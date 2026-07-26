@@ -21,9 +21,9 @@ const baseInput: ProposalExcelInput = {
     ],
   },
   company: {
-    name: "Vet MG Ltda",
+    name: "Empresa Exemplo Ltda",
     cnpj: "00.000.000/0001-00",
-    email: "adm@vetmg.com.br",
+    email: "comercial@example.com",
     bankName: "Banco X",
     bankAgency: "0001",
     bankAccount: "12345-6",
@@ -54,7 +54,7 @@ describe("generateProposalExcel (§11)", () => {
     // 4 * 25 + 10 * 3,5 = 135
     expect(totalGeral).toBe(135);
     expect(textos.join(" ")).toContain("Dipirona 500mg");
-    expect(textos.join(" ")).toContain("Vet MG Ltda");
+    expect(textos.join(" ")).toContain("Empresa Exemplo Ltda");
   });
 
   it("nunca expõe custo, margem ou fornecedor de origem", async () => {
@@ -66,7 +66,6 @@ describe("generateProposalExcel (§11)", () => {
     expect(texto).not.toContain("custo");
     expect(texto).not.toContain("margem");
     expect(texto).not.toContain("fornecedor");
-    // O custo unitário sentinela (987.65) não pode aparecer em nenhuma célula.
     expect(conteudo.some((c) => c.includes("987.65"))).toBe(false);
   });
 
