@@ -43,8 +43,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Sinalizar falha do runner sem acusar a produção
+        if: always() && hashFiles('artifacts/uptime/public-verification.json') == ''
+        run: |
+          echo "::error::O workflow falhou antes de produzir uma verificação válida. Nenhum incidente de produção foi criado ou alterado."
+          echo "### Falha de infraestrutura do monitor" >> "$GITHUB_STEP_SUMMARY"
+          echo "O verificador não produziu relatório; a disponibilidade do S2 não foi inferida." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Abrir, atualizar ou encerrar incidente
-        if: always()
+        if: always() && hashFiles('artifacts/uptime/public-verification.json') != ''
         uses: actions/github-script@v7
         env:
           OUTCOME: ${{ steps.check.outcome }}
@@ -55,6 +62,12 @@ jobs:
             const fs = require("fs");
             const title = "🚨 S2 Licit indisponível — incidente automático";
             const { owner, repo } = context.repo;
+            const summary = JSON.parse(fs.readFileSync(process.env.SUMMARY_PATH, "utf8"));
+            const checkedAt = new Date().toISOString();
+            const baseUrl = process.env.BASE_URL;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const healthy = process.env.OUTCOME === "success" && summary.ok === true;
+
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner,
               repo,
@@ -62,13 +75,6 @@ jobs:
               per_page: 100,
             });
             const incident = issues.find((issue) => !issue.pull_request && issue.title === title);
-            const checkedAt = new Date().toISOString();
-            const baseUrl = process.env.BASE_URL;
-            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
-            const summary = fs.existsSync(process.env.SUMMARY_PATH)
-              ? JSON.parse(fs.readFileSync(process.env.SUMMARY_PATH, "utf8"))
-              : { ok: false, fatalError: "O verificador não produziu relatório.", checks: [] };
-            const healthy = process.env.OUTCOME === "success" && summary.ok === true;
 
             if (!healthy) {
               const diagnostics = (summary.checks || []).map((check) => {
@@ -84,7 +90,7 @@ jobs:
               }).join("\n\n");
 
               const body = [
-                "O monitor não confirmou a identidade e a prontidão do Sistema S2.",
+                "O verificador executou requisições, mas não confirmou a identidade e a prontidão do Sistema S2.",
                 "",
                 `- URL: ${baseUrl}`,
                 `- Última verificação: ${checkedAt}`,
@@ -94,6 +100,7 @@ jobs:
                 "1. `/healthz` deve responder JSON com `status: ok`.",
                 "2. `/readyz` deve responder JSON com `status: ready`.",
                 "3. `/login` deve conter a identidade HTML do Sistema S2.",
+                "4. A URL final deve permanecer no mesmo host configurado.",
                 "",
                 "### Diagnóstico mais recente",
                 diagnostics || `- Erro fatal: ${summary.fatalError || "não identificado"}`,
@@ -106,12 +113,7 @@ jobs:
               ].join("\n");
 
               if (incident) {
-                await github.rest.issues.update({
-                  owner,
-                  repo,
-                  issue_number: incident.number,
-                  body,
-                });
+                await github.rest.issues.update({ owner, repo, issue_number: incident.number, body });
               } else {
                 await github.rest.issues.create({ owner, repo, title, body });
               }
@@ -123,7 +125,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: incident.number,
-                body: `✅ Recuperação confirmada automaticamente em ${checkedAt}. Identidade do S2, /healthz e /readyz foram validados. Evidência: ${runUrl}`,
+                body: `✅ Recuperação confirmada automaticamente em ${checkedAt}. Identidade, origem, /healthz e /readyz foram validados. Evidência: ${runUrl}`,
               });
               await github.rest.issues.update({
                 owner,
@@ -134,6 +136,6 @@ jobs:
               });
             }
 
-      - name: Falhar o workflow em indisponibilidade real
+      - name: Falhar o workflow quando o monitor não concluir com sucesso
         if: steps.check.outcome != 'success'
         run: exit 1
