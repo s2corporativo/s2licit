@@ -1,0 +1,93 @@
+{
+  "public": [
+    "/login"
+  ],
+  "authenticated": [
+    "/",
+    "/agenda",
+    "/desempenho",
+    "/funil",
+    "/tributos",
+    "/custo-total",
+    "/pos-venda",
+    "/busca-global",
+    "/manual",
+    "/comparacao",
+    "/categorias",
+    "/produtos",
+    "/equivalencias",
+    "/seguranca",
+    "/cotacoes-recebidas",
+    "/radar-pncp",
+    "/propostas",
+    "/financeiro",
+    "/enriquecimento",
+    "/imagens",
+    "/sinonimos",
+    "/templates-proposta",
+    "/agente",
+    "/404"
+  ],
+  "editor": [
+    "/centro-operacional",
+    "/diagnostico",
+    "/qualidade",
+    "/fornecedores",
+    "/importar",
+    "/importar-nfe",
+    "/analise-precos",
+    "/captura-revisao",
+    "/certidoes",
+    "/sala-disputa",
+    "/portais-licitacao",
+    "/documentos-habilitacao",
+    "/diligencias",
+    "/enriquecimento-nfe",
+    "/historico-enriquecimento",
+    "/captura-inteligente",
+    "/reclassificacao",
+    "/edital",
+    "/analise-juridica",
+    "/agente-proposta"
+  ],
+  "admin": [
+    "/usuarios",
+    "/logs",
+    "/aplicar-precificacao",
+    "/regras-categoria",
+    "/central-ia",
+    "/integracoes",
+    "/admin/database-health",
+    "/configuracao",
+    "/scraper-fornecedores"
+  ],
+  "redirects": {
+    "/dashboard": "/",
+    "/busca": "/busca-global",
+    "/configurador-fornecedores": "/scraper-fornecedores",
+    "/captura-scheduler": "/captura-inteligente",
+    "/captura-analytics": "/captura-inteligente",
+    "/central-operacional": "/funil",
+    "/decisao-executiva": "/centro-operacional",
+    "/contratos-pos-licitacao": "/centro-operacional",
+    "/proposta-rapida": "/propostas",
+    "/propostas-admin": "/propostas",
+    "/analisador-edital": "/edital",
+    "/proposta-automatica": "/edital"
+  },
+  "dynamic": [
+    "/propostas/:id"
+  ],
+  "critical": [
+    "/",
+    "/funil",
+    "/produtos",
+    "/fornecedores",
+    "/propostas",
+    "/edital",
+    "/radar-pncp",
+    "/comparacao",
+    "/busca-global",
+    "/analise-juridica"
+  ]
+}
