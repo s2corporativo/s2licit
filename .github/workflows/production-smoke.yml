@@ -86,7 +86,7 @@ jobs:
           const fs = require('fs');
           const path = 'artifacts/smoke/summary.json';
           if (!fs.existsSync(path)) {
-            console.log('### Smoke sem resumo' >> process.env.GITHUB_STEP_SUMMARY);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### Smoke sem resumo\n');
             process.exit(0);
           }
           const summary = JSON.parse(fs.readFileSync(path, 'utf8'));
