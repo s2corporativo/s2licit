@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   EXPECTED_TITLE,
   normalizeBaseUrl,
+  validateFinalOrigin,
   validateS2Html,
   validateStatusPayload,
   verifyPublicS2,
@@ -12,6 +13,13 @@ describe("verificador público do Sistema S2", () => {
     expect(normalizeBaseUrl("https://s2.example.com/")).toBe("https://s2.example.com");
     expect(() => normalizeBaseUrl("ftp://s2.example.com")).toThrow("Protocolo inválido");
     expect(() => normalizeBaseUrl("")).toThrow("não informada");
+  });
+
+  it("rejeita mudança de host após redirecionamento", () => {
+    expect(validateFinalOrigin("https://s2.example.com/login", "https://s2.example.com"))
+      .toBe("https://s2.example.com");
+    expect(() => validateFinalOrigin("https://institucional.example.com/login", "https://s2.example.com"))
+      .toThrow("Redirecionamento para outro host");
   });
 
   it("rejeita HTML de outro site e aceita a identidade do S2", () => {
@@ -79,5 +87,26 @@ describe("verificador público do Sistema S2", () => {
     expect(result.ok).toBe(false);
     expect(result.checks.find((check) => check.name === "identity")?.attempts.at(-1)?.error)
       .toContain("Título do S2 ausente");
+  });
+
+  it("classifica como falha quando o domínio redireciona para outro host", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => ({
+      ok: true,
+      status: 200,
+      url: `https://institucional.example.com${new URL(String(input)).pathname}`,
+      headers: new Headers({ "content-type": "application/json" }),
+      text: async () => '{"status":"ok"}',
+    }) as Response);
+
+    const result = await verifyPublicS2({
+      baseUrl: "https://s2.example.com",
+      retries: 1,
+      delayMs: 0,
+      timeoutMs: 1000,
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.checks[0]?.attempts.at(-1)?.error).toContain("Redirecionamento para outro host");
   });
 });
