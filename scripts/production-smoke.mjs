@@ -6,7 +6,9 @@
  * Valida:
  *  1. identidade pública do domínio e endpoints /healthz e /readyz;
  *  2. login real pela interface, quando as credenciais de smoke estiverem configuradas;
- *  3. todas as rotas permitidas ao papel da conta, ou somente o conjunto crítico.
+ *  3. rotas estáticas permitidas ao papel da conta;
+ *  4. rotas dinâmicas resolvíveis com dados existentes, registrando explicitamente
+ *     as que não puderam ser exercitadas.
  *
  * Variáveis:
  *  SMOKE_BASE_URL       URL do sistema
@@ -46,6 +48,8 @@ if (!["critical", "full"].includes(smokeScope)) {
 
 const fatalTextMarkers = [
   "página não encontrada",
+  "permissão insuficiente",
+  "acesso negado",
   "erro inesperado",
   "não foi possível conectar ao servidor",
   "application error",
@@ -63,21 +67,29 @@ function expectedRedirect(route) {
   return manifest.redirects[route] || null;
 }
 
+function accessibleRoutesForConfiguredRole() {
+  const routes = [...manifest.authenticated];
+  if (roleRank[smokeRole] >= roleRank.editor) routes.push(...manifest.editor);
+  if (roleRank[smokeRole] >= roleRank.admin) routes.push(...manifest.admin);
+  return new Set(routes);
+}
+
 function routesForConfiguredRole() {
   const explicitRoutes = (process.env.SMOKE_ROUTES || "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
   if (explicitRoutes.length > 0) return explicitRoutes;
-  if (smokeScope === "critical") return manifest.critical;
 
-  const routes = [...manifest.authenticated];
-  if (roleRank[smokeRole] >= roleRank.editor) routes.push(...manifest.editor);
-  if (roleRank[smokeRole] >= roleRank.admin) routes.push(...manifest.admin);
+  const accessible = accessibleRoutesForConfiguredRole();
+  const routes = smokeScope === "critical"
+    ? manifest.critical.filter((route) => accessible.has(route))
+    : [...accessible];
 
-  const accessible = new Set(routes);
-  for (const [source, target] of Object.entries(manifest.redirects)) {
-    if (accessible.has(target)) routes.push(source);
+  if (smokeScope === "full") {
+    for (const [source, target] of Object.entries(manifest.redirects)) {
+      if (accessible.has(target)) routes.push(source);
+    }
   }
   return [...new Set(routes)];
 }
@@ -87,7 +99,7 @@ async function fetchText(endpoint) {
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`${baseUrl}${endpoint}`, {
-      headers: { "user-agent": "S2-Licit-Production-Smoke/2.0" },
+      headers: { "user-agent": "S2-Licit-Production-Smoke/3.0" },
       redirect: "follow",
       signal: controller.signal,
     });
@@ -179,6 +191,111 @@ async function writeSummary(summary) {
   );
 }
 
+async function settlePage(page) {
+  await page.waitForSelector("#root");
+  await page.waitForNetworkIdle({ idleTime: 400, timeout: 8_000 }).catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+
+async function inspectLoadedPage({
+  page,
+  route,
+  expectedPath,
+  response,
+  routeErrorsBefore,
+  summary,
+}) {
+  const currentUrl = new URL(page.url());
+  const currentPath = currentUrl.pathname;
+  const title = await page.title();
+  const text = (await page.evaluate(() => document.body?.innerText || "")).trim();
+  const normalizedText = text.toLocaleLowerCase("pt-BR");
+  const fatalMarker = fatalTextMarkers.find((marker) => normalizedText.includes(marker));
+  const routeErrors = summary.browserErrors.slice(routeErrorsBefore);
+  const pathMatches = expectedPath instanceof RegExp
+    ? expectedPath.test(currentPath)
+    : currentPath === expectedPath;
+
+  const result = {
+    route,
+    expectedPath: expectedPath instanceof RegExp ? expectedPath.source : expectedPath,
+    currentPath,
+    status: response?.status() ?? null,
+    title,
+    browserErrors: routeErrors,
+  };
+  summary.routes.push(result);
+
+  if (currentPath === "/login") {
+    throw new Error(`${route}: sessão perdida ou acesso redirecionado para login`);
+  }
+  if (response && response.status() >= 400) {
+    throw new Error(`${route}: respondeu HTTP ${response.status()}`);
+  }
+  if (!pathMatches) {
+    throw new Error(`${route}: abriu ${currentPath}; esperado ${String(expectedPath)}`);
+  }
+  if (!text || text.length < 20) {
+    throw new Error(`${route}: página sem conteúdo suficiente`);
+  }
+  if (fatalMarker) {
+    throw new Error(`${route}: marcador de erro encontrado: ${fatalMarker}`);
+  }
+  if (routeErrors.length > 0) {
+    throw new Error(`${route}: erro de JavaScript: ${routeErrors.join(" | ")}`);
+  }
+  return result;
+}
+
+async function exerciseDynamicRoutes(page, summary) {
+  if (smokeScope !== "full") return;
+
+  for (const template of manifest.dynamic) {
+    if (template !== "/propostas/:id") {
+      summary.dynamicRoutes.skipped.push({
+        template,
+        reason: "Nenhum resolvedor automático foi definido para esta rota dinâmica.",
+      });
+      continue;
+    }
+
+    await page.goto(`${baseUrl}/propostas`, { waitUntil: "domcontentloaded" });
+    await settlePage(page);
+    const firstProposal = await page.$("table.its-table tbody tr");
+    if (!firstProposal) {
+      summary.dynamicRoutes.skipped.push({
+        template,
+        reason: "Não havia proposta existente para abrir sem criar dados artificiais.",
+      });
+      continue;
+    }
+
+    const startedAt = Date.now();
+    const routeErrorsBefore = summary.browserErrors.length;
+    await firstProposal.evaluate((element) => element.click());
+    await page.waitForFunction(
+      () => /^\/propostas\/\d+$/.test(window.location.pathname),
+      { timeout: 15_000 },
+    );
+    await settlePage(page);
+    const result = await inspectLoadedPage({
+      page,
+      route: template,
+      expectedPath: /^\/propostas\/\d+$/,
+      response: null,
+      routeErrorsBefore,
+      summary,
+    });
+    result.durationMs = Date.now() - startedAt;
+    summary.dynamicRoutes.resolved.push({ template, path: result.currentPath });
+    await page.screenshot({
+      path: path.join(screenshotDir, `${sanitizeRoute(result.currentPath)}.png`),
+      fullPage: false,
+    });
+    console.log(`OK ${template} -> ${result.currentPath} (${result.durationMs} ms)`);
+  }
+}
+
 async function main() {
   await fs.mkdir(screenshotDir, { recursive: true });
 
@@ -190,6 +307,7 @@ async function main() {
     role: smokeRole,
     endpoints: [],
     routes: [],
+    dynamicRoutes: { resolved: [], skipped: [] },
     browserErrors: [],
     authentication: {
       configured: Boolean(email && password),
@@ -266,51 +384,17 @@ async function main() {
       const startedAt = Date.now();
       const routeErrorsBefore = summary.browserErrors.length;
       const response = await page.goto(`${baseUrl}${route}`, { waitUntil: "domcontentloaded" });
-      await page.waitForSelector("#root");
-      await page.waitForNetworkIdle({ idleTime: 400, timeout: 8_000 }).catch(() => undefined);
-      await new Promise((resolve) => setTimeout(resolve, 250));
-
-      const currentUrl = new URL(page.url());
-      const currentPath = currentUrl.pathname;
-      const title = await page.title();
-      const text = (await page.evaluate(() => document.body?.innerText || "")).trim();
-      const normalizedText = text.toLocaleLowerCase("pt-BR");
-      const fatalMarker = fatalTextMarkers.find((marker) => normalizedText.includes(marker));
-      const routeErrors = summary.browserErrors.slice(routeErrorsBefore);
+      await settlePage(page);
       const redirectTarget = expectedRedirect(route);
-
-      const result = {
+      const result = await inspectLoadedPage({
+        page,
         route,
         expectedPath: redirectTarget || route,
-        currentPath,
-        status: response?.status() ?? null,
-        title,
-        durationMs: Date.now() - startedAt,
-        browserErrors: routeErrors,
-      };
-      summary.routes.push(result);
-
-      if (currentPath === "/login") {
-        throw new Error(`${route}: sessão perdida ou acesso redirecionado para login`);
-      }
-      if (response && response.status() >= 400) {
-        throw new Error(`${route}: respondeu HTTP ${response.status()}`);
-      }
-      if (redirectTarget && currentPath !== redirectTarget) {
-        throw new Error(`${route}: redirecionou para ${currentPath}, esperado ${redirectTarget}`);
-      }
-      if (!redirectTarget && currentPath !== route) {
-        throw new Error(`${route}: abriu ${currentPath}`);
-      }
-      if (!text || text.length < 20) {
-        throw new Error(`${route}: página sem conteúdo suficiente`);
-      }
-      if (fatalMarker) {
-        throw new Error(`${route}: marcador de erro encontrado: ${fatalMarker}`);
-      }
-      if (routeErrors.length > 0) {
-        throw new Error(`${route}: erro de JavaScript: ${routeErrors.join(" | ")}`);
-      }
+        response,
+        routeErrorsBefore,
+        summary,
+      });
+      result.durationMs = Date.now() - startedAt;
 
       await page.screenshot({
         path: path.join(screenshotDir, `${sanitizeRoute(route)}.png`),
@@ -318,6 +402,8 @@ async function main() {
       });
       console.log(`OK ${route} (${result.durationMs} ms)`);
     }
+
+    await exerciseDynamicRoutes(page, summary);
   } catch (error) {
     summary.failedAt = new Date().toISOString();
     summary.error = error instanceof Error ? error.stack || error.message : String(error);
