@@ -140,7 +140,13 @@ jobs:
         run: node scripts/migrate-production.mjs
 
       - name: Testes de integração contra MySQL real
-        run: pnpm exec vitest run server/**/*.integration-db.test.ts --passWithNoTests
+        # `**` só expande como "zero ou mais diretórios" com globstar habilitado;
+        # sem isso o bash padrão do runner não casava server/db.integration-db.test.ts
+        # (arquivo direto em server/, sem subpasta) e o step passava com 0 arquivos
+        # executados (--passWithNoTests mascarava isso como sucesso).
+        run: |
+          shopt -s globstar
+          pnpm exec vitest run server/**/*.integration-db.test.ts --passWithNoTests
 
   docker-image:
     # Garante que a imagem usada no deploy sempre builda — o deploy na VPS
