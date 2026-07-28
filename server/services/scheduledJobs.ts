@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
-import { syncS2PortalOpportunities } from "./s2PortalOpportunitySyncService";
+import { syncS2PortalOpportunitiesSafely } from "./s2PortalOpportunityOrchestrator";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
@@ -96,7 +96,7 @@ export async function runPortalOpportunitySync(): Promise<void> {
   }
   portalOpportunitySyncRunning = true;
   try {
-    const result = await syncS2PortalOpportunities();
+    const result = await syncS2PortalOpportunitiesSafely();
     logger.info(
       `[Scheduler] Seis portais S2: ${result.found} encontradas, ${result.imported} importadas, ` +
         `${result.skipped} já existentes, ${result.matchedItems} itens casados com Tambasa e ` +
