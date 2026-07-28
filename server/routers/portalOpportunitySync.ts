@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
-import { syncS2PortalOpportunities } from "../services/s2PortalOpportunitySyncService";
+import { syncS2PortalOpportunitiesSafely } from "../services/s2PortalOpportunityOrchestrator";
 import {
   S2_TARGET_PORTAL_DEFINITIONS,
   S2_TARGET_PORTALS,
@@ -41,7 +41,7 @@ export const portalOpportunitySyncRouter = router({
         .optional(),
     )
     .mutation(({ input }) =>
-      syncS2PortalOpportunities({
+      syncS2PortalOpportunitiesSafely({
         sources: input?.sources as S2TargetPortal[] | undefined,
         maxFundepGroups: input?.maxFundepGroups,
       }),
