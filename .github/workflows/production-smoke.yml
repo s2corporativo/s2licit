@@ -42,10 +42,12 @@ env:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, s2licit-vps]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -90,11 +92,11 @@ jobs:
             `- Rotas estáticas validadas: ${summary.routes?.filter((route) => !route.route?.includes(':')).length ?? 0}`,
             `- Rotas dinâmicas resolvidas: ${summary.dynamicRoutes?.resolved?.length ?? 0}`,
             `- Rotas dinâmicas sem dados: ${summary.dynamicRoutes?.skipped?.length ?? 0}`,
-            `- Rotas dinâmicas não solicitadas: ${summary.dynamicRoutes?.notRequested?.length ?? 0}`,
             `- Escopo: ${summary.scope ?? 'n/d'}`,
             `- Papel configurado/real: ${summary.configuredRole ?? 'n/d'} / ${summary.authentication?.actualRole ?? 'não verificado'}`,
             `- Autenticação: ${summary.authentication?.skipped ? 'não configurada; apenas verificação pública' : 'executada'}`,
             `- Resultado: ${summary.error ? 'falha' : 'sucesso'}`,
+            '- Armazenamento de artefatos: desativado para evitar cobrança',
           ];
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
           NODE
@@ -105,15 +107,6 @@ jobs:
           echo "::error::O workflow falhou antes de produzir o resumo do smoke. Nenhum incidente de produção será criado ou alterado."
           echo "### Falha de infraestrutura do smoke" >> "$GITHUB_STEP_SUMMARY"
           echo "Não houve evidência suficiente para concluir sobre a produção." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Publicar evidências
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: production-smoke-${{ github.run_id }}
-          path: artifacts/smoke
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Abrir, atualizar ou encerrar incidente
         if: always() && hashFiles('artifacts/smoke/summary.json') != ''
@@ -144,13 +137,13 @@ jobs:
                 .slice(0, 10)
                 .join("\n");
               const body = [
-                "O smoke produziu evidências e identificou falha real na validação do S2.",
+                "O smoke identificou falha real na validação do S2.",
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
                 `- Papel configurado/real: ${summary.configuredRole || "n/d"} / ${summary.authentication?.actualRole || "não identificado"}`,
                 `- Rotas validadas antes da falha: ${summary.routes?.length ?? 0}`,
-                `- Workflow e evidências: ${runUrl}`,
+                `- Workflow: ${runUrl}`,
                 "",
                 "### Erro",
                 "```text",
@@ -174,7 +167,7 @@ jobs:
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
-                `- Evidências: ${runUrl}`,
+                `- Workflow: ${runUrl}`,
                 "",
                 "### Pendência objetiva",
                 "Cadastrar `SMOKE_USER_EMAIL`, `SMOKE_USER_PASSWORD` e `SMOKE_ROLE` correspondentes à mesma conta.",
@@ -187,7 +180,7 @@ jobs:
               owner,
               repo,
               issue_number: incident.number,
-              body: `✅ Recuperação confirmada em ${checkedAt}. Origem, login, papel e rotas foram validados. Evidências: ${runUrl}`,
+              body: `✅ Recuperação confirmada em ${checkedAt}. Origem, login, papel e rotas foram validados. Workflow: ${runUrl}`,
             });
             await github.rest.issues.update({
               owner,
@@ -196,6 +189,10 @@ jobs:
               state: "closed",
               state_reason: "completed",
             });
+
+      - name: Limpar evidências locais
+        if: always()
+        run: rm -rf artifacts/smoke
 
       - name: Falhar o workflow quando o smoke falhar
         if: steps.smoke.outcome != 'success'
