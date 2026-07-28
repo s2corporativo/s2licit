@@ -50,7 +50,7 @@ pnpm install --frozen-lockfile --ignore-scripts
 if [ ! -f .env ]; then
   cp .env.example .env
   echo
-echo -e "${YELLOW}[ATENÇÃO] O arquivo .env foi criado a partir do modelo.${NC}"
+  echo -e "${YELLOW}[ATENÇÃO] O arquivo .env foi criado a partir do modelo.${NC}"
   echo -e "${YELLOW}Preencha DATABASE_URL, JWT_SECRET e ENCRYPTION_KEY e execute o setup novamente.${NC}"
   exit 1
 fi
