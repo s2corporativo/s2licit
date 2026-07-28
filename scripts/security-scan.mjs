@@ -54,7 +54,7 @@ for (const file of trackedFiles) {
   if (/^(?:credentials?|service-account|secrets?)\.(?:json|ya?ml)$/i.test(name)) {
     add(file, "arquivo de credenciais versionado");
   }
-  if (/(?:^|\/)(?:uploads?|backups?|private-imports?|data)\//i.test(lower)) {
+  if (/^(?:uploads?|backups?|private-imports?|data)\//i.test(lower) || /^public\/uploads\//i.test(lower)) {
     add(file, "dados operacionais ou persistentes versionados");
   }
   if (/\.(?:db|sqlite|sqlite3)$/i.test(name)) add(file, "banco local versionado");
