@@ -10,6 +10,7 @@ const TEXT_EXTENSIONS = new Set([
   ".jsx", ".md", ".mjs", ".prisma", ".scss", ".sh", ".sql", ".ts",
   ".tsx", ".txt", ".yaml", ".yml",
 ]);
+const AUDIT_IMPLEMENTATION = "scripts/repository-audit.mjs";
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   encoding: "utf8",
@@ -42,7 +43,7 @@ const topLevelEntries = new Set();
 const hashes = new Map();
 
 const suspiciousNamePattern = /(?:^|\/)(?:backup|copy|copia|old|obsolete|obsoleto|deprecated)(?:[._-]|\/)|\.(?:bak|old|orig|rej|tmp|temp|disabled|backup)$|~$/i;
-const generatedPathPattern = /(?:^|\/)(?:graphify-out|coverage|dist|build|\.manus-logs|evidencias)(?:\/|$)|(?:^|\/)Pasted_content_|(?:^|\/)repository-audit\.json$/i;
+const generatedPathPattern = /(?:^|\/)(?:graphify-out|coverage|dist|build|\.manus-logs|evidencias|artifacts)(?:\/|$)|(?:^|\/)Pasted_content_|(?:^|\/)repository-audit\.json$/i;
 
 for (const file of trackedFiles) {
   topLevelEntries.add(file.split("/")[0]);
@@ -75,17 +76,23 @@ for (const file of trackedFiles) {
   if (buffer.includes(0) || (!TEXT_EXTENSIONS.has(extension) && !basename(file).startsWith(".env"))) continue;
 
   const text = buffer.toString("utf8");
-  const staleRules = [
-    ["identidade Verdelimp", /\bverdelimp\b/i],
-    ["identidade Cuidar Vet", /\bcuidar\s+vet\b/i],
-    ["artefato Manus", /\bmanus\b/i],
-    ["proxy Forge legado", /\bforge\b/i],
-  ];
-  for (const [rule, pattern] of staleRules) {
-    if (pattern.test(text)) report.staleIdentityReferences.push({ file, rule });
+  const isAuditImplementation = file === AUDIT_IMPLEMENTATION;
+
+  if (!isAuditImplementation) {
+    const staleRules = [
+      ["identidade Verdelimp", /\bverdelimp\b/i],
+      ["identidade Cuidar Vet", /\bcuidar\s+vet\b/i],
+      ["artefato Manus", /\bmanus\b/i],
+      ["proxy Forge legado", /\bforge\b/i],
+    ];
+    for (const [rule, pattern] of staleRules) {
+      if (pattern.test(text)) report.staleIdentityReferences.push({ file, rule });
+    }
   }
 
-  if (/\b(?:TODO|FIXME|HACK)\b/.test(text)) report.maintenanceMarkers.push(file);
+  if (!isAuditImplementation && /\b(?:TODO|FIXME|HACK)\b/.test(text)) {
+    report.maintenanceMarkers.push(file);
+  }
   if (/^(?:client\/src|server|shared)\//.test(file) && !/(?:^|\/)(?:__tests__|fixtures|mocks?|tests?)(?:\/|$)/i.test(file) && /\b(?:mock|fake|demo|simulad[oa]s?)\b/i.test(text)) {
     report.sourceDemoOrMockMarkers.push(file);
   }
