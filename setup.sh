@@ -1,84 +1,75 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================
-# SISTEMA S2 — SCRIPT DE INSTALAÇÃO AUTOMÁTICA
+# SISTEMA S2 — INSTALAÇÃO LOCAL EM LINUX
 # Execute: chmod +x setup.sh && ./setup.sh
 # ============================================================
 
-set -e
+set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+readonly PNPM_VERSION="10.4.1"
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m'
 
 echo -e "${BLUE}============================================${NC}"
-echo -e "${BLUE}   SISTEMA S2 — INSTALAÇÃO AUTOMÁTICA      ${NC}"
+echo -e "${BLUE}   SISTEMA S2 — INSTALAÇÃO LOCAL           ${NC}"
 echo -e "${BLUE}============================================${NC}"
-echo ""
+echo
 
-# Verificar Node.js
-if ! command -v node &> /dev/null; then
-    echo -e "${RED}[ERRO] Node.js não encontrado. Instale o Node.js 18+ em https://nodejs.org${NC}"
-    exit 1
+if ! command -v node >/dev/null 2>&1; then
+  echo -e "${RED}[ERRO] Node.js não encontrado. Instale o Node.js 22 LTS em https://nodejs.org${NC}"
+  exit 1
 fi
-NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-    echo -e "${RED}[ERRO] Node.js 18+ é necessário. Versão atual: $(node --version)${NC}"
-    exit 1
+
+NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo -e "${RED}[ERRO] Node.js 22 ou superior é obrigatório. Versão atual: $(node --version)${NC}"
+  exit 1
 fi
 echo -e "${GREEN}✓ Node.js $(node --version) detectado${NC}"
 
-# Instalar pnpm se necessário
-if ! command -v pnpm &> /dev/null; then
-    echo -e "${YELLOW}→ Instalando pnpm...${NC}"
-    npm install -g pnpm
+if ! command -v pnpm >/dev/null 2>&1 || [ "$(pnpm --version)" != "$PNPM_VERSION" ]; then
+  echo -e "${YELLOW}→ Instalando pnpm ${PNPM_VERSION}...${NC}"
+  npm install -g "pnpm@${PNPM_VERSION}"
 fi
 echo -e "${GREEN}✓ pnpm $(pnpm --version) disponível${NC}"
 
-# Verificar MySQL
-if ! command -v mysql &> /dev/null; then
-    echo -e "${YELLOW}[AVISO] MySQL client não encontrado no PATH.${NC}"
-    echo -e "${YELLOW}        Se tiver Docker, use: docker-compose up -d${NC}"
+if ! command -v mysql >/dev/null 2>&1; then
+  echo -e "${YELLOW}[AVISO] Cliente MySQL não encontrado no PATH.${NC}"
+  echo -e "${YELLOW}        Para ambiente local com containers, use: docker compose up -d${NC}"
 else
-    echo -e "${GREEN}✓ MySQL client detectado${NC}"
+  echo -e "${GREEN}✓ Cliente MySQL detectado${NC}"
 fi
 
-echo ""
-echo -e "${BLUE}→ Instalando dependências...${NC}"
-pnpm install --ignore-scripts
+echo
+echo -e "${BLUE}→ Instalando dependências pelo lockfile oficial...${NC}"
+pnpm install --frozen-lockfile --ignore-scripts
 
-echo ""
-echo -e "${BLUE}→ Verificando arquivo .env...${NC}"
 if [ ! -f .env ]; then
-    cp .env.example .env 2>/dev/null || echo -e "${YELLOW}[AVISO] Arquivo .env não encontrado. Crie manualmente baseado no .env.example${NC}"
+  cp .env.example .env
+  echo
+echo -e "${YELLOW}[ATENÇÃO] O arquivo .env foi criado a partir do modelo.${NC}"
+  echo -e "${YELLOW}Preencha DATABASE_URL, JWT_SECRET e ENCRYPTION_KEY e execute o setup novamente.${NC}"
+  exit 1
 fi
 
-echo ""
-echo -e "${BLUE}→ Aplicando migrações do banco de dados...${NC}"
-if [ -z "$DATABASE_URL" ]; then
-    source .env 2>/dev/null || true
+echo
+echo -e "${BLUE}→ Aplicando migrações oficiais do banco...${NC}"
+if ! pnpm db:push; then
+  echo -e "${RED}[ERRO] Não foi possível aplicar as migrações.${NC}"
+  echo -e "${RED}Verifique o MySQL, a DATABASE_URL e as permissões do usuário do banco.${NC}"
+  exit 1
 fi
+echo -e "${GREEN}✓ Migrações aplicadas${NC}"
 
-if [ -z "$DATABASE_URL" ]; then
-    echo -e "${YELLOW}[AVISO] DATABASE_URL não definido. Configure o .env antes de continuar.${NC}"
-    echo -e "${YELLOW}        Exemplo: DATABASE_URL=mysql://usuario:senha@localhost:3306/sistema_s2${NC}"
-else
-    pnpm db:push && echo -e "${GREEN}✓ Banco de dados configurado${NC}"
-fi
-
-echo ""
+echo
 echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}   INSTALAÇÃO CONCLUÍDA!                   ${NC}"
+echo -e "${GREEN}   INSTALAÇÃO CONCLUÍDA                    ${NC}"
 echo -e "${GREEN}============================================${NC}"
-echo ""
-echo -e "Para iniciar em desenvolvimento:"
-echo -e "  ${BLUE}pnpm dev${NC}"
-echo ""
-echo -e "Para iniciar em produção (após build):"
-echo -e "  ${BLUE}pnpm build && pnpm start${NC}"
-echo ""
-echo -e "Com Docker (recomendado):"
-echo -e "  ${BLUE}docker-compose up -d${NC}"
-echo ""
-echo -e "Acesso: ${BLUE}http://localhost:3000${NC}"
+echo
+echo -e "Desenvolvimento: ${BLUE}pnpm dev${NC}"
+echo -e "Produção local:  ${BLUE}pnpm build && pnpm start${NC}"
+echo -e "Containers:      ${BLUE}docker compose up -d --build${NC}"
+echo -e "Acesso padrão:   ${BLUE}http://localhost:3000${NC}"
