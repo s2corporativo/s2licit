@@ -1,8 +1,5 @@
-# Deploy do Sistema S2 na VPS via SSH.
-#
-# O workflow preserva o .env da VPS, aplica somente configurações não vazias,
-# publica a imagem validada e só conclui quando aplicação, MySQL e domínio
-# público respondem com a identidade correta do S2.
+# Deploy gratuito do Sistema S2 usando runner próprio na VPS.
+# Não usa GitHub-hosted runner, GHCR, cache ou artefatos cobrados.
 name: Deploy VPS
 
 on:
@@ -21,99 +18,68 @@ on:
         required: true
         default: "root"
       password:
-        description: "Senha SSH (deixe vazio para usar o secret VPS_PASSWORD)"
+        description: "Senha SSH (vazio usa o secret VPS_PASSWORD)"
         required: false
         default: ""
       domain:
-        description: "Domínio do S2. Vazio mantém o valor salvo/variável padrão."
+        description: "Domínio do S2"
         required: false
         default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
 
 env:
   DEPLOY_HOST: ${{ inputs.host || vars.VPS_HOST || '13.140.167.153' }}
   DEPLOY_USER: ${{ inputs.ssh_user || vars.VPS_SSH_USER || 'root' }}
   DEPLOY_DOMAIN: ${{ inputs.domain || vars.VPS_DOMAIN || 's2.s2corporativo.com.br' }}
 
-concurrency:
-  group: deploy-vps
-  cancel-in-progress: false
-
 jobs:
-  build-image:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
-
-      - name: Login no ghcr
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Definir tag da imagem
-        id: meta
-        run: |
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${SHA}" >> "$GITHUB_OUTPUT"
-
-      - name: Build e push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.meta.outputs.image }}
-            ghcr.io/${{ github.repository }}:latest
-
   deploy:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    needs: build-image
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
+    runs-on: [self-hosted, linux, x64, s2licit-vps]
+    timeout-minutes: 60
     steps:
       - name: Checkout do release validado
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 1
 
-      - name: Configurar Node.js para verificação pública
+      - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Preparar ferramentas SSH
+      - name: Validar ferramentas locais gratuitas
+        run: |
+          set -euo pipefail
+          command -v sshpass >/dev/null || { echo "sshpass não instalado no runner" >&2; exit 1; }
+          command -v rsync >/dev/null || { echo "rsync não instalado no runner" >&2; exit 1; }
+          command -v docker >/dev/null || { echo "Docker não instalado no runner" >&2; exit 1; }
+
+      - name: Preparar conexão SSH
         env:
           VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
         run: |
           set -euo pipefail
           if [ -n "${{ inputs.password }}" ]; then echo "::add-mask::${{ inputs.password }}"; fi
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass rsync
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           if [ -n "$VPS_HOST_KEY" ]; then
             printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
             echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-            echo "Chave do host fixada."
           else
             echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-            echo "::warning::VPS_HOST_KEY ausente — conexão SSH sem pinagem da chave do host."
+            echo "::warning::VPS_HOST_KEY ausente; cadastre a chave do host para eliminar este aviso."
           fi
 
-      - name: Enviar código para a VPS
+      - name: Sincronizar código preservando dados e segredos
         env:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
         run: |
@@ -128,27 +94,72 @@ jobs:
             --exclude node_modules \
             --exclude dist \
             --exclude .env \
+            --exclude artifacts \
+            --exclude uploads \
+            --exclude backups \
             -e "sshpass -e ssh $SSH_OPTS" \
             ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/s2licit/"
 
-      - name: Instalar, migrar, configurar proxy e subir
+      - name: Criar tag local, migrar e subir containers
         env:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          S2_IMAGE: ${{ needs.build-image.outputs.image }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL || secrets.ADMIN_EMAIL }}
           CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL || secrets.CERTBOT_EMAIL }}
         run: |
           set -euo pipefail
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
-
           printf -v Q_DOMAIN '%q' "$DEPLOY_DOMAIN"
-          printf -v Q_IMAGE '%q' "$S2_IMAGE"
+          printf -v Q_SHA '%q' "$RELEASE_SHA"
           printf -v Q_ADMIN_EMAIL '%q' "${ADMIN_EMAIL:-}"
           printf -v Q_CERTBOT_EMAIL '%q' "${CERTBOT_EMAIL:-}"
           sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DOMAIN=$Q_DOMAIN S2_IMAGE=$Q_IMAGE ADMIN_EMAIL=$Q_ADMIN_EMAIL CERTBOT_EMAIL=$Q_CERTBOT_EMAIL bash /opt/s2licit/scripts/vps-bootstrap.sh"
+            "DOMAIN=$Q_DOMAIN RELEASE_SHA=$Q_SHA ADMIN_EMAIL=$Q_ADMIN_EMAIL CERTBOT_EMAIL=$Q_CERTBOT_EMAIL bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd /opt/s2licit
+          RELEASE_IMAGE="sistema-s2-app:${RELEASE_SHA}"
+          RELEASE_IMAGE="$RELEASE_IMAGE" python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path('.env')
+          lines = path.read_text(encoding='utf-8').splitlines() if path.exists() else []
+          values = {}
+          order = []
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key, value = line.split('=', 1)
+                  if key not in values:
+                      order.append(key)
+                  values[key] = value
+          current = values.get('S2_IMAGE', '')
+          target = os.environ['RELEASE_IMAGE']
+          if current and current != target:
+              values['S2_IMAGE_PREVIOUS'] = current
+              if 'S2_IMAGE_PREVIOUS' not in order:
+                  order.append('S2_IMAGE_PREVIOUS')
+          values['S2_IMAGE'] = target
+          if 'S2_IMAGE' not in order:
+              order.append('S2_IMAGE')
+          rendered = []
+          emitted = set()
+          for line in lines:
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key = line.split('=', 1)[0]
+                  if key in values and key not in emitted:
+                      rendered.append(f'{key}={values[key]}')
+                      emitted.add(key)
+              else:
+                  rendered.append(line)
+          for key in order:
+              if key not in emitted:
+                  rendered.append(f'{key}={values[key]}')
+          tmp = path.with_suffix('.env.tmp')
+          tmp.write_text('\n'.join(rendered) + '\n', encoding='utf-8')
+          os.chmod(tmp, 0o600)
+          os.replace(tmp, path)
+          PY
+          DOMAIN="$DOMAIN" ADMIN_EMAIL="$ADMIN_EMAIL" CERTBOT_EMAIL="$CERTBOT_EMAIL" bash scripts/vps-bootstrap.sh
+          REMOTE
 
       - name: Validar aplicação e MySQL internamente
         env:
@@ -164,25 +175,23 @@ jobs:
             if BODY="$BODY" python3 - <<'PY'
           import json, os
           try:
-              payload = json.loads(os.environ.get("BODY", ""))
+              payload = json.loads(os.environ.get('BODY', ''))
           except Exception:
               raise SystemExit(1)
-          raise SystemExit(0 if payload.get("status") == "ready" else 1)
+          raise SystemExit(0 if payload.get('status') == 'ready' else 1)
           PY
             then
-              echo "Aplicação e MySQL prontos ✅"
+              echo "Aplicação e MySQL prontos"
               exit 0
             fi
             sleep 4
           done
-          echo "Aplicação não ficou pronta" >&2
           docker compose ps >&2 || true
           docker compose logs --tail=100 app db >&2 || true
           exit 1
           REMOTE
 
-      # Valores ausentes são ignorados e não apagam o .env existente.
-      - name: Aplicar integrações cadastradas no GitHub
+      - name: Aplicar integrações cadastradas
         env:
           SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
@@ -221,14 +230,8 @@ jobs:
           SCRAPER_SCHEDULE_CRON: ${{ vars.SCRAPER_SCHEDULE_CRON || secrets.SCRAPER_SCHEDULE_CRON }}
         run: |
           set -euo pipefail
-
-          # Compatibilidade controlada com EMAIL_USER/EMAIL_PASSWORD: só é usada
-          # quando ambos foram explicitamente cadastrados, sem identidade padrão.
           if [ -n "${EMAIL_PASSWORD:-}" ]; then
-            if [ -z "${EMAIL_USER:-}" ]; then
-              echo "::error::EMAIL_PASSWORD foi informado sem EMAIL_USER."
-              exit 1
-            fi
+            [ -n "${EMAIL_USER:-}" ] || { echo "EMAIL_PASSWORD informado sem EMAIL_USER" >&2; exit 1; }
             IMAP_HOST="${IMAP_HOST:-imap.gmail.com}"
             IMAP_PORT="${IMAP_PORT:-993}"
             IMAP_USER="${IMAP_USER:-$EMAIL_USER}"
@@ -243,25 +246,23 @@ jobs:
             SMTP_FROM="${SMTP_FROM:-$EMAIL_USER}"
           fi
 
-          cat > /tmp/remote-config.sh <<'REMOTE'
+          cat > /tmp/s2-remote-config.sh <<'REMOTE'
           set -euo pipefail
           cd /opt/s2licit
           set_kv_b64() {
             KEY="$1" VALUE_B64="$2" python3 - <<'PY'
           import base64, os
           from pathlib import Path
-
-          key = os.environ["KEY"]
-          value = base64.b64decode(os.environ["VALUE_B64"]).decode("utf-8")
-          if "\n" in value or "\r" in value:
-              raise SystemExit(f"Valor multilinha não permitido para {key}")
-          path = Path(".env")
-          lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-          replacement = f"{key}={value}"
-          updated = False
-          output = []
+          key = os.environ['KEY']
+          value = base64.b64decode(os.environ['VALUE_B64']).decode('utf-8')
+          if '\n' in value or '\r' in value:
+              raise SystemExit(f'Valor multilinha não permitido para {key}')
+          path = Path('.env')
+          lines = path.read_text(encoding='utf-8').splitlines() if path.exists() else []
+          replacement = f'{key}={value}'
+          output, updated = [], False
           for line in lines:
-              if line.startswith(f"{key}="):
+              if line.startswith(f'{key}='):
                   if not updated:
                       output.append(replacement)
                       updated = True
@@ -269,8 +270,8 @@ jobs:
                   output.append(line)
           if not updated:
               output.append(replacement)
-          tmp = path.with_suffix(".env.tmp")
-          tmp.write_text("\n".join(output) + "\n", encoding="utf-8")
+          tmp = path.with_suffix('.env.tmp')
+          tmp.write_text('\n'.join(output) + '\n', encoding='utf-8')
           os.chmod(tmp, 0o600)
           os.replace(tmp, path)
           PY
@@ -283,8 +284,7 @@ jobs:
             value="${!key:-}"
             [ -n "$value" ] || return 0
             encoded=$(printf %s "$value" | base64 -w0)
-            printf "set_kv_b64 '%s' '%s'\n" "$key" "$encoded" >> /tmp/remote-config.sh
-            echo "Configurando ${key}"
+            printf "set_kv_b64 '%s' '%s'\n" "$key" "$encoded" >> /tmp/s2-remote-config.sh
             applied=$((applied + 1))
           }
 
@@ -301,39 +301,17 @@ jobs:
             append_value "$key"
           done
 
-          if [ "$applied" -eq 0 ]; then
-            echo "Nenhuma configuração nova informada; mantendo o .env atual."
-            exit 0
-          fi
-
-          cat >> /tmp/remote-config.sh <<'REMOTE'
+          if [ "$applied" -gt 0 ]; then
+            cat >> /tmp/s2-remote-config.sh <<'REMOTE'
           docker compose up -d --force-recreate app >/dev/null
-          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
-          LOCAL_PORT=${LOCAL_PORT:-3000}
-          for i in $(seq 1 45); do
-            BODY=$(curl -fsS "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null || true)
-            if BODY="$BODY" python3 - <<'PY'
-          import json, os
-          try:
-              payload = json.loads(os.environ.get("BODY", ""))
-          except Exception:
-              raise SystemExit(1)
-          raise SystemExit(0 if payload.get("status") == "ready" else 1)
-          PY
-            then
-              echo "Integrações aplicadas e aplicação pronta ✅"
-              exit 0
-            fi
-            sleep 4
-          done
-          echo "Aplicação não ficou pronta após aplicar integrações" >&2
-          docker compose logs --tail=100 app >&2 || true
-          exit 1
           REMOTE
+            sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < /tmp/s2-remote-config.sh
+          else
+            echo "Nenhuma integração nova; mantendo o .env atual."
+          fi
+          rm -f /tmp/s2-remote-config.sh
 
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < /tmp/remote-config.sh
-
-      - name: Validar domínio público e identidade do S2
+      - name: Validar domínio público e identidade
         env:
           S2_BASE_URL: https://${{ env.DEPLOY_DOMAIN }}
           S2_VERIFY_OUTPUT: artifacts/deploy/public-verification.json
@@ -341,22 +319,16 @@ jobs:
           S2_VERIFY_DELAY_MS: 10000
         run: node scripts/verify-public-s2.mjs
 
-      - name: Publicar diagnóstico do domínio
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy-public-verification-${{ github.run_id }}
-          path: artifacts/deploy
-          if-no-files-found: warn
-          retention-days: 14
-
       - name: Resumo
         if: success()
         run: |
-          echo "### Deploy concluído ✅" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deploy gratuito concluído" >> "$GITHUB_STEP_SUMMARY"
           echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Aplicação e MySQL validados internamente" >> "$GITHUB_STEP_SUMMARY"
-          echo "- DNS/proxy, /healthz, /readyz e identidade HTML validados externamente" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Código, migrações e integrações sincronizados" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Nenhum valor de secret foi exibido nos logs" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Runner: próprio, sem cobrança de minutos" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Imagem: construída localmente na VPS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub Packages/GHCR: não utilizado" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Aplicação, MySQL, domínio e identidade validados" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Limpar evidências locais
+        if: always()
+        run: rm -rf artifacts/deploy
