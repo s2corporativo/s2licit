@@ -2,12 +2,13 @@
    SISTEMA S2 - COMO USAR (WINDOWS)
 =============================================
 
-ANTES DE TUDO - instale o Node.js:
------------------------------------
+ANTES DE TUDO - instale o Node.js 22 LTS:
+------------------------------------------
 1. Abra o navegador (Chrome, Edge, etc.)
 2. Digite na barra de endereço: nodejs.org
-3. Baixe a versão LTS
+3. Baixe a versão 22 LTS
 4. Abra o arquivo baixado e conclua a instalação
+5. Reinicie o computador
 
 
 O SISTEMA TAMBÉM PRECISA DE UM BANCO DE DADOS:
@@ -22,8 +23,9 @@ Sem isso, o sistema pode abrir, mas não funcionará corretamente.
 PRIMEIRA VEZ (instalar o sistema):
 ------------------------------------
 1. Clique duas vezes em: INSTALAR.bat
-2. Aguarde a conclusão da instalação
-3. Quando aparecer "INSTALAÇÃO CONCLUÍDA", feche a janela
+2. O instalador usará o pnpm 10.4.1 e o lockfile oficial
+3. Aguarde a conclusão da instalação e das migrações
+4. Quando aparecer "INSTALAÇÃO CONCLUÍDA", feche a janela
 
 
 TODOS OS DIAS (para usar o sistema):
