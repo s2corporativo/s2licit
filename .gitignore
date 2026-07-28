@@ -33,8 +33,10 @@ secrets.json
 # Dados persistentes, importações privadas e bancos locais
 /uploads/
 /backups/
+scripts/backups/
 /data/
 /private-imports/
+artifacts/
 *.db
 *.sqlite
 *.sqlite3
