@@ -13,7 +13,20 @@ const ALLOWED_ENV_FILES = new Set([
   ".env.production.example",
   ".env.vps.example",
 ]);
-const SAFE_CREDENTIAL_CONTEXT = /^(?:README\.md|setup\.sh|docker-compose\.yml)$|(?:^|\/)(?:\.github\/workflows|tests?|__tests__|fixtures|docs)(?:\/|$)|(?:^|\/)\.env[^/]*\.example$/i;
+const SAFE_EXAMPLE_CONTEXT = /^(?:README\.md)$|(?:^|\/)(?:docs|tests?|__tests__|fixtures)(?:\/|$)|(?:^|\/)\.env[^/]*\.example$/i;
+const SECRET_NAMES = [
+  "JWT_SECRET",
+  "ENCRYPTION_KEY",
+  "ANTHROPIC_API_KEY",
+  "GROQ_API_KEY",
+  "SMTP_PASSWORD",
+  "IMAP_PASSWORD",
+].join("|");
+const secretLiteralPattern = new RegExp(
+  String.raw`["']?\b(?:${SECRET_NAMES})\b["']?\s*[:=]\s*(?:"([^"\r\n]{12,})"|'([^'\r\n]{12,})'|([A-Za-z0-9_+/.=-]{12,})(?=\s*(?:$|[,;#}])))`,
+  "gmi",
+);
+const databaseUrlPattern = /\b(?:mysql|postgres(?:ql)?):\/\/[^\s"'`<>]+/gi;
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   encoding: "utf8",
@@ -42,6 +55,23 @@ const tokenRules = [
   ["chave OpenAI/compatível", /\bsk-[A-Za-z0-9_-]{20,}\b/],
 ];
 
+function isLocalEphemeralDatabaseUrl(value) {
+  try {
+    const url = new URL(value);
+    const localHost = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+    const testCredentials =
+      (url.username === "root" && url.password === "root") ||
+      (url.username === "test" && url.password === "test");
+    return localHost && testCredentials;
+  } catch {
+    return false;
+  }
+}
+
+function isExpression(value) {
+  return /\$\{|\$\{\{|\b(?:process\.env|secrets\.|vars\.|readSecret|decrypt|ENV\.)/i.test(value);
+}
+
 for (const file of trackedFiles) {
   const name = basename(file);
   const lower = file.toLowerCase();
@@ -54,11 +84,13 @@ for (const file of trackedFiles) {
   if (/^(?:credentials?|service-account|secrets?)\.(?:json|ya?ml)$/i.test(name)) {
     add(file, "arquivo de credenciais versionado");
   }
-  if (/^(?:uploads?|backups?|private-imports?|data)\//i.test(lower) || /^public\/uploads\//i.test(lower)) {
+  if (/(?:^|\/)(?:uploads?|backups?|private-imports?)\//i.test(lower) || /^data\//i.test(lower) || /^public\/uploads\//i.test(lower)) {
     add(file, "dados operacionais ou persistentes versionados");
   }
   if (/\.(?:db|sqlite|sqlite3)$/i.test(name)) add(file, "banco local versionado");
-  if (/(?:dump|backup).+\.sql(?:\.gz)?$/i.test(name)) add(file, "dump de banco versionado");
+  if (/^(?:.*[-_.])?(?:dump|backup)(?:[-_.].*)?\.sql(?:\.gz)?$/i.test(name)) {
+    add(file, "dump de banco versionado");
+  }
 
   let stats;
   try {
@@ -78,12 +110,20 @@ for (const file of trackedFiles) {
     if (pattern.test(text)) add(file, rule);
   }
 
-  if (!SAFE_CREDENTIAL_CONTEXT.test(file) && /\b(?:mysql|postgres(?:ql)?)\:\/\/[^\s:@/]+:[^\s@/]+@/i.test(text)) {
-    add(file, "URL de banco com credenciais embutidas");
+  for (const match of text.matchAll(databaseUrlPattern)) {
+    const value = match[0].replace(/[),;]+$/, "");
+    if (isExpression(value)) continue;
+    if (SAFE_EXAMPLE_CONTEXT.test(file)) continue;
+    if (isLocalEphemeralDatabaseUrl(value)) continue;
+    add(file, "URL de banco com credenciais literais embutidas");
   }
 
-  if (!SAFE_CREDENTIAL_CONTEXT.test(file) && /(?:JWT_SECRET|ENCRYPTION_KEY|ANTHROPIC_API_KEY|GROQ_API_KEY|SMTP_PASSWORD|IMAP_PASSWORD)\s*=\s*["']?[A-Za-z0-9_+\/=.-]{12,}/.test(text)) {
-    add(file, "segredo preenchido em código ou configuração rastreada");
+  if (!SAFE_EXAMPLE_CONTEXT.test(file)) {
+    for (const match of text.matchAll(secretLiteralPattern)) {
+      const value = match[1] ?? match[2] ?? match[3] ?? "";
+      if (!value || isExpression(value)) continue;
+      add(file, "segredo literal preenchido em código ou configuração rastreada");
+    }
   }
 }
 
