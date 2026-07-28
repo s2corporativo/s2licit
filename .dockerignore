@@ -32,12 +32,14 @@ coverage
 *backup*.sql
 *.sql.gz
 
-# Dados persistentes e anexos locais
+# Dados persistentes, backups e diagnósticos locais
 uploads
 backups
+scripts/backups
 data
 private-imports
 attached_assets
+artifacts
 
 # Documentação e instaladores locais fora do runtime
 *.md
