@@ -59,7 +59,7 @@
   --chart-4: oklch(0.75 0.14 85);
   --chart-5: oklch(0.55 0.20 300);
   --radius: 0.75rem;
-  --background: oklch(0.962 0.002 265);         /* #f3f4f6 — fundo Verdelimp */
+  --background: oklch(0.962 0.002 265);         /* fundo neutro da aplicação */
   --foreground: oklch(0.18 0.02 265);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.18 0.02 265);
@@ -212,7 +212,7 @@
 ::-webkit-scrollbar-thumb { background: #2563eb; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #1A3F8F; }
 
-/* Acento azul nos controles nativos (padrão Verdelimp, verde→azul) */
+/* Acento azul nos controles nativos do S2 */
 input[type="checkbox"], input[type="radio"] { accent-color: #2563eb; }
 
 /* Scrollbar da sidebar escura */
