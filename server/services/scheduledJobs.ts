@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
+import { syncPortalOpportunities } from "./portalOpportunitySyncService";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
@@ -16,12 +17,14 @@ import { logger } from "../_core/logger";
  * Agendador central de jobs recorrentes.
  *
  * - Sincronização de cotações por e-mail (se IMAP configurado).
+ * - Captura pública de oportunidades Fundep/Funarbe e matching Tambasa.
  * - Notificações proativas diárias (certidões vencendo, prazos de cotação).
  *
  * Tudo desligável por ambiente. As expressões cron podem ser sobrescritas.
  */
 
 const DEFAULT_EMAIL_SYNC_CRON = "*/15 * * * *"; // a cada 15 min
+const DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON = "0 7,12,17 * * *"; // 3x/dia
 const DEFAULT_ALERTS_CRON = "0 8 * * *"; // todo dia às 8h
 const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
 const DEFAULT_BACKUP_CRON = "0 3 * * *"; // backup diário às 3h
@@ -58,6 +61,7 @@ async function notifyJobFailure(title: string, detail: string): Promise<void> {
 }
 
 let emailSyncRunning = false;
+let portalOpportunitySyncRunning = false;
 
 /** Roda a sincronização de e-mail uma vez, com log resumido e guarda de sobreposição. */
 async function runEmailSync(): Promise<void> {
@@ -77,6 +81,46 @@ async function runEmailSync(): Promise<void> {
     logger.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
   } finally {
     emailSyncRunning = false;
+  }
+}
+
+/**
+ * Busca oportunidades públicas nos portais Fundep/Funarbe, cruza seus itens
+ * exclusivamente com o catálogo Tambasa e encaminha os resultados à fila de
+ * revisão. O envio não ocorre aqui e continua sujeito à aprovação humana.
+ */
+export async function runPortalOpportunitySync(): Promise<void> {
+  if (portalOpportunitySyncRunning) {
+    logger.warn("[Scheduler] Busca Fundep/Funarbe anterior ainda em andamento — pulando este ciclo.");
+    return;
+  }
+  portalOpportunitySyncRunning = true;
+  try {
+    const result = await syncPortalOpportunities();
+    logger.info(
+      `[Scheduler] Fundep/Funarbe: ${result.found} encontradas, ${result.imported} importadas, ` +
+        `${result.skipped} já existentes, ${result.matchedItems} itens casados com Tambasa e ` +
+        `${result.unmatchedItems} sem correspondência.`,
+    );
+    if (result.errors.length > 0) {
+      const detail = result.errors.slice(0, 5).join("; ");
+      logger.warn(`[Scheduler] Fundep/Funarbe com ${result.errors.length} aviso(s): ${detail}`);
+      if (result.found === 0) {
+        await notifyJobFailure(
+          "Falha na busca Fundep/Funarbe — Sistema S2",
+          `Nenhuma oportunidade pôde ser processada. Avisos: ${detail}`,
+        );
+      }
+    }
+  } catch (err) {
+    const detail = (err as Error).message;
+    logger.error("[Scheduler] Falha na busca Fundep/Funarbe:", detail);
+    await notifyJobFailure(
+      "Falha na busca Fundep/Funarbe — Sistema S2",
+      `A captura agendada falhou: ${detail}`,
+    );
+  } finally {
+    portalOpportunitySyncRunning = false;
   }
 }
 
@@ -287,7 +331,22 @@ export function initScheduledJobs(): void {
     }
   }
 
-  // 2. Alertas proativos diários
+  // 2. Oportunidades públicas Fundep/Funarbe → matching Tambasa → fila de revisão.
+  if (enabled(process.env.PORTAL_OPPORTUNITY_SYNC_ENABLED, true)) {
+    const expr = process.env.PORTAL_OPPORTUNITY_SYNC_CRON || DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON;
+    if (cron.validate(expr)) {
+      cron.schedule(expr, () => { void runPortalOpportunitySync(); }, { timezone: SCRAPER_TIMEZONE });
+      logger.info(
+        `[Scheduler] Busca Fundep/Funarbe agendada (${expr}, horário de Brasília; envio sujeito à aprovação).`,
+      );
+    } else {
+      logger.warn(
+        `[Scheduler] PORTAL_OPPORTUNITY_SYNC_CRON inválido: "${expr}" — busca Fundep/Funarbe desativada.`,
+      );
+    }
+  }
+
+  // 3. Alertas proativos diários
   if (enabled(process.env.ALERTS_ENABLED, true)) {
     const expr = process.env.ALERTS_CRON || DEFAULT_ALERTS_CRON;
     if (cron.validate(expr)) {
@@ -298,7 +357,7 @@ export function initScheduledJobs(): void {
     }
   }
 
-  // 3. Execução automática dos scrapers de fornecedores no horário configurado
+  // 4. Execução automática dos scrapers de fornecedores no horário configurado
   if (enabled(process.env.SCRAPER_SCHEDULE_ENABLED, true)) {
     const expr = process.env.SCRAPER_SCHEDULE_CRON || DEFAULT_SCRAPER_SCHEDULE_CRON;
     if (cron.validate(expr)) {
@@ -309,7 +368,7 @@ export function initScheduledJobs(): void {
     }
   }
 
-  // 4. Backup automático do banco (§16)
+  // 5. Backup automático do banco (§16)
   if (enabled(process.env.BACKUP_ENABLED, true)) {
     const expr = process.env.BACKUP_CRON || DEFAULT_BACKUP_CRON;
     if (cron.validate(expr)) {
