@@ -1,16 +1,71 @@
+# Controle de versão, automações e ferramentas de desenvolvimento
 .git
 .github
+.claude
+.vscode
+.idea
+
+# Dependências, builds e caches locais
 node_modules
+.pnpm-store
 dist
-.env
-.env.*
-!.env.example
-!.env.production.example
+build
+coverage
+.cache
+*.tsbuildinfo
 *.log
+
+# Ambientes, segredos, certificados e bancos locais
+.env*
+*.pem
+*.pfx
+*.p12
+*.key
+*.crt
+*.cer
+*.der
+*.kdbx
+*.db
+*.sqlite
+*.sqlite3
+*dump*.sql
+*backup*.sql
+*.sql.gz
+
+# Dados persistentes e anexos locais
 uploads
 backups
-docs
+data
+private-imports
 attached_assets
+
+# Documentação e instaladores locais fora do runtime
 *.md
-!README.md
-scripts/backups
+docs
+*.bat
+*.ps1
+LEIA-ME.txt
+
+# Testes e relatórios não usados no build de produção
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+repository-audit.json
+typecheck.log
+tests.log
+migration.log
+scripts/repository-audit.mjs
+scripts/security-scan.mjs
+
+# Resíduos e artefatos externos
+.webdev
+.manus-logs
+.project-config.json
+Pasted_content_*
+graphify-out
+evidencias
+*.zip
+*.tgz
+*.tar
+*.tar.gz
