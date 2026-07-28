@@ -1,0 +1,43 @@
+name: Higiene do repositório
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hygiene-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: Secrets, resíduos e duplicações
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Bloquear secrets e arquivos sensíveis
+        run: node scripts/security-scan.mjs
+
+      - name: Gerar auditoria estrutural
+        run: node scripts/repository-audit.mjs > repository-audit.json
+
+      - name: Publicar auditoria estrutural
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-audit
+          path: repository-audit.json
+          if-no-files-found: error
+          retention-days: 30
