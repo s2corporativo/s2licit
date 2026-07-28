@@ -12,7 +12,7 @@ ORM** (backend), **MySQL** (banco).
 ## Pré-requisitos
 
 - Node.js 22+
-- pnpm 10+ (`npm install -g pnpm`)
+- pnpm 10.4.1, conforme `packageManager` do projeto
 - MySQL 8+ (local ou gerenciado)
 
 ## Configuração
@@ -33,11 +33,14 @@ ORM** (backend), **MySQL** (banco).
    | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Administrador inicial (login local), criado no primeiro boot |
    | `ANTHROPIC_API_KEY` | Chave da API da Anthropic para os recursos de IA (opcional) |
 
-2. Instale as dependências:
+2. Instale as dependências exatamente pelo lockfile:
 
    ```bash
-   pnpm install
+   npm install -g pnpm@10.4.1
+   pnpm install --frozen-lockfile
    ```
+
+   No Windows, use `INSTALAR.bat`. No Linux, use `chmod +x setup.sh && ./setup.sh`.
 
 3. Aplique o schema do banco:
 
@@ -128,7 +131,7 @@ Um provedor OAuth externo continua suportado (defina `OAUTH_SERVER_URL` e
 
 O deploy roda em VPS (Contabo) via Docker Compose — veja **`DEPLOY-CONTABO.md`**
 para o passo a passo, ou use o workflow **Deploy VPS** (GitHub → Actions), que
-publica automaticamente a cada merge no `main`. Configure os segredos
+publica automaticamente após CI aprovado na `main`. Configure os segredos
 (`DATABASE_URL`/credenciais do banco, `JWT_SECRET`, `ENCRYPTION_KEY`,
 `ADMIN_EMAIL`, `ADMIN_PASSWORD`, chaves de IA) no `.env` da VPS. O health
 check responde em `/healthz` (processo) e `/readyz` (aplicação + MySQL — é o
@@ -137,4 +140,6 @@ gate usado pelo deploy).
 ## Integração contínua
 
 O workflow em `.github/workflows/ci.yml` roda verificação de tipos, testes e
-build de produção a cada push e pull request.
+build de produção a cada push e pull request. O workflow
+`.github/workflows/repository-hygiene.yml` bloqueia secrets e preserva o
+relatório de auditoria estrutural como artefato.
