@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
-import { syncPortalOpportunities } from "./portalOpportunitySyncService";
+import { syncS2PortalOpportunitiesSafely } from "./s2PortalOpportunityOrchestrator";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
@@ -17,7 +17,7 @@ import { logger } from "../_core/logger";
  * Agendador central de jobs recorrentes.
  *
  * - Sincronização de cotações por e-mail (se IMAP configurado).
- * - Captura pública de oportunidades Fundep/Funarbe e matching Tambasa.
+ * - Radar COPASA, CEMIG, Fundep, Funarbe, Compras MG e FIEMG/SESI/SENAI.
  * - Notificações proativas diárias (certidões vencendo, prazos de cotação).
  *
  * Tudo desligável por ambiente. As expressões cron podem ser sobrescritas.
@@ -85,38 +85,32 @@ async function runEmailSync(): Promise<void> {
 }
 
 /**
- * Busca oportunidades públicas nos portais Fundep/Funarbe, cruza seus itens
- * exclusivamente com o catálogo Tambasa e encaminha os resultados à fila de
- * revisão. O envio não ocorre aqui e continua sujeito à aprovação humana.
+ * Executa o radar dos seis portais definidos pela operação S2, cruza os itens
+ * com a Tambasa e encaminha os resultados à fila de revisão. O envio final
+ * permanece sujeito à aprovação humana.
  */
 export async function runPortalOpportunitySync(): Promise<void> {
   if (portalOpportunitySyncRunning) {
-    logger.warn("[Scheduler] Busca Fundep/Funarbe anterior ainda em andamento — pulando este ciclo.");
+    logger.warn("[Scheduler] Radar dos seis portais ainda em andamento — pulando este ciclo.");
     return;
   }
   portalOpportunitySyncRunning = true;
   try {
-    const result = await syncPortalOpportunities();
+    const result = await syncS2PortalOpportunitiesSafely();
     logger.info(
-      `[Scheduler] Fundep/Funarbe: ${result.found} encontradas, ${result.imported} importadas, ` +
+      `[Scheduler] Seis portais S2: ${result.found} encontradas, ${result.imported} importadas, ` +
         `${result.skipped} já existentes, ${result.matchedItems} itens casados com Tambasa e ` +
         `${result.unmatchedItems} sem correspondência.`,
     );
     if (result.errors.length > 0) {
-      const detail = result.errors.slice(0, 5).join("; ");
-      logger.warn(`[Scheduler] Fundep/Funarbe com ${result.errors.length} aviso(s): ${detail}`);
-      if (result.found === 0) {
-        await notifyJobFailure(
-          "Falha na busca Fundep/Funarbe — Sistema S2",
-          `Nenhuma oportunidade pôde ser processada. Avisos: ${detail}`,
-        );
-      }
+      const detail = result.errors.slice(0, 8).join("; ");
+      logger.warn(`[Scheduler] Radar dos seis portais com ${result.errors.length} aviso(s): ${detail}`);
     }
   } catch (err) {
     const detail = (err as Error).message;
-    logger.error("[Scheduler] Falha na busca Fundep/Funarbe:", detail);
+    logger.error("[Scheduler] Falha no radar dos seis portais:", detail);
     await notifyJobFailure(
-      "Falha na busca Fundep/Funarbe — Sistema S2",
+      "Falha no radar de portais — Sistema S2",
       `A captura agendada falhou: ${detail}`,
     );
   } finally {
@@ -331,17 +325,17 @@ export function initScheduledJobs(): void {
     }
   }
 
-  // 2. Oportunidades públicas Fundep/Funarbe → matching Tambasa → fila de revisão.
+  // 2. Seis portais S2 → matching Tambasa → fila de revisão.
   if (enabled(process.env.PORTAL_OPPORTUNITY_SYNC_ENABLED, true)) {
     const expr = process.env.PORTAL_OPPORTUNITY_SYNC_CRON || DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, () => { void runPortalOpportunitySync(); }, { timezone: SCRAPER_TIMEZONE });
       logger.info(
-        `[Scheduler] Busca Fundep/Funarbe agendada (${expr}, horário de Brasília; envio sujeito à aprovação).`,
+        `[Scheduler] Radar COPASA/CEMIG/Fundep/Funarbe/ComprasMG/FIEMG agendado (${expr}, horário de Brasília; envio sujeito à aprovação).`,
       );
     } else {
       logger.warn(
-        `[Scheduler] PORTAL_OPPORTUNITY_SYNC_CRON inválido: "${expr}" — busca Fundep/Funarbe desativada.`,
+        `[Scheduler] PORTAL_OPPORTUNITY_SYNC_CRON inválido: "${expr}" — radar dos seis portais desativado.`,
       );
     }
   }

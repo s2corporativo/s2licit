@@ -1,6 +1,6 @@
 /**
  * propostaAgentRouter.ts
- * Endpoints tRPC para o Agente de Preenchimento de Propostas
+ * Endpoints tRPC para o Agente de Preenchimento de Propostas.
  */
 
 import { router, protectedProcedure } from "../_core/trpc";
@@ -8,35 +8,57 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { encryptPassword } from "../utils/encryption";
 import {
-  PORTAL_CONFIGS,
   executarAgenteProposta,
   propostaJobs,
   type PortalType,
 } from "../services/propostaAgent";
+import {
+  S2_PORTAL_CONFIGS,
+  S2_TARGET_PORTALS,
+  type S2TargetPortal,
+} from "../services/s2PortalAgentExtension";
 
 const portalTypeSchema = z.enum([
-  "comprasnet", "comprasmg", "fundep", "funarbe", "copasa", "agrega", "generico"
+  "copasa",
+  "cemig",
+  "fundep",
+  "funarbe",
+  "comprasmg",
+  "fiemg",
 ]);
+
+function isTargetPortal(value: string): value is S2TargetPortal {
+  return (S2_TARGET_PORTALS as readonly string[]).includes(value);
+}
+
+function asLegacyPortalType(portal: S2TargetPortal): PortalType {
+  // O motor legado aceita strings em runtime; a extensão registra CEMIG/FIEMG
+  // no mesmo mapa de configurações antes da execução.
+  return portal as unknown as PortalType;
+}
 
 export const propostaAgentRouter = router({
 
-  /** Lista portais suportados com suas configurações */
+  /** Lista somente os seis portais definidos para a operação atual do S2. */
   portaisDisponiveis: protectedProcedure.query(() => {
-    return Object.entries(PORTAL_CONFIGS).map(([key, cfg]) => ({
-      tipo: key as PortalType,
-      nome: cfg.nome,
-      loginUrl: cfg.loginUrl,
-      estrategia: cfg.estrategia,
-      camposSuportados: {
-        preco: !!cfg.seletores.inputPreco,
-        marca: !!cfg.seletores.inputMarca,
-        validade: !!cfg.seletores.inputValidade,
-        envioAutomatico: !!cfg.seletores.botaoEnviar,
-      },
-    }));
+    return S2_TARGET_PORTALS.map((key) => {
+      const cfg = S2_PORTAL_CONFIGS[key];
+      return {
+        tipo: key,
+        nome: cfg.nome,
+        loginUrl: cfg.loginUrl,
+        estrategia: cfg.estrategia,
+        camposSuportados: {
+          preco: !!cfg.seletores.inputPreco,
+          marca: !!cfg.seletores.inputMarca,
+          validade: !!cfg.seletores.inputValidade,
+          envioAutomatico: !!cfg.seletores.botaoEnviar,
+        },
+      };
+    });
   }),
 
-  /** Inicia preenchimento de proposta em segundo plano */
+  /** Inicia preenchimento de proposta em segundo plano. */
   iniciar: protectedProcedure
     .input(z.object({
       propostaId: z.number(),
@@ -59,25 +81,30 @@ export const propostaAgentRouter = router({
 
       // Resolve a credencial: do cofre (credencialId) ou inline.
       let cred = input.credencial;
-      let portalType = input.portalType as PortalType;
+      let portalType = input.portalType as S2TargetPortal;
       if (input.credencialId) {
         const { getPortalCredentialDecrypted } = await import("./portalCredentials");
-        const v = await getPortalCredentialDecrypted(input.credencialId);
-        if (!v) throw new Error("Credencial do portal não encontrada no cofre.");
-        cred = { email: v.usuario, password: v.senha, cnpj: v.cnpj, loginUrl: v.loginUrl };
-        portalType = v.portal;
+        const saved = await getPortalCredentialDecrypted(input.credencialId);
+        if (!saved) throw new Error("Credencial do portal não encontrada no cofre.");
+        if (!isTargetPortal(saved.portal)) {
+          throw new Error("A credencial selecionada pertence a um portal fora do escopo atual do S2.");
+        }
+        cred = {
+          email: saved.usuario,
+          password: saved.senha,
+          cnpj: saved.cnpj,
+          loginUrl: saved.loginUrl,
+        };
+        portalType = saved.portal;
       }
       if (!cred) throw new Error("Informe uma credencial (inline) ou um credencialId do cofre.");
 
-      // Criptografar senha antes de passar ao job background
       const passwordEncrypted = encryptPassword(cred.password);
-
       propostaJobs.set(jobId, { status: "running", criadoEm: new Date() });
 
-      // Disparar em background
       executarAgenteProposta({
         propostaId: input.propostaId,
-        portalType,
+        portalType: asLegacyPortalType(portalType),
         credencial: {
           email: cred.email,
           passwordEncrypted,
@@ -99,9 +126,14 @@ export const propostaAgentRouter = router({
         propostaJobs.set(jobId, {
           status: "error",
           resultado: {
-            sucesso: false, portalUsado: input.portalType as PortalType,
-            itensTentados: 0, itensPreenchidos: 0, itensComErro: 0,
-            screenshots: [], log: [], erros: [err?.message ?? "Erro desconhecido"],
+            sucesso: false,
+            portalUsado: asLegacyPortalType(portalType),
+            itensTentados: 0,
+            itensPreenchidos: 0,
+            itensComErro: 0,
+            screenshots: [],
+            log: [],
+            erros: [err?.message ?? "Erro desconhecido"],
             aguardandoAprovacao: false,
             resumo: { processo: "", orgao: "", totalProposta: 0, validadeDias: input.validadeDias },
           },
@@ -115,22 +147,19 @@ export const propostaAgentRouter = router({
       };
     }),
 
-  /** Consulta status e resultado de um job */
+  /** Consulta status e resultado de um job. */
   status: protectedProcedure
     .input(z.object({ jobId: z.string().uuid() }))
     .query(({ input }: { input: { jobId: string } }) => {
       const job = propostaJobs.get(input.jobId);
       if (!job) return { status: "not_found" as const, resultado: null };
-
-      // Retornar sem screenshots (são grandes — buscar separado)
       const resultado = job.resultado
         ? { ...job.resultado, screenshots: [] }
         : null;
-
       return { status: job.status, resultado };
     }),
 
-  /** Busca screenshots de um job concluído */
+  /** Busca screenshots de um job concluído. */
   screenshots: protectedProcedure
     .input(z.object({ jobId: z.string().uuid() }))
     .query(({ input }: { input: { jobId: string } }) => {
@@ -139,7 +168,7 @@ export const propostaAgentRouter = router({
       return { screenshots: job.resultado.screenshots };
     }),
 
-  /** Confirma envio final (após aprovação humana no modo rascunho) */
+  /** Confirma envio final após aprovação humana no modo rascunho. */
   confirmarEnvio: protectedProcedure
     .input(z.object({
       jobId: z.string().uuid(),
@@ -154,16 +183,16 @@ export const propostaAgentRouter = router({
       }),
       urlLicitacao: z.string().url().optional(),
     }))
-    .mutation(async ({ input }: { input: { jobId: string; propostaId: number; portalType: PortalType; credencial: { email: string; password: string; cpf?: string; cnpj?: string; loginUrl?: string }; urlLicitacao?: string } }) => {
+    .mutation(async ({ input }) => {
       const novoJobId = randomUUID();
       const passwordEncrypted = encryptPassword(input.credencial.password);
+      const portalType = input.portalType as S2TargetPortal;
 
       propostaJobs.set(novoJobId, { status: "running", criadoEm: new Date() });
 
-      // Reexecuta em modo envio direto
       executarAgenteProposta({
         propostaId: input.propostaId,
-        portalType: input.portalType as PortalType,
+        portalType: asLegacyPortalType(portalType),
         credencial: { ...input.credencial, passwordEncrypted },
         urlLicitacao: input.urlLicitacao,
         modoAprovacao: "enviar_direto",
@@ -179,9 +208,14 @@ export const propostaAgentRouter = router({
           status: "error",
           criadoEm: new Date(),
           resultado: {
-            sucesso: false, portalUsado: input.portalType as PortalType,
-            itensTentados: 0, itensPreenchidos: 0, itensComErro: 0,
-            screenshots: [], log: [], erros: [err?.message],
+            sucesso: false,
+            portalUsado: asLegacyPortalType(portalType),
+            itensTentados: 0,
+            itensPreenchidos: 0,
+            itensComErro: 0,
+            screenshots: [],
+            log: [],
+            erros: [err?.message ?? "Erro desconhecido"],
             aguardandoAprovacao: false,
             resumo: { processo: "", orgao: "", totalProposta: 0, validadeDias: 60 },
           },
@@ -191,7 +225,7 @@ export const propostaAgentRouter = router({
       return { jobId: novoJobId, message: "Envio iniciado" };
     }),
 
-  /** Lista jobs recentes (últimas 20 execuções em memória) */
+  /** Lista jobs recentes (últimas 20 execuções em memória). */
   historicoJobs: protectedProcedure.query(() => {
     return Array.from(propostaJobs.entries())
       .slice(-20)
