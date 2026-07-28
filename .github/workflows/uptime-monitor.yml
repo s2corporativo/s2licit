@@ -19,10 +19,12 @@ env:
 
 jobs:
   uptime:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, s2licit-vps]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -33,15 +35,6 @@ jobs:
         id: check
         continue-on-error: true
         run: node scripts/verify-public-s2.mjs
-
-      - name: Publicar diagnóstico
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: uptime-diagnostic-${{ github.run_id }}
-          path: artifacts/uptime
-          if-no-files-found: warn
-          retention-days: 7
 
       - name: Sinalizar falha do runner sem acusar a produção
         if: always() && hashFiles('artifacts/uptime/public-verification.json') == ''
@@ -104,12 +97,6 @@ jobs:
                 "",
                 "### Diagnóstico mais recente",
                 diagnostics || `- Erro fatal: ${summary.fatalError || "não identificado"}`,
-                "",
-                "### Ações imediatas",
-                "1. Conferir DNS do subdomínio e o `server_name` do Nginx/Caddy.",
-                "2. Verificar `docker compose ps` e `docker compose logs --tail=200 app db`.",
-                "3. Confirmar certificado TLS, proxy para a porta local e variável `DOMAIN`.",
-                "4. Executar deploy ou rollback somente após identificar o componente incorreto.",
               ].join("\n");
 
               if (incident) {
@@ -125,7 +112,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: incident.number,
-                body: `✅ Recuperação confirmada automaticamente em ${checkedAt}. Identidade, origem, /healthz e /readyz foram validados. Evidência: ${runUrl}`,
+                body: `✅ Recuperação confirmada automaticamente em ${checkedAt}. Identidade, origem, /healthz e /readyz foram validados. Workflow: ${runUrl}`,
               });
               await github.rest.issues.update({
                 owner,
@@ -135,6 +122,10 @@ jobs:
                 state_reason: "completed",
               });
             }
+
+      - name: Limpar diagnóstico local
+        if: always()
+        run: rm -rf artifacts/uptime
 
       - name: Falhar o workflow quando o monitor não concluir com sucesso
         if: steps.check.outcome != 'success'
