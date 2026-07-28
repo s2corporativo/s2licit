@@ -40,7 +40,7 @@ const cemigConfig: PortalConfig = {
     botaoEnviar:
       'button[id*="enviar"], button[id*="submeter"], input[value*="Enviar"]',
     confirmacaoEnvio:
-      'button[id*="confirmar"], input[value="Confirmar"], button:has-text("Confirmar")',
+      'button[id*="confirmar"], input[value="Confirmar"], button[id*="confirmarEnvio"]',
   },
 };
 
@@ -90,11 +90,6 @@ const copasaConfig: PortalConfig = {
   estrategia: "spa",
 };
 
-/**
- * Os demais conectores existentes continuam no código legado, mas não são
- * oferecidos pela operação atual do S2. A lista operacional fica fechada nos
- * seis portais definidos pelo usuário.
- */
 export const S2_PORTAL_CONFIGS: Record<S2TargetPortal, PortalConfig> = {
   copasa: copasaConfig,
   cemig: cemigConfig,
@@ -104,7 +99,16 @@ export const S2_PORTAL_CONFIGS: Record<S2TargetPortal, PortalConfig> = {
   fiemg: fiemgConfig,
 };
 
-Object.assign(PORTAL_CONFIGS as unknown as Record<string, PortalConfig>, S2_PORTAL_CONFIGS);
+const mutablePortalConfigs = PORTAL_CONFIGS as unknown as Record<string, PortalConfig>;
+Object.assign(mutablePortalConfigs, S2_PORTAL_CONFIGS);
+
+// Mantém o código legado disponível no histórico do repositório, porém o
+// registro carregado em runtime fica deliberadamente restrito aos seis portais.
+for (const portal of Object.keys(mutablePortalConfigs)) {
+  if (!(S2_TARGET_PORTALS as readonly string[]).includes(portal)) {
+    delete mutablePortalConfigs[portal];
+  }
+}
 
 export { S2_TARGET_PORTALS };
 export type { S2TargetPortal };
