@@ -5,6 +5,15 @@ import { MailCheck, RefreshCw, AlertCircle, CheckCircle2, XCircle, Loader2, Kanb
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
+const PORTAL_SOURCES = [
+  "copasa",
+  "cemig",
+  "fundep",
+  "funarbe",
+  "comprasmg",
+  "fiemg",
+] as const;
+
 const STATUS_LABELS: Record<string, { label: string; className: string }> = {
   nova: { label: "Nova", className: "bg-blue-100 text-blue-800" },
   processando: { label: "Processando", className: "bg-amber-100 text-amber-800" },
@@ -45,7 +54,7 @@ export default function CotacoesRecebidas() {
   const portalSyncMutation = trpc.portalOpportunitySync.sync.useMutation({
     onSuccess: (res) => {
       toast.success(
-        `Fundep/Funarbe: ${res.imported} nova(s), ${res.skipped} já existente(s), ${res.matchedItems} item(ns) encontrados na Tambasa.`,
+        `Radar S2: ${res.imported} nova(s), ${res.skipped} já existente(s), ${res.matchedItems} item(ns) encontrados na Tambasa.`,
       );
       if (res.unmatchedItems > 0) {
         toast.warning(`${res.unmatchedItems} item(ns) ficaram sem correspondência na Tambasa.`);
@@ -65,11 +74,13 @@ export default function CotacoesRecebidas() {
         <div className="flex items-center gap-3">
           <MailCheck className="w-7 h-7 text-blue-600" />
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Cotações Recebidas</h1>
-            <p className="text-sm text-gray-500">E-mails e oportunidades Fundep/Funarbe cruzados com o catálogo Tambasa</p>
+            <h1 className="text-2xl font-bold text-gray-900">Radar e Cotações Recebidas</h1>
+            <p className="text-sm text-gray-500">
+              COPASA, CEMIG, Fundep, Funarbe, Compras MG e FIEMG/SESI/SENAI cruzados com a Tambasa
+            </p>
             {portalStatusQuery.data && (
               <p className="text-[11px] text-gray-400 mt-0.5">
-                Busca automática: 7h, 12h e 17h · envio somente após aprovação
+                Busca automática: 7h, 12h e 17h · login e envio somente com aprovação humana
               </p>
             )}
           </div>
@@ -77,12 +88,12 @@ export default function CotacoesRecebidas() {
         {isAdmin && (
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => portalSyncMutation.mutate({ sources: ["fundep", "funarbe"] })}
+              onClick={() => portalSyncMutation.mutate({ sources: [...PORTAL_SOURCES] })}
               disabled={portalSyncMutation.isPending}
               className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
             >
               {portalSyncMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe2 className="w-4 h-4" />}
-              Buscar Fundep/Funarbe
+              Buscar seis portais
             </button>
             <button
               onClick={() => syncMutation.mutate({ limit: 25 })}
@@ -119,13 +130,12 @@ export default function CotacoesRecebidas() {
             os pedidos de cotação que chegam no e-mail da empresa, mas isso exige uma configuração
             única no servidor. Peça ao responsável técnico para definir as variáveis{" "}
             <code>IMAP_HOST</code>, <code>IMAP_USER</code> e <code>IMAP_PASSWORD</code> no ambiente
-            (porta e TLS opcionais). A busca pública da Fundep e da Funarbe continua disponível.
+            (porta e TLS opcionais). O radar público dos seis portais continua disponível.
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Lista */}
         <div className="border border-gray-200">
           <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-bold uppercase tracking-wider text-gray-500">
             Cotações {listQuery.data ? `(${listQuery.data.length})` : ""}
@@ -162,7 +172,6 @@ export default function CotacoesRecebidas() {
           )}
         </div>
 
-        {/* Detalhe */}
         <div className="border border-gray-200">
           <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs font-bold uppercase tracking-wider text-gray-500">
             Detalhe e cruzamento
