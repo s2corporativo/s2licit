@@ -27,6 +27,10 @@ const portalTypeSchema = z.enum([
   "fiemg",
 ]);
 
+function isTargetPortal(value: string): value is S2TargetPortal {
+  return (S2_TARGET_PORTALS as readonly string[]).includes(value);
+}
+
 function asLegacyPortalType(portal: S2TargetPortal): PortalType {
   // O motor legado aceita strings em runtime; a extensão registra CEMIG/FIEMG
   // no mesmo mapa de configurações antes da execução.
@@ -80,10 +84,18 @@ export const propostaAgentRouter = router({
       let portalType = input.portalType as S2TargetPortal;
       if (input.credencialId) {
         const { getPortalCredentialDecrypted } = await import("./portalCredentials");
-        const v = await getPortalCredentialDecrypted(input.credencialId);
-        if (!v) throw new Error("Credencial do portal não encontrada no cofre.");
-        cred = { email: v.usuario, password: v.senha, cnpj: v.cnpj, loginUrl: v.loginUrl };
-        portalType = v.portal;
+        const saved = await getPortalCredentialDecrypted(input.credencialId);
+        if (!saved) throw new Error("Credencial do portal não encontrada no cofre.");
+        if (!isTargetPortal(saved.portal)) {
+          throw new Error("A credencial selecionada pertence a um portal fora do escopo atual do S2.");
+        }
+        cred = {
+          email: saved.usuario,
+          password: saved.senha,
+          cnpj: saved.cnpj,
+          loginUrl: saved.loginUrl,
+        };
+        portalType = saved.portal;
       }
       if (!cred) throw new Error("Informe uma credencial (inline) ou um credencialId do cofre.");
 
