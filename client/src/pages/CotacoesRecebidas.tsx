@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { usePermission } from "@/components/RequireAuth";
-import { MailCheck, RefreshCw, AlertCircle, CheckCircle2, XCircle, Loader2, KanbanSquare } from "lucide-react";
+import { MailCheck, RefreshCw, AlertCircle, CheckCircle2, XCircle, Loader2, KanbanSquare, Globe2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
@@ -21,6 +21,7 @@ export default function CotacoesRecebidas() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const statusQuery = trpc.emailQuotations.status.useQuery();
+  const portalStatusQuery = trpc.portalOpportunitySync.status.useQuery();
   const listQuery = trpc.emailQuotations.list.useQuery({});
   const prazosQuery = trpc.emailQuotations.prazosProximos.useQuery({ diasAlerta: 3 });
   const detailQuery = trpc.emailQuotations.get.useQuery(
@@ -41,27 +42,57 @@ export default function CotacoesRecebidas() {
     onError: (e) => toast.error(e.message),
   });
 
+  const portalSyncMutation = trpc.portalOpportunitySync.sync.useMutation({
+    onSuccess: (res) => {
+      toast.success(
+        `Fundep/Funarbe: ${res.imported} nova(s), ${res.skipped} já existente(s), ${res.matchedItems} item(ns) encontrados na Tambasa.`,
+      );
+      if (res.unmatchedItems > 0) {
+        toast.warning(`${res.unmatchedItems} item(ns) ficaram sem correspondência na Tambasa.`);
+      }
+      if (res.errors.length > 0) toast.warning(`${res.errors.length} aviso(s) na captura dos portais.`);
+      utils.emailQuotations.list.invalidate();
+      utils.emailQuotations.prazosProximos.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const imapConfigured = statusQuery.data?.imapConfigured;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div className="flex items-center gap-3">
           <MailCheck className="w-7 h-7 text-blue-600" />
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Cotações Recebidas</h1>
-            <p className="text-sm text-gray-500">Pedidos de cotação recebidos por e-mail e cruzados com o catálogo</p>
+            <p className="text-sm text-gray-500">E-mails e oportunidades Fundep/Funarbe cruzados com o catálogo Tambasa</p>
+            {portalStatusQuery.data && (
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Busca automática: 7h, 12h e 17h · envio somente após aprovação
+              </p>
+            )}
           </div>
         </div>
         {isAdmin && (
-          <button
-            onClick={() => syncMutation.mutate({ limit: 25 })}
-            disabled={syncMutation.isPending}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
-          >
-            {syncMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            Sincronizar caixa de entrada
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => portalSyncMutation.mutate({ sources: ["fundep", "funarbe"] })}
+              disabled={portalSyncMutation.isPending}
+              className="flex items-center gap-2 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
+            >
+              {portalSyncMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe2 className="w-4 h-4" />}
+              Buscar Fundep/Funarbe
+            </button>
+            <button
+              onClick={() => syncMutation.mutate({ limit: 25 })}
+              disabled={syncMutation.isPending}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
+            >
+              {syncMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Sincronizar e-mail
+            </button>
+          </div>
         )}
       </div>
 
@@ -88,8 +119,7 @@ export default function CotacoesRecebidas() {
             os pedidos de cotação que chegam no e-mail da empresa, mas isso exige uma configuração
             única no servidor. Peça ao responsável técnico para definir as variáveis{" "}
             <code>IMAP_HOST</code>, <code>IMAP_USER</code> e <code>IMAP_PASSWORD</code> no ambiente
-            (porta e TLS opcionais). Enquanto isso, você pode importar cotações manualmente pela
-            tela Importar edital.
+            (porta e TLS opcionais). A busca pública da Fundep e da Funarbe continua disponível.
           </div>
         </div>
       )}
@@ -127,7 +157,7 @@ export default function CotacoesRecebidas() {
             </ul>
           ) : (
             <div className="p-8 text-center text-sm text-gray-400">
-              Nenhuma cotação recebida ainda.{isAdmin ? " Clique em “Sincronizar”." : ""}
+              Nenhuma cotação recebida ainda.{isAdmin ? " Use uma das opções de sincronização acima." : ""}
             </div>
           )}
         </div>
@@ -350,7 +380,7 @@ function QuotationDetail({
 
       {items.length === 0 && (
         <div className="p-6 text-center text-sm text-gray-400">
-          Nenhum item extraído automaticamente. O corpo do e-mail está preservado para conferência manual.
+          Nenhum item extraído automaticamente. O conteúdo original está preservado para conferência manual.
         </div>
       )}
     </div>
