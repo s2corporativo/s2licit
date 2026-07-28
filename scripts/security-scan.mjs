@@ -13,7 +13,7 @@ const ALLOWED_ENV_FILES = new Set([
   ".env.production.example",
   ".env.vps.example",
 ]);
-const SAFE_CREDENTIAL_CONTEXT = /(?:^|\/)(?:\.github\/workflows|tests?|__tests__|fixtures|docs)(?:\/|$)|(?:^|\/)\.env[^/]*\.example$/i;
+const SAFE_CREDENTIAL_CONTEXT = /^(?:README\.md|setup\.sh|docker-compose\.yml)$|(?:^|\/)(?:\.github\/workflows|tests?|__tests__|fixtures|docs)(?:\/|$)|(?:^|\/)\.env[^/]*\.example$/i;
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], {
   encoding: "utf8",
