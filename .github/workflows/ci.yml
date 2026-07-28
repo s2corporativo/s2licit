@@ -13,10 +13,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: [self-hosted, linux, x64, s2licit-vps]
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,74 +31,41 @@ jobs:
         with:
           node-version: 22
 
+      - name: Habilitar pnpm
+        run: corepack enable
+
       - name: Bloquear secrets e arquivos sensíveis
         run: node scripts/security-scan.mjs
 
-      - name: Gerar auditoria estrutural
-        run: node scripts/repository-audit.mjs > repository-audit.json
-
-      - name: Publicar auditoria estrutural
-        uses: actions/upload-artifact@v4
-        with:
-          name: repository-audit
-          path: repository-audit.json
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Habilitar pnpm
-        run: corepack enable
+      - name: Gerar auditoria estrutural no log
+        run: node scripts/repository-audit.mjs | tee repository-audit.json
 
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
 
-      - name: Verificação de tipos (tsc)
-        id: typecheck
-        continue-on-error: true
-        run: pnpm exec tsc --noEmit --pretty false > typecheck.log 2>&1
-
-      - name: Publicar diagnóstico do TypeScript
-        if: steps.typecheck.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-errors
-          path: typecheck.log
-          retention-days: 3
-
-      - name: Interromper em erro de tipos
-        if: steps.typecheck.outcome == 'failure'
+      - name: Verificação de tipos
         run: |
-          cat typecheck.log
-          exit 1
+          set -o pipefail
+          pnpm exec tsc --noEmit --pretty false 2>&1 | tee typecheck.log
 
       - name: Lint
         run: pnpm lint
 
-      - name: Testes (vitest)
-        id: tests
-        continue-on-error: true
-        run: pnpm test -- --reporter=verbose > tests.log 2>&1
-
-      - name: Publicar diagnóstico dos testes
-        if: steps.tests.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-errors
-          path: tests.log
-          retention-days: 3
-
-      - name: Interromper em falha de testes
-        if: steps.tests.outcome == 'failure'
+      - name: Testes
         run: |
-          tail -n 250 tests.log
-          exit 1
+          set -o pipefail
+          pnpm test -- --reporter=verbose 2>&1 | tee tests.log
 
       - name: Build de produção
         run: pnpm build
 
+      - name: Limpar relatórios locais
+        if: always()
+        run: rm -f repository-audit.json typecheck.log tests.log
+
   mysql-migrations:
-    # Exercita as migrações contra um MySQL real e valida idempotência.
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: [self-hosted, linux, x64, s2licit-vps]
+    timeout-minutes: 25
     services:
       mysql:
         image: mysql:8.0
@@ -102,14 +73,14 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: s2licit_ci
         ports:
-          - 3306:3306
+          - 33060:3306
         options: >-
           --health-cmd="mysqladmin ping -h localhost -uroot -proot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
     env:
-      DATABASE_URL: mysql://root:root@127.0.0.1:3306/s2licit_ci
+      DATABASE_URL: mysql://root:root@127.0.0.1:33060/s2licit_ci
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,50 +97,45 @@ jobs:
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
 
-      - name: Aguardar MySQL
+      - name: Aguardar MySQL de CI
         run: |
           for i in $(seq 1 30); do
-            if mysqladmin ping -h 127.0.0.1 -uroot -proot --silent 2>/dev/null; then
-              echo "MySQL pronto"; exit 0
+            if mysqladmin ping -h 127.0.0.1 -P 33060 -uroot -proot --silent 2>/dev/null; then
+              echo "MySQL de CI pronto"
+              exit 0
             fi
             sleep 2
           done
-          echo "MySQL não respondeu a tempo" >&2; exit 1
-
-      - name: Aplicar migrações de produção do zero
-        id: migrations
-        continue-on-error: true
-        run: node scripts/migrate-production.mjs > migration.log 2>&1
-
-      - name: Publicar diagnóstico das migrações
-        if: steps.migrations.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: migration-errors
-          path: migration.log
-          retention-days: 3
-
-      - name: Interromper em falha de migração
-        if: steps.migrations.outcome == 'failure'
-        run: |
-          tail -n 300 migration.log
+          echo "MySQL de CI não respondeu a tempo" >&2
           exit 1
 
-      - name: Reaplicar migrations (idempotência)
+      - name: Aplicar migrações de produção do zero
+        run: |
+          set -o pipefail
+          node scripts/migrate-production.mjs 2>&1 | tee migration.log
+
+      - name: Reaplicar migrations para validar idempotência
         run: node scripts/migrate-production.mjs
 
       - name: Testes de integração contra MySQL real
         run: pnpm exec vitest run server/**/*.integration-db.test.ts --passWithNoTests
 
+      - name: Limpar relatório local
+        if: always()
+        run: rm -f migration.log
+
   docker-image:
-    # Só consome runner após código, testes e migrations serem aprovados.
     needs: [build-and-test, mysql-migrations]
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: [self-hosted, linux, x64, s2licit-vps]
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Build da imagem Docker
-        run: docker build -t s2licit-ci-check .
+        run: docker build -t "s2licit-ci-check:${{ github.sha }}" .
+
+      - name: Remover imagem temporária
+        if: always()
+        run: docker image rm -f "s2licit-ci-check:${{ github.sha }}" >/dev/null 2>&1 || true
