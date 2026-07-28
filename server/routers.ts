@@ -46,6 +46,7 @@ import { legalAnalysisRouter } from "./routers/legalAnalysis";
 import { integrationsRouter } from "./routers/integrations";
 import { precificacaoRouter } from "./routers/precificacao";
 import { portalCredentialsRouter } from "./routers/portalCredentials";
+import { portalOpportunitySyncRouter } from "./routers/portalOpportunitySync";
 import { agendaRouter } from "./routers/agenda";
 import { desempenhoRouter } from "./routers/desempenho";
 import { funilRouter } from "./routers/funil";
@@ -98,6 +99,7 @@ export const appRouter = router({
   integrations: integrationsRouter,
   precificacao: precificacaoRouter,
   portalCredentials: portalCredentialsRouter,
+  portalOpportunitySync: portalOpportunitySyncRouter,
   agenda: agendaRouter,
   desempenho: desempenhoRouter,
   funil: funilRouter,
