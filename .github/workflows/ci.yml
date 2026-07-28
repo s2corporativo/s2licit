@@ -2,12 +2,15 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
-    branches: ["**"]
+    branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -16,11 +19,27 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Bloquear secrets e arquivos sensíveis
+        run: node scripts/security-scan.mjs
+
+      - name: Gerar auditoria estrutural
+        run: node scripts/repository-audit.mjs > repository-audit.json
+
+      - name: Publicar auditoria estrutural
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-audit
+          path: repository-audit.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Habilitar pnpm
         run: corepack enable
@@ -73,9 +92,7 @@ jobs:
         run: pnpm build
 
   mysql-migrations:
-    # Exercita as migrações contra um MySQL REAL (efêmero): sem isto, um erro
-    # de migração só aparecia no deploy da VPS. Aplica toda a cadeia do zero
-    # e valida que o schema sobe limpo.
+    # Exercita as migrações contra um MySQL real e valida idempotência.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -95,6 +112,8 @@ jobs:
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/s2licit_ci
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -136,19 +155,21 @@ jobs:
           tail -n 300 migration.log
           exit 1
 
-      - name: Reaplicar (idempotência) — segunda passada não pode falhar
+      - name: Reaplicar migrations (idempotência)
         run: node scripts/migrate-production.mjs
 
       - name: Testes de integração contra MySQL real
         run: pnpm exec vitest run server/**/*.integration-db.test.ts --passWithNoTests
 
   docker-image:
-    # Garante que a imagem usada no deploy sempre builda — o deploy na VPS
-    # reconstrói esta mesma imagem e não pode descobrir o erro em produção.
+    # Só consome runner após código, testes e migrations serem aprovados.
+    needs: [build-and-test, mysql-migrations]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Build da imagem Docker
         run: docker build -t s2licit-ci-check .
