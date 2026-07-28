@@ -1,4 +1,5 @@
 @echo off
+setlocal
 chcp 65001 >nul
 title Sistema S2 - Instalacao
 color 0A
@@ -13,7 +14,7 @@ echo.
 
 REM Verificar se Node.js esta instalado
 node --version >nul 2>&1
-IF %ERRORLEVEL% NEQ 0 (
+IF ERRORLEVEL 1 (
     color 0C
     echo.
     echo  [ERRO] Node.js nao esta instalado!
@@ -49,10 +50,10 @@ echo.
 
 REM Instalar exatamente a versao declarada em package.json
 pnpm --version >nul 2>&1
-IF %ERRORLEVEL% NEQ 0 (
+IF ERRORLEVEL 1 (
     echo  Instalando pnpm %PNPM_VERSION%...
     call npm install -g pnpm@%PNPM_VERSION% --quiet
-    IF %ERRORLEVEL% NEQ 0 (
+    IF ERRORLEVEL 1 (
         color 0C
         echo.
         echo  [ERRO] Nao foi possivel instalar o pnpm %PNPM_VERSION%.
@@ -67,7 +68,7 @@ for /f "delims=" %%V in ('pnpm --version') do set "PNPM_INSTALLED=%%V"
 IF NOT "%PNPM_INSTALLED%"=="%PNPM_VERSION%" (
     echo  Ajustando pnpm para a versao %PNPM_VERSION%...
     call npm install -g pnpm@%PNPM_VERSION% --quiet
-    IF %ERRORLEVEL% NEQ 0 (
+    IF ERRORLEVEL 1 (
         color 0C
         echo.
         echo  [ERRO] Nao foi possivel fixar o pnpm %PNPM_VERSION%.
@@ -84,7 +85,7 @@ echo  Instalando dependencias do sistema pelo lockfile...
 echo  (Aguarde, pode demorar alguns minutos)
 echo.
 call pnpm install --frozen-lockfile --ignore-scripts
-IF %ERRORLEVEL% NEQ 0 (
+IF ERRORLEVEL 1 (
     color 0C
     echo.
     echo  [ERRO] A instalacao das dependencias falhou.
@@ -116,7 +117,7 @@ IF NOT EXIST ".env" (
 echo.
 echo  Aplicando migracoes do banco de dados...
 call pnpm db:push
-IF %ERRORLEVEL% NEQ 0 (
+IF ERRORLEVEL 1 (
     color 0C
     echo.
     echo  [ERRO] Nao foi possivel aplicar as migracoes.
@@ -141,3 +142,4 @@ echo.
 echo  Agora clique duas vezes em: INICIAR.bat
 echo.
 pause
+endlocal
