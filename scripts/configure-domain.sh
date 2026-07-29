@@ -6,8 +6,6 @@ set -Eeuo pipefail
 DOMAIN="${1:-s2.s2corporativo.com.br}"
 EXPECTED_IPV4="${2:-13.140.167.153}"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_LOCAL_PORT="3000"
-APP_PUBLIC_PORT="8080"
 
 log() { printf '[dominio] %s\n' "$*"; }
 die() { printf '[dominio] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -21,6 +19,7 @@ cd "$PROJECT_DIR"
 [[ -f docker-compose.yml ]] || die "docker-compose.yml não encontrado."
 command -v docker >/dev/null || die "Docker não está instalado."
 docker compose version >/dev/null || die "Docker Compose não está disponível."
+command -v ss >/dev/null || die "O utilitário ss não está disponível."
 
 log "Conferindo se o DNS de $DOMAIN já aponta para $EXPECTED_IPV4..."
 RESOLVED_IPV4="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u || true)"
@@ -31,6 +30,11 @@ if ! grep -Fxq "$EXPECTED_IPV4" <<<"$RESOLVED_IPV4"; then
   exit 2
 fi
 
+read_env() {
+  local key="$1"
+  grep -E "^${key}=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"' | xargs || true
+}
+
 upsert_env() {
   local key="$1" value="$2"
   if grep -qE "^${key}=" .env; then
@@ -40,12 +44,56 @@ upsert_env() {
   fi
 }
 
+port_in_use() {
+  ss -H -ltn "sport = :$1" 2>/dev/null | grep -q .
+}
+
+port_owned_by_current_s2() {
+  docker port sistema-s2-app 3000/tcp 2>/dev/null | grep -Eq "(^|:|\])$1$"
+}
+
+port_available_for_s2() {
+  local port="$1"
+  ! port_in_use "$port" || port_owned_by_current_s2 "$port"
+}
+
+choose_port() {
+  local preferred="$1"
+  shift
+  local port
+  for port in "$preferred" "$@"; do
+    [[ "$port" =~ ^[0-9]+$ ]] || continue
+    if port_available_for_s2 "$port"; then
+      printf '%s\n' "$port"
+      return 0
+    fi
+  done
+  return 1
+}
+
+REQUESTED_LOCAL_PORT="${APP_LOCAL_PORT:-$(read_env APP_LOCAL_PORT)}"
+REQUESTED_PUBLIC_PORT="${APP_HTTP_PORT:-$(read_env APP_HTTP_PORT)}"
+REQUESTED_LOCAL_PORT="${REQUESTED_LOCAL_PORT:-3000}"
+REQUESTED_PUBLIC_PORT="${REQUESTED_PUBLIC_PORT:-8080}"
+
+APP_LOCAL_PORT="$(choose_port "$REQUESTED_LOCAL_PORT" 3000 3001 3002 3003 3004 3005 3006 3007 3008 3009 3010)" \
+  || die "Nenhuma porta local livre encontrada entre 3000 e 3010."
+APP_PUBLIC_PORT="$(choose_port "$REQUESTED_PUBLIC_PORT" 8080 8081 8082 8083 8084 8085 8086 8087 8088 8089 8090)" \
+  || die "Nenhuma porta pública de diagnóstico livre encontrada entre 8080 e 8090."
+
+if [[ "$APP_LOCAL_PORT" != "$REQUESTED_LOCAL_PORT" ]]; then
+  log "A porta local $REQUESTED_LOCAL_PORT já está ocupada; usando 127.0.0.1:${APP_LOCAL_PORT}."
+fi
+if [[ "$APP_PUBLIC_PORT" != "$REQUESTED_PUBLIC_PORT" ]]; then
+  log "A porta pública $REQUESTED_PUBLIC_PORT já está ocupada; usando ${APP_PUBLIC_PORT}."
+fi
+
 ENV_BACKUP="/root/s2licit-env-antes-dominio-$(date +%Y%m%d-%H%M%S)"
 cp -a .env "$ENV_BACKUP"
 log "Backup do .env criado em $ENV_BACKUP"
 
-# O Nginx assume 80/443. O app permanece acessível localmente em 3000 e,
-# opcionalmente, diretamente em 8080 para diagnóstico.
+# O Nginx assume 80/443. O app usa uma porta local livre e, opcionalmente,
+# outra porta pública apenas para diagnóstico direto.
 upsert_env DOMAIN "$DOMAIN"
 upsert_env FORCE_SECURE_COOKIES true
 upsert_env APP_LOCAL_PORT "$APP_LOCAL_PORT"
