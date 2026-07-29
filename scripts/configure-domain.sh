@@ -49,6 +49,7 @@ port_in_use() {
 }
 
 port_owned_by_current_s2() {
+  [[ "$(docker inspect -f '{{.State.Running}}' sistema-s2-app 2>/dev/null || true)" == "true" ]] || return 1
   docker port sistema-s2-app 3000/tcp 2>/dev/null | grep -Eq "(^|:|\])$1$"
 }
 
