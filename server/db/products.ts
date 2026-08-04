@@ -269,11 +269,3 @@ export async function bulkInsertProducts(data: InsertProduct[]): Promise<{ inser
 }
 
 
-export async function deactivateProductsByBatch(supplierId: number, batchId: number) {
-  const db = await getDb();
-  if (!db) return;
-  await db
-    .update(products)
-    .set({ isActive: "no" })
-    .where(and(eq(products.supplierId, supplierId), sql`${products.importBatchId} != ${batchId}`));
-}

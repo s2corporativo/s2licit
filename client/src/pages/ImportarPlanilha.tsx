@@ -303,7 +303,6 @@ export default function ImportarPlanilha() {
   const { data: suppliers } = trpc.suppliers.list.useQuery({ activeOnly: false });
   const { data: categoriesHierarchy } = trpc.categories.listHierarchy.useQuery();
   const createSupplier = trpc.suppliers.create.useMutation();
-  const processUpload = trpc.imports.processUpload.useMutation();
   const processUploadV2 = trpc.imports.processUploadV2.useMutation();
   const suggestCategoryMutation = trpc.categories.suggest.useMutation();
   const previewFuzzyMutation = trpc.masterProducts.previewImportFuzzy.useMutation();
