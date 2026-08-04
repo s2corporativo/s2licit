@@ -114,14 +114,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const sidebar = (
     <aside className="flex h-full w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white text-slate-900">
       <div className="relative border-b border-slate-200 px-5 py-5">
-        {/* Substituir este bloco pela logomarca original assim que o arquivo for anexado ao repositório. */}
-        <div className="flex items-center gap-3" aria-label="S2 Licit">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-950 text-sm font-black text-white">S2</div>
-          <div>
-            <p className="m-0 text-[15px] font-black tracking-tight text-blue-950">S2 LICIT</p>
-            <p className="m-0 text-[10px] font-medium text-slate-500">Licitações e propostas</p>
-          </div>
-        </div>
+        <Link
+          href="/"
+          className="block rounded-xl bg-blue-950 p-2.5 no-underline"
+          aria-label="Ir para o início do S2 Licit"
+        >
+          <img
+            src="/s2-corporativo-logo.png"
+            alt="S2 Corporativo — Soluções, Estratégia, Resultados"
+            className="mx-auto h-[82px] w-full object-contain"
+          />
+        </Link>
         <button
           className="absolute right-3 top-3 rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:hidden"
           onClick={() => setSidebarOpen(false)}
