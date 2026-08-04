@@ -1,48 +1,17 @@
+import { levenshteinSimilarity } from "../matching/productMatcher";
+
 /**
- * Calcula similaridade entre duas strings (0-1)
- * Usa Levenshtein distance normalizada
+ * Calcula similaridade entre duas strings (0-1), case-insensitive.
+ * Usa Levenshtein distance normalizada — delega para
+ * matching/productMatcher.ts#levenshteinSimilarity, antes uma cópia
+ * paralela do mesmo algoritmo (achado do inventário: "4 implementações
+ * divergentes de fuzzy matching"). Mantido só o pré-processamento
+ * (lowercase/trim) e o guard de string vazia que este chamador precisa,
+ * verificado sem mudança de comportamento pelos testes existentes.
  */
 export function calculateStringSimilarity(str1: string, str2: string): number {
   if (!str1 || !str2) return 0;
-
-  const s1 = str1.toLowerCase().trim();
-  const s2 = str2.toLowerCase().trim();
-
-  if (s1 === s2) return 1;
-
-  const longer = s1.length > s2.length ? s1 : s2;
-  const shorter = s1.length > s2.length ? s2 : s1;
-
-  if (longer.length === 0) return 1;
-
-  const editDistance = getLevenshteinDistance(longer, shorter);
-  return (longer.length - editDistance) / longer.length;
-}
-
-/**
- * Calcula Levenshtein distance entre duas strings
- */
-function getLevenshteinDistance(s1: string, s2: string): number {
-  const costs: number[] = [];
-
-  for (let i = 0; i <= s1.length; i++) {
-    let lastValue = i;
-    for (let j = 0; j <= s2.length; j++) {
-      if (i === 0) {
-        costs[j] = j;
-      } else if (j > 0) {
-        let newValue = costs[j - 1];
-        if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-          newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-        }
-        costs[j - 1] = lastValue;
-        lastValue = newValue;
-      }
-    }
-    if (i > 0) costs[s2.length] = lastValue;
-  }
-
-  return costs[s2.length];
+  return levenshteinSimilarity(str1.toLowerCase().trim(), str2.toLowerCase().trim());
 }
 
 export interface MasterProductMatch {

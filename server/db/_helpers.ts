@@ -2,6 +2,7 @@
  * Helpers puros (sem dependência de banco) usados pela camada de dados.
  * Extraídos de db.ts para reduzir o arquivo e permitir reutilização.
  */
+import { levenshteinSimilarity } from "../matching/productMatcher";
 
 /** Escapa caracteres especiais de LIKE (%, _, \). */
 export function escapeLike(term: string): string {
@@ -55,26 +56,12 @@ export function normalizeName(s: string): string {
     .trim();
 }
 
-/** Distância de Levenshtein entre duas strings. */
-export function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[m][n];
-}
-
-/** Similaridade 0-1 entre dois nomes normalizados. */
-export function similarity(a: string, b: string): number {
-  if (a === b) return 1;
-  const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(a, b) / maxLen;
-}
+/**
+ * Similaridade 0-1 entre dois nomes normalizados (Levenshtein).
+ * Delega para matching/productMatcher.ts#levenshteinSimilarity — este
+ * arquivo tinha sua própria cópia do mesmo algoritmo (mais uma entre as
+ * várias implementações divergentes de fuzzy matching encontradas no
+ * sistema). Fórmula idêntica (1 - distância/tamanho), verificado sem
+ * mudança de comportamento para os mesmos argumentos.
+ */
+export const similarity = levenshteinSimilarity;

@@ -3,62 +3,16 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { products } from "../../drizzle/schema";
 import { eq, like, and, inArray } from "drizzle-orm";
+import { jaroWinklerSimilarity as canonicalJaroWinklerSimilarity } from "../matching/productMatcher";
 
 /**
- * Algoritmo de similaridade Jaro-Winkler simplificado
- * Retorna score entre 0 e 1 (1 = idêntico)
+ * Similaridade Jaro-Winkler (0-1, 1 = idêntico), case-insensitive.
+ * Delega para matching/productMatcher.ts#jaroWinklerSimilarity — mesmo
+ * bug de arredondamento (maxDist sem Math.floor) e consolidação já
+ * descritos em routers/duplicates.ts, que tinha a mesma cópia local.
  */
 function jaroWinklerSimilarity(s1: string, s2: string): number {
-  const s1Lower = s1.toLowerCase();
-  const s2Lower = s2.toLowerCase();
-
-  if (s1Lower === s2Lower) return 1;
-  if (!s1Lower || !s2Lower) return 0;
-
-  const len1 = s1Lower.length;
-  const len2 = s2Lower.length;
-  const maxDist = Math.max(len1, len2) / 2 - 1;
-
-  if (maxDist < 0) return 0;
-
-  const s1Matches = new Array(len1).fill(false);
-  const s2Matches = new Array(len2).fill(false);
-
-  let matches = 0;
-  for (let i = 0; i < len1; i++) {
-    const start = Math.max(0, i - maxDist);
-    const end = Math.min(i + maxDist + 1, len2);
-
-    for (let j = start; j < end; j++) {
-      if (s2Matches[j] || s1Lower[i] !== s2Lower[j]) continue;
-      s1Matches[i] = true;
-      s2Matches[j] = true;
-      matches++;
-      break;
-    }
-  }
-
-  if (matches === 0) return 0;
-
-  let transpositions = 0;
-  let k = 0;
-  for (let i = 0; i < len1; i++) {
-    if (!s1Matches[i]) continue;
-    while (!s2Matches[k]) k++;
-    if (s1Lower[i] !== s2Lower[k]) transpositions++;
-    k++;
-  }
-
-  const jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3;
-
-  // Winkler: aumentar score se prefixo comum (até 4 caracteres)
-  let prefix = 0;
-  for (let i = 0; i < Math.min(4, len1, len2); i++) {
-    if (s1Lower[i] === s2Lower[i]) prefix++;
-    else break;
-  }
-
-  return jaro + prefix * 0.1 * (1 - jaro);
+  return canonicalJaroWinklerSimilarity(s1.toLowerCase(), s2.toLowerCase());
 }
 
 /**

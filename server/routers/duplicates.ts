@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { products, duplicateExceptions } from "../../drizzle/schema";
 import { eq, or, and } from "drizzle-orm";
 import { logger } from "../_core/logger";
+import { jaroWinklerSimilarity as canonicalJaroWinklerSimilarity } from "../matching/productMatcher";
 
 function pairKey(id1: number, id2: number): string {
   return id1 < id2 ? `${id1}:${id2}` : `${id2}:${id1}`;
@@ -16,60 +17,17 @@ async function loadExceptionPairs(db: NonNullable<Awaited<ReturnType<typeof getD
 }
 
 /**
- * Algoritmo de similaridade Jaro-Winkler simplificado
- * Retorna score entre 0 e 1 (1 = idêntico)
+ * Similaridade Jaro-Winkler (0-1, 1 = idêntico), case-insensitive.
+ * Delega para matching/productMatcher.ts#jaroWinklerSimilarity — este
+ * arquivo tinha sua própria cópia do algoritmo com um bug real: a janela
+ * de match (`maxDist`) não usava Math.floor, divergindo do algoritmo
+ * padrão para strings de tamanho ímpar (ex.: par com maior comprimento 5
+ * dava janela 1.5 em vez de 1). A versão canônica é a implementação
+ * correta (com Math.floor) já usada e testada em 4 outros pontos do
+ * matching de produtos.
  */
 function jaroWinklerSimilarity(s1: string, s2: string): number {
-  const s1Lower = s1.toLowerCase().trim();
-  const s2Lower = s2.toLowerCase().trim();
-
-  if (s1Lower === s2Lower) return 1;
-  if (!s1Lower || !s2Lower) return 0;
-
-  const len1 = s1Lower.length;
-  const len2 = s2Lower.length;
-  const maxDist = Math.max(len1, len2) / 2 - 1;
-
-  if (maxDist < 0) return 0;
-
-  const s1Matches = new Array(len1).fill(false);
-  const s2Matches = new Array(len2).fill(false);
-
-  let matches = 0;
-  for (let i = 0; i < len1; i++) {
-    const start = Math.max(0, i - maxDist);
-    const end = Math.min(i + maxDist + 1, len2);
-
-    for (let j = start; j < end; j++) {
-      if (s2Matches[j] || s1Lower[i] !== s2Lower[j]) continue;
-      s1Matches[i] = true;
-      s2Matches[j] = true;
-      matches++;
-      break;
-    }
-  }
-
-  if (matches === 0) return 0;
-
-  let transpositions = 0;
-  let k = 0;
-  for (let i = 0; i < len1; i++) {
-    if (!s1Matches[i]) continue;
-    while (!s2Matches[k]) k++;
-    if (s1Lower[i] !== s2Lower[k]) transpositions++;
-    k++;
-  }
-
-  const jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3;
-
-  // Winkler: aumentar score se prefixo comum (até 4 caracteres)
-  let prefix = 0;
-  for (let i = 0; i < Math.min(4, len1, len2); i++) {
-    if (s1Lower[i] === s2Lower[i]) prefix++;
-    else break;
-  }
-
-  return jaro + prefix * 0.1 * (1 - jaro);
+  return canonicalJaroWinklerSimilarity(s1.toLowerCase().trim(), s2.toLowerCase().trim());
 }
 
 export const duplicatesRouter = router({

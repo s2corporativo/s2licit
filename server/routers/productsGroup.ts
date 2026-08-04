@@ -675,19 +675,6 @@ export const productsRouter = router({
         return result;
       }),
 
-    // ─── Enriquecimento em Lote de Fichas Técnicas ──────────────────────────────
-    enrichFichaTecnicaBatch: protectedProcedure
-      .query(async () => {
-        const { runEnrichFichaTecnicaBatch } = await import("../jobs/enrichFichaTecnicaJob");
-        return runEnrichFichaTecnicaBatch();
-      }),
-
-    getEnrichmentProgress: protectedProcedure
-      .query(async () => {
-        const { getEnrichmentProgress } = await import("../jobs/enrichFichaTecnicaJob");
-        return getEnrichmentProgress();
-      }),
-
     // ─── Exportação em Excel ───────────────────────────────────────────────────
     exportToExcel: protectedProcedure
       .input(

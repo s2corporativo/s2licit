@@ -2,6 +2,7 @@
  * Módulo de similaridade de strings para reconhecimento fuzzy de produtos.
  * Implementa Jaro-Winkler distance, normalização e matching inteligente.
  */
+import { jaroSimilarity } from "./matching/productMatcher";
 
 /**
  * Normaliza string para comparação: maiúsculas, sem acentos, sem espaços extras.
@@ -20,47 +21,15 @@ export function normalizeStr(s: string | null | undefined): string {
 /**
  * Calcula a distância de Jaro entre duas strings.
  * Retorna valor entre 0 (completamente diferentes) e 1 (idênticas).
+ *
+ * Delega para matching/productMatcher.ts#jaroSimilarity — mesma fórmula,
+ * antes copiada em paralelo nos dois arquivos (achado do inventário:
+ * "4 implementações divergentes de fuzzy matching"). Consolidado numa só,
+ * verificado sem mudança de comportamento pelos testes existentes de
+ * ambos os módulos.
  */
 export function jaroDistance(s1: string, s2: string): number {
-  if (s1 === s2) return 1;
-  const len1 = s1.length;
-  const len2 = s2.length;
-  if (len1 === 0 || len2 === 0) return 0;
-
-  const matchWindow = Math.floor(Math.max(len1, len2) / 2) - 1;
-  if (matchWindow < 0) return 0;
-
-  const s1Matches = new Array(len1).fill(false);
-  const s2Matches = new Array(len2).fill(false);
-
-  let matches = 0;
-  let transpositions = 0;
-
-  for (let i = 0; i < len1; i++) {
-    const start = Math.max(0, i - matchWindow);
-    const end = Math.min(i + matchWindow + 1, len2);
-    for (let j = start; j < end; j++) {
-      if (s2Matches[j] || s1[i] !== s2[j]) continue;
-      s1Matches[i] = true;
-      s2Matches[j] = true;
-      matches++;
-      break;
-    }
-  }
-
-  if (matches === 0) return 0;
-
-  let k = 0;
-  for (let i = 0; i < len1; i++) {
-    if (!s1Matches[i]) continue;
-    while (!s2Matches[k]) k++;
-    if (s1[i] !== s2[k]) transpositions++;
-    k++;
-  }
-
-  return (
-    (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3
-  );
+  return jaroSimilarity(s1, s2);
 }
 
 /**
