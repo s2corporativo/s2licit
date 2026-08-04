@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  Clock,
   Loader2,
   Play,
   RefreshCw,
@@ -65,13 +64,6 @@ function ConfidenceBar({ value }: { value: number }) {
       </span>
     </div>
   );
-}
-
-function formatTime(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}m${s > 0 ? ` ${s}s` : ""}`;
 }
 
 // ─── SuggestionCard ──────────────────────────────────────────────────────────
@@ -217,24 +209,39 @@ function SuggestionCard({
 // ─── ProgressPanel ───────────────────────────────────────────────────────────
 
 function ProgressPanel({ onRefresh }: { onRefresh: () => void }) {
-  const { data: progress, refetch } = trpc.products.getEnrichmentProgress.useQuery(undefined, {
-    // Polling apenas enquanto o enriquecimento estiver em execução
-    refetchInterval: (query) => (query.state.data?.status === "running" ? 3000 : false),
+  // Job persistido (ai_jobs) — mesmo mecanismo já usado em Produtos.tsx para
+  // reclassificação e ficha técnica em massa. Antes esta tela usava um job
+  // em memória próprio (jobs/enrichFichaTecnicaJob.ts) que perdia todo o
+  // progresso se o servidor reiniciasse no meio do lote; consolidado num
+  // único mecanismo, com o mesmo estado sobrevivendo a reinícios do servidor
+  // (só a tela precisa reabrir o acompanhamento, o job em si continua).
+  const [jobId, setJobId] = useState<number | null>(null);
+  const startJob = trpc.enrichment.enrichFichaTecnicaStartJob.useMutation({
+    onSuccess: (res) => setJobId(res.jobId),
+    onError: (e) => toast.error(e.message),
   });
-  const startBatch = trpc.products.enrichFichaTecnicaBatch.useQuery(undefined, { enabled: false });
+  const jobQuery = trpc.enrichment.aiJobStatus.useQuery(
+    { jobId: jobId ?? 0 },
+    { enabled: jobId != null, refetchInterval: 3000 }
+  );
 
-  const handleStart = async () => {
+  const job = jobId != null ? jobQuery.data : undefined;
+  const isRunning = job?.status === "executando";
+  const isCompleted = job?.status === "concluido";
+  const isError = job?.status === "erro";
+  const isIdle = !job;
+
+  useEffect(() => {
+    if (job && job.status !== "executando") onRefresh();
+  }, [job?.status]);
+
+  const handleStart = () => {
     toast.info("Iniciando enriquecimento automático em background...");
-    await startBatch.refetch();
-    setTimeout(() => { refetch(); onRefresh(); }, 2000);
+    startJob.mutate({ scope: "withoutFicha", overwrite: false });
   };
 
-  if (!progress) return null;
-
-  const isRunning = progress.status === "running";
-  const isCompleted = progress.status === "completed";
-  const isError = progress.status === "error";
-  const isIdle = progress.status === "idle";
+  const progresso = job?.progresso ?? { processed: 0, total: 0, updated: 0, skipped: 0, errors: 0 };
+  const percentComplete = progresso.total > 0 ? Math.round((progresso.processed / progresso.total) * 100) : 0;
 
   return (
     <div className={`rounded-xl border p-4 ${isRunning ? "border-blue-300 bg-blue-50" : isCompleted ? "border-emerald-300 bg-emerald-50" : isError ? "border-red-300 bg-red-50" : "border-gray-200 bg-gray-50"}`}>
@@ -250,64 +257,56 @@ function ProgressPanel({ onRefresh }: { onRefresh: () => void }) {
         </div>
         <div className="flex items-center gap-2">
           {isRunning && (
-            <button onClick={() => refetch()} className="text-[10px] text-blue-600 hover:text-blue-800 flex items-center gap-1">
+            <button onClick={() => jobQuery.refetch()} className="text-[10px] text-blue-600 hover:text-blue-800 flex items-center gap-1">
               <RefreshCw size={10} /> Atualizar
             </button>
           )}
           {(isIdle || isCompleted || isError) && (
             <button
               onClick={handleStart}
-              disabled={startBatch.isFetching}
+              disabled={startJob.isPending}
               className="flex items-center gap-1.5 bg-blue-600 text-white text-[10px] font-bold px-3 py-1.5 rounded hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
-              {startBatch.isFetching ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />}
+              {startJob.isPending ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />}
               {isCompleted ? "Reprocessar" : "Enriquecer Tudo Automaticamente"}
             </button>
           )}
         </div>
       </div>
 
-      {(isRunning || isCompleted || isError) && progress.totalProducts > 0 && (
+      {(isRunning || isCompleted || isError) && progresso.total > 0 && (
         <>
           {/* Barra de progresso */}
           <div className="w-full h-3 bg-white rounded-full overflow-hidden border border-gray-200 mb-3">
             <div
               className={`h-full rounded-full transition-all duration-500 ${isCompleted ? "bg-emerald-500" : isError ? "bg-red-400" : "bg-blue-500"}`}
-              style={{ width: `${progress.percentComplete}%` }}
+              style={{ width: `${percentComplete}%` }}
             />
           </div>
 
           {/* Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-white rounded-lg p-2.5 border border-gray-200 text-center">
-              <div className="text-lg font-black text-gray-900">{progress.processedProducts}</div>
+              <div className="text-lg font-black text-gray-900">{progresso.processed}</div>
               <div className="text-[10px] text-gray-500 font-medium">Processados</div>
             </div>
             <div className="bg-white rounded-lg p-2.5 border border-emerald-200 text-center">
-              <div className="text-lg font-black text-emerald-700">{progress.successfulProducts}</div>
+              <div className="text-lg font-black text-emerald-700">{progresso.updated}</div>
               <div className="text-[10px] text-emerald-600 font-medium">Sucesso</div>
             </div>
             <div className="bg-white rounded-lg p-2.5 border border-red-200 text-center">
-              <div className="text-lg font-black text-red-600">{progress.failedProducts}</div>
+              <div className="text-lg font-black text-red-600">{progresso.errors}</div>
               <div className="text-[10px] text-red-500 font-medium">Erros</div>
             </div>
             <div className="bg-white rounded-lg p-2.5 border border-gray-200 text-center">
-              <div className="text-lg font-black text-gray-700">{progress.percentComplete}%</div>
+              <div className="text-lg font-black text-gray-700">{percentComplete}%</div>
               <div className="text-[10px] text-gray-500 font-medium">Completo</div>
             </div>
           </div>
 
-          {isRunning && progress.estimatedTimeRemaining > 0 && (
-            <div className="flex items-center gap-1.5 mt-2 text-[10px] text-blue-600">
-              <Clock size={10} />
-              Tempo restante estimado: <strong>{formatTime(progress.estimatedTimeRemaining)}</strong>
-              {" · "}Lote {progress.currentBatch}/{progress.totalBatches}
-            </div>
-          )}
-
-          {isError && progress.lastError && (
+          {isError && job?.errorMessages?.[0] && (
             <div className="mt-2 text-[10px] text-red-600 bg-red-50 border border-red-200 rounded p-2">
-              <strong>Erro:</strong> {progress.lastError}
+              <strong>Erro:</strong> {job.errorMessages[0]}
             </div>
           )}
         </>
@@ -315,8 +314,9 @@ function ProgressPanel({ onRefresh }: { onRefresh: () => void }) {
 
       {isIdle && (
         <p className="text-[11px] text-gray-500">
-          Processa automaticamente <strong>todos os produtos sem ficha técnica</strong> em lotes de 50, usando IA para extrair
-          princípio ativo, concentração, forma farmacêutica, classe terapêutica, espécie-alvo e indicações.
+          Processa automaticamente <strong>todos os produtos sem ficha técnica</strong> em lotes de 150, usando IA para extrair
+          princípio ativo, concentração, forma farmacêutica, classe terapêutica, espécie-alvo e indicações. Roda em segundo
+          plano no servidor — continua mesmo se você fechar ou atualizar a página.
         </p>
       )}
     </div>
