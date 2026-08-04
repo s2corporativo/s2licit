@@ -1,7 +1,8 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { desc, eq, isNull } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, getProposalWithItems } from "../db";
 import {
   deliveries,
   payables,
@@ -108,6 +109,71 @@ export const posVendaRouter = router({
       if (!db) throw new Error("Banco indisponível");
       await db.update(purchaseOrders).set({ status: input.status }).where(eq(purchaseOrders.id, input.id));
       return { ok: true };
+    }),
+
+  /**
+   * Cria o pedido de compra a partir da proposta vencedora — fecha o ciclo
+   * proposta → pedido em 1 clique, herdando itens/fornecedor/valor em vez
+   * de o operador digitar tudo de novo (achado do inventário: purchase_orders
+   * não tinha nenhum vínculo com a proposta que o originou).
+   */
+  criarPedidoDeProposta: protectedProcedure
+    .input(z.object({ proposalId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Banco indisponível");
+
+      const proposal = await getProposalWithItems(input.proposalId);
+      if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+      if (proposal.items.length === 0) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Proposta sem itens." });
+      }
+
+      const [existing] = await db
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.proposalId, input.proposalId))
+        .limit(1);
+      if (existing) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Já existe um pedido de compra para esta proposta (#${existing.id}).`,
+        });
+      }
+
+      // Custo ao fornecedor (não o preço de venda ao comprador): costPrice
+      // explícito, ou unitPrice (custo do sistema) como fallback.
+      const fornecedoresUnicos = [
+        ...new Set(proposal.items.map((i) => i.supplierName).filter((s): s is string => Boolean(s?.trim()))),
+      ];
+      const fornecedorNome = fornecedoresUnicos.length > 0 ? fornecedoresUnicos.join(" / ") : "A definir";
+      const custoTotal = proposal.items.reduce((sum, i) => {
+        const custo = Number(i.costPrice ?? i.unitPrice ?? 0);
+        const qtd = Number(i.quantity ?? 0);
+        return sum + (Number.isFinite(custo) && Number.isFinite(qtd) ? custo * qtd : 0);
+      }, 0);
+
+      const [res] = await db.insert(purchaseOrders).values({
+        proposalId: input.proposalId,
+        fornecedorNome,
+        descricao: `Compra p/ atender proposta: ${proposal.title}${proposal.orgName ? ` (${proposal.orgName})` : ""}`,
+        valorTotal: String(custoTotal.toFixed(2)),
+        vinculo: proposal.processNumber ?? undefined,
+        observacoes: `Gerado automaticamente a partir da proposta #${proposal.id}.`,
+        criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
+      });
+      const orderId = Number((res as any).insertId);
+
+      await db.insert(purchaseOrderItems).values(
+        proposal.items.map((i) => ({
+          orderId,
+          descricao: i.productName,
+          quantidade: String(i.quantity ?? 1),
+          precoUnit: String(Number(i.costPrice ?? i.unitPrice ?? 0).toFixed(4)),
+        })),
+      );
+
+      return { id: orderId };
     }),
 
   // ── Entregas ───────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatBRL } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { Truck, Loader2, Plus, Trash2, AlertTriangle, Calculator } from "lucide-react";
 import { toast } from "sonner";
@@ -12,8 +13,7 @@ import { toast } from "sonner";
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
 const num = (s: string) => parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
-const moeda = (v: number | null) =>
-  v == null ? "—" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const moeda = formatBRL;
 
 export default function CustoTotal() {
   const utils = trpc.useUtils();

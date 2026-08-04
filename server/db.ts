@@ -25,8 +25,6 @@ export * from "./db/importLogs";
 
 // ─── Dashboard Stats → ./db/dashboard ───
 export * from "./db/dashboard";
-// ─── Quotations → ./db/quotations ───
-export * from "./db/quotations";
 // ─── Bulk Update Products → ./db/bulkUpdateProducts ───
 export * from "./db/bulkUpdateProducts";
 // ─── Company Settings → ./db/companySettings ───
@@ -69,7 +67,5 @@ export * from "./db/matchFeedback";
 export * from "./db/duplicateMerge";
 // ─── Preços por Fornecedor → ./db/supplierPrices ───
 export * from "./db/supplierPrices";
-// ─── Edital Analyzer → ./db/editalAnalyses ───
-export * from "./db/editalAnalyses";
 // ─── Match Logs → ./db/matchLogs ───
 export * from "./db/matchLogs";

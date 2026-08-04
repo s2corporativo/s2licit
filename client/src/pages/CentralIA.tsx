@@ -1,3 +1,4 @@
+import { formatBRL } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { AiKeysForm } from "@/components/AiKeysForm";
 import { usePermission } from "@/components/RequireAuth";
@@ -10,8 +11,7 @@ const PROVIDER_LABELS: Record<string, { nome: string; nota: string }> = {
   forge: { nome: "Forge (legado)", nota: "Endpoint legado da plataforma" },
 };
 
-const formatBrl = (v: number) =>
-  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2 });
+const formatBrl = formatBRL;
 
 export default function CentralIA() {
   const isAdmin = usePermission("admin");

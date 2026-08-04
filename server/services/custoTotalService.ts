@@ -12,6 +12,7 @@
  */
 
 import { calcularEmbalagem, type EmbalagemResult } from "./packagingService";
+import { calcularPrecoDivisor, r2 } from "./precoUnificado";
 
 export interface EntradaCustoTotal {
   precoProdutoUnit: number;      // preço unitário do fornecedor
@@ -44,8 +45,6 @@ export interface ResultadoCustoTotal {
   embalagem?: EmbalagemResult;   // quebra de embalagem quando informada (§8)
   alertas: string[];
 }
-
-const r2 = (v: number) => Math.round(v * 100) / 100;
 
 export function calcularCustoTotal(e: EntradaCustoTotal): ResultadoCustoTotal {
   const alertas: string[] = [];
@@ -82,11 +81,12 @@ export function calcularCustoTotal(e: EntradaCustoTotal): ResultadoCustoTotal {
     (e.impostosPct ?? 0) + (e.taxasPct ?? 0) + (e.custoFinanceiroPct ?? 0);
 
   const precoPara = (margemPct: number): number | null => {
-    const divisor = 1 - (percentuaisSobreVenda + margemPct) / 100;
-    if (divisor <= 0) {
-      return null; // impossível: percentuais + margem >= 100% da venda
-    }
-    return r2(custoUnitarioReal / divisor);
+    const preco = calcularPrecoDivisor({
+      custo: custoUnitarioReal,
+      margemPct,
+      impostosPct: percentuaisSobreVenda,
+    });
+    return preco === null ? null : r2(preco);
   };
 
   const precoMinimoUnit = e.margemMinimaPct != null ? precoPara(e.margemMinimaPct) : precoPara(0);

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatBRL } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { Trophy, TrendingUp, Loader2, Check, X, Ban } from "lucide-react";
 import { toast } from "sonner";
@@ -170,8 +171,8 @@ export default function Desempenho() {
                         {RESULTADO_LABEL[h.resultado]}
                       </span>
                     </td>
-                    <td className="py-2 pr-2 text-right tabular-nums">{h.valorProposto != null ? h.valorProposto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—"}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums">{h.valorVencedor != null ? h.valorVencedor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—"}</td>
+                    <td className="py-2 pr-2 text-right tabular-nums">{formatBRL(h.valorProposto)}</td>
+                    <td className="py-2 pr-2 text-right tabular-nums">{formatBRL(h.valorVencedor)}</td>
                     <td className="py-2 text-gray-500">{h.resultadoEm ? new Date(h.resultadoEm).toLocaleDateString("pt-BR") : "—"}</td>
                   </tr>
                 ))}

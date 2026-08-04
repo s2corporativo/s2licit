@@ -73,32 +73,6 @@ export type Supplier = typeof suppliers.$inferSelect;
 export type InsertSupplier = typeof suppliers.$inferInsert;
 
 // Importações de fornecedores via XML
-export const supplierImports = mysqlTable(
-  "supplier_imports",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    supplierId: int("supplierId")
-      .notNull()
-      .references(() => suppliers.id, { onDelete: "cascade" }),
-    fileName: varchar("fileName", { length: 256 }).notNull(),
-    fileContent: text("fileContent"),
-    productsImported: int("productsImported").default(0),
-    productsMatched: int("productsMatched").default(0),
-    status: mysqlEnum("status", ["pending", "processing", "completed", "failed"]).default("pending"),
-    errorMessage: text("errorMessage"),
-    importedAt: timestamp("importedAt").defaultNow().notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_supplier_imports_supplier").on(table.supplierId),
-    index("idx_supplier_imports_status").on(table.status),
-  ]
-);
-
-export type SupplierImport = typeof supplierImports.$inferSelect;
-export type InsertSupplierImport = typeof supplierImports.$inferInsert;
-
-// Produtos
 export const products = mysqlTable(
   "products",
   {
@@ -258,52 +232,6 @@ export type ImportLog = typeof importLogs.$inferSelect;
 export type InsertImportLog = typeof importLogs.$inferInsert;
 
 // Orçamentos
-export const quotations = mysqlTable("quotations", {
-  id: int("id").autoincrement().primaryKey(),
-  title: varchar("title", { length: 256 }).notNull(),
-  clientName: varchar("clientName", { length: 256 }),
-  clientContact: varchar("clientContact", { length: 256 }),
-  notes: text("notes"),
-  status: mysqlEnum("status", ["draft", "finalized"]).default("draft").notNull(),
-  validUntil: timestamp("validUntil"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type Quotation = typeof quotations.$inferSelect;
-export type InsertQuotation = typeof quotations.$inferInsert;
-
-// Itens do orçamento
-export const quotationItems = mysqlTable(
-  "quotation_items",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    quotationId: int("quotationId")
-      .notNull()
-      .references(() => quotations.id, { onDelete: "cascade" }),
-    productId: int("productId").references(() => products.id, { onDelete: "set null" }),
-    productName: varchar("productName", { length: 512 }).notNull(),
-    supplierName: varchar("supplierName", { length: 256 }),
-    activeIngredient: varchar("activeIngredient", { length: 512 }),
-    manufacturer: varchar("manufacturer", { length: 256 }),
-    concentration: varchar("concentration", { length: 128 }),
-    presentation: varchar("presentation", { length: 256 }),
-    unit: varchar("unit", { length: 64 }),
-    price: decimal("price", { precision: 12, scale: 2 }),
-    priceUnit: varchar("priceUnit", { length: 64 }),
-    quantity: int("quantity").default(1).notNull(),
-    sortOrder: int("sortOrder").default(0),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_qitems_quotation").on(table.quotationId),
-  ]
-);
-
-export type QuotationItem = typeof quotationItems.$inferSelect;
-export type InsertQuotationItem = typeof quotationItems.$inferInsert;
-
-// Configurações da empresa (singleton)
 export const companySettings = mysqlTable("company_settings", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 256 }).notNull().default(""),
@@ -361,7 +289,6 @@ export const proposals = mysqlTable("proposals", {
   deliveryTerms: varchar("deliveryTerms", { length: 256 }),
   notes: text("notes"),
   notesHtml: text("notesHtml"),
-  regrasTributariasId: int("regrasTributariasId"),
   // Frete
   freightValue: decimal("freightValue", { precision: 12, scale: 2 }),
   freightCarrier: varchar("freightCarrier", { length: 256 }),
@@ -383,6 +310,12 @@ export const proposals = mysqlTable("proposals", {
   origem: varchar("origem", { length: 32 }).default("manual"),
   // ID da oportunidade do Radar que originou esta proposta (nullable)
   radarOpportunityId: int("radarOpportunityId"),
+  // Registrados ao marcar status "cancelled" por perda para concorrente
+  // (distinto de cancelamento interno, que deixa os dois campos vazios) —
+  // alimenta o win rate consolidado em routers/desempenho.ts junto com
+  // email_quotations.
+  competitorValue: decimal("competitorValue", { precision: 15, scale: 2 }),
+  lossReason: text("lossReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -544,25 +477,6 @@ export type PriceHistory = typeof priceHistory.$inferSelect;
 export type InsertPriceHistory = typeof priceHistory.$inferInsert;
 
 // ─── Imagens de Produtos ──────────────────────────────────────────────────────
-export const productImages = mysqlTable(
-  "product_images",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    url: text("url").notNull(),
-    fileHash: varchar("fileHash", { length: 64 }),
-    source: mysqlEnum("source", ["import_url", "manual_upload"]).default("manual_upload").notNull(),
-    isPrimary: mysqlEnum("isPrimary", ["yes", "no"]).default("no").notNull(),
-    status: mysqlEnum("status", ["pending", "success", "failed"]).default("success").notNull(),
-    importBatchId: int("importBatchId"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [index("idx_pimg_product").on(t.productId), index("idx_pimg_hash").on(t.fileHash)]
-);
-export type ProductImage = typeof productImages.$inferSelect;
-export type InsertProductImage = typeof productImages.$inferInsert;
-
-// ─── Templates de Declarações Fixas ──────────────────────────────────────────
 export const declarationTemplates = mysqlTable("declaration_templates", {
   id: int("id").autoincrement().primaryKey(),
   title: varchar("title", { length: 256 }).notNull(),
@@ -593,99 +507,6 @@ export type ProposalDeclaration = typeof proposalDeclarations.$inferSelect;
 export type InsertProposalDeclaration = typeof proposalDeclarations.$inferInsert;
 
 // ─── Resultados de Licitações ─────────────────────────────────────────────────
-export const licitacaoResultados = mysqlTable(
-  "licitacao_resultados",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    proposalId: int("proposalId").notNull().references(() => proposals.id, { onDelete: "cascade" }),
-    statusFinal: mysqlEnum("statusFinal", ["ganhou", "perdeu", "desclassificado"]).notNull(),
-    suaColocacao: int("suaColocacao"),
-    vencedorNome: varchar("vencedorNome", { length: 256 }),
-    vencedorTotal: decimal("vencedorTotal", { precision: 14, scale: 2 }),
-    diferencaPercent: decimal("diferencaPercent", { precision: 8, scale: 2 }),
-    encerradaEm: timestamp("encerradaEm"),
-    notes: text("notes"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [index("idx_licit_proposal").on(t.proposalId)]
-);
-export type LicitacaoResultado = typeof licitacaoResultados.$inferSelect;
-export type InsertLicitacaoResultado = typeof licitacaoResultados.$inferInsert;
-
-// ─── Estoque ──────────────────────────────────────────────────────────────────
-export const estoque = mysqlTable(
-  "estoque",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }).unique(),
-    quantidade: decimal("quantidade", { precision: 12, scale: 3 }).default("0").notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [index("idx_estoque_product").on(t.productId)]
-);
-export type Estoque = typeof estoque.$inferSelect;
-
-export const estoqueReservas = mysqlTable(
-  "estoque_reservas",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    proposalId: int("proposalId").notNull().references(() => proposals.id, { onDelete: "cascade" }),
-    productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    quantidade: decimal("quantidade", { precision: 12, scale: 3 }).notNull(),
-    status: mysqlEnum("status", ["reservado", "liberado", "consumido"]).default("reservado").notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [index("idx_ereserva_proposal").on(t.proposalId), index("idx_ereserva_product").on(t.productId)]
-);
-export type EstoqueReserva = typeof estoqueReservas.$inferSelect;
-
-// ─── Regras Tributárias ───────────────────────────────────────────────────────
-export const regrasTributarias = mysqlTable("regras_tributarias", {
-  id: int("id").autoincrement().primaryKey(),
-  tipoCliente: varchar("tipoCliente", { length: 128 }).notNull(),
-  icmsPercent: decimal("icmsPercent", { precision: 6, scale: 2 }).default("0"),
-  stPercent: decimal("stPercent", { precision: 6, scale: 2 }).default("0"),
-  retencoes: int("retencoes").default(0),
-  isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-export type RegraTributaria = typeof regrasTributarias.$inferSelect;
-export type InsertRegraTributaria = typeof regrasTributarias.$inferInsert;
-
-// ─── Contratos e Reajustes ────────────────────────────────────────────────────
-export const contratos = mysqlTable(
-  "contratos",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    proposalId: int("proposalId").references(() => proposals.id, { onDelete: "set null" }),
-    indice: varchar("indice", { length: 64 }).notNull().default("IPCA"),
-    periodicidadeMeses: int("periodicidadeMeses").default(12),
-    dataBase: timestamp("dataBase"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [index("idx_contrato_proposal").on(t.proposalId)]
-);
-export type Contrato = typeof contratos.$inferSelect;
-export type InsertContrato = typeof contratos.$inferInsert;
-
-export const contratoReajustes = mysqlTable(
-  "contrato_reajustes",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    contratoId: int("contratoId").notNull().references(() => contratos.id, { onDelete: "cascade" }),
-    fator: decimal("fator", { precision: 8, scale: 6 }).notNull(),
-    dataBase: timestamp("dataBase").notNull(),
-    aplicadoEm: timestamp("aplicadoEm").defaultNow().notNull(),
-    notes: text("notes"),
-  },
-  (t) => [index("idx_creajuste_contrato").on(t.contratoId)]
-);
-export type ContratoReajuste = typeof contratoReajustes.$inferSelect;
-
-// ─── Sinônimos para Matching ──────────────────────────────────────────────────
-// Cada registro mapeia um termo (abreviação, variação, nome popular) para o
-// termo canônico (princípio ativo ou nome padrão do catálogo).
-// Ex: "IVERMEC" → "ivermectina", "AMOX" → "amoxicilina"
 export const synonyms = mysqlTable(
   "synonyms",
   {
@@ -770,320 +591,7 @@ export const matchFeedback = mysqlTable(
 export type MatchFeedback = typeof matchFeedback.$inferSelect;
 export type InsertMatchFeedback = typeof matchFeedback.$inferInsert;
 
-// ─── Licitações Compras.gov.br ────────────────────────────────────────────────
-// Armazena licitações buscadas automaticamente da API de Dados Abertos do
-// Compras.gov.br. A janela de busca é sempre os últimos 15 dias.
-// rawJson preserva o payload original para auditoria.
-export const govLicitations = mysqlTable(
-  "gov_licitations",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    source: varchar("source", { length: 64 }).default("comprasgov").notNull(),
-    // Identificador único da licitação no Compras.gov.br
-    externalId: varchar("externalId", { length: 256 }).notNull().unique(),
-    uasg: varchar("uasg", { length: 64 }),
-    numeroAviso: varchar("numeroAviso", { length: 128 }),
-    objeto: text("objeto").notNull(),
-    ufSigla: varchar("ufSigla", { length: 4 }),
-    razaoSocial: varchar("razaoSocial", { length: 512 }),
-    dataPublicacao: timestamp("dataPublicacao"),
-    dataAbertura: timestamp("dataAbertura"),
-    rawJson: json("rawJson"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [
-    index("idx_govlic_extid").on(t.externalId),
-    index("idx_govlic_datapub").on(t.dataPublicacao),
-    index("idx_govlic_uasg").on(t.uasg),
-  ]
-);
-export type GovLicitation = typeof govLicitations.$inferSelect;
-export type InsertGovLicitation = typeof govLicitations.$inferInsert;
-
-// Itens de cada licitação, filtrados para veterinários.
-// matchedProductId aponta para o produto do catálogo mais próximo.
-export const govLicitationItems = mysqlTable(
-  "gov_licitation_items",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    govLicitationId: int("govLicitationId").notNull().references(() => govLicitations.id, { onDelete: "cascade" }),
-    descricaoItem: text("descricaoItem").notNull(),
-    quantidade: decimal("quantidade", { precision: 12, scale: 3 }).default("1"),
-    unidade: varchar("unidade", { length: 64 }),
-    valorEstimado: decimal("valorEstimado", { precision: 14, scale: 4 }),
-    // Campos extraídos via regex/dicionário do descricaoItem
-    activeIngredient: varchar("activeIngredient", { length: 256 }),
-    concentration: varchar("concentration", { length: 128 }),
-    presentation: varchar("presentation", { length: 128 }),
-    // Cruzamento com catálogo
-    matchedProductId: int("matchedProductId").references(() => products.id, { onDelete: "set null" }),
-    matchScore: int("matchScore").default(0),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [
-    index("idx_govitem_licid").on(t.govLicitationId),
-    index("idx_govitem_product").on(t.matchedProductId),
-  ]
-);
-export type GovLicitationItem = typeof govLicitationItems.$inferSelect;
-export type InsertGovLicitationItem = typeof govLicitationItems.$inferInsert;
-
-// Histórico de participação em licitações: registra se a empresa participou e o resultado.
-export const govParticipationHistory = mysqlTable(
-  "gov_participation_history",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    govLicitationId: int("govLicitationId").notNull().references(() => govLicitations.id, { onDelete: "cascade" }),
-    // Status: "participou" | "nao_participou" | "ganhou" | "perdeu" | "desclassificado"
-    status: varchar("status", { length: 32 }).notNull().default("participou"),
-    // Resultado final após abertura: "ganhou" | "perdeu" | "desclassificado" | "pendente"
-    result: varchar("result", { length: 32 }).default("pendente"),
-    proposalId: int("proposalId").references(() => proposals.id, { onDelete: "set null" }),
-    notes: text("notes"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [
-    index("idx_govpart_licid").on(t.govLicitationId),
-    index("idx_govpart_status").on(t.status),
-  ]
-);
-export type GovParticipationHistory = typeof govParticipationHistory.$inferSelect;
-export type InsertGovParticipationHistory = typeof govParticipationHistory.$inferInsert;
-
-// ── Monitoramento Integral de CNPJ ──────────────────────────────────────────
-// Configuração de monitoramento: suporta múltiplos CNPJs, múltiplas fontes
-// e intervalo de verificação configurável.
-export const cnpjMonitorConfig = mysqlTable("cnpj_monitor_config", {
-  id: int("id").autoincrement().primaryKey(),
-  cnpj: varchar("cnpj", { length: 18 }).notNull(),
-  razaoSocial: varchar("razaoSocial", { length: 256 }).notNull().default(""),
-  label: varchar("label", { length: 128 }).notNull().default("Minha Empresa"),
-  active: boolean("active").notNull().default(true),
-  // Intervalo em minutos: 1, 5, 15, 30, 60, 360, 1440
-  intervalMinutes: int("intervalMinutes").notNull().default(60),
-  // Fontes habilitadas (JSON array): "pncp_contratos", "comprasnet_itens", "sicaf"
-  fontes: varchar("fontes", { length: 512 }).notNull().default('["pncp_contratos","comprasnet_itens","sicaf"]'),
-  // Palavras-chave adicionais para monitorar (JSON array)
-  keywords: varchar("keywords", { length: 1024 }).notNull().default('[]'),
-  // Última varredura bem-sucedida
-  lastCheckedAt: timestamp("lastCheckedAt"),
-  // Última data de publicação verificada (para evitar re-alertar)
-  lastPublicationDate: varchar("lastPublicationDate", { length: 10 }),
-  // Situação no SICAF (cache)
-  sicafStatus: varchar("sicafStatus", { length: 64 }),
-  sicafCheckedAt: timestamp("sicafCheckedAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-export type CnpjMonitorConfig = typeof cnpjMonitorConfig.$inferSelect;
-export type InsertCnpjMonitorConfig = typeof cnpjMonitorConfig.$inferInsert;
-
-// Eventos detectados: cada linha representa um evento relacionado ao CNPJ monitorado.
-// Tipos de evento cobertos:
-//   pncp_contrato       - Contrato assinado no PNCP
-//   comprasnet_item     - Item de licitação vencido no Comprasnet
-//   sicaf_mudanca       - Alteração na situação cadastral (SICAF)
-//   keyword_match       - Palavra-chave encontrada em objeto de compra
-export const cnpjMonitorEvents = mysqlTable(
-  "cnpj_monitor_events",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    configId: int("configId").notNull().references(() => cnpjMonitorConfig.id, { onDelete: "cascade" }),
-    // Fonte do evento
-    fonte: varchar("fonte", { length: 32 }).notNull(), // "pncp_contratos" | "comprasnet_itens" | "sicaf" | "keyword"
-    // Tipo detalhado do evento
-    tipoEvento: varchar("tipoEvento", { length: 64 }).notNull(),
-    // Hash para deduplicacao (antiflood)
-    eventHash: varchar("eventHash", { length: 64 }).notNull(),
-    // Identificador externo (numero do contrato, numero do pregao, etc.)
-    externalId: varchar("externalId", { length: 256 }),
-    // Numero do pregao / processo
-    numeroPregao: varchar("numeroPregao", { length: 128 }),
-    // Orgao
-    cnpjOrgao: varchar("cnpjOrgao", { length: 18 }),
-    nomeOrgao: varchar("nomeOrgao", { length: 256 }),
-    ufOrgao: varchar("ufOrgao", { length: 2 }),
-    // Objeto / descricao do evento
-    objeto: text("objeto"),
-    // Valor
-    valor: decimal("valor", { precision: 14, scale: 2 }),
-    // Datas
-    dataEvento: varchar("dataEvento", { length: 10 }),
-    dataPublicacao: varchar("dataPublicacao", { length: 10 }),
-    // Link para o portal
-    urlPortal: varchar("urlPortal", { length: 512 }),
-    // Dados extras em JSON (campos especificos de cada fonte)
-    dadosExtras: text("dadosExtras"),
-    // Controle de leitura
-    readAt: timestamp("readAt"),
-    // Notificacao enviada
-    notifiedAt: timestamp("notifiedAt"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_cnpjevent_config").on(t.configId),
-    index("idx_cnpjevent_hash").on(t.eventHash),
-    index("idx_cnpjevent_fonte").on(t.fonte),
-    index("idx_cnpjevent_read").on(t.readAt),
-    index("idx_cnpjevent_created").on(t.createdAt),
-  ]
-);
-export type CnpjMonitorEvent = typeof cnpjMonitorEvents.$inferSelect;
-export type InsertCnpjMonitorEvent = typeof cnpjMonitorEvents.$inferInsert;
-
-// Compatibilidade retroativa com codigo existente
-export const cnpjAlertConfig = cnpjMonitorConfig;
-export const cnpjAlerts = cnpjMonitorEvents;
-export type CnpjAlertConfig = CnpjMonitorConfig;
-export type InsertCnpjAlertConfig = InsertCnpjMonitorConfig;
-export type CnpjAlert = CnpjMonitorEvent;
-export type InsertCnpjAlert = InsertCnpjMonitorEvent;
-
 // ─── Monitoramento por Palavras-Chave no PNCP ────────────────────────────────
-export const keywordMonitorConfig = mysqlTable(
-  "keyword_monitor_config",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    // Palavra-chave ou frase a monitorar
-    keyword: varchar("keyword", { length: 256 }).notNull(),
-    // Descricao amigavel (ex: "Equipamentos Veterinários")
-    descricao: varchar("descricao", { length: 256 }),
-    // Ativo ou pausado
-    ativo: boolean("ativo").notNull().default(true),
-    // Filtro opcional por UF (ex: "SP", "RJ")
-    uf: varchar("uf", { length: 2 }),
-    // Filtro opcional por modalidade (ex: 8 = pregão eletrônico)
-    modalidade: int("modalidade"),
-    // Ultima varredura
-    lastScanAt: timestamp("lastScanAt"),
-    // Total de oportunidades encontradas
-    totalFound: int("totalFound").notNull().default(0),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [
-    index("idx_kwconfig_ativo").on(t.ativo),
-    index("idx_kwconfig_keyword").on(t.keyword),
-  ]
-);
-export type KeywordMonitorConfig = typeof keywordMonitorConfig.$inferSelect;
-export type InsertKeywordMonitorConfig = typeof keywordMonitorConfig.$inferInsert;
-
-export const keywordMonitorEvents = mysqlTable(
-  "keyword_monitor_events",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    configId: int("configId").notNull().references(() => keywordMonitorConfig.id, { onDelete: "cascade" }),
-    // Palavra-chave que gerou este evento (desnormalizado para facilitar queries)
-    keyword: varchar("keyword", { length: 256 }).notNull(),
-    // Hash para deduplicacao (antiflood) — SHA1 do numeroControlePNCP
-    eventHash: varchar("eventHash", { length: 64 }).notNull().unique(),
-    // Identificador PNCP
-    numeroControlePncp: varchar("numeroControlePncp", { length: 128 }),
-    numeroPregao: varchar("numeroPregao", { length: 64 }),
-    anoCompra: int("anoCompra"),
-    sequencialCompra: int("sequencialCompra"),
-    // Orgao
-    cnpjOrgao: varchar("cnpjOrgao", { length: 18 }),
-    nomeOrgao: varchar("nomeOrgao", { length: 256 }),
-    ufOrgao: varchar("ufOrgao", { length: 2 }),
-    municipioOrgao: varchar("municipioOrgao", { length: 128 }),
-    // Objeto da licitacao
-    objeto: text("objeto"),
-    // Modalidade
-    modalidadeNome: varchar("modalidadeNome", { length: 128 }),
-    modalidadeId: int("modalidadeId"),
-    // Valores
-    valorEstimado: decimal("valorEstimado", { precision: 14, scale: 2 }),
-    // Datas
-    dataAbertura: varchar("dataAbertura", { length: 32 }),
-    dataEncerramento: varchar("dataEncerramento", { length: 32 }),
-    dataPublicacao: varchar("dataPublicacao", { length: 32 }),
-    // SRP (Sistema de Registro de Precos)
-    srp: boolean("srp").default(false),
-    // Link direto para o portal
-    urlPortal: varchar("urlPortal", { length: 512 }),
-    // Controle de leitura
-    readAt: timestamp("readAt"),
-    // Notificacao enviada
-    notifiedAt: timestamp("notifiedAt"),
-    // Status da oportunidade (nova, visualizada, descartada, participando)
-    status: varchar("status", { length: 32 }).notNull().default("nova"),
-    // Notas do usuario
-    notas: text("notas"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_kwevent_config").on(t.configId),
-    index("idx_kwevent_keyword").on(t.keyword),
-    index("idx_kwevent_status").on(t.status),
-    index("idx_kwevent_encerramento").on(t.dataEncerramento),
-    index("idx_kwevent_created").on(t.createdAt),
-  ]
-);
-export type KeywordMonitorEvent = typeof keywordMonitorEvents.$inferSelect;
-export type InsertKeywordMonitorEvent = typeof keywordMonitorEvents.$inferInsert;
-
-// ============================================================
-// MÓDULO 1: Licitações Descobertas (Captura de Oportunidades)
-// ============================================================
-export const licitacoesDescobertas = mysqlTable(
-  "licitacoes_descobertas",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    // Identificação única no PNCP
-    pncpId: varchar("pncpId", { length: 128 }),
-    sequencial: int("sequencial"),
-    ano: int("ano"),
-    // Órgão
-    cnpjOrgao: varchar("cnpjOrgao", { length: 18 }),
-    nomeOrgao: varchar("nomeOrgao", { length: 256 }),
-    ufOrgao: varchar("ufOrgao", { length: 2 }),
-    municipioOrgao: varchar("municipioOrgao", { length: 128 }),
-    // Objeto
-    objeto: text("objeto"),
-    // Modalidade
-    modalidadeNome: varchar("modalidadeNome", { length: 128 }),
-    modalidadeId: int("modalidadeId"),
-    // Valores
-    valorEstimado: decimal("valorEstimado", { precision: 14, scale: 2 }),
-    // Datas
-    dataAbertura: varchar("dataAbertura", { length: 32 }),
-    dataEncerramento: varchar("dataEncerramento", { length: 32 }),
-    dataPublicacao: varchar("dataPublicacao", { length: 32 }),
-    // SRP
-    srp: boolean("srp").default(false),
-    // Links
-    urlPortal: varchar("urlPortal", { length: 512 }),
-    urlEdital: varchar("urlEdital", { length: 512 }),
-    // Controle
-    status: varchar("status", { length: 32 }).notNull().default("nova"),
-    notas: text("notas"),
-    // Vínculo com proposta criada
-    proposalId: int("proposalId"),
-    // Palavra-chave que originou a descoberta
-    origemKeyword: varchar("origemKeyword", { length: 128 }),
-    // Antiflood
-    hashId: varchar("hashId", { length: 64 }).unique(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_licit_status").on(t.status),
-    index("idx_licit_encerramento").on(t.dataEncerramento),
-    index("idx_licit_orgao").on(t.cnpjOrgao),
-    index("idx_licit_created").on(t.createdAt),
-  ]
-);
-export type LicitacaoDescoberta = typeof licitacoesDescobertas.$inferSelect;
-export type InsertLicitacaoDescoberta = typeof licitacoesDescobertas.$inferInsert;
-
-// ============================================================
-// MÓDULO 3: Documentos de Habilitação
-// ============================================================
 export const documentosHabilitacao = mysqlTable(
   "documentos_habilitacao",
   {
@@ -1118,47 +626,6 @@ export type InsertDocumentoHabilitacao = typeof documentosHabilitacao.$inferInse
 // ============================================================
 // MÓDULO 2: Análises de Edital (IA)
 // ============================================================
-export const editalAnalyses = mysqlTable(
-  "edital_analyses",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    // Arquivo original
-    fileName: varchar("fileName", { length: 256 }).notNull(),
-    fileUrl: varchar("fileUrl", { length: 512 }),
-    fileKey: varchar("fileKey", { length: 256 }),
-    // Resultado da extração LLM
-    itensExtraidos: json("itensExtraidos"),       // [{nome, quantidade, unidade, matchProductId?, matchScore?}]
-    prazosEntrega: text("prazosEntrega"),
-    condicoesPagamento: text("condicoesPagamento"),
-    documentosExigidos: json("documentosExigidos"), // string[]
-    orgaoComprador: varchar("orgaoComprador", { length: 256 }),
-    numeroEdital: varchar("numeroEdital", { length: 128 }),
-    // Status do processamento
-    status: varchar("status", { length: 32 }).notNull().default("pendente"),
-    errorMessage: text("errorMessage"),
-    // Vínculo com proposta criada
-    proposalId: int("proposalId"),
-    // Vínculo com licitação descoberta
-    licitacaoId: int("licitacaoId"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    processedAt: timestamp("processedAt"),
-  },
-  (t) => [
-    index("idx_edital_status").on(t.status),
-    index("idx_edital_created").on(t.createdAt),
-  ]
-);
-export type EditalAnalysis = typeof editalAnalyses.$inferSelect;
-export type InsertEditalAnalysis = typeof editalAnalyses.$inferInsert;
-
-// ============================================================
-// MATCHING DE PRODUTOS — Logs e Feedback Expandido
-// ============================================================
-
-/**
- * matchLogs: Registra cada execução de matching para auditoria.
- * Armazena o item do edital, produto sugerido, score, critérios e tempo.
- */
 export const matchLogs = mysqlTable(
   "match_logs",
   {
@@ -1197,222 +664,6 @@ export type InsertMatchLog = typeof matchLogs.$inferInsert;
  * Armazena o item do edital, produto escolhido, score original, ação e data.
  * Usado para aprendizado contínuo do sistema.
  */
-export const matchFeedbackV2 = mysqlTable(
-  "match_feedback_v2",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    // Item do edital (texto original e normalizado)
-    editalItem: varchar("editalItem", { length: 512 }).notNull(),
-    editalItemNormalizado: varchar("editalItemNormalizado", { length: 512 }),
-    // Produto sugerido originalmente pelo algoritmo
-    produtoSugeridoId: int("produtoSugeridoId"),
-    produtoSugeridoNome: varchar("produtoSugeridoNome", { length: 512 }),
-    scoreOriginal: decimal("scoreOriginal", { precision: 5, scale: 4 }),
-    // Produto escolhido pelo usuário (pode ser diferente do sugerido)
-    produtoEscolhidoId: int("produtoEscolhidoId"),
-    produtoEscolhidoNome: varchar("produtoEscolhidoNome", { length: 512 }),
-    // Ação do usuário: aceitar | trocar | criar | ignorar
-    acao: varchar("acao", { length: 32 }).notNull(),
-    // Se o usuário confirmou a sugestão original
-    usuarioConfirmou: boolean("usuarioConfirmou").default(false).notNull(),
-    // Contexto
-    editalAnalysisId: int("editalAnalysisId"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_mfbv2_edital").on(t.editalItem),
-    index("idx_mfbv2_produto").on(t.produtoEscolhidoId),
-    index("idx_mfbv2_acao").on(t.acao),
-    index("idx_mfbv2_created").on(t.createdAt),
-  ]
-);
-export type MatchFeedbackV2 = typeof matchFeedbackV2.$inferSelect;
-export type InsertMatchFeedbackV2 = typeof matchFeedbackV2.$inferInsert;
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MÓDULO DE RASPAGEM WEB (Prompt 3)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * scrapeProfiles: Perfis de raspagem por fornecedor.
- * Cada perfil define domínios permitidos, seletores CSS e regras de limpeza.
- */
-export const scrapeProfiles = mysqlTable(
-  "scrape_profiles",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    // Fornecedor vinculado (opcional — pode ser genérico)
-    supplierId: int("supplierId"),
-    supplierName: varchar("supplierName", { length: 256 }).notNull(),
-    // Domínios permitidos (JSON array de strings)
-    allowedDomains: json("allowedDomains").notNull().$type<string[]>(),
-    // Seletores CSS para extração de campos (JSON)
-    selectors: json("selectors").notNull().$type<{
-      nome?: string;
-      ean?: string;
-      fabricante?: string;
-      apresentacao?: string;
-      fichaTecnica?: string;
-      preco?: string;
-      imagem?: string;
-      link?: string;
-      paginaProxima?: string;
-      listaItens?: string;
-    }>(),
-    // Regras de limpeza (regex / normalização) por campo (JSON)
-    cleanRules: json("cleanRules").$type<Record<string, string>>(),
-    // Cookie/token de sessão para sites que exigem login (armazenado com cuidado)
-    sessionCookie: text("sessionCookie"),
-    // User-agent personalizado
-    userAgent: varchar("userAgent", { length: 512 }),
-    // Rate limit em ms entre requisições
-    rateLimitMs: int("rateLimitMs").default(2000),
-    // Máximo de páginas na listagem
-    maxPages: int("maxPages").default(10),
-    // Ativo/inativo
-    isActive: boolean("isActive").default(true).notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [
-    index("idx_sprof_supplier").on(t.supplierId),
-    index("idx_sprof_active").on(t.isActive),
-  ]
-);
-export type ScrapeProfile = typeof scrapeProfiles.$inferSelect;
-export type InsertScrapeProfile = typeof scrapeProfiles.$inferInsert;
-
-/**
- * scrapeJobs: Registro de cada execução de raspagem.
- * tipo: "listagem" | "individual"
- * status: "pendente" | "executando" | "concluido" | "erro" | "cancelado"
- */
-export const scrapeJobs = mysqlTable(
-  "scrape_jobs",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    profileId: int("profileId").references(() => scrapeProfiles.id, { onDelete: "set null" }),
-    supplierId: int("supplierId"),
-    supplierName: varchar("supplierName", { length: 256 }),
-    tipo: varchar("tipo", { length: 32 }).notNull(), // listagem | individual
-    url: varchar("url", { length: 2048 }).notNull(),
-    status: varchar("status", { length: 32 }).default("pendente").notNull(),
-    // Estatísticas
-    totalCapturado: int("totalCapturado").default(0),
-    totalComEan: int("totalComEan").default(0),
-    totalSemFabricante: int("totalSemFabricante").default(0),
-    totalSemFicha: int("totalSemFicha").default(0),
-    totalConflitos: int("totalConflitos").default(0),
-    totalErros: int("totalErros").default(0),
-    // Resultado bruto (JSON com lista de produtos capturados)
-    resultadoBruto: json("resultadoBruto"),
-    // Mensagem de erro geral
-    errorMessage: text("errorMessage"),
-    iniciadoEm: timestamp("iniciadoEm"),
-    concluidoEm: timestamp("concluidoEm"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_sjob_profile").on(t.profileId),
-    index("idx_sjob_supplier").on(t.supplierId),
-    index("idx_sjob_status").on(t.status),
-    index("idx_sjob_tipo").on(t.tipo),
-    index("idx_sjob_created").on(t.createdAt),
-  ]
-);
-export type ScrapeJob = typeof scrapeJobs.$inferSelect;
-export type InsertScrapeJob = typeof scrapeJobs.$inferInsert;
-
-/**
- * scrapeResults: Resultado individual de cada produto capturado em um job.
- * origem: "site" | "web_enrichment" | "ia"
- */
-export const scrapeResults = mysqlTable(
-  "scrape_results",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    jobId: int("jobId").references(() => scrapeJobs.id, { onDelete: "cascade" }).notNull(),
-    // Produto vinculado (null se ainda não aplicado)
-    productId: int("productId"),
-    // Dados capturados (JSON com todos os campos)
-    dadosCapturados: json("dadosCapturados").notNull(),
-    // Campos que foram preenchidos neste resultado
-    camposCapturados: json("camposCapturados").$type<string[]>(),
-    // Origem da captura
-    origem: varchar("origem", { length: 32 }).default("site"),
-    // Confiança (0–1)
-    confianca: decimal("confianca", { precision: 3, scale: 2 }),
-    // Status: pendente | aplicado | ignorado | conflito
-    status: varchar("status", { length: 32 }).default("pendente").notNull(),
-    // Notas do usuário durante revisão
-    notasRevisao: text("notasRevisao"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_sres_job").on(t.jobId),
-    index("idx_sres_product").on(t.productId),
-    index("idx_sres_status").on(t.status),
-    index("idx_sres_origem").on(t.origem),
-  ]
-);
-export type ScrapeResult = typeof scrapeResults.$inferSelect;
-export type InsertScrapeResult = typeof scrapeResults.$inferInsert;
-
-/**
- * scrapeErrors: Log de erros por URL durante a raspagem.
- */
-export const scrapeErrors = mysqlTable(
-  "scrape_errors",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    jobId: int("jobId").references(() => scrapeJobs.id, { onDelete: "cascade" }).notNull(),
-    url: varchar("url", { length: 2048 }),
-    erro: text("erro"),
-    statusCode: int("statusCode"),
-    stack: text("stack"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_serr_job").on(t.jobId),
-    index("idx_serr_created").on(t.createdAt),
-  ]
-);
-export type ScrapeError = typeof scrapeErrors.$inferSelect;
-export type InsertScrapeError = typeof scrapeErrors.$inferInsert;
-
-/**
- * scrapeEnrichmentLog: Log de enriquecimento web por produto.
- * Armazena fonte, texto extraído e data da captura.
- */
-export const scrapeEnrichmentLog = mysqlTable(
-  "scrape_enrichment_log",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    productId: int("productId"),
-    jobId: int("jobId"),
-    campo: varchar("campo", { length: 64 }).notNull(), // fichaTecnica | fabricante | imagem | etc.
-    valorAnterior: text("valorAnterior"),
-    valorNovo: text("valorNovo"),
-    fonte: varchar("fonte", { length: 2048 }),
-    dataCaptura: timestamp("dataCaptura").defaultNow().notNull(),
-    // Conflito: quando há múltiplas fontes com valores diferentes
-    temConflito: boolean("temConflito").default(false).notNull(),
-    conflitosJson: json("conflitosJson"),
-    revisadoPor: varchar("revisadoPor", { length: 256 }),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_senr_product").on(t.productId),
-    index("idx_senr_job").on(t.jobId),
-    index("idx_senr_campo").on(t.campo),
-  ]
-);
-export type ScrapeEnrichmentLog = typeof scrapeEnrichmentLog.$inferSelect;
-export type InsertScrapeEnrichmentLog = typeof scrapeEnrichmentLog.$inferInsert;
-
-// ─── Preços por Fornecedor ────────────────────────────────────────────────────
-// Tabela normalizada: um produto pode ter preço diferente em cada fornecedor.
-// Substitui o campo price da tabela products (que passa a ser o preço de referência).
 export const productSupplierPrices = mysqlTable(
   "product_supplier_prices",
   {
@@ -1461,366 +712,6 @@ export const licitacoes = mysqlTable("licitacoes", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
 });
 
-export const licitacaoItens = mysqlTable("licitacaoItens", {
-  id: int("id").primaryKey().autoincrement(),
-  licitacaoId: int("licitacaoId").notNull().references(() => licitacoes.id, { onDelete: "cascade" }),
-  numeroItem: int("numeroItem"),
-  descricao: text("descricao"),
-  quantidade: decimal("quantidade", { precision: 15, scale: 4 }),
-  unidade: varchar("unidade", { length: 64 }),
-  valorEstimado: decimal("valorEstimado", { precision: 15, scale: 2 }),
-  valorUnitario: decimal("valorUnitario", { precision: 15, scale: 4 }),
-  categoria: varchar("categoria", { length: 256 }),
-  codigoCatalogo: varchar("codigoCatalogo", { length: 64 }),
-  produtoMatchId: int("produtoMatchId"), // produto sugerido pelo matching
-  scoreMatch: decimal("scoreMatch", { precision: 5, scale: 4 }), // 0.0000 a 1.0000
-  matchConfirmado: int("matchConfirmado").default(0),
-  createdAt: timestamp("createdAt").defaultNow(),
-});
-
-export const licitacaoMatch = mysqlTable("licitacaoMatch", {
-  id: int("id").primaryKey().autoincrement(),
-  licitacaoItemId: int("licitacaoItemId").notNull().references(() => licitacaoItens.id, { onDelete: "cascade" }),
-  produtoId: int("produtoId").notNull(),
-  score: decimal("score", { precision: 5, scale: 4 }).notNull(),
-  matchConfirmado: int("matchConfirmado").default(0),
-  confirmadoPor: varchar("confirmadoPor", { length: 128 }),
-  data: timestamp("data").defaultNow(),
-});
-
-export const oportunidadesLicitacao = mysqlTable("oportunidadesLicitacao", {
-  id: int("id").primaryKey().autoincrement(),
-  licitacaoId: int("licitacaoId").notNull().references(() => licitacoes.id, { onDelete: "cascade" }),
-  licitacaoItemId: int("licitacaoItemId").references(() => licitacaoItens.id, { onDelete: "cascade" }),
-  produtoId: int("produtoId"),
-  score: decimal("score", { precision: 5, scale: 4 }),
-  valorEstimado: decimal("valorEstimado", { precision: 15, scale: 2 }),
-  status: varchar("status", { length: 32 }).default("nova"), // nova | em_analise | proposta_gerada | descartada
-  alertaEnviado: int("alertaEnviado").default(0),
-  createdAt: timestamp("createdAt").defaultNow(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
-});
-
-export const licitacaoSyncLogs = mysqlTable("licitacaoSyncLogs", {
-  id: int("id").primaryKey().autoincrement(),
-  fonte: varchar("fonte", { length: 32 }).notNull(), // "pncp" | "compras_gov" | "atas" | "contratos"
-  dataExecucao: timestamp("dataExecucao").defaultNow(),
-  totalLicitacoes: int("totalLicitacoes").default(0),
-  totalItens: int("totalItens").default(0),
-  totalOportunidades: int("totalOportunidades").default(0),
-  erros: int("erros").default(0),
-  tempoExecucaoMs: int("tempoExecucaoMs").default(0),
-  detalhes: text("detalhes"),
-  status: varchar("status", { length: 32 }).default("ok"), // ok | erro | parcial
-});
-
-// ─── Motor de Inteligência: Metadados do Produto ─────────────────────────────
-export const productMetadata = mysqlTable("productMetadata", {
-  id: int("id").primaryKey().autoincrement(),
-  produtoId: int("produtoId").notNull().references(() => products.id, { onDelete: "cascade" }),
-  key: varchar("key", { length: 128 }).notNull(),       // ex: principio_ativo, concentracao, forma_farmaceutica, voltagem, etc.
-  value: text("value").notNull(),
-  confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000"), // 0.000 a 1.000
-  source: varchar("source", { length: 64 }).default("extracted_from_ficha"), // extracted_from_ficha | manual
-  needsReview: int("needsReview").default(0),            // 1 = confiança < 0.70
-  lockedManual: int("lockedManual").default(0),          // 1 = travado como manual (não sobrescrever)
-  generatedBy: varchar("generatedBy", { length: 128 }),  // userId ou "ai"
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
-  createdAt: timestamp("createdAt").defaultNow(),
-});
-
-
-// ─── Motor Universal de Equivalência por Ficha Técnica ───────────────────────
-
-// Perfis de equivalência por categoria (define atributos críticos, tolerâncias e score)
-export const equivalenceProfiles = mysqlTable("equivalenceProfiles", {
-  id: int("id").primaryKey().autoincrement(),
-  // Identificação do perfil
-  name: varchar("name", { length: 256 }).notNull(),          // ex: "Medicamentos Veterinários Injetáveis"
-  categorySlug: varchar("categorySlug", { length: 128 }),    // vinculado à categoria do catálogo
-  description: text("description"),
-  isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(),
-  // Configuração em JSON (atributos_criticos, tolerancias, atributos_importantes, sinonimos)
-  criticalAttributes: json("criticalAttributes").notNull(),  // string[] — ex: ["principio_ativo","concentracao","forma_farmaceutica"]
-  tolerances: json("tolerances").notNull(),                  // Record<string, {op: ">="|"<="|"="|"range", value: number|[number,number], unit?: string}>
-  importantAttributes: json("importantAttributes").notNull(),// string[] — contribuem para score mas não são críticos
-  synonyms: json("synonyms"),                                // Record<string, string[]> — ex: {"ivermectina": ["ivermectin"]}
-  minScore: int("minScore").default(80),                     // Score mínimo para APROVADO (0-100)
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type EquivalenceProfile = typeof equivalenceProfiles.$inferSelect;
-export type InsertEquivalenceProfile = typeof equivalenceProfiles.$inferInsert;
-
-// Atributos extraídos de fichas técnicas com evidência e rastreabilidade
-export const extractedAttributes = mysqlTable(
-  "extractedAttributes",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    // Atributo extraído
-    attribute: varchar("attribute", { length: 128 }).notNull(),  // ex: principio_ativo, concentracao, voltagem
-    value: text("value").notNull(),                              // valor bruto extraído
-    valueNormalized: text("valueNormalized"),                    // valor normalizado (ex: "12.5 mg/mL")
-    unit: varchar("unit", { length: 64 }),                       // unidade normalizada (ex: "mg/mL")
-    valueNumeric: decimal("valueNumeric", { precision: 18, scale: 6 }), // valor numérico para comparação
-    // Evidência e rastreabilidade (OBRIGATÓRIO — não inventar)
-    sourceType: mysqlEnum("sourceType", ["pdf", "url", "text", "manual"]).notNull(),
-    sourceRef: text("sourceRef"),                                // URL ou caminho do PDF/página
-    sourceHash: varchar("sourceHash", { length: 64 }),          // SHA-256 do documento fonte
-    sourcePage: int("sourcePage"),                               // Página do PDF onde foi encontrado
-    sourceExcerpt: text("sourceExcerpt"),                        // Trecho exato onde o atributo foi encontrado
-    confidence: decimal("confidence", { precision: 4, scale: 3 }).default("0.000"), // 0.000 a 1.000
-    needsReview: int("needsReview").default(0),                  // 1 = confiança < 0.70 ou ambíguo
-    extractedBy: varchar("extractedBy", { length: 64 }).default("ai"), // "ai" ou userId
-    extractedAt: timestamp("extractedAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_ext_attr_product").on(table.productId),
-    index("idx_ext_attr_attribute").on(table.attribute),
-    index("idx_ext_attr_product_attr").on(table.productId, table.attribute),
-  ]
-);
-
-export type ExtractedAttribute = typeof extractedAttributes.$inferSelect;
-export type InsertExtractedAttribute = typeof extractedAttributes.$inferInsert;
-
-// Sessões de comparação de equivalência técnica
-export const equivalenceSessions = mysqlTable("equivalenceSessions", {
-  id: int("id").primaryKey().autoincrement(),
-  profileId: int("profileId").references(() => equivalenceProfiles.id, { onDelete: "set null" }),
-  referenceProductId: int("referenceProductId").references(() => products.id, { onDelete: "set null" }),
-  referenceDescription: text("referenceDescription"),   // Descrição do item de referência (edital/licitação)
-  title: varchar("title", { length: 512 }),              // Título da sessão (ex: "Pregão 001/2025 - Item 3")
-  processNumber: varchar("processNumber", { length: 256 }), // Número do processo licitatório
-  createdBy: varchar("createdBy", { length: 128 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type EquivalenceSession = typeof equivalenceSessions.$inferSelect;
-export type InsertEquivalenceSession = typeof equivalenceSessions.$inferInsert;
-
-// Resultados de equivalência técnica por candidato
-export const equivalenceResults = mysqlTable(
-  "equivalenceResults",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    sessionId: int("sessionId").notNull().references(() => equivalenceSessions.id, { onDelete: "cascade" }),
-    candidateProductId: int("candidateProductId").references(() => products.id, { onDelete: "set null" }),
-    candidateDescription: text("candidateDescription"),  // Descrição do candidato (se não for produto do catálogo)
-    // Resultado da comparação
-    status: mysqlEnum("status", ["APROVADO", "REPROVADO", "REVISAO"]).notNull(),
-    score: int("score").default(0),                       // 0-100
-    // Detalhamento (JSON)
-    criticalDivergences: json("criticalDivergences"),     // Array de {attribute, referenceValue, candidateValue, reason}
-    importantDivergences: json("importantDivergences"),   // Array de {attribute, referenceValue, candidateValue, scoreImpact}
-    attributeComparisons: json("attributeComparisons"),   // Array completo de comparações para o relatório
-    justification: text("justification"),                 // Justificativa curta (1-2 frases)
-    reviewNotes: text("reviewNotes"),                     // Notas para revisão manual
-    // Rastreabilidade
-    generatedBy: varchar("generatedBy", { length: 64 }).default("ai"),
-    reviewedBy: varchar("reviewedBy", { length: 128 }),
-    reviewedAt: timestamp("reviewedAt"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_eq_result_session").on(table.sessionId),
-    index("idx_eq_result_candidate").on(table.candidateProductId),
-    index("idx_eq_result_status").on(table.status),
-  ]
-);
-
-export type EquivalenceResult = typeof equivalenceResults.$inferSelect;
-export type InsertEquivalenceResult = typeof equivalenceResults.$inferInsert;
-
-// ─── Framework de Fornecedores (Conectores API/CSV/XML/Manual) ───────────────
-
-export const supplierConnectors = mysqlTable(
-  "supplierConnectors",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    supplierId: int("supplierId").references(() => suppliers.id, { onDelete: "set null" }),
-    name: varchar("name", { length: 256 }).notNull(),
-    connectorType: mysqlEnum("connectorType", ["api_rest", "csv_excel", "xml", "manual"]).notNull().default("csv_excel"),
-    isActive: mysqlEnum("isActive", ["yes", "no"]).notNull().default("yes"),
-    baseUrl: text("baseUrl"),
-    authType: mysqlEnum("authType", ["none", "api_key", "bearer", "basic"]).default("none"),
-    authConfig: json("authConfig"),
-    endpoints: json("endpoints"),
-    paginationConfig: json("paginationConfig"),
-    rateLimit: int("rateLimit").default(60),
-    fieldMapping: json("fieldMapping"),
-    downloadUrl: text("downloadUrl"),
-    xmlRootPath: varchar("xmlRootPath", { length: 256 }),
-    lastSyncAt: timestamp("lastSyncAt"),
-    lastSyncStatus: mysqlEnum("lastSyncStatus", ["ok", "error", "partial", "pending"]).default("pending"),
-    lastSyncMessage: text("lastSyncMessage"),
-    syncIntervalHours: int("syncIntervalHours").default(24),
-    notes: text("notes"),
-    createdBy: varchar("createdBy", { length: 128 }),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_sc_supplier").on(table.supplierId),
-    index("idx_sc_active").on(table.isActive),
-  ]
-);
-
-export type SupplierConnector = typeof supplierConnectors.$inferSelect;
-export type InsertSupplierConnector = typeof supplierConnectors.$inferInsert;
-
-// A tabela legada `auditLog` foi removida: nenhum código escrevia ou lia nela
-// e a trilha de auditoria oficial é `audit_logs` (auditService.recordAudit).
-
-// ─── Histórico de Preços Públicos (PNCP/ComprasGov) ─────────────────────────
-
-export const publicPriceHistory = mysqlTable(
-  "publicPriceHistory",
-  {
-    id: int("id").primaryKey().autoincrement(),
-    productId: int("productId").references(() => products.id, { onDelete: "set null" }),
-    itemDescription: text("itemDescription").notNull(),
-    catmatCode: varchar("catmatCode", { length: 32 }),
-    unitPrice: decimal("unitPrice", { precision: 15, scale: 4 }),
-    estimatedUnitPrice: decimal("estimatedUnitPrice", { precision: 15, scale: 4 }),
-    quantity: decimal("quantity", { precision: 15, scale: 4 }),
-    unit: varchar("unit", { length: 64 }),
-    totalValue: decimal("totalValue", { precision: 18, scale: 4 }),
-    source: varchar("source", { length: 32 }).notNull().default("PNCP"),
-    processNumber: varchar("processNumber", { length: 256 }),
-    pncpId: varchar("pncpId", { length: 256 }),
-    orgaoCnpj: varchar("orgaoCnpj", { length: 18 }),
-    orgaoName: varchar("orgaoName", { length: 512 }),
-    uf: varchar("uf", { length: 2 }),
-    modalidade: varchar("modalidade", { length: 64 }),
-    publicationDate: date("publicationDate"),
-    homologationDate: date("homologationDate"),
-    evidenceUrl: text("evidenceUrl"),
-    rawJson: json("rawJson"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_pph_product").on(table.productId),
-    index("idx_pph_catmat").on(table.catmatCode),
-    index("idx_pph_uf").on(table.uf),
-    index("idx_pph_date").on(table.publicationDate),
-    index("idx_pph_source").on(table.source),
-  ]
-);
-
-export type PublicPriceHistory = typeof publicPriceHistory.$inferSelect;
-export type InsertPublicPriceHistory = typeof publicPriceHistory.$inferInsert;
-
-// ─── Radar Nacional de Licitações ─────────────────────────────────────────────
-
-// Palavras-chave por área com score e exclusões
-export const radarKeywords = mysqlTable(
-  "radarKeywords",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    areaId: int("areaId").notNull(), // 1-4
-    areaName: varchar("areaName", { length: 128 }).notNull(),
-    keyword: varchar("keyword", { length: 256 }).notNull(),
-    type: mysqlEnum("type", ["include", "exclude", "anchor"]).notNull().default("include"),
-    scoreBonus: int("scoreBonus").default(0), // +30, +20, -40, +10
-    isActive: boolean("isActive").default(true).notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_rk_area").on(table.areaId),
-    index("idx_rk_type").on(table.type),
-  ]
-);
-
-export type RadarKeyword = typeof radarKeywords.$inferSelect;
-export type InsertRadarKeyword = typeof radarKeywords.$inferInsert;
-
-// Fontes monitoradas (FontesRadar)
-export const radarSources = mysqlTable(
-  "radarSources",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    tipoEntidade: varchar("tipoEntidade", { length: 64 }).notNull(), // UF, IF, HU, ESTATAL, OUTRO
-    entidadeNome: varchar("entidadeNome", { length: 256 }).notNull(),
-    uf: varchar("uf", { length: 2 }),
-    municipio: varchar("municipio", { length: 128 }),
-    dominioOficial: varchar("dominioOficial", { length: 256 }),
-    canalPrimario: varchar("canalPrimario", { length: 64 }), // PNCP, LICITACOES_E, COMPRAS_GOV, PROPRIO, OUTRO
-    urlCanal: text("urlCanal"),
-    metodoColeta: varchar("metodoColeta", { length: 64 }).default("PNCP"), // PNCP, SCRAPING, API, MANUAL
-    observacoesValidacao: text("observacoesValidacao"),
-    prioridade: mysqlEnum("prioridade", ["alta", "media", "baixa"]).default("media").notNull(),
-    ativo: boolean("ativo").default(true).notNull(),
-    ultimaSincronizacao: timestamp("ultimaSincronizacao"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_rs_uf").on(table.uf),
-    index("idx_rs_tipo").on(table.tipoEntidade),
-    index("idx_rs_prioridade").on(table.prioridade),
-    index("idx_rs_canal").on(table.canalPrimario),
-  ]
-);
-
-export type RadarSource = typeof radarSources.$inferSelect;
-export type InsertRadarSource = typeof radarSources.$inferInsert;
-
-// Oportunidades capturadas (OportunidadesRadar)
-export const radarOpportunities = mysqlTable(
-  "radarOpportunities",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    sourceId: int("sourceId"), // FK radarSources (nullable para PNCP direto)
-    areaId: int("areaId").notNull(), // 1-4
-    dataCaptura: timestamp("dataCaptura").defaultNow().notNull(),
-    fonte: varchar("fonte", { length: 64 }).notNull(), // PNCP, COMPRAS_MG, LICITACOES_E, PROPRIO
-    entidadeNome: varchar("entidadeNome", { length: 256 }),
-    cnpjOrgao: varchar("cnpjOrgao", { length: 18 }),
-    uf: varchar("uf", { length: 2 }),
-    municipio: varchar("municipio", { length: 128 }),
-    canal: varchar("canal", { length: 128 }),
-    objetoTexto: text("objetoTexto"),
-    modalidade: varchar("modalidade", { length: 128 }),
-    dataPublicacao: date("dataPublicacao"),
-    dataAbertura: date("dataAbertura"),
-    situacao: varchar("situacao", { length: 64 }),
-    linkEdital: text("linkEdital"),
-    anexosLinks: json("anexosLinks"), // string[]
-    scoreRelevancia: int("scoreRelevancia").default(0),
-    keywordsDetectadas: json("keywordsDetectadas"), // string[]
-    evidencias: json("evidencias"), // { url, hash, capturedAt }[]
-    numeroProcesso: varchar("numeroProcesso", { length: 128 }),
-    pncpId: varchar("pncpId", { length: 256 }),
-    contentHash: varchar("contentHash", { length: 64 }), // SHA-256 para detectar alterações
-    isNew: boolean("isNew").default(true).notNull(),
-    isAlerted: boolean("isAlerted").default(false).notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_ro_area").on(table.areaId),
-    index("idx_ro_fonte").on(table.fonte),
-    index("idx_ro_uf").on(table.uf),
-    index("idx_ro_score").on(table.scoreRelevancia),
-    index("idx_ro_data").on(table.dataPublicacao),
-    index("idx_ro_pncp").on(table.pncpId),
-    index("idx_ro_hash").on(table.contentHash),
-    index("idx_ro_new").on(table.isNew),
-  ]
-);
-
-export type RadarOpportunity = typeof radarOpportunities.$inferSelect;
-export type InsertRadarOpportunity = typeof radarOpportunities.$inferInsert;
-
-// ============================================================
-// GOVERNANÇA OPERACIONAL — Auditoria, Diligências e Histórico
-// ============================================================
 export const auditLogs = mysqlTable(
   "audit_logs",
   {
@@ -1871,53 +762,6 @@ export const diligenciaWorkflows = mysqlTable(
 export type DiligenciaWorkflow = typeof diligenciaWorkflows.$inferSelect;
 export type InsertDiligenciaWorkflow = typeof diligenciaWorkflows.$inferInsert;
 
-export const orgHistoryEvents = mysqlTable(
-  "org_history_events",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    orgId: int("orgId").notNull().references(() => requestingOrgs.id, { onDelete: "cascade" }),
-    proposalId: int("proposalId").references(() => proposals.id, { onDelete: "set null" }),
-    eventType: varchar("eventType", { length: 64 }).notNull(),
-    title: varchar("title", { length: 256 }).notNull(),
-    details: text("details"),
-    score: int("score").default(0),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (t) => [
-    index("idx_org_history_org").on(t.orgId),
-    index("idx_org_history_type").on(t.eventType),
-    index("idx_org_history_created").on(t.createdAt),
-  ]
-);
-export type OrgHistoryEvent = typeof orgHistoryEvents.$inferSelect;
-export type InsertOrgHistoryEvent = typeof orgHistoryEvents.$inferInsert;
-
-// Logs de execução do Radar
-export const radarSyncLogs = mysqlTable(
-  "radarSyncLogs",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    startedAt: timestamp("startedAt").defaultNow().notNull(),
-    finishedAt: timestamp("finishedAt"),
-    status: mysqlEnum("status", ["running", "success", "error", "partial"]).default("running").notNull(),
-    totalFontes: int("totalFontes").default(0),
-    totalOportunidades: int("totalOportunidades").default(0),
-    novas: int("novas").default(0),
-    alteradas: int("alteradas").default(0),
-    erros: int("erros").default(0),
-    detalhes: json("detalhes"), // { fonte, status, count, error }[]
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_rsl_status").on(table.status),
-    index("idx_rsl_started").on(table.startedAt),
-  ]
-);
-
-export type RadarSyncLog = typeof radarSyncLogs.$inferSelect;
-export type InsertRadarSyncLog = typeof radarSyncLogs.$inferInsert;
-
-// ─── Logs de chamadas a APIs externas (rastreabilidade) ───────────────────────
 export const apiLogs = mysqlTable(
   "apiLogs",
   {
@@ -2010,34 +854,6 @@ export type InsertProductSupplierOffer = typeof productSupplierOffers.$inferInse
 
 
 // ─── Histórico de Auto-vinculação de Imagens ─────────────────────────────────────
-export const imageAutoLinkHistory = mysqlTable(
-  "image_auto_link_history",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    productId: int("productId")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
-    imageUrl: text("imageUrl").notNull(),
-    productName: varchar("productName", { length: 512 }).notNull(),
-    matchScore: decimal("matchScore", { precision: 3, scale: 2 }).notNull(), // 0-1 (Jaro-Winkler score)
-    status: mysqlEnum("status", ["linked", "rejected", "pending_review"]).default("linked").notNull(),
-    importBatchId: int("importBatchId"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_ialh_productId").on(table.productId),
-    index("idx_ialh_matchScore").on(table.matchScore),
-    index("idx_ialh_status").on(table.status),
-    index("idx_ialh_importBatchId").on(table.importBatchId),
-  ]
-);
-
-export type ImageAutoLinkHistory = typeof imageAutoLinkHistory.$inferSelect;
-export type InsertImageAutoLinkHistory = typeof imageAutoLinkHistory.$inferInsert;
-
-
-// ─── Web Scraper Configuration ───────────────────────────────────────────────
-
 export const scraperConfigs = mysqlTable("scraper_configs", {
   id: int("id").autoincrement().primaryKey(),
   supplierId: int("supplierId")
@@ -2116,75 +932,6 @@ export type ScraperLog = typeof scraperLogs.$inferSelect;
 export type InsertScraperLog = typeof scraperLogs.$inferInsert;
 
 // ─── Configuração de Precificação ─────────────────────────────────────────
-export const pricingConfigs = mysqlTable("pricing_configs", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  region: varchar("region", { length: 128 }).notNull(), // "Nacional", "SP", "RJ", etc. ou deixar vazio para padrão
-  
-  // Impostos (em percentual)
-  icmsPercentage: decimal("icmsPercentage", { precision: 5, scale: 2 }).default("0"), // ICMS %
-  ipPercentage: decimal("ipPercentage", { precision: 5, scale: 2 }).default("0"), // IP %
-  pisPercentage: decimal("pisPercentage", { precision: 5, scale: 2 }).default("0"), // PIS %
-  cofinsPercentage: decimal("cofinsPercentage", { precision: 5, scale: 2 }).default("0"), // COFINS %
-  
-  // Fretes (valor fixo ou percentual)
-  freightType: mysqlEnum("freightType", ["fixed", "percentage"]).default("fixed"), // Tipo de frete
-  freightValue: decimal("freightValue", { precision: 12, scale: 2 }).default("0"), // Valor ou percentual
-  
-  // Margem de lucro
-  marginPercentage: decimal("marginPercentage", { precision: 5, scale: 2 }).notNull(), // Margem de lucro %
-  
-  // Configurações adicionais
-  minPrice: decimal("minPrice", { precision: 12, scale: 2 }), // Preço mínimo permitido
-  maxPrice: decimal("maxPrice", { precision: 12, scale: 2 }), // Preço máximo permitido
-  roundingMethod: mysqlEnum("roundingMethod", ["round", "ceil", "floor"]).default("round"), // Método de arredondamento
-  
-  // Status
-  isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type PricingConfig = typeof pricingConfigs.$inferSelect;
-export type InsertPricingConfig = typeof pricingConfigs.$inferInsert;
-
-// ─── Histórico de Precificação ────────────────────────────────────────────
-export const pricingHistory = mysqlTable("pricing_history", {
-  id: int("id").autoincrement().primaryKey(),
-  productId: int("productId")
-    .notNull()
-    .references(() => products.id, { onDelete: "cascade" }),
-  pricingConfigId: int("pricingConfigId")
-    .notNull()
-    .references(() => pricingConfigs.id, { onDelete: "cascade" }),
-  
-  // Preços
-  basePriceBeforeTax: decimal("basePriceBeforeTax", { precision: 12, scale: 2 }).notNull(), // Preço base
-  taxAmount: decimal("taxAmount", { precision: 12, scale: 2 }).notNull(), // Valor de impostos
-  freightAmount: decimal("freightAmount", { precision: 12, scale: 2 }).notNull(), // Valor de frete
-  priceBeforeMargin: decimal("priceBeforeMargin", { precision: 12, scale: 2 }).notNull(), // Preço antes da margem
-  marginAmount: decimal("marginAmount", { precision: 12, scale: 2 }).notNull(), // Valor da margem
-  finalPrice: decimal("finalPrice", { precision: 12, scale: 2 }).notNull(), // Preço final
-  
-  // Detalhes
-  icmsAmount: decimal("icmsAmount", { precision: 12, scale: 2 }).default("0"),
-  ipAmount: decimal("ipAmount", { precision: 12, scale: 2 }).default("0"),
-  pisAmount: decimal("pisAmount", { precision: 12, scale: 2 }).default("0"),
-  cofinsAmount: decimal("cofinsAmount", { precision: 12, scale: 2 }).default("0"),
-  
-  // Rastreamento
-  appliedAt: timestamp("appliedAt"),
-  appliedBy: int("appliedBy").references(() => users.id, { onDelete: "set null" }),
-  
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-export type PricingHistory = typeof pricingHistory.$inferSelect;
-export type InsertPricingHistory = typeof pricingHistory.$inferInsert;
-
-// ─── Regras de Precificação por Categoria ──────────────────────────────────
 export const categoryPricingRules = mysqlTable("category_pricing_rules", {
   id: int("id").autoincrement().primaryKey(),
   categoryId: int("categoryId")
@@ -2313,85 +1060,6 @@ export type NfeImport = typeof nfeImports.$inferSelect;
 export type InsertNfeImport = typeof nfeImports.$inferInsert;
 
 // ─── Captura de Catálogo de Fornecedor ─────────────────────────────────────
-export const supplierCaptureConfigs = mysqlTable("supplier_capture_configs", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  
-  // URLs
-  baseUrl: varchar("baseUrl", { length: 512 }).notNull(),
-  loginUrl: varchar("loginUrl", { length: 512 }),
-  catalogUrl: varchar("catalogUrl", { length: 512 }),
-  
-  // Tipo de acesso
-  accessType: mysqlEnum("accessType", ["public", "username_password", "session_cookie", "api_key"]).default("public"),
-  
-  // Método de captura
-  captureMethod: mysqlEnum("captureMethod", ["html", "sitemap", "api", "pagination", "search"]).default("html"),
-  
-  // Seletores CSS/XPath
-  productListSelector: text("productListSelector"),
-  productNameSelector: text("productNameSelector"),
-  productPriceSelector: text("productPriceSelector"),
-  productDescriptionSelector: text("productDescriptionSelector"),
-  productImageSelector: text("productImageSelector"),
-  productSkuSelector: text("productSkuSelector"),
-  productManufacturerSelector: text("productManufacturerSelector"),
-  productStockSelector: text("productStockSelector"),
-  paginationSelector: text("paginationSelector"),
-  productLinkSelector: text("productLinkSelector"),
-  
-  // Regras de limpeza
-  cleanupRegex: text("cleanupRegex"),
-  prefixesToRemove: text("prefixesToRemove"),
-  suffixesToRemove: text("suffixesToRemove"),
-  
-  // Configurações
-  updateFrequencyHours: int("updateFrequencyHours").default(24),
-  inactivationPolicy: mysqlEnum("inactivationPolicy", ["never", "after_2_misses", "after_3_misses"]).default("after_3_misses"),
-  customHeaders: json("customHeaders"),
-  retryAttempts: int("retryAttempts").default(3),
-  timeoutSeconds: int("timeoutSeconds").default(30),
-  
-  // Status
-  isActive: boolean("isActive").default(true),
-  lastCaptureAt: timestamp("lastCaptureAt"),
-  lastSuccessAt: timestamp("lastSuccessAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type SupplierCaptureConfig = typeof supplierCaptureConfigs.$inferSelect;
-export type InsertSupplierCaptureConfig = typeof supplierCaptureConfigs.$inferInsert;
-
-// ─── Credenciais de Fornecedor (Criptografadas) ────────────────────────────
-export const supplierCredentials = mysqlTable("supplier_credentials", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  
-  // Tipo de autenticação
-  authType: mysqlEnum("authType", ["username_password", "api_key", "oauth", "session_token"]).default("username_password"),
-  
-  // Credenciais (criptografadas)
-  username: text("username"),
-  passwordEncrypted: text("passwordEncrypted"),
-  apiKey: text("apiKey"),
-  sessionToken: text("sessionToken"),
-  
-  // Metadados
-  notes: text("notes"),
-  lastUsedAt: timestamp("lastUsedAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type SupplierCredential = typeof supplierCredentials.$inferSelect;
-export type InsertSupplierCredential = typeof supplierCredentials.$inferInsert;
-
-// ─── Sessões de Fornecedor ────────────────────────────────────────────────
 export const supplierSessions = mysqlTable("supplier_sessions", {
   id: int("id").autoincrement().primaryKey(),
   supplierId: int("supplierId")
@@ -2417,36 +1085,6 @@ export type SupplierSession = typeof supplierSessions.$inferSelect;
 export type InsertSupplierSession = typeof supplierSessions.$inferInsert;
 
 // ─── Logs de Captura ──────────────────────────────────────────────────────
-export const captureLogs = mysqlTable("capture_logs", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  
-  // Timing
-  startedAt: timestamp("startedAt").defaultNow().notNull(),
-  completedAt: timestamp("completedAt"),
-  durationSeconds: int("durationSeconds"),
-  
-  // Estatísticas
-  totalPages: int("totalPages").default(0),
-  totalProductsFound: int("totalProductsFound").default(0),
-  newProductsCreated: int("newProductsCreated").default(0),
-  productsUpdated: int("productsUpdated").default(0),
-  productsWithErrors: int("productsWithErrors").default(0),
-  productsIgnored: int("productsIgnored").default(0),
-  
-  // Status
-  status: mysqlEnum("status", ["running", "completed", "failed", "partial"]).default("running"),
-  errorMessage: text("errorMessage"),
-  
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-export type CaptureLog = typeof captureLogs.$inferSelect;
-export type InsertCaptureLog = typeof captureLogs.$inferInsert;
-
-// ─── Histórico de Captura de Produtos ─────────────────────────────────────
 export const productCaptureHistory = mysqlTable("product_capture_history", {
   id: int("id").autoincrement().primaryKey(),
   productId: int("productId")
@@ -2476,75 +1114,6 @@ export type ProductCaptureHistory = typeof productCaptureHistory.$inferSelect;
 export type InsertProductCaptureHistory = typeof productCaptureHistory.$inferInsert;
 
 // ─── Erros de Captura ─────────────────────────────────────────────────────
-export const captureErrors = mysqlTable("capture_errors", {
-  id: int("id").autoincrement().primaryKey(),
-  captureLogId: int("captureLogId")
-    .notNull()
-    .references(() => captureLogs.id, { onDelete: "cascade" }),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  
-  // Contexto do erro
-  pageUrl: varchar("pageUrl", { length: 512 }),
-  pageNumber: int("pageNumber"),
-  productName: varchar("productName", { length: 256 }),
-  
-  // Erro
-  errorType: varchar("errorType", { length: 128 }).notNull(),
-  errorMessage: text("errorMessage").notNull(),
-  failureStage: varchar("failureStage", { length: 128 }),
-  
-  // Snapshot para debug
-  htmlSnapshot: text("htmlSnapshot"),
-  stackTrace: text("stackTrace"),
-  
-  // Reprocessamento
-  canReprocess: boolean("canReprocess").default(true),
-  reprocessedAt: timestamp("reprocessedAt"),
-  
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-export type CaptureError = typeof captureErrors.$inferSelect;
-export type InsertCaptureError = typeof captureErrors.$inferInsert;
-
-
-
-// Tabelas de Notificações
-export const notificationWebhooks = mysqlTable("notification_webhooks", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  type: mysqlEnum("type", ["slack", "email"]).notNull(),
-  webhookUrl: varchar("webhookUrl", { length: 512 }).notNull(),
-  name: varchar("name", { length: 255 }),
-  isActive: boolean("isActive").default(true),
-  createdAt: timestamp("createdAt").defaultNow(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow(),
-});
-
-export const notificationHistory = mysqlTable("notification_history", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierId: int("supplierId")
-    .notNull()
-    .references(() => suppliers.id, { onDelete: "cascade" }),
-  webhookId: int("webhookId")
-    .notNull()
-    .references(() => notificationWebhooks.id, { onDelete: "cascade" }),
-  type: varchar("type", { length: 50 }).notNull(),
-  title: varchar("title", { length: 255 }).notNull(),
-  message: text("message"),
-  status: mysqlEnum("status", ["sent", "failed"]).default("sent"),
-  errorMessage: text("errorMessage"),
-  sentAt: timestamp("sentAt").defaultNow(),
-});
-
-
-export type NotificationHistory = typeof notificationHistory.$inferSelect;
-export type InsertNotificationHistory = typeof notificationHistory.$inferInsert;
-
 export const enrichmentHistory = mysqlTable(
   "enrichment_history",
   {
@@ -2606,85 +1175,6 @@ export type EnrichmentResult = typeof enrichmentResults.$inferSelect;
 export type InsertEnrichmentResult = typeof enrichmentResults.$inferInsert;
 
 
-export const duplicateDetectionRuns = mysqlTable(
-  "duplicate_detection_runs",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    triggeredByUserId: int("triggeredByUserId").references(() => users.id, { onDelete: "set null" }),
-    status: mysqlEnum("status", ["running", "completed", "failed"]).default("running").notNull(),
-    scope: json("scope"),
-    totalCandidates: int("totalCandidates").default(0).notNull(),
-    confirmedCount: int("confirmedCount").default(0).notNull(),
-    probableCount: int("probableCount").default(0).notNull(),
-    reviewCount: int("reviewCount").default(0).notNull(),
-    ignoredCount: int("ignoredCount").default(0).notNull(),
-    notes: text("notes"),
-    finishedAt: timestamp("finishedAt"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_duplicate_runs_status").on(table.status),
-    index("idx_duplicate_runs_user").on(table.triggeredByUserId),
-    index("idx_duplicate_runs_created").on(table.createdAt),
-  ]
-);
-export type DuplicateDetectionRun = typeof duplicateDetectionRuns.$inferSelect;
-export type InsertDuplicateDetectionRun = typeof duplicateDetectionRuns.$inferInsert;
-
-export const duplicateDetectionResults = mysqlTable(
-  "duplicate_detection_results",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    runId: int("runId").notNull().references(() => duplicateDetectionRuns.id, { onDelete: "cascade" }),
-    primaryProductId: int("primaryProductId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    secondaryProductId: int("secondaryProductId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    score: decimal("score", { precision: 5, scale: 2 }).default("0.00").notNull(),
-    classification: mysqlEnum("classification", ["confirmed", "probable", "review", "distinct", "ignored", "merged"]).default("review").notNull(),
-    rationale: text("rationale"),
-    matchedFields: json("matchedFields"),
-    reviewedByUserId: int("reviewedByUserId").references(() => users.id, { onDelete: "set null" }),
-    reviewedAt: timestamp("reviewedAt"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_duplicate_results_run").on(table.runId),
-    index("idx_duplicate_results_primary").on(table.primaryProductId),
-    index("idx_duplicate_results_secondary").on(table.secondaryProductId),
-    index("idx_duplicate_results_classification").on(table.classification),
-    index("idx_duplicate_results_score").on(table.score),
-  ]
-);
-export type DuplicateDetectionResult = typeof duplicateDetectionResults.$inferSelect;
-export type InsertDuplicateDetectionResult = typeof duplicateDetectionResults.$inferInsert;
-
-export const duplicateMergeHistory = mysqlTable(
-  "duplicate_merge_history",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    resultId: int("resultId").references(() => duplicateDetectionResults.id, { onDelete: "set null" }),
-    primaryProductId: int("primaryProductId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    secondaryProductId: int("secondaryProductId").notNull().references(() => products.id, { onDelete: "cascade" }),
-    action: mysqlEnum("action", ["merge", "replace", "ignore", "mark_distinct"]).notNull(),
-    performedByUserId: int("performedByUserId").references(() => users.id, { onDelete: "set null" }),
-    notes: text("notes"),
-    snapshot: json("snapshot"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_duplicate_history_result").on(table.resultId),
-    index("idx_duplicate_history_primary").on(table.primaryProductId),
-    index("idx_duplicate_history_secondary").on(table.secondaryProductId),
-    index("idx_duplicate_history_action").on(table.action),
-  ]
-);
-export type DuplicateMergeHistory = typeof duplicateMergeHistory.$inferSelect;
-export type InsertDuplicateMergeHistory = typeof duplicateMergeHistory.$inferInsert;
-
-// Pares de produtos marcados manualmente como "não duplicados" (router
-// duplicates.ts, detecção simples por similaridade de nome) — evita que o
-// mesmo par volte a aparecer agrupado nas próximas detecções.
 export const duplicateExceptions = mysqlTable(
   "duplicate_exceptions",
   {
@@ -2699,60 +1189,6 @@ export const duplicateExceptions = mysqlTable(
 );
 export type DuplicateException = typeof duplicateExceptions.$inferSelect;
 export type InsertDuplicateException = typeof duplicateExceptions.$inferInsert;
-
-export const executiveDecisions = mysqlTable(
-  "executive_decisions",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    proposalId: int("proposalId").references(() => proposals.id, { onDelete: "set null" }),
-    orgId: int("orgId").references(() => requestingOrgs.id, { onDelete: "set null" }),
-    recommendation: mysqlEnum("recommendation", ["vale_entrar", "entrar_com_cautela", "nao_vale_entrar"]).notNull(),
-    totalScore: int("totalScore").default(0).notNull(),
-    adherenceScore: int("adherenceScore").default(0).notNull(),
-    marginScore: int("marginScore").default(0).notNull(),
-    documentalRiskScore: int("documentalRiskScore").default(0).notNull(),
-    technicalRiskScore: int("technicalRiskScore").default(0).notNull(),
-    operationalRiskScore: int("operationalRiskScore").default(0).notNull(),
-    historyScore: int("historyScore").default(0).notNull(),
-    marginEstimate: decimal("marginEstimate", { precision: 10, scale: 2 }).default("0.00"),
-    justification: text("justification"),
-    nextStep: text("nextStep"),
-    riskSummary: text("riskSummary"),
-    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  },
-  (table) => [
-    index("idx_exec_decisions_proposal").on(table.proposalId),
-    index("idx_exec_decisions_org").on(table.orgId),
-    index("idx_exec_decisions_recommendation").on(table.recommendation),
-    index("idx_exec_decisions_score").on(table.totalScore),
-  ]
-);
-export type ExecutiveDecision = typeof executiveDecisions.$inferSelect;
-export type InsertExecutiveDecision = typeof executiveDecisions.$inferInsert;
-
-export const executiveDecisionFactors = mysqlTable(
-  "executive_decision_factors",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    decisionId: int("decisionId").notNull().references(() => executiveDecisions.id, { onDelete: "cascade" }),
-    factorKey: varchar("factorKey", { length: 64 }).notNull(),
-    factorLabel: varchar("factorLabel", { length: 128 }).notNull(),
-    score: int("score").default(0).notNull(),
-    weight: int("weight").default(0).notNull(),
-    impact: mysqlEnum("impact", ["positive", "neutral", "negative"]).default("neutral").notNull(),
-    details: text("details"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_exec_factors_decision").on(table.decisionId),
-    index("idx_exec_factors_key").on(table.factorKey),
-    index("idx_exec_factors_impact").on(table.impact),
-  ]
-);
-export type ExecutiveDecisionFactor = typeof executiveDecisionFactors.$inferSelect;
-export type InsertExecutiveDecisionFactor = typeof executiveDecisionFactors.$inferInsert;
 
 export const postAwardContracts = mysqlTable(
   "post_award_contracts",
@@ -2789,69 +1225,6 @@ export const postAwardContracts = mysqlTable(
 export type PostAwardContract = typeof postAwardContracts.$inferSelect;
 export type InsertPostAwardContract = typeof postAwardContracts.$inferInsert;
 
-export const contractBalanceMovements = mysqlTable(
-  "contract_balance_movements",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    contractId: int("contractId").notNull().references(() => postAwardContracts.id, { onDelete: "cascade" }),
-    movementType: mysqlEnum("movementType", ["empenho", "faturamento", "consumo", "reforco", "glosa", "outro"]).notNull(),
-    amount: decimal("amount", { precision: 14, scale: 2 }).default("0.00").notNull(),
-    movementDate: date("movementDate").notNull(),
-    description: text("description"),
-    referenceNumber: varchar("referenceNumber", { length: 128 }),
-    createdByUserId: int("createdByUserId").references(() => users.id, { onDelete: "set null" }),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_contract_balance_contract").on(table.contractId),
-    index("idx_contract_balance_type").on(table.movementType),
-    index("idx_contract_balance_date").on(table.movementDate),
-  ]
-);
-export type ContractBalanceMovement = typeof contractBalanceMovements.$inferSelect;
-export type InsertContractBalanceMovement = typeof contractBalanceMovements.$inferInsert;
-
-export const contractReajustes = mysqlTable(
-  "contract_reajustes",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    contractId: int("contractId").notNull().references(() => postAwardContracts.id, { onDelete: "cascade" }),
-    reajusteDate: date("reajusteDate").notNull(),
-    indexName: varchar("indexName", { length: 64 }),
-    indexPercent: decimal("indexPercent", { precision: 8, scale: 4 }).default("0.0000"),
-    previousValue: decimal("previousValue", { precision: 14, scale: 2 }).default("0.00"),
-    updatedValue: decimal("updatedValue", { precision: 14, scale: 2 }).default("0.00"),
-    notes: text("notes"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_contract_reajuste_contract").on(table.contractId),
-    index("idx_contract_reajuste_date").on(table.reajusteDate),
-  ]
-);
-export type ContractReajuste = typeof contractReajustes.$inferSelect;
-export type InsertContractReajuste = typeof contractReajustes.$inferInsert;
-
-export const contractExtensions = mysqlTable(
-  "contract_extensions",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    contractId: int("contractId").notNull().references(() => postAwardContracts.id, { onDelete: "cascade" }),
-    extensionType: mysqlEnum("extensionType", ["prazo", "quantitativo", "ambos"]).default("prazo").notNull(),
-    previousEndDate: date("previousEndDate"),
-    newEndDate: date("newEndDate"),
-    addedDays: int("addedDays").default(0).notNull(),
-    notes: text("notes"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_contract_extensions_contract").on(table.contractId),
-    index("idx_contract_extensions_new_end").on(table.newEndDate),
-  ]
-);
-export type ContractExtension = typeof contractExtensions.$inferSelect;
-export type InsertContractExtension = typeof contractExtensions.$inferInsert;
-
 export const contractAlerts = mysqlTable(
   "contract_alerts",
   {
@@ -2876,6 +1249,109 @@ export const contractAlerts = mysqlTable(
 );
 export type ContractAlert = typeof contractAlerts.$inferSelect;
 export type InsertContractAlert = typeof contractAlerts.$inferInsert;
+
+export const operationalCertifications = mysqlTable(
+  "operational_certifications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    entityType: mysqlEnum("entityType", ["supplier", "portal"]).notNull(),
+    entityId: int("entityId"),
+    entityName: varchar("entityName", { length: 256 }).notNull(),
+    status: mysqlEnum("status", ["pending", "approved", "failed", "expired"]).default("pending").notNull(),
+    checklist: json("checklist").notNull(),
+    evidenceUrl: varchar("evidenceUrl", { length: 512 }),
+    notes: text("notes"),
+    validUntil: date("validUntil"),
+    lastTestedAt: timestamp("lastTestedAt"),
+    testedBy: varchar("testedBy", { length: 320 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    unique("uq_operational_certification_entity").on(table.entityType, table.entityName),
+    index("idx_operational_certification_status").on(table.status),
+    index("idx_operational_certification_type").on(table.entityType),
+  ]
+);
+export type OperationalCertification = typeof operationalCertifications.$inferSelect;
+export type InsertOperationalCertification = typeof operationalCertifications.$inferInsert;
+
+export const contractLifecycle = mysqlTable(
+  "contract_lifecycle",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    funilId: int("funilId"),
+    proposalId: int("proposalId"),
+    orgao: varchar("orgao", { length: 256 }).notNull(),
+    numeroContrato: varchar("numeroContrato", { length: 128 }).notNull(),
+    objeto: text("objeto"),
+    valorContratado: decimal("valorContratado", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    saldoContratual: decimal("saldoContratual", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    inicioVigencia: date("inicioVigencia"),
+    fimVigencia: date("fimVigencia"),
+    dataBaseReajuste: date("dataBaseReajuste"),
+    indiceReajuste: varchar("indiceReajuste", { length: 64 }),
+    garantiaVencimento: date("garantiaVencimento"),
+    status: mysqlEnum("status", ["draft", "active", "suspended", "expired", "closed", "cancelled"])
+      .default("draft")
+      .notNull(),
+    alerts: json("alerts"),
+    notes: text("notes"),
+    createdBy: varchar("createdBy", { length: 320 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    unique("uq_contract_number").on(table.numeroContrato),
+    index("idx_contract_status").on(table.status),
+    index("idx_contract_end_date").on(table.fimVigencia),
+    index("idx_contract_funil").on(table.funilId),
+  ]
+);
+export type ContractLifecycle = typeof contractLifecycle.$inferSelect;
+export type InsertContractLifecycle = typeof contractLifecycle.$inferInsert;
+
+export const contractItemBalances = mysqlTable(
+  "contract_item_balances",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    contractId: int("contractId")
+      .notNull()
+      .references(() => contractLifecycle.id, { onDelete: "cascade" }),
+    description: varchar("description", { length: 512 }).notNull(),
+    quantityContracted: decimal("quantityContracted", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    quantityOrdered: decimal("quantityOrdered", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    quantityDelivered: decimal("quantityDelivered", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    quantityInvoiced: decimal("quantityInvoiced", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    unitPrice: decimal("unitPrice", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [index("idx_contract_item_contract").on(table.contractId)]
+);
+export type ContractItemBalance = typeof contractItemBalances.$inferSelect;
+export type InsertContractItemBalance = typeof contractItemBalances.$inferInsert;
+
+export const executiveAssessments = mysqlTable(
+  "executive_assessments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    opportunityId: int("opportunityId").notNull(),
+    score: decimal("score", { precision: 5, scale: 2 }).notNull(),
+    recommendation: mysqlEnum("recommendation", ["go", "caution", "no_go"]).notNull(),
+    metrics: json("metrics").notNull(),
+    blockers: json("blockers").notNull(),
+    reasons: json("reasons").notNull(),
+    createdBy: varchar("createdBy", { length: 320 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_executive_assessment_opportunity").on(table.opportunityId),
+    index("idx_executive_assessment_recommendation").on(table.recommendation),
+  ]
+);
+export type ExecutiveAssessment = typeof executiveAssessments.$inferSelect;
+export type InsertExecutiveAssessment = typeof executiveAssessments.$inferInsert;
 
 export const capturedProductBatches = mysqlTable(
   "captured_product_batches",
@@ -3269,6 +1745,10 @@ export const purchaseOrders = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     funilId: int("funilId"),
+    // Proposta comercial vencedora que originou este pedido — fecha o ciclo
+    // proposta → pedido (antes o pedido era digitado do zero, sem herdar
+    // nada da proposta). Ver posVenda.criarPedidoDeProposta.
+    proposalId: int("proposalId").references(() => proposals.id, { onDelete: "set null" }),
     supplierId: int("supplierId"),
     fornecedorNome: varchar("fornecedorNome", { length: 256 }).notNull(),
     descricao: varchar("descricao", { length: 512 }).notNull(),
@@ -3283,7 +1763,11 @@ export const purchaseOrders = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
-  (t) => [index("idx_po_status").on(t.status), index("idx_po_funil").on(t.funilId)]
+  (t) => [
+    index("idx_po_status").on(t.status),
+    index("idx_po_funil").on(t.funilId),
+    index("idx_po_proposal").on(t.proposalId),
+  ]
 );
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 

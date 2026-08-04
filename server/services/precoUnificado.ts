@@ -21,15 +21,44 @@ export interface EntradaPreco {
   freteUnit?: number;   // frete unitário em R$ (custo de aquisição)
 }
 
-const r2 = (v: number) => Math.round(v * 100) / 100;
+export const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /**
- * Preço final unitário pela fórmula do divisor (imposto por dentro).
+ * Núcleo aritmético único do divisor de preço — usado por TODOS os pontos
+ * de precificação do sistema (precoUnificado, pricingSafety, custoTotalService,
+ * PricingService). Sem validação e sem arredondamento: cada chamador aplica
+ * suas próprias regras de validação/erro e de casas decimais sobre este
+ * resultado, preservando o contrato observável que já tinham antes da
+ * consolidação (alguns lançam exceção e retornam valor cheio, outros
+ * retornam null e arredondam).
+ *
+ * preço = (custo + frete) / (1 − (impostos% + margem%)/100)
+ *
+ * Retorna null quando impostos + margem ≥ 100% da venda (inviável).
+ */
+export function calcularPrecoDivisor(input: {
+  custo: number;
+  margemPct: number;
+  impostosPct?: number;
+  freteUnit?: number;
+}): number | null {
+  const custoComFrete = input.custo + (input.freteUnit ?? 0);
+  const divisor = 1 - ((input.impostosPct ?? 0) + input.margemPct) / 100;
+  if (divisor <= 0) return null;
+  return custoComFrete / divisor;
+}
+
+/**
+ * Preço final unitário pela fórmula do divisor (imposto por dentro),
+ * arredondado a 2 casas decimais.
  * Retorna null quando impostos + margem ≥ 100% da venda (inviável).
  */
 export function precoFinalUnificado(e: EntradaPreco): number | null {
-  const custo = e.custo + (e.freteUnit ?? 0);
-  const divisor = 1 - ((e.impostosPct ?? 0) + e.margemPct) / 100;
-  if (divisor <= 0) return null;
-  return r2(custo / divisor);
+  const preco = calcularPrecoDivisor({
+    custo: e.custo,
+    margemPct: e.margemPct,
+    impostosPct: e.impostosPct,
+    freteUnit: e.freteUnit,
+  });
+  return preco === null ? null : r2(preco);
 }

@@ -1,10 +1,13 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, editorProcedure, router } from "../_core/trpc";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { products, proposals, suppliers } from "../../drizzle/schema";
-import { addProposalItem, advanceProposalStatus, createFinancialEntry, createProposal, deleteProposal, duplicateProposal, getDb, getProposalStatusHistory, getProposalWithItems, listProposals, listProposalsAdmin, removeProposalItem, suggestProductsFromList, updateProposal, updateProposalFreight, updateProposalItem } from "../db";
+import { addProposalItem, advanceProposalStatus, createFinancialEntry, createProposal, deleteProposal, duplicateProposal, getCompanySettings, getDb, getProposalStatusHistory, getProposalWithItems, getRequestingOrgById, listProposals, listProposalsAdmin, removeProposalItem, suggestProductsFromList, updateProposal, updateProposalFreight, updateProposalItem } from "../db";
 import { validateEquivalenceForMultipleItems } from "../services/equivalenceValidationService";
 import { recordAudit } from "../services/auditService";
+import { generateProposalPdf } from "../proposalPdf";
+import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 
 export const proposalsRouter = router({
     list: protectedProcedure.query(() => listProposals()),
@@ -137,6 +140,71 @@ export const proposalsRouter = router({
         dateTo: z.date().optional(),
       }).optional())
       .query(({ input }) => listProposalsAdmin(input)),
+
+    /**
+     * Envia a proposta por e-mail ao comprador (PDF em anexo) e avança o
+     * status para "sent" — fecha o ciclo que hoje termina em download manual.
+     * Reaproveita o mesmo motor de envio (emailSenderService) e a mesma
+     * trilha de status (advanceProposalStatus) já usados no fluxo de
+     * cotações recebidas por e-mail.
+     */
+    sendByEmail: editorProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          to: z.string().email().optional(),
+          subject: z.string().max(256).optional(),
+          mensagem: z.string().max(4000).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        if (!isSmtpConfigured()) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "SMTP não configurado. Defina SMTP_HOST, SMTP_USER e SMTP_PASSWORD.",
+          });
+        }
+
+        const proposal = await getProposalWithItems(input.id);
+        if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+
+        const org = proposal.orgId ? await getRequestingOrgById(proposal.orgId) : null;
+        const destinatario = input.to ?? org?.email ?? undefined;
+        if (!destinatario) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Sem destinatário: informe um e-mail (o órgão vinculado não tem e-mail cadastrado).",
+          });
+        }
+
+        const company = await getCompanySettings();
+        // generateProposalPdf valida preço pronto de cada item (assertProposalPricingReady)
+        // — nenhuma proposta sai sem preço de venda definido.
+        const pdfBuffer = await generateProposalPdf(proposal as any, company as any);
+
+        await sendEmail({
+          to: destinatario,
+          subject: input.subject ?? `Proposta comercial - ${proposal.title}`,
+          text:
+            input.mensagem ??
+            "Prezados,\n\nSegue em anexo nossa proposta comercial.\n\nAtenciosamente.",
+          attachments: [
+            { filename: `proposta-${input.id}.pdf`, content: pdfBuffer, contentType: "application/pdf" },
+          ],
+        });
+
+        await advanceProposalStatus(input.id, "sent", `Enviada por e-mail para ${destinatario}`);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "proposal_send_email",
+          entity: "proposals",
+          entityId: input.id,
+          summary: `Proposta enviada por e-mail para ${destinatario}`,
+        });
+
+        return { success: true as const, to: destinatario };
+      }),
+
     advanceStatus: protectedProcedure
       .input(z.object({
         id: z.number(),
@@ -145,9 +213,25 @@ export const proposalsRouter = router({
         // Parcelamento: apenas quando newStatus === 'delivered'
         installments: z.number().int().min(1).max(60).optional(),
         firstDueDate: z.date().optional(), // data de vencimento da 1ª parcela
+        // Perda para concorrente: apenas quando newStatus === 'cancelled'.
+        // Ausentes = cancelamento interno (não conta como perda no win rate).
+        lossReason: z.string().max(2000).optional(),
+        competitorValue: z.number().nonnegative().optional(),
       }))
       .mutation(async ({ input }) => {
         await advanceProposalStatus(input.id, input.newStatus, input.notes);
+        if (input.newStatus === "cancelled" && (input.lossReason || input.competitorValue != null)) {
+          const db = await getDb();
+          if (db) {
+            await db
+              .update(proposals)
+              .set({
+                lossReason: input.lossReason,
+                competitorValue: input.competitorValue != null ? String(input.competitorValue) : undefined,
+              })
+              .where(eq(proposals.id, input.id));
+          }
+        }
         // Gerar entradas financeiras parceladas ao marcar como entregue
         if (input.newStatus === "delivered" && input.installments && input.installments > 1) {
           const db = await getDb();

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatBRL, formatDateBR } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { PackageCheck, Loader2, Plus, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -11,8 +12,8 @@ import { toast } from "sonner";
 type Aba = "pedidos" | "entregas" | "receber" | "pagar" | "fluxo";
 
 const num = (s: string) => parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
-const moeda = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const dataBR = (d: string | Date | null) => (d ? new Date(d).toLocaleDateString("pt-BR") : "—");
+const moeda = formatBRL;
+const dataBR = formatDateBR;
 
 const STATUS_PEDIDO = ["solicitado", "confirmado", "faturado", "enviado", "recebido", "divergente", "cancelado"] as const;
 const STATUS_ENTREGA = ["preparando", "transito", "entregue", "atrasada", "devolvida"] as const;
