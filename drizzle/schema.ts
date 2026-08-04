@@ -2877,6 +2877,109 @@ export const contractAlerts = mysqlTable(
 export type ContractAlert = typeof contractAlerts.$inferSelect;
 export type InsertContractAlert = typeof contractAlerts.$inferInsert;
 
+export const operationalCertifications = mysqlTable(
+  "operational_certifications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    entityType: mysqlEnum("entityType", ["supplier", "portal"]).notNull(),
+    entityId: int("entityId"),
+    entityName: varchar("entityName", { length: 256 }).notNull(),
+    status: mysqlEnum("status", ["pending", "approved", "failed", "expired"]).default("pending").notNull(),
+    checklist: json("checklist").notNull(),
+    evidenceUrl: varchar("evidenceUrl", { length: 512 }),
+    notes: text("notes"),
+    validUntil: date("validUntil"),
+    lastTestedAt: timestamp("lastTestedAt"),
+    testedBy: varchar("testedBy", { length: 320 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    unique("uq_operational_certification_entity").on(table.entityType, table.entityName),
+    index("idx_operational_certification_status").on(table.status),
+    index("idx_operational_certification_type").on(table.entityType),
+  ]
+);
+export type OperationalCertification = typeof operationalCertifications.$inferSelect;
+export type InsertOperationalCertification = typeof operationalCertifications.$inferInsert;
+
+export const contractLifecycle = mysqlTable(
+  "contract_lifecycle",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    funilId: int("funilId"),
+    proposalId: int("proposalId"),
+    orgao: varchar("orgao", { length: 256 }).notNull(),
+    numeroContrato: varchar("numeroContrato", { length: 128 }).notNull(),
+    objeto: text("objeto"),
+    valorContratado: decimal("valorContratado", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    saldoContratual: decimal("saldoContratual", { precision: 15, scale: 2 }).default("0.00").notNull(),
+    inicioVigencia: date("inicioVigencia"),
+    fimVigencia: date("fimVigencia"),
+    dataBaseReajuste: date("dataBaseReajuste"),
+    indiceReajuste: varchar("indiceReajuste", { length: 64 }),
+    garantiaVencimento: date("garantiaVencimento"),
+    status: mysqlEnum("status", ["draft", "active", "suspended", "expired", "closed", "cancelled"])
+      .default("draft")
+      .notNull(),
+    alerts: json("alerts"),
+    notes: text("notes"),
+    createdBy: varchar("createdBy", { length: 320 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    unique("uq_contract_number").on(table.numeroContrato),
+    index("idx_contract_status").on(table.status),
+    index("idx_contract_end_date").on(table.fimVigencia),
+    index("idx_contract_funil").on(table.funilId),
+  ]
+);
+export type ContractLifecycle = typeof contractLifecycle.$inferSelect;
+export type InsertContractLifecycle = typeof contractLifecycle.$inferInsert;
+
+export const contractItemBalances = mysqlTable(
+  "contract_item_balances",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    contractId: int("contractId")
+      .notNull()
+      .references(() => contractLifecycle.id, { onDelete: "cascade" }),
+    description: varchar("description", { length: 512 }).notNull(),
+    quantityContracted: decimal("quantityContracted", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    quantityOrdered: decimal("quantityOrdered", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    quantityDelivered: decimal("quantityDelivered", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    quantityInvoiced: decimal("quantityInvoiced", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    unitPrice: decimal("unitPrice", { precision: 15, scale: 4 }).default("0.0000").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [index("idx_contract_item_contract").on(table.contractId)]
+);
+export type ContractItemBalance = typeof contractItemBalances.$inferSelect;
+export type InsertContractItemBalance = typeof contractItemBalances.$inferInsert;
+
+export const executiveAssessments = mysqlTable(
+  "executive_assessments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    opportunityId: int("opportunityId").notNull(),
+    score: decimal("score", { precision: 5, scale: 2 }).notNull(),
+    recommendation: mysqlEnum("recommendation", ["go", "caution", "no_go"]).notNull(),
+    metrics: json("metrics").notNull(),
+    blockers: json("blockers").notNull(),
+    reasons: json("reasons").notNull(),
+    createdBy: varchar("createdBy", { length: 320 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_executive_assessment_opportunity").on(table.opportunityId),
+    index("idx_executive_assessment_recommendation").on(table.recommendation),
+  ]
+);
+export type ExecutiveAssessment = typeof executiveAssessments.$inferSelect;
+export type InsertExecutiveAssessment = typeof executiveAssessments.$inferInsert;
+
 export const capturedProductBatches = mysqlTable(
   "captured_product_batches",
   {
