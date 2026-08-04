@@ -6,6 +6,135 @@ import { calculateSalePrice } from "../services/pricingSafety";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
 import { addProposalItem, createProposal, getDb, getProductById, getProposalTemplate, loadFeedbackMap, loadSynonymMap, normalizeEditalTerm, recordFeedback, upsertRequestingOrg } from "../db";
 
+interface EditalExtraction {
+  processo: { numero: string; modalidade: string; orgao: string; objeto: string };
+  itens: Array<{ numero: number; descricao: string; unidade: string; quantidade: number; precoUnitario: number | null; precoTotal: number | null }>;
+}
+
+export const EDITAL_CHUNK_SIZE = 120000;
+export const EDITAL_CHUNK_OVERLAP = 3000;
+export const EDITAL_MAX_CHUNKS = 5;
+
+/**
+ * Divide o texto do edital em chunks de até EDITAL_CHUNK_SIZE chars, com
+ * sobreposição para reduzir o risco de cortar um item bem na fronteira.
+ * Limitado a EDITAL_MAX_CHUNKS (cobre ~600.000 chars — a esmagadora maioria
+ * dos editais reais); além disso, `truncated` avisa honestamente que parte
+ * do documento não foi processada, em vez de simplesmente cortar em
+ * silêncio como antes.
+ */
+export function splitEditalIntoChunks(rawText: string): { chunks: string[]; truncated: boolean } {
+  const chunks: string[] = [];
+  const step = EDITAL_CHUNK_SIZE - EDITAL_CHUNK_OVERLAP;
+  for (let start = 0; start < rawText.length && chunks.length < EDITAL_MAX_CHUNKS; start += step) {
+    chunks.push(rawText.slice(start, start + EDITAL_CHUNK_SIZE));
+  }
+  if (chunks.length === 0) chunks.push("");
+  const coveredChars = Math.min(rawText.length, (chunks.length - 1) * step + EDITAL_CHUNK_SIZE);
+  return { chunks, truncated: coveredChars < rawText.length };
+}
+
+/**
+ * Mescla os resultados de N chunks extraídos independentemente: metadados
+ * do processo vêm do primeiro chunk que os retornar preenchidos; itens são
+ * concatenados e deduplicados por número (chunks vizinhos se sobrepõem e
+ * podem extrair o mesmo item duas vezes).
+ */
+export function mergeEditalExtractions(extractions: EditalExtraction[]): EditalExtraction {
+  const processo = extractions.find((e) => e.processo?.numero?.trim())?.processo
+    ?? extractions[0]?.processo
+    ?? { numero: "", modalidade: "", orgao: "", objeto: "" };
+
+  const itensPorNumero = new Map<number, EditalExtraction["itens"][number]>();
+  for (const extraction of extractions) {
+    for (const item of extraction.itens ?? []) {
+      if (!itensPorNumero.has(item.numero)) itensPorNumero.set(item.numero, item);
+    }
+  }
+  const itens = [...itensPorNumero.values()].sort((a, b) => a.numero - b.numero);
+
+  return { processo, itens };
+}
+
+const EDITAL_EXTRACTION_SCHEMA = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "edital_extraction",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        processo: {
+          type: "object",
+          properties: {
+            numero: { type: "string", description: "Número do processo ou pregão, ex: 001/2025" },
+            modalidade: { type: "string", description: "Modalidade: Pregão Eletrônico, Dispensa, Concorrência, etc." },
+            orgao: { type: "string", description: "Nome do órgão ou entidade requisitante" },
+            objeto: { type: "string", description: "Objeto resumido da licitação" },
+          },
+          required: ["numero", "modalidade", "orgao", "objeto"],
+          additionalProperties: false,
+        },
+        itens: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              numero: { type: "number", description: "Número sequencial do item" },
+              descricao: { type: "string", description: "Descrição completa do item" },
+              unidade: { type: "string", description: "Unidade de medida: UN, CX, KG, L, etc." },
+              quantidade: { type: "number", description: "Quantidade solicitada" },
+              precoUnitario: { type: ["number", "null"], description: "Preço unitário de referência em reais (null se não informado)" },
+              precoTotal: { type: ["number", "null"], description: "Preço total estimado do item em reais (null se não informado)" },
+            },
+            required: ["numero", "descricao", "unidade", "quantidade", "precoUnitario", "precoTotal"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["processo", "itens"],
+      additionalProperties: false,
+    },
+  },
+};
+
+/** Extrai processo+itens de UM trecho de texto de edital (até CHUNK_SIZE chars). */
+async function extractEditalChunk(chunkText: string, isFirstChunk: boolean): Promise<EditalExtraction> {
+  const llmResult = await invokeLLM({
+    messages: [
+      {
+        role: "system",
+        content:
+          "Você é um especialista em licitações públicas brasileiras. Analise o texto de um edital (ou um trecho dele) e extraia: " +
+          "(1) metadados do processo (número do processo, modalidade, órgão, objeto) — se o trecho não contiver essa informação, use string vazia; " +
+          "(2) lista completa de itens/produtos solicitados NESTE TRECHO com: número do item (conforme numerado no próprio edital, não reenumere), descrição completa, unidade de medida, quantidade, " +
+          "preço unitário de referência (se informado no edital — pode aparecer como 'valor unitário', 'preço máximo', 'preço referência', 'valor estimado unitário') e " +
+          "preço total estimado do item (quantidade × preço unitário). " +
+          "Se o edital não informar preços, retorne null nesses campos. " +
+          (isFirstChunk
+            ? ""
+            : "Este é um trecho intermediário/final de um edital maior — extraia apenas os itens presentes neste trecho, sem inventar nem repetir itens de outras partes. ") +
+          "Responda APENAS com JSON válido conforme o schema solicitado.",
+      },
+      {
+        role: "user",
+        content: `Analise o seguinte texto de edital e extraia os dados solicitados:\n\n${chunkText}`,
+      },
+    ],
+    response_format: EDITAL_EXTRACTION_SCHEMA,
+  });
+
+  const rawContent = llmResult.choices?.[0]?.message?.content;
+  const content = typeof rawContent === "string" ? rawContent : null;
+  if (!content) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "IA não retornou resposta" });
+
+  try {
+    return parseLlmJson(content);
+  } catch {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Resposta da IA inválida" });
+  }
+}
+
 export const editalRouter = router({
     // Extrai texto de PDF ou DOCX (base64) e usa IA para identificar itens do edital
     extract: protectedProcedure
@@ -21,90 +150,17 @@ export const editalRouter = router({
         const { extractDocumentText } = await import("../services/documentTextService");
         const { text: rawText } = await extractDocumentText(input);
 
-        // Limite aumentado para 120.000 chars (~100 itens de edital)
-        // Para documentos maiores, processa em chunks e mescla os resultados
-        const CHUNK_SIZE = 120000;
-        const needsChunking = rawText.length > CHUNK_SIZE;
-        const truncatedText = rawText.slice(0, CHUNK_SIZE);
-
-        // 2. Usar IA para extrair metadados do edital e lista de itens
-        const llmResult = await invokeLLM({
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um especialista em licitações públicas brasileiras. Analise o texto de um edital e extraia: " +
-                "(1) metadados do processo (número do processo, modalidade, órgão, objeto); " +
-                "(2) lista completa de itens/produtos solicitados com: número do item, descrição completa, unidade de medida, quantidade, " +
-                "preço unitário de referência (se informado no edital — pode aparecer como 'valor unitário', 'preço máximo', 'preço referência', 'valor estimado unitário') e " +
-                "preço total estimado do item (quantidade × preço unitário). " +
-                "Se o edital não informar preços, retorne null nesses campos. " +
-                "Responda APENAS com JSON válido conforme o schema solicitado.",
-            },
-            {
-              role: "user",
-              content: `Analise o seguinte texto de edital e extraia os dados solicitados:\n\n${truncatedText}`,
-            },
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "edital_extraction",
-              strict: true,
-              schema: {
-                type: "object",
-                properties: {
-                  processo: {
-                    type: "object",
-                    properties: {
-                      numero: { type: "string", description: "Número do processo ou pregão, ex: 001/2025" },
-                      modalidade: { type: "string", description: "Modalidade: Pregão Eletrônico, Dispensa, Concorrência, etc." },
-                      orgao: { type: "string", description: "Nome do órgão ou entidade requisitante" },
-                      objeto: { type: "string", description: "Objeto resumido da licitação" },
-                    },
-                    required: ["numero", "modalidade", "orgao", "objeto"],
-                    additionalProperties: false,
-                  },
-                  itens: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                        properties: {
-                        numero: { type: "number", description: "Número sequencial do item" },
-                        descricao: { type: "string", description: "Descrição completa do item" },
-                        unidade: { type: "string", description: "Unidade de medida: UN, CX, KG, L, etc." },
-                        quantidade: { type: "number", description: "Quantidade solicitada" },
-                        precoUnitario: { type: ["number", "null"], description: "Preço unitário de referência em reais (null se não informado)" },
-                        precoTotal: { type: ["number", "null"], description: "Preço total estimado do item em reais (null se não informado)" },
-                      },
-                      required: ["numero", "descricao", "unidade", "quantidade", "precoUnitario", "precoTotal"],
-                      additionalProperties: false,
-                    },
-                  },
-                },
-                required: ["processo", "itens"],
-                additionalProperties: false,
-              },
-            },
-          },
-        });
-
-        const rawContent = llmResult.choices?.[0]?.message?.content;
-        const content = typeof rawContent === "string" ? rawContent : null;
-        if (!content) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "IA não retornou resposta" });
-
-        let parsed: { processo: { numero: string; modalidade: string; orgao: string; objeto: string }; itens: Array<{ numero: number; descricao: string; unidade: string; quantidade: number; precoUnitario: number | null; precoTotal: number | null }> };
-        try {
-          parsed = parseLlmJson(content);
-        } catch {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Resposta da IA inválida" });
-        }
+        // 2. Editais maiores que 1 chamada são processados em chunks reais
+        // (ver splitEditalIntoChunks) e os resultados mesclados.
+        const { chunks, truncated } = splitEditalIntoChunks(rawText);
+        const extractions = await Promise.all(chunks.map((chunk, idx) => extractEditalChunk(chunk, idx === 0)));
+        const { processo, itens } = mergeEditalExtractions(extractions);
 
         return {
-          processo: parsed.processo,
-          itens: parsed.itens,
+          processo,
+          itens,
           totalChars: rawText.length,
-          truncated: needsChunking && rawText.length > CHUNK_SIZE * 2,
+          truncated,
         };
       }),
 
