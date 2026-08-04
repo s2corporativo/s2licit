@@ -99,6 +99,13 @@
       "when": 1784425000000,
       "tag": "0013_operational_governance",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1785852244916,
+      "tag": "0014_drop_orphan_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -138,7 +138,7 @@ export async function findDuplicateGroups(opts?: {
 
 /**
  * Funde um grupo de duplicatas: mantém o produto mestre (masterId),
- * redireciona TODAS as referências (proposal_items, quotation_items,
+ * redireciona TODAS as referências (proposal_items,
  * equivalence_members, ofertas por fornecedor e histórico de preço) para o
  * mestre — em transação — e desativa (soft delete) os demais.
  */
