@@ -80,7 +80,6 @@ function ActionLink({
 export default function Dashboard() {
   const { user } = useAuth();
   const { data: stats, isLoading } = trpc.dashboard.stats.useQuery();
-  const { data: extended } = trpc.dashboard.extendedStats.useQuery();
   const { data: pipeline = [] } = trpc.dashboard.proposalPipeline.useQuery();
   const { data: expiring = [] } = trpc.dashboard.expiringProposals.useQuery({ daysAhead: 7 });
 
@@ -89,6 +88,9 @@ export default function Dashboard() {
     .filter((item) => !["delivered", "cancelled"].includes(item.status))
     .reduce((total, item) => total + item.count, 0);
   const pipelineValue = pipeline.reduce((total, item) => total + item.totalValue, 0);
+  const executionCount = pipeline
+    .filter((item) => ["order", "in_transit"].includes(item.status))
+    .reduce((total, item) => total + item.count, 0);
   const firstName = user?.name?.trim().split(/\s+/)[0];
 
   return (
@@ -131,7 +133,7 @@ export default function Dashboard() {
         />
         <Metric
           label="Pedidos e entregas"
-          value={extended?.ordersInProgress ?? 0}
+          value={executionCount}
           detail="operações que precisam de acompanhamento"
           href="/centro-operacional"
           icon={<PackageCheck size={18} />}
