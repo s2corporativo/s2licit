@@ -55,7 +55,6 @@ queryClient.getMutationCache().subscribe(event => {
 
 // Procedimentos de importação que enviam payloads grandes — usam httpLink (sem batching)
 const LARGE_PAYLOAD_PROCEDURES = new Set([
-  "imports.processUpload",
   "imports.processUploadV2",
   "imports.startBatchImport",
   "imports.previewCategoryClassification",
