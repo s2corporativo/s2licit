@@ -441,6 +441,101 @@ function SimilaresPanel({
     </div>
   );
 }
+
+// ─── Validação de Equivalência Técnica (IA) ────────────────────────────────────
+// Serviço já existia no backend (proposals.validateEquivalenceForItems) mas
+// nenhuma tela o chamava — o requisito central de equivalência auditável
+// (§12) ficava órfão. Disparo manual (não automático) para manter o custo
+// de IA visível e sob controle do operador, como já é o padrão nas outras
+// telas de IA do sistema.
+
+function equivalenciaVeredito(score: number): { label: string; cls: string; icon: "ok" | "ressalva" | "alerta" } {
+  if (score >= 90) return { label: "Equivalente", cls: "bg-green-100 text-green-800 border-green-300", icon: "ok" };
+  if (score >= 70) return { label: "Equivalente com ressalvas", cls: "bg-yellow-100 text-yellow-800 border-yellow-300", icon: "ressalva" };
+  return { label: "Verificar manualmente", cls: "bg-orange-100 text-orange-800 border-orange-300", icon: "alerta" };
+}
+
+function EquivalenciaValidationPanel({
+  itemDescricao,
+  quantidade,
+  unidade,
+}: {
+  itemDescricao: string;
+  quantidade: number;
+  unidade: string;
+}) {
+  const [checked, setChecked] = useState(false);
+  const validar = trpc.proposals.validateEquivalenceForItems.useMutation();
+
+  if (!checked) {
+    return (
+      <button
+        onClick={() => {
+          setChecked(true);
+          validar.mutate({
+            items: [{ id: "item", description: itemDescricao, quantity: quantidade, unit: unidade }],
+          });
+        }}
+        className="inline-flex items-center gap-1.5 text-[11px] font-bold text-violet-700 border border-violet-300 px-2 py-1 hover:bg-violet-50 transition-colors"
+      >
+        <Brain size={11} />
+        Validar equivalência técnica (IA)
+      </button>
+    );
+  }
+
+  if (validar.isPending) {
+    return (
+      <p className="text-xs text-gray-400 flex items-center gap-1.5 py-1">
+        <Loader2 size={11} className="animate-spin" /> Analisando atributos técnicos...
+      </p>
+    );
+  }
+
+  if (validar.isError) {
+    return <p className="text-xs text-red-600 py-1">Falha na validação: {validar.error.message}</p>;
+  }
+
+  const resultado = validar.data?.[0];
+  if (!resultado) return null;
+
+  const { extractedAttributes, bestMatch, totalFound } = resultado;
+  const veredito = bestMatch ? equivalenciaVeredito(bestMatch.score) : null;
+
+  return (
+    <div className="mt-2 border border-violet-200 bg-violet-50/50 p-2.5 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-black text-violet-900 uppercase tracking-widest">Análise de equivalência técnica (IA)</span>
+        {veredito ? (
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 border ${veredito.cls}`}>{veredito.label}</span>
+        ) : (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 border bg-gray-100 text-gray-600 border-gray-300">
+            {totalFound === 0 ? "Sem candidatos no catálogo" : "Dados insuficientes"}
+          </span>
+        )}
+      </div>
+      {(extractedAttributes.principioAtivo || extractedAttributes.concentracao || extractedAttributes.formaFarmaceutica) && (
+        <p className="text-[11px] text-gray-600">
+          Atributos extraídos: {[
+            extractedAttributes.principioAtivo,
+            extractedAttributes.concentracao,
+            extractedAttributes.formaFarmaceutica,
+          ].filter(Boolean).join(" · ")}
+        </p>
+      )}
+      {bestMatch && (
+        <div className="text-[11px] text-gray-700 space-y-0.5">
+          <p><span className="font-semibold">Melhor equivalente:</span> {bestMatch.name} ({bestMatch.score}% de aderência)</p>
+          <p className="text-gray-500">{bestMatch.justification}</p>
+        </div>
+      )}
+      {totalFound > 1 && (
+        <p className="text-[10px] text-gray-400">+{totalFound - 1} outro(s) candidato(s) encontrado(s) no catálogo.</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Confidence Badge ─────────────────────────────────────────────────────────
 
 function ConfidenceBadge({ confidence }: { confidence: MatchedItem["confidence"] }) {
@@ -1214,6 +1309,15 @@ export default function ImportarEdital() {
                           />
                         </div>
                       )}
+
+                      {/* Validação de equivalência técnica por IA (§12 — requisito central) */}
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <EquivalenciaValidationPanel
+                          itemDescricao={m.itemDescricao}
+                          quantidade={m.itemQuantidade}
+                          unidade={m.itemUnidade}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
