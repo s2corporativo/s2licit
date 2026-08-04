@@ -21,7 +21,7 @@ const stages = [
   { status: "order", label: "Pedidos", color: "bg-amber-500" },
   { status: "in_transit", label: "Em trânsito", color: "bg-violet-600" },
   { status: "delivered", label: "Entregues", color: "bg-emerald-600" },
-];
+] as const;
 
 function Metric({
   label,
