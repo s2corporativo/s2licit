@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatBRL } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { Gavel, Plus, Trash2, AlertTriangle, Calculator } from "lucide-react";
 
@@ -11,9 +12,7 @@ interface ItemInput {
 
 const emptyItem: ItemInput = { descricao: "", custo: "", quantidade: "1", medianaHomologado: "" };
 
-function brl(n: number) {
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+const brl = formatBRL;
 
 export default function SalaDisputa() {
   const [items, setItems] = useState<ItemInput[]>([{ ...emptyItem }]);

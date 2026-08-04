@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatBRL } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import { usePermission } from "@/components/RequireAuth";
 import { Percent, Loader2, Plus, Ban, Calculator, AlertTriangle } from "lucide-react";
@@ -25,9 +26,7 @@ const TIPO_LABEL: Record<string, string> = {
 
 const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
 
-function moeda(v: number): string {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+const moeda = formatBRL;
 
 export default function MotorTributario() {
   const isAdmin = usePermission("admin");

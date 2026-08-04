@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { formatBRL } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 
 interface NfePreview {
@@ -175,7 +176,7 @@ export function NfeUploadComponent({ onSuccess, onError }: NfeUploadComponentPro
               <p><strong>Fornecedor:</strong> {preview.supplierName}</p>
               <p><strong>CNPJ:</strong> {preview.supplierCnpj}</p>
               <p><strong>Itens:</strong> {preview.products.length}</p>
-              <p><strong>Valor:</strong> {preview.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p>
+              <p><strong>Valor:</strong> {formatBRL(preview.totalValue)}</p>
               <p><strong>Selecionados:</strong> {selectedProducts.size}</p>
             </div>
           </Card>
@@ -205,8 +206,8 @@ export function NfeUploadComponent({ onSuccess, onError }: NfeUploadComponentPro
                     <td className="p-2 font-medium">{product.productName}</td>
                     <td className="p-2 font-mono text-xs">{product.ean || "—"}</td>
                     <td className="p-2 text-right">{product.quantity}</td>
-                    <td className="p-2 text-right">{Number(product.unitPrice).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
-                    <td className="p-2 text-right">{Number(product.totalPrice).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
+                    <td className="p-2 text-right">{formatBRL(product.unitPrice)}</td>
+                    <td className="p-2 text-right">{formatBRL(product.totalPrice)}</td>
                   </tr>
                 ))}
               </tbody>

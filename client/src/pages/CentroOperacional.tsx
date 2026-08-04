@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { usePermission } from "@/components/RequireAuth";
+import { formatBRL, formatDateBR } from "@/lib/format";
 import { trpc } from "@/lib/trpc";
 import {
   Activity,
@@ -218,5 +219,4 @@ function Loading() { return <div className="p-8 text-center"><Loader2 className=
 function Empty({ text }: { text: string }) { return <div className="border border-dashed p-8 text-center text-sm text-gray-400">{text}</div>; }
 function ErrorState({ message }: { message: string }) { return <div className="border border-red-200 bg-red-50 p-4 text-sm text-red-700">{message}</div>; }
 function Result({ title, items }: { title: string; items: string[] }) { return items.length ? <div className="border p-3"><div className="mb-1 text-xs font-bold uppercase">{title}</div><ul className="space-y-1 text-sm">{items.map((item) => <li key={item}>• {item}</li>)}</ul></div> : null; }
-function formatBRL(value: number) { return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
-function formatDate(value: string | Date | null) { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("pt-BR"); }
+const formatDate = formatDateBR;

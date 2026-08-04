@@ -1,3 +1,5 @@
+import { calcularPrecoDivisor } from "./precoUnificado";
+
 export type MonetaryValue = string | number | null | undefined;
 
 export interface SalePriceInput {
@@ -64,14 +66,19 @@ export function calculateSalePrice({
   assertPercent("Margem", marginPercent);
   assertPercent("Despesas percentuais", revenueCostPercent);
 
-  const denominator = 1 - (marginPercent + revenueCostPercent) / 100;
-  if (denominator <= 0) {
+  const preco = calcularPrecoDivisor({
+    custo: costValue,
+    margemPct: marginPercent,
+    impostosPct: revenueCostPercent,
+    freteUnit: fixedCostValue,
+  });
+  if (preco === null) {
     throw new Error(
       "A soma da margem com as despesas percentuais deve ser inferior a 100%.",
     );
   }
 
-  return (costValue + fixedCostValue) / denominator;
+  return preco;
 }
 
 export function findProposalPricingIssues(
