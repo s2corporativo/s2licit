@@ -487,13 +487,31 @@ export default function PropostaEditor() {
   // Modal de parcelamento ao marcar como Entregue
   const [showInstallmentModal, setShowInstallmentModal] = useState(false);
   const [installmentForm, setInstallmentForm] = useState({ nInstallments: 1, firstDueDate: new Date().toISOString().slice(0, 10) });
+  // Modal de motivo da perda ao marcar como Cancelada — alimenta o win rate
+  // em Desempenho (sem esses dados, a proposta conta como cancelamento
+  // interno, não como perda para concorrente).
+  const [showLossModal, setShowLossModal] = useState(false);
+  const [lossForm, setLossForm] = useState({ lossReason: "", competitorValue: "" });
   const advanceStatusMutation = trpc.proposals.advanceStatus.useMutation({
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       utils.proposals.get.invalidate({ id });
       utils.proposals.list.invalidate();
-      toast.success("Proposta marcada como entregue!");
+      utils.desempenho.resumo.invalidate();
+      toast.success(
+        variables.newStatus === "delivered" ? "Proposta marcada como entregue!" :
+        variables.newStatus === "cancelled" ? "Proposta cancelada." :
+        "Status da proposta atualizado."
+      );
       setEditingHeader(false);
       setShowInstallmentModal(false);
+      setShowLossModal(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const criarPedidoMutation = trpc.posVenda.criarPedidoDeProposta.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Pedido de compra #${result.id} criado a partir desta proposta!`);
+      navigate(`/pos-venda`);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -549,6 +567,11 @@ export default function PropostaEditor() {
       setShowInstallmentModal(true);
       return;
     }
+    // Se está marcando como Cancelada, capturar motivo da perda antes (alimenta Desempenho)
+    if (headerForm.status === "cancelled" && proposal?.status !== "cancelled") {
+      setShowLossModal(true);
+      return;
+    }
     updateProposal.mutate({
       id,
       title: headerForm.title,
@@ -581,6 +604,28 @@ export default function PropostaEditor() {
           firstDueDate: installmentForm.firstDueDate
             ? new Date(installmentForm.firstDueDate + "T12:00:00")
             : undefined,
+        });
+      },
+    });
+  };
+  const handleConfirmCancellation = () => {
+    // Salvar dados do header primeiro, depois avançar status com motivo/valor do concorrente
+    updateProposal.mutate({
+      id,
+      title: headerForm.title,
+      processNumber: headerForm.processNumber || null,
+      orgName: headerForm.orgName || null,
+      validityDays: parseInt(headerForm.validityDays) || 30,
+      paymentTerms: headerForm.paymentTerms || null,
+      deliveryTerms: headerForm.deliveryTerms || null,
+      notes: headerForm.notes || null,
+    }, {
+      onSuccess: () => {
+        advanceStatusMutation.mutate({
+          id,
+          newStatus: "cancelled",
+          lossReason: lossForm.lossReason.trim() || undefined,
+          competitorValue: lossForm.competitorValue.trim() ? Number(lossForm.competitorValue) : undefined,
         });
       },
     });
@@ -619,6 +664,16 @@ export default function PropostaEditor() {
   const [selectedDeclarations, setSelectedDeclarations] = useState<number[]>([]);
   const [showDeclaracoesPanel, setShowDeclaracoesPanel] = useState(false);
   const saveSnapshotMutation = trpc.declarations.saveSnapshot.useMutation();
+  const sendEmailMutation = trpc.proposals.sendByEmail.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Proposta enviada para ${result.to}!`);
+      utils.proposals.get.invalidate({ id });
+      utils.proposals.list.invalidate();
+    },
+    onError: (err) => {
+      toast.error(err.message || "Erro ao enviar a proposta por e-mail.");
+    },
+  });
   const { data: savedSnapshots } = trpc.declarations.getForProposal.useQuery(
     { proposalId: id },
     { enabled: !!id }
@@ -967,6 +1022,20 @@ export default function PropostaEditor() {
               </span>
             )}
           </button>
+          {(proposal.status === "order" || proposal.status === "in_transit" || proposal.status === "delivered") && (
+            <button
+              onClick={() => criarPedidoMutation.mutate({ proposalId: id })}
+              disabled={criarPedidoMutation.isPending}
+              className="flex items-center gap-2 border border-emerald-700 text-emerald-800 px-4 py-2 text-xs font-bold hover:bg-emerald-700 hover:text-white transition-colors disabled:opacity-60"
+              title="Cria o pedido de compra ao fornecedor a partir desta proposta vencedora"
+            >
+              {criarPedidoMutation.isPending ? (
+                <><Loader2 size={12} className="animate-spin" />Criando...</>
+              ) : (
+                <><ShoppingCart size={12} />Criar Pedido de Compra</>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1802,7 +1871,7 @@ export default function PropostaEditor() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Enviar Proposta por E-mail</h3>
-                <p className="text-[11px] text-gray-500 mt-0.5">Abre seu cliente de e-mail com os campos pré-preenchidos</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">O PDF é gerado e enviado direto pelo sistema, em anexo</p>
               </div>
               <button onClick={() => setShowEmailModal(false)} className="text-gray-400 hover:text-gray-900">
                 <X size={16} />
@@ -1837,9 +1906,11 @@ export default function PropostaEditor() {
                   className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 resize-none font-mono"
                 />
               </div>
-              <div className="bg-amber-50 border border-amber-200 px-3 py-2 text-[11px] text-amber-700">
-                <strong>Importante:</strong> Baixe o PDF da proposta antes de enviar e anexe-o manualmente no seu cliente de e-mail.
-              </div>
+              {!canExportPdf && (
+                <div className="bg-red-50 border border-red-200 px-3 py-2 text-[11px] text-red-700">
+                  <strong>Bloqueado:</strong> {exportPricingIssues.slice(0, 2).join(". ")}.
+                </div>
+              )}
             </div>
             <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
               <button
@@ -1849,16 +1920,20 @@ export default function PropostaEditor() {
                 Cancelar
               </button>
               <button
+                disabled={sendEmailMutation.isPending || !canExportPdf || !emailTo.trim()}
                 onClick={() => {
-                  const mailto = `mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-                  window.open(mailto, "_blank");
-                  setShowEmailModal(false);
-                  toast.success("Cliente de e-mail aberto!");
+                  sendEmailMutation.mutate(
+                    { id, to: emailTo.trim(), subject: emailSubject, mensagem: emailBody },
+                    { onSuccess: () => setShowEmailModal(false) }
+                  );
                 }}
-                className="px-4 py-2 text-xs font-bold bg-blue-800 text-white hover:bg-blue-900 transition-colors flex items-center gap-2"
+                className="px-4 py-2 text-xs font-bold bg-blue-800 text-white hover:bg-blue-900 transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Mail size={12} />
-                Abrir no Cliente de E-mail
+                {sendEmailMutation.isPending ? (
+                  <><Loader2 size={12} className="animate-spin" />Enviando...</>
+                ) : (
+                  <><Mail size={12} />Enviar Proposta</>
+                )}
               </button>
             </div>
           </div>
@@ -1915,6 +1990,60 @@ export default function PropostaEditor() {
                 className="px-4 py-2 text-xs font-bold bg-green-700 text-white hover:bg-green-800 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 {advanceStatusMutation.isPending ? "Salvando..." : `Confirmar Entrega${installmentForm.nInstallments > 1 ? ` (${installmentForm.nInstallments}x)` : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showLossModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white w-full max-w-md shadow-2xl border border-gray-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <h3 className="text-sm font-bold text-gray-900">Cancelar Proposta</h3>
+              <button onClick={() => setShowLossModal(false)} className="text-gray-400 hover:text-gray-900"><X size={16} /></button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-xs text-gray-600">
+                Se a proposta foi perdida para um concorrente, registre o motivo e (se souber) o valor
+                vencedor — isso alimenta a taxa de vitória em <strong>Desempenho</strong>. Deixe em branco
+                se for apenas um cancelamento interno (não conta como perda).
+              </p>
+              <div>
+                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">Motivo da perda (opcional)</label>
+                <textarea
+                  value={lossForm.lossReason}
+                  onChange={(e) => setLossForm((f) => ({ ...f, lossReason: e.target.value }))}
+                  rows={3}
+                  placeholder="Ex.: preço acima do concorrente, prazo de entrega, documentação..."
+                  className="w-full border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">Valor do vencedor (opcional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={lossForm.competitorValue}
+                  onChange={(e) => setLossForm((f) => ({ ...f, competitorValue: e.target.value }))}
+                  placeholder="0,00"
+                  className="w-full border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
+              <button
+                onClick={() => setShowLossModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 border border-gray-300 hover:border-gray-900"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={handleConfirmCancellation}
+                disabled={advanceStatusMutation.isPending || updateProposal.isPending}
+                className="px-4 py-2 text-xs font-bold bg-red-700 text-white hover:bg-red-800 transition-colors disabled:opacity-50"
+              >
+                {advanceStatusMutation.isPending ? "Salvando..." : "Confirmar Cancelamento"}
               </button>
             </div>
           </div>

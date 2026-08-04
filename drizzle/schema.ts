@@ -310,6 +310,12 @@ export const proposals = mysqlTable("proposals", {
   origem: varchar("origem", { length: 32 }).default("manual"),
   // ID da oportunidade do Radar que originou esta proposta (nullable)
   radarOpportunityId: int("radarOpportunityId"),
+  // Registrados ao marcar status "cancelled" por perda para concorrente
+  // (distinto de cancelamento interno, que deixa os dois campos vazios) —
+  // alimenta o win rate consolidado em routers/desempenho.ts junto com
+  // email_quotations.
+  competitorValue: decimal("competitorValue", { precision: 15, scale: 2 }),
+  lossReason: text("lossReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -1739,6 +1745,10 @@ export const purchaseOrders = mysqlTable(
   {
     id: int("id").autoincrement().primaryKey(),
     funilId: int("funilId"),
+    // Proposta comercial vencedora que originou este pedido — fecha o ciclo
+    // proposta → pedido (antes o pedido era digitado do zero, sem herdar
+    // nada da proposta). Ver posVenda.criarPedidoDeProposta.
+    proposalId: int("proposalId").references(() => proposals.id, { onDelete: "set null" }),
     supplierId: int("supplierId"),
     fornecedorNome: varchar("fornecedorNome", { length: 256 }).notNull(),
     descricao: varchar("descricao", { length: 512 }).notNull(),
@@ -1753,7 +1763,11 @@ export const purchaseOrders = mysqlTable(
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
-  (t) => [index("idx_po_status").on(t.status), index("idx_po_funil").on(t.funilId)]
+  (t) => [
+    index("idx_po_status").on(t.status),
+    index("idx_po_funil").on(t.funilId),
+    index("idx_po_proposal").on(t.proposalId),
+  ]
 );
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 
