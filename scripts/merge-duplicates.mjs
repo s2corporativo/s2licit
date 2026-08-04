@@ -8,7 +8,7 @@
  * 1. Identificar o registro "mais completo" (maior score de campos preenchidos)
  * 2. Mesclar campos não preenchidos no registro keeper com dados dos duplicados
  * 3. Redirecionar TODAS as referências para o keeper, em transação:
- *    proposal_items, quotation_items, equivalence_members,
+ *    proposal_items, equivalence_members,
  *    product_supplier_prices, product_supplier_offers, price_history
  * 4. Marcar duplicados como isActive='no' (soft delete para segurança)
  */
@@ -145,10 +145,6 @@ for (const group of dupGroups) {
       // Referências simples (sem unique por produto)
       await conn.execute(
         `UPDATE proposal_items SET productId = ? WHERE productId IN (${dupPlaceholders})`,
-        [keeper.id, ...dupIds]
-      );
-      await conn.execute(
-        `UPDATE quotation_items SET productId = ? WHERE productId IN (${dupPlaceholders})`,
         [keeper.id, ...dupIds]
       );
       await conn.execute(

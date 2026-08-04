@@ -174,7 +174,6 @@ export async function mergeProductGroup(
 
   const {
     proposalItems,
-    quotationItems,
     equivalenceMembers,
     productSupplierPrices,
     productSupplierOffers,
@@ -195,11 +194,6 @@ export async function mergeProductGroup(
       .set({ productId: masterId })
       .where(inArray(proposalItems.productId, duplicateIds));
     redirected = (redirectResult as any)[0]?.affectedRows ?? 0;
-
-    await tx
-      .update(quotationItems)
-      .set({ productId: masterId })
-      .where(inArray(quotationItems.productId, duplicateIds));
 
     await tx
       .update(priceHistory)

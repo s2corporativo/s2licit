@@ -18,8 +18,6 @@ import { duplicatesRouter } from "./routers/duplicates";
 import { imagesRouter } from "./routers/images";
 import { importSmartRouter } from "./importSmartRouter";
 import { nfeImportRouter } from "./routers/nfeImport";
-import { priceSyncRouter } from "./routers/priceSync";
-import { priceImportRouter } from "./routers/priceImport";
 import { priceAnalysisRouter } from "./routers/priceAnalysis";
 import { pricingRouter } from "./routers/pricing";
 import { categoryPricingRouter } from "./routers/categoryPricing";
@@ -60,11 +58,8 @@ import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 
-import { TRPCError } from "@trpc/server";
-import { z } from "zod";
-
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, router } from "./_core/trpc";
+import { router } from "./_core/trpc";
 
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
@@ -72,8 +67,6 @@ export const appRouter = router({
   system: systemRouter,
   importSmart: importSmartRouter,
   nfeImport: nfeImportRouter,
-  priceSync: priceSyncRouter,
-  priceImport: priceImportRouter,
   priceAnalysis: priceAnalysisRouter,
   pricing: pricingRouter,
   categoryPricing: categoryPricingRouter,
@@ -156,34 +149,6 @@ export const appRouter = router({
   // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────
   // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────
   edital: editalRouter,
-
-  // ─── (A) Upload seguro de logo ────────────────────────────────────────────
-  uploadLogo: protectedProcedure
-    .input(z.object({
-      base64: z.string().max(8_000_000), // ~6MB base64
-      mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
-      fileName: z.string().max(256),
-    }))
-    .mutation(async ({ input }) => {
-      const { storagePut } = await import("./storage");
-      // Decode base64
-      const buffer = Buffer.from(input.base64, "base64");
-      // Validate size: max 5MB
-      if (buffer.length > 5 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "Imagem muito grande (máx 5MB)" });
-      // Validate magic bytes
-      const magic = buffer.slice(0, 4);
-      const isJpeg = magic[0] === 0xFF && magic[1] === 0xD8;
-      const isPng = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47;
-      // RIFF (bytes 0-3) também é usado por AVI/WAV — exige "WEBP" nos bytes 8-11.
-      const isWebp =
-        magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46 &&
-        buffer.length > 12 && buffer.slice(8, 12).toString("ascii") === "WEBP";
-      if (!isJpeg && !isPng && !isWebp) throw new TRPCError({ code: "BAD_REQUEST", message: "Formato inválido. Use JPEG, PNG ou WebP." });
-      const ext = isJpeg ? "jpg" : isPng ? "png" : "webp";
-      const key = `empresa/logo-${Date.now()}.${ext}`;
-      const { url } = await storagePut(key, buffer, input.mimeType);
-      return { url };
-    }),
 
   // ─── (E) Declarações fixas (templates) ────────────────────────────────────
   declarations: declarationsRouter,

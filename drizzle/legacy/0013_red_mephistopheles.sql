@@ -1,1 +1,0 @@
-ALTER TABLE `company_settings` ADD `minMarginPercent` decimal(6,2) DEFAULT '15';
