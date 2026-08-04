@@ -2,179 +2,84 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { getRoleLabel, hasMinimumRole, type Role } from "@/lib/access";
 import {
-  Activity,
-  BarChart3,
-  BookOpen,
-  Bot,
-  Brain,
-  Building2,
-  CalendarClock,
-  ClipboardCheck,
-  ClipboardList,
-  DatabaseZap,
-  DollarSign,
-  FileScan,
-  FileSpreadsheet,
-  FileText,
-  Gauge,
-  Gavel,
-  GitCompareArrows,
-  GitMerge,
-  History,
-  Image,
-  KanbanSquare,
-  Landmark,
-  LayoutGrid,
-  LayoutTemplate,
-  Lock,
-  LogOut,
-  MailCheck,
-  Menu,
-  MessageSquareWarning,
-  Package,
-  PackageCheck,
-  Percent,
-  PlugZap,
-  Radar,
-  Receipt,
-  Scale,
-  ScrollText,
-  Search,
-  Settings,
-  ShieldCheck,
-  Sparkles,
-  Tag,
-  Tags,
-  Trophy,
-  Truck,
-  Users,
-  Wand2,
-  X,
+  Activity, BookOpen, Bot, Building2, CalendarClock, ChevronDown, CircleDollarSign,
+  FileScan, FileText, Gavel, LayoutDashboard, LogOut, Menu, Package, PackageCheck,
+  Radar, Search, Settings, ShieldCheck, Sparkles, Users, X
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
-
-const AZUL_SIDEBAR = "#2e3c55";
-const LARANJA_ATIVO = "#e05008";
-const TRACO = 1.5;
 
 type NavItem = { href: string; icon: React.ElementType; label: string; minRole?: Role };
 type NavGroup = { label: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
   {
-    label: "VISÃO GERAL",
+    label: "Início",
     items: [
-      { href: "/", icon: LayoutGrid, label: "Dashboard" },
-      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
-      { href: "/funil", icon: KanbanSquare, label: "Funil de oportunidades" },
+      { href: "/", icon: LayoutDashboard, label: "Visão geral" },
+      { href: "/agenda", icon: CalendarClock, label: "Agenda e pendências" },
+      { href: "/funil", icon: Activity, label: "Funil de trabalho" },
     ],
   },
   {
-    label: "OPORTUNIDADES",
+    label: "Oportunidades",
     items: [
       { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
-      { href: "/cotacoes-recebidas", icon: MailCheck, label: "Cotações recebidas", minRole: "editor" },
-      { href: "/edital", icon: FileScan, label: "Importar edital", minRole: "editor" },
-      { href: "/analise-juridica", icon: Scale, label: "Análise jurídica (IA)", minRole: "editor" },
-      { href: "/diligencias", icon: MessageSquareWarning, label: "Diligências e recursos", minRole: "editor" },
+      { href: "/cotacoes-recebidas", icon: FileText, label: "Cotações recebidas", minRole: "editor" },
+      { href: "/edital", icon: FileScan, label: "Analisar oportunidade", minRole: "editor" },
     ],
   },
   {
-    label: "CATÁLOGO",
+    label: "Propostas",
     items: [
-      { href: "/produtos", icon: Package, label: "Produtos" },
-      { href: "/busca-global", icon: Search, label: "Busca unificada" },
-      { href: "/equivalencias", icon: GitMerge, label: "Produtos equivalentes" },
-      { href: "/enriquecimento", icon: Sparkles, label: "Completar dados (IA)" },
-      { href: "/imagens", icon: Image, label: "Imagens de produtos" },
-      { href: "/categorias", icon: Tags, label: "Categorias" },
-      { href: "/sinonimos", icon: BookOpen, label: "Sinônimos" },
-    ],
-  },
-  {
-    label: "DADOS E IA",
-    items: [
-      { href: "/agente", icon: Bot, label: "Assistente IA" },
-      { href: "/reclassificacao", icon: Wand2, label: "Reclassificação IA", minRole: "editor" },
-      { href: "/qualidade", icon: Activity, label: "Qualidade de dados", minRole: "editor" },
-      { href: "/enriquecimento-nfe", icon: Sparkles, label: "Pipeline de enriquecimento NF-e", minRole: "editor" },
-      { href: "/historico-enriquecimento", icon: History, label: "Histórico de enriquecimento", minRole: "editor" },
-    ],
-  },
-  {
-    label: "PREÇOS E TRIBUTOS",
-    items: [
-      { href: "/analise-precos", icon: BarChart3, label: "Análise de preços", minRole: "editor" },
-      { href: "/comparacao", icon: GitCompareArrows, label: "Comparação de preços" },
-      { href: "/aplicar-precificacao", icon: Percent, label: "Precificação em massa", minRole: "admin" },
-      { href: "/tributos", icon: Scale, label: "Motor tributário" },
-      { href: "/custo-total", icon: Truck, label: "Custo total e fretes" },
-    ],
-  },
-  {
-    label: "FORNECEDORES E CAPTURA",
-    items: [
-      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
-      { href: "/scraper-fornecedores", icon: Bot, label: "Captura automática de preços", minRole: "admin" },
-      { href: "/captura-inteligente", icon: Brain, label: "Central de captura", minRole: "editor" },
-      { href: "/captura-revisao", icon: ClipboardCheck, label: "Revisão de capturas", minRole: "editor" },
-      { href: "/importar", icon: FileSpreadsheet, label: "Importar planilha", minRole: "editor" },
-      { href: "/importar-nfe", icon: Receipt, label: "Importar NF-e", minRole: "editor" },
-    ],
-  },
-  {
-    label: "PROPOSTAS E DISPUTA",
-    items: [
-      { href: "/propostas", icon: FileText, label: "Propostas" },
-      { href: "/templates-proposta", icon: LayoutTemplate, label: "Templates de proposta" },
-      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
-      { href: "/certidoes", icon: ScrollText, label: "Certidões", minRole: "editor" },
+      { href: "/propostas", icon: FileText, label: "Central de propostas" },
       { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
-      { href: "/agente-proposta", icon: Tag, label: "Agente de proposta", minRole: "editor" },
+      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
     ],
   },
   {
-    label: "EXECUÇÃO E RESULTADOS",
+    label: "Execução",
     items: [
-      { href: "/centro-operacional", icon: Gauge, label: "Central operacional", minRole: "editor" },
+      { href: "/centro-operacional", icon: PackageCheck, label: "Operação e entregas", minRole: "editor" },
+      { href: "/financeiro", icon: CircleDollarSign, label: "Financeiro" },
       { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
-      { href: "/financeiro", icon: DollarSign, label: "Financeiro" },
-      { href: "/desempenho", icon: Trophy, label: "Desempenho" },
     ],
   },
   {
-    label: "SISTEMA",
+    label: "Catálogo",
     items: [
-      { href: "/integracoes", icon: PlugZap, label: "Integrações e credenciais", minRole: "admin" },
-      { href: "/central-ia", icon: Brain, label: "Inteligência artificial", minRole: "admin" },
-      { href: "/portais-licitacao", icon: PlugZap, label: "Portais de licitação", minRole: "editor" },
-      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
-      { href: "/configuracao", icon: Settings, label: "Dados da empresa", minRole: "admin" },
+      { href: "/produtos", icon: Package, label: "Produtos e preços" },
+      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
+      { href: "/busca-global", icon: Search, label: "Busca e equivalências" },
+      { href: "/enriquecimento", icon: Sparkles, label: "Qualidade do catálogo" },
+    ],
+  },
+  {
+    label: "Administração",
+    items: [
+      { href: "/configuracao", icon: Settings, label: "Configurações", minRole: "admin" },
+      { href: "/integracoes", icon: Bot, label: "Integrações e IA", minRole: "admin" },
       { href: "/usuarios", icon: Users, label: "Usuários e permissões", minRole: "admin" },
-      { href: "/logs", icon: ClipboardList, label: "Logs de auditoria", minRole: "admin" },
-      { href: "/admin/database-health", icon: DatabaseZap, label: "Integridade do banco", minRole: "admin" },
-      { href: "/seguranca", icon: Lock, label: "Segurança da conta" },
-      { href: "/manual", icon: BookOpen, label: "Manual e glossário" },
+      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
+      { href: "/manual", icon: BookOpen, label: "Ajuda e manual" },
     ],
   },
 ];
 
-function stripQuery(value: string): string {
-  return value.split("?")[0];
+function cleanPath(value: string): string {
+  return value.split("?")[0].replace(/\/$/, "") || "/";
 }
 
 function isPathActive(location: string, href: string): boolean {
-  const path = stripQuery(href);
-  if (path === "/") return location === "/";
-  return location === path || location.startsWith(`${path}/`);
+  const current = cleanPath(location);
+  const target = cleanPath(href);
+  return target === "/" ? current === "/" : current === target || current.startsWith(`${target}/`);
 }
 
 function currentPageLabel(location: string): string {
   for (const group of navGroups) {
-    for (const item of group.items) {
-      if (isPathActive(location, item.href)) return item.label;
-    }
+    const item = group.items.find((entry) => isPathActive(location, entry.href));
+    if (item) return item.label;
   }
   return "S2 Licit";
 }
@@ -183,77 +88,144 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user, isAuthenticated, loading, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ Administração: true });
+
+  const visibleGroups = useMemo(
+    () =>
+      isAuthenticated
+        ? navGroups
+            .map((group) => ({
+              ...group,
+              items: group.items.filter((item) => hasMinimumRole(user?.role, item.minRole)),
+            }))
+            .filter((group) => group.items.length > 0)
+        : [],
+    [isAuthenticated, user?.role],
+  );
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center bg-gray-100 text-lg text-blue-900">Carregando...</div>;
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50 text-sm font-semibold text-slate-600">
+        Carregando S2 Licit...
+      </div>
+    );
   }
 
-  const visibleNavGroups = isAuthenticated
-    ? navGroups
-        .map((group) => ({ ...group, items: group.items.filter((item) => hasMinimumRole(user?.role, item.minRole)) }))
-        .filter((group) => group.items.length > 0)
-    : [];
-
   const sidebar = (
-    <aside className="relative flex h-full w-[220px] shrink-0 flex-col text-white" style={{ background: AZUL_SIDEBAR }}>
-      <div className="border-b border-white/10 px-3 py-3">
-        <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-white text-blue-900">
-          <Landmark size={24} strokeWidth={1.5} />
+    <aside className="flex h-full w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white text-slate-900">
+      <div className="relative border-b border-slate-200 px-5 py-5">
+        {/* Substituir este bloco pela logomarca original assim que o arquivo for anexado ao repositório. */}
+        <div className="flex items-center gap-3" aria-label="S2 Licit">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-950 text-sm font-black text-white">S2</div>
+          <div>
+            <p className="m-0 text-[15px] font-black tracking-tight text-blue-950">S2 LICIT</p>
+            <p className="m-0 text-[10px] font-medium text-slate-500">Licitações e propostas</p>
+          </div>
         </div>
-        <p className="m-0 text-center text-[13px] font-black tracking-wide">S2 LICIT</p>
-        <p className="mt-0.5 text-center text-[10px] text-white/65">Licitações &amp; Fornecedores</p>
-        <button className="absolute right-3 top-3 text-white/60 hover:text-white lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X size={16} /></button>
+        <button
+          className="absolute right-3 top-3 rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Fechar menu"
+        >
+          <X size={17} />
+        </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-1 py-1" aria-label="Navegação principal">
-        {visibleNavGroups.map((group, groupIndex) => (
-          <div key={group.label}>
-            <p className="mx-2 mb-1 mt-2 border-t border-white/[.07] pt-2 text-[10px] font-bold uppercase tracking-wide text-white/65" style={{ borderTop: groupIndex === 0 ? "none" : undefined }}>{group.label}</p>
-            {group.items.map((item) => {
-              const Icon = item.icon;
-              const active = isPathActive(location, item.href);
-              return (
-                <Link key={item.href} href={item.href} onClick={() => setSidebarOpen(false)} className="mb-px flex w-full items-center gap-2 rounded-lg px-2 py-[7px] text-left text-[12.5px] no-underline" style={{ background: active ? "rgba(255,255,255,.18)" : "transparent", color: active ? "#fff" : "rgba(255,255,255,.85)", fontWeight: active ? 700 : 400, borderLeft: active ? `3px solid ${LARANJA_ATIVO}` : "3px solid transparent" }}>
-                  <Icon size={14} strokeWidth={active ? 2 : TRACO} className="shrink-0" style={{ opacity: active ? 1 : 0.75 }} />
-                  <span className="truncate">{item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+      <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Navegação principal">
+        {visibleGroups.map((group) => {
+          const activeGroup = group.items.some((item) => isPathActive(location, item.href));
+          const isCollapsed = collapsed[group.label] && !activeGroup;
+          return (
+            <section key={group.label} className="mb-2">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500 hover:bg-slate-50"
+                onClick={() => setCollapsed((state) => ({ ...state, [group.label]: !state[group.label] }))}
+                aria-expanded={!isCollapsed}
+              >
+                {group.label}
+                <ChevronDown size={13} className={`transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+              </button>
+              {!isCollapsed && (
+                <div className="space-y-0.5">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    const active = isPathActive(location, item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setSidebarOpen(false)}
+                        className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] no-underline transition-colors ${
+                          active
+                            ? "bg-blue-50 font-bold text-blue-950"
+                            : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                        }`}
+                      >
+                        <Icon size={16} strokeWidth={active ? 2.2 : 1.7} className="shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          );
+        })}
       </nav>
 
-      <div className="border-t border-white/10 px-3 py-2">
+      <div className="border-t border-slate-200 p-3">
         {isAuthenticated ? (
-          <>
-            <p className="m-0 text-[11px] font-semibold text-white/75">{user?.name ?? "Usuário"}</p>
-            <p className="mb-1 mt-0.5 text-[10px] text-white/60">{getRoleLabel(user?.role)}</p>
-            <button onClick={() => logout()} className="flex w-full items-center justify-center gap-1.5 rounded-md border border-white/10 bg-white/10 p-1.5 text-[11px] text-white"><LogOut size={12} /> Sair</button>
-          </>
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="m-0 truncate text-xs font-bold text-slate-800">{user?.name ?? "Usuário"}</p>
+            <div className="mt-1 flex items-center justify-between">
+              <span className="text-[10px] text-slate-500">{getRoleLabel(user?.role)}</span>
+              <button
+                onClick={() => logout()}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-white hover:text-red-700"
+              >
+                <LogOut size={12} /> Sair
+              </button>
+            </div>
+          </div>
         ) : (
-          <a href={getLoginUrl()} className="block w-full rounded-md border border-white/10 bg-white/10 p-1.5 text-center text-[11px] text-white no-underline">Entrar</a>
+          <a href={getLoginUrl()} className="block rounded-lg bg-blue-950 px-3 py-2 text-center text-xs font-bold text-white no-underline">
+            Entrar
+          </a>
         )}
       </div>
     </aside>
   );
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
+    <div className="flex h-screen overflow-hidden bg-slate-50">
       <div className="hidden h-full lg:block">{sidebar}</div>
-      {sidebarOpen && <div className="fixed inset-0 z-50 lg:hidden"><button className="absolute inset-0 h-full w-full bg-black/50" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" /><div className="absolute inset-y-0 left-0">{sidebar}</div></div>}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button className="absolute inset-0 h-full w-full bg-slate-950/45" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" />
+          <div className="absolute inset-y-0 left-0">{sidebar}</div>
+        </div>
+      )}
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
         {isAuthenticated && (
-          <header className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-5 py-2">
-            <button className="text-gray-400 hover:text-gray-700 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu size={18} /></button>
-            <span className="truncate text-[13px] font-bold text-gray-900">{currentPageLabel(location)}</span>
-            <div className="ml-auto flex items-center gap-3">
-              <Link href="/busca-global" className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] text-gray-500 no-underline hover:text-gray-800"><Search size={12} /><span className="hidden sm:inline">Buscar no sistema...</span></Link>
-              <span className="hidden items-center gap-1.5 text-[11px] text-gray-400 sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-blue-600" />S2 Licit ERP</span>
+          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 sm:px-6">
+            <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu">
+              <Menu size={19} />
+            </button>
+            <div className="min-w-0">
+              <p className="m-0 truncate text-sm font-extrabold text-slate-900">{currentPageLabel(location)}</p>
             </div>
+            <Link
+              href="/busca-global"
+              className="ml-auto flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 no-underline hover:border-slate-300 hover:bg-white"
+            >
+              <Search size={14} />
+              <span className="hidden sm:inline">Buscar no sistema</span>
+            </Link>
           </header>
         )}
-        <main className="flex-1 overflow-y-auto bg-gray-100 p-[22px]">{children}</main>
+        <main className="flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6">{children}</main>
       </div>
     </div>
   );
