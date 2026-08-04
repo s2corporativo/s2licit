@@ -120,8 +120,10 @@ export function levenshteinSimilarity(a: string, b: string): number {
 
 /**
  * Similaridade de Jaro entre duas strings (0–1).
+ * Exportada para ser a única implementação do algoritmo no sistema — ver
+ * server/fuzzy.ts, que delega para esta em vez de manter uma cópia própria.
  */
-function jaroSimilarity(s1: string, s2: string): number {
+export function jaroSimilarity(s1: string, s2: string): number {
   if (s1 === s2) return 1;
   if (s1.length === 0 || s2.length === 0) return 0;
 
