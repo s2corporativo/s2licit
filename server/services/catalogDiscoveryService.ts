@@ -1,5 +1,6 @@
 import { JSDOM } from "jsdom";
 import { logger } from "../_core/logger";
+import { parsePrecoBR } from "../utils/number";
 
 export interface CatalogPage {
   url: string;
@@ -295,25 +296,8 @@ export async function extractProductData(
  * Normaliza e limpa preço extraído
  */
 export function parsePrice(priceText?: string): number | undefined {
-  if (!priceText) return undefined;
-
-  const cleaned = priceText.replace(/[^\d.,]/g, "");
-  if (!cleaned) return undefined;
-
-  const lastComma = cleaned.lastIndexOf(",");
-  const lastDot = cleaned.lastIndexOf(".");
-  const decimalSeparatorIndex = Math.max(lastComma, lastDot);
-
-  if (decimalSeparatorIndex >= 0) {
-    const integerPart = cleaned.slice(0, decimalSeparatorIndex).replace(/[.,]/g, "");
-    const decimalPart = cleaned.slice(decimalSeparatorIndex + 1).replace(/[.,]/g, "");
-    const normalized = decimalPart.length > 0 ? `${integerPart}.${decimalPart}` : integerPart;
-    const value = Number.parseFloat(normalized);
-    return Number.isNaN(value) ? undefined : value;
-  }
-
-  const value = Number.parseFloat(cleaned.replace(/[.,]/g, ""));
-  return Number.isNaN(value) ? undefined : value;
+  const result = parsePrecoBR(priceText ?? "");
+  return result === null ? undefined : result;
 }
 
 /**
