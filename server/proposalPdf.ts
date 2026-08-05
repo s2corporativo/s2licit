@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 import https from "https";
 import http from "http";
 import { valorPorExtenso } from "./utils/extenso";
+import { formatDate, formatCurrency } from "./utils/formatting";
 import {
   assertProposalPricingReady,
   getExplicitSalePrice,
@@ -139,24 +140,6 @@ function fetchImageBuffer(url: string): Promise<Buffer> {
       });
     req.on("error", reject);
     req.on("timeout", () => { req.destroy(); reject(new Error("Timeout ao buscar imagem")); });
-  });
-}
-
-function formatCurrency(value: string | number | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "—";
-  const n = typeof value === "number" ? value : parseFloat(value as string);
-  if (isNaN(n)) return String(value);
-  return `R$ ${n.toLocaleString("pt-BR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatDate(date: Date): string {
-  return new Date(date).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
   });
 }
 

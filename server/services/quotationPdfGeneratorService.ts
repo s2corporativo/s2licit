@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { formatDate, formatCurrency } from "../utils/formatting";
 
 export interface QuotationItem {
   productName: string;
@@ -281,27 +282,6 @@ function drawFooter(doc: PDFKit.PDFDocument, company: CompanySettings): void {
     pageHeight - 20,
     { align: "center" }
   );
-}
-
-/**
- * Formata data para formato brasileiro
- */
-function formatDate(date: Date): string {
-  return date.toLocaleDateString("pt-BR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-}
-
-/**
- * Formata número como moeda brasileira
- */
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
 }
 
 /**
