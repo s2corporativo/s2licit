@@ -1,4 +1,5 @@
 import { parseStringPromise } from "xml2js";
+import { parsePrecoBR } from "../utils/number";
 
 export interface NfeProduct {
   id: string;
@@ -48,9 +49,8 @@ function sanitizeXmlContent(xmlContent: string): string {
 }
 
 function toNumber(value: unknown, fallback = 0): number {
-  if (value === null || value === undefined || value === "") return fallback;
-  const parsed = Number.parseFloat(String(value).replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : fallback;
+  const parsed = parsePrecoBR(String(value ?? ""));
+  return parsed !== null ? parsed : fallback;
 }
 
 function cleanEan(value: unknown): string | undefined {

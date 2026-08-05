@@ -16,6 +16,7 @@
  */
 
 import { robustFetch, parseDate, generateDedupeKey } from "./baseConnector";
+import { parsePrecoBR } from "../utils/number";
 import type { NormalizedLicitacao } from "./baseConnector";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -68,12 +69,8 @@ interface ComprasResponse {
 }
 
 function toNumber(v: unknown): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(/\./g, "").replace(",", "."));
-    return isNaN(n) ? 0 : n;
-  }
-  return 0;
+  const parsed = parsePrecoBR(String(v ?? ""));
+  return parsed !== null ? parsed : 0;
 }
 
 function modalidadeNome(m: unknown): string {
