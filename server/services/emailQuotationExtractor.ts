@@ -2,6 +2,7 @@ import { readAllSheetsAsRows } from "../utils/spreadsheet";
 import { extractTextFromBinaryDocument } from "./intelligentCaptureIngestionService";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
 import { logger } from "../_core/logger";
+import { parsePrice } from "./catalogDiscoveryService";
 
 /**
  * Extração de itens de cotação a partir de anexos de e-mail.
@@ -58,13 +59,6 @@ function matchColumn(header: string): keyof ExtractedItem | null {
   return best?.field ?? null;
 }
 
-function parseNumber(value: unknown): number | undefined {
-  if (value == null || value === "") return undefined;
-  if (typeof value === "number") return value;
-  const cleaned = String(value).replace(/\./g, "").replace(",", ".").replace(/[^0-9.]/g, "");
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? undefined : n;
-}
 
 /**
  * Extrai itens de uma planilha (XLSX/CSV). Detecta a linha de cabeçalho
@@ -103,8 +97,8 @@ export async function extractItemsFromSpreadsheet(buffer: Buffer): Promise<Extra
         const colIdx = Number(colIdxStr);
         const raw = row[colIdx];
         if (raw == null || raw === "") continue;
-        if (field === "quantidade") item.quantidade = parseNumber(raw);
-        else if (field === "numeroItem") item.numeroItem = parseNumber(raw);
+        if (field === "quantidade") item.quantidade = parsePrice(String(raw));
+        else if (field === "numeroItem") item.numeroItem = parsePrice(String(raw));
         else item[field] = String(raw).trim() as any;
       }
       // Só considera itens com descrição não trivial.
