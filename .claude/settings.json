@@ -8,7 +8,6 @@
       "Bash(git switch *)",
       "Bash(git fetch *)",
       "Bash(git pull *)",
-      "Bash(git push *)",
       "Bash(git merge *)",
       "Bash(git rebase *)",
       "Bash(git remote *)",
@@ -24,10 +23,11 @@
       "Bash(gh issue list *)",
       "Bash(gh run list *)",
       "Bash(gh run view *)",
-      "Bash(gh run watch *)",
-      "Bash(gh api *)"
+      "Bash(gh run watch *)"
     ],
     "deny": [
+      "Bash(gh api *)",
+      "Bash(git push *)",
       "Bash(gh pr merge *)",
       "Bash(git push --force *)",
       "Bash(git push -f *)",
