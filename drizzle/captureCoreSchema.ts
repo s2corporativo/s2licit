@@ -30,6 +30,12 @@ export const captureJobs = mysqlTable(
     supplierId: int("supplierId")
       .notNull()
       .references(() => suppliers.id, { onDelete: "cascade" }),
+    /**
+     * Chave preenchida apenas enquanto queued/running. UNIQUE + múltiplos NULL
+     * do MySQL garantem um único job ativo por configuração mesmo com várias
+     * instâncias do backend enfileirando ao mesmo tempo.
+     */
+    activeKey: varchar("activeKey", { length: 96 }),
     mode: mysqlEnum("mode", ["search", "refresh", "full"]).default("full").notNull(),
     trigger: mysqlEnum("trigger", ["manual", "scheduled", "bulk", "proposal", "api"])
       .default("manual")
@@ -70,6 +76,7 @@ export const captureJobs = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   (table) => [
+    uniqueIndex("uq_capture_jobs_active_key").on(table.activeKey),
     index("idx_capture_jobs_queue").on(table.status, table.runAfter, table.priority),
     index("idx_capture_jobs_config").on(table.scraperConfigId, table.createdAt),
     index("idx_capture_jobs_supplier").on(table.supplierId, table.createdAt),
@@ -78,7 +85,7 @@ export const captureJobs = mysqlTable(
 );
 
 /**
- * Evidência bruta imutável de cada preço/estoque observado no fornecedor.
+ * Evidência de cada preço/estoque observado no fornecedor.
  * A observação é separada da oferta atual para permitir auditoria, reprocesso,
  * detecção de anomalia e evolução do matching sem precisar raspar novamente.
  */
@@ -136,9 +143,6 @@ export const supplierProductObservations = mysqlTable(
   ],
 );
 
-/**
- * Eventos pequenos do job substituem o log em memória e alimentam a UI.
- */
 export const captureJobEvents = mysqlTable(
   "capture_job_events",
   {
@@ -155,11 +159,7 @@ export const captureJobEvents = mysqlTable(
   (table) => [index("idx_capture_job_events_job").on(table.captureJobId, table.createdAt)],
 );
 
-/**
- * Memória supervisionada da IA de captura. Cada decisão humana reaproveitável
- * vira um exemplo local de few-shot; nenhuma informação precisa sair do banco
- * para "treinar" o comportamento do módulo entre execuções.
- */
+/** Memória supervisionada e reutilizável da IA de captura. */
 export const captureAiFeedback = mysqlTable(
   "capture_ai_feedback",
   {
@@ -191,10 +191,6 @@ export const captureAiFeedback = mysqlTable(
   ],
 );
 
-/**
- * Um snapshot de saúde por configuração evita recalcular toda a série histórica
- * a cada card da interface e permite bloqueio automático de uma captura ruim.
- */
 export const captureConnectorHealth = mysqlTable(
   "capture_connector_health",
   {
