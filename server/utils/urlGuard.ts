@@ -30,19 +30,19 @@ function isNonPublicIpv4(address: string): boolean {
 
   const [a, b, c] = parsed;
 
-  if (a === 0) return true; // current host / unspecified
-  if (a === 10) return true; // RFC1918
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  if (a === 127) return true; // loopback
-  if (a === 169 && b === 254) return true; // link-local / metadata
-  if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
-  if (a === 192 && b === 168) return true; // RFC1918
-  if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
-  if (a === 192 && b === 0 && c === 2) return true; // TEST-NET-1
-  if (a === 198 && (b === 18 || b === 19)) return true; // benchmark network
-  if (a === 198 && b === 51 && c === 100) return true; // TEST-NET-2
-  if (a === 203 && b === 0 && c === 113) return true; // TEST-NET-3
-  if (a >= 224) return true; // multicast/reserved/broadcast
+  if (a === 0) return true;
+  if (a === 10) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 192 && b === 0 && c === 0) return true;
+  if (a === 192 && b === 0 && c === 2) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  if (a === 203 && b === 0 && c === 113) return true;
+  if (a >= 224) return true;
 
   return false;
 }
@@ -59,10 +59,10 @@ function isNonPublicIpv6(address: string): boolean {
   if (!normalized.includes(":")) return false;
 
   if (normalized === "::" || normalized === "::1") return true;
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // ULA fc00::/7
-  if (/^fe[89ab]/.test(normalized)) return true; // link-local fe80::/10
-  if (normalized.startsWith("ff")) return true; // multicast ff00::/8
-  if (normalized.startsWith("2001:db8:")) return true; // documentation
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(normalized)) return true;
+  if (normalized.startsWith("ff")) return true;
+  if (normalized.startsWith("2001:db8:")) return true;
 
   const mapped = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
   if (mapped) return isNonPublicIpv4(mapped[1]);
@@ -97,16 +97,14 @@ function assertPublicHostname(hostname: string, context: string): void {
   }
 }
 
-/**
- * Validação sintática/estática. Use `assertSafeExternalUrlResolved` antes de
- * efetuar requests server-side quando for necessário validar também o DNS.
- */
+/** Validação sintática/estática. Para requests server-side, use também a variante DNS. */
 export function assertSafeExternalUrl(rawUrl: string, context = "URL"): URL {
   let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new Error(`${context} inválida: ${rawUrl}`);
+    // Não ecoar a entrada: URLs inválidas podem conter tokens/segredos em texto livre.
+    throw new Error(`${context} inválida.`);
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -126,8 +124,7 @@ export function assertSafeExternalUrl(rawUrl: string, context = "URL"): URL {
 /**
  * Resolve o hostname e rejeita o destino se QUALQUER endereço retornado for
  * loopback, privado, link-local, CGNAT, documentação, multicast ou reservado.
- * Rejeitar respostas mistas evita um atacante esconder IP interno entre A/AAAA
- * públicos e reduz risco de DNS rebinding/round-robin malicioso.
+ * Rejeitar respostas mistas evita esconder IP interno entre A/AAAA públicos.
  */
 export async function assertSafeExternalUrlResolved(
   rawUrl: string,
