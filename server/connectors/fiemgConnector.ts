@@ -1,103 +1,43 @@
 /**
- * FIEMG / Sistema S — fonte HTML não oficial.
+ * FIEMG / Sistema S — adapter do Radar manual.
  *
- * Não é tratada como API REST: o adapter classifica mudança de layout como
- * CONTRACT_ERROR e nunca confunde indisponibilidade/parser quebrado com zero
- * oportunidades legítimas.
+ * Reutiliza a mesma URL e o mesmo parser institucional do radar agendado para
+ * evitar duas interpretações diferentes da mesma fonte.
  */
-import { parseDate, generateDedupeKey } from "./baseConnector";
 import type { NormalizedLicitacao } from "./baseConnector";
-import { resolveCredential } from "../integrations/core/credentialResolver";
+import { generateDedupeKey } from "./baseConnector";
 import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 import { classifyThrownError, IntegrationError } from "../integrations/core/integrationError";
 import { failureResult, successResult } from "../integrations/core/integrationResult";
 import type { IntegrationResult } from "../integrations/core/types";
+import { getS2PortalUrl } from "../services/s2TargetPortals";
+import { parseInstitutionalPortalHtml } from "../services/s2PortalOpportunitySyncService";
 
-const DEFAULT_FIEMG_URL = "https://www7.fiemg.com.br/licitacoes";
-
-interface EditalExtraido {
-  titulo: string;
-  href: string;
-  dataTexto: string | null;
-}
-
-async function fiemgUrl(): Promise<string> {
-  return (await resolveCredential("FIEMG_LICITACOES_URL")) || DEFAULT_FIEMG_URL;
-}
-
-function limparTexto(value: string): string {
-  return value
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&aacute;/gi, "á")
-    .replace(/&eacute;/gi, "é")
-    .replace(/&ccedil;/gi, "ç")
-    .replace(/&atilde;/gi, "ã")
-    .replace(/&otilde;/gi, "õ")
-    .replace(/&#(\d+);/g, (_, number) => String.fromCharCode(Number(number)))
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function pareceEdital(texto: string, href: string): boolean {
-  const alvo = `${texto} ${href}`.toLowerCase();
-  return /edital|licita|preg[aã]o|concorr[eê]ncia|processo|cota[cç][aã]o|chamada/.test(alvo);
-}
-
-function extrairData(trecho: string): string | null {
-  const br = trecho.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
-  const iso = trecho.match(/(\d{4})-(\d{2})-(\d{2})/);
-  return iso?.[0] ?? null;
-}
-
-export function extrairEditaisFiemg(html: string): EditalExtraido[] {
-  const editais: EditalExtraido[] = [];
-  const vistos = new Set<string>();
-  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = anchorRe.exec(html)) !== null) {
-    const href = match[1];
-    const titulo = limparTexto(match[2]);
-    if (!titulo || titulo.length < 8 || !pareceEdital(titulo, href) || vistos.has(href)) continue;
-    vistos.add(href);
-    editais.push({ titulo, href, dataTexto: extrairData(titulo) });
-    if (editais.length >= 200) break;
-  }
-  return editais;
-}
-
-function resolverUrl(href: string, base: string): string {
-  if (/^https?:\/\//i.test(href)) return href;
-  try {
-    return new URL(href, base).toString();
-  } catch {
-    return href;
-  }
-}
-
-export function normalizeFiemgEdital(edital: EditalExtraido, base: string): NormalizedLicitacao {
-  const dataPublicacao = parseDate(edital.dataTexto);
-  const link = resolverUrl(edital.href, base);
+function normalizeOpportunity(
+  opportunity: ReturnType<typeof parseInstitutionalPortalHtml>[number],
+): NormalizedLicitacao {
   return {
     source: "fiemg",
-    sourceId: link,
-    orgao: "Sistema FIEMG",
+    sourceId: opportunity.externalId,
+    orgao: opportunity.orgao,
     unidadeCompradora: "FIEMG / SESI / SENAI",
     modalidade: "Edital Sistema S",
-    numeroProcesso: "",
-    objeto: edital.titulo,
-    descricaoDetalhada: "",
+    numeroProcesso: opportunity.externalId,
+    objeto: opportunity.items[0]?.descricao || opportunity.subject,
+    descricaoDetalhada: opportunity.bodyText,
     uf: "MG",
     municipio: "",
-    dataPublicacao,
+    dataPublicacao: null,
     dataAbertura: null,
-    dataEncerramento: null,
+    dataEncerramento: opportunity.prazoResposta,
     valorEstimado: 0,
     status: "Publicado",
-    links: [link],
-    dedupeKey: generateDedupeKey("Sistema FIEMG", edital.titulo, dataPublicacao),
+    links: [opportunity.portalUrl],
+    dedupeKey: generateDedupeKey(
+      opportunity.orgao,
+      opportunity.items[0]?.descricao || opportunity.subject,
+      opportunity.prazoResposta,
+    ),
   };
 }
 
@@ -106,7 +46,7 @@ export async function buscarLicitacoesFiemgResult(
   fim: Date,
 ): Promise<IntegrationResult<NormalizedLicitacao[]>> {
   const startedAt = Date.now();
-  const url = await fiemgUrl();
+  const url = await getS2PortalUrl("fiemg");
   try {
     const response = await externalHttpRequest<string>({
       source: "fiemg",
@@ -116,9 +56,9 @@ export async function buscarLicitacoesFiemgResult(
       accept: "text/html,application/xhtml+xml",
       timeoutMs: 20_000,
       maxRetries: 1,
-      maxBodyBytes: 5 * 1024 * 1024,
+      maxBodyBytes: 8 * 1024 * 1024,
     });
-    if (!response.ok || !response.data) {
+    if (!response.ok || response.data == null) {
       return failureResult({
         source: "fiemg",
         operation: "licitacoes.list",
@@ -134,10 +74,9 @@ export async function buscarLicitacoesFiemgResult(
       });
     }
 
-    const html = response.data;
-    const editais = extrairEditaisFiemg(html);
-    const pageLooksRelevant = /licita|edital|preg[aã]o|concorr[eê]ncia|cota[cç][aã]o/i.test(html);
-    if (editais.length === 0 && pageLooksRelevant) {
+    const opportunities = parseInstitutionalPortalHtml("fiemg", response.data, url);
+    const pageLooksRelevant = /licita[cç][aã]o|edital|preg[aã]o|cota[cç][aã]o|processo|contrata[cç][aã]o/i.test(response.data);
+    if (opportunities.length === 0 && pageLooksRelevant) {
       return failureResult({
         source: "fiemg",
         operation: "licitacoes.list",
@@ -145,19 +84,20 @@ export async function buscarLicitacoesFiemgResult(
         startedAt,
         requestId: response.requestId,
         error: new IntegrationError(
-          "A página FIEMG respondeu, mas o parser não reconheceu editais. Possível mudança de layout.",
+          "A página FIEMG respondeu, mas o parser institucional não reconheceu oportunidades ativas. Possível mudança de layout.",
           { type: "CONTRACT", code: "FIEMG_HTML_DRIFT" },
         ),
-        metadata: { sourceUrl: url, schemaVersion: "fiemg-html-v2" },
+        metadata: { sourceUrl: url, schemaVersion: "institutional-html-v3" },
       });
     }
 
-    const data = editais
-      .map((edital) => normalizeFiemgEdital(edital, url))
-      .filter((licitacao) => {
-        if (!licitacao.dataPublicacao) return true;
-        const time = licitacao.dataPublicacao.getTime();
-        return time >= inicio.getTime() && time <= fim.getTime() + 86_400_000;
+    const data = opportunities
+      .map(normalizeOpportunity)
+      .filter((opportunity) => {
+        const deadline = opportunity.dataEncerramento;
+        if (!deadline) return true;
+        // Não exibe no Radar uma oportunidade cujo prazo terminou antes da janela.
+        return deadline.getTime() >= inicio.getTime() && deadline.getTime() <= fim.getTime() + 90 * 86_400_000;
       });
 
     return successResult({
@@ -169,7 +109,7 @@ export async function buscarLicitacoesFiemgResult(
       metadata: {
         records: data.length,
         sourceUrl: url,
-        schemaVersion: "fiemg-html-v2",
+        schemaVersion: "institutional-html-v3",
       },
     });
   } catch (error) {
@@ -184,7 +124,6 @@ export async function buscarLicitacoesFiemgResult(
   }
 }
 
-/** Compatibilidade: falha verdadeira lança; zero real continua sendo []. */
 export async function buscarLicitacoesFiemg(
   inicio: Date,
   fim: Date,
