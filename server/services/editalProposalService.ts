@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   funilEventos,
   funilOportunidades,
@@ -11,6 +12,7 @@ import {
   suppliers,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { editalProposalKeys } from "../db/editalProposalKeys";
 import { calculateSalePrice } from "./pricingSafety";
 import { transitionOpportunityInTransaction } from "./opportunityStateService";
 
@@ -68,6 +70,9 @@ type ProductSnapshot = {
   supplierName: string | null;
 };
 
+type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 function insertId(result: unknown): number {
   if (Array.isArray(result)) {
     const first = result[0];
@@ -88,6 +93,12 @@ function normalizeRequired(value: string, field: string, max: number): string {
 
 function roundMoney(value: number): string {
   return (Math.round(value * 100) / 100).toFixed(2);
+}
+
+export function editalProposalDedupeKey(processNumber: string, orgName: string): string {
+  return createHash("sha256")
+    .update(`${processNumber.trim().toLocaleLowerCase("pt-BR")}||${orgName.trim().toLocaleLowerCase("pt-BR")}`)
+    .digest("hex");
 }
 
 function validateItemInput(item: ReviewedEditalItem): void {
@@ -138,7 +149,7 @@ async function loadCanonicalProducts(productIds: number[]): Promise<Map<number, 
 }
 
 async function resolveOrCreateRequestingOrg(
-  tx: Parameters<Parameters<NonNullable<Awaited<ReturnType<typeof getDb>>>["transaction"]>[0]>[0],
+  tx: Transaction,
   orgName: string,
 ): Promise<number> {
   const [existing] = await tx
@@ -155,7 +166,7 @@ async function resolveOrCreateRequestingOrg(
 }
 
 async function resolveOpportunity(
-  tx: Parameters<Parameters<NonNullable<Awaited<ReturnType<typeof getDb>>>["transaction"]>[0]>[0],
+  tx: Transaction,
   processo: ReviewedEditalProcess,
   actor: string,
 ): Promise<{ id: number; etapa: typeof funilOportunidades.$inferSelect["etapa"]; reused: boolean }> {
@@ -222,7 +233,7 @@ async function resolveOpportunity(
 }
 
 async function normalizeExistingOpportunityForProposal(
-  tx: Parameters<Parameters<NonNullable<Awaited<ReturnType<typeof getDb>>>["transaction"]>[0]>[0],
+  tx: Transaction,
   opportunity: { id: number; etapa: typeof funilOportunidades.$inferSelect["etapa"] },
   actor: string,
 ): Promise<"precificacao"> {
@@ -260,6 +271,38 @@ async function normalizeExistingOpportunityForProposal(
     });
   }
   return "precificacao";
+}
+
+async function reserveEditalProposalKey(
+  tx: Transaction,
+  dedupeKey: string,
+): Promise<number | null> {
+  // ON DUPLICATE KEY UPDATE adquire o lock da chave já existente. Se outra
+  // transação estiver criando a proposta, esta instrução espera o commit dela;
+  // o SELECT seguinte então enxerga o proposalId concluído.
+  await tx.execute(sql`
+    INSERT INTO edital_proposal_keys (dedupeKey)
+    VALUES (${dedupeKey})
+    ON DUPLICATE KEY UPDATE dedupeKey = VALUES(dedupeKey)
+  `);
+  const [reservation] = await tx
+    .select({ proposalId: editalProposalKeys.proposalId })
+    .from(editalProposalKeys)
+    .where(eq(editalProposalKeys.dedupeKey, dedupeKey))
+    .limit(1);
+  if (!reservation) throw new Error("Falha ao reservar chave de idempotência do edital.");
+  return reservation.proposalId ?? null;
+}
+
+async function completeEditalProposalKey(
+  tx: Transaction,
+  dedupeKey: string,
+  proposalId: number,
+): Promise<void> {
+  await tx
+    .update(editalProposalKeys)
+    .set({ proposalId, completedAt: new Date() })
+    .where(eq(editalProposalKeys.dedupeKey, dedupeKey));
 }
 
 export async function createProposalFromReviewedEdital(
@@ -307,6 +350,7 @@ export async function createProposalFromReviewedEdital(
   const modality = normalizeRequired(input.processo.modalidade, "Modalidade", 128);
   const title = `${modality} — ${processNumber}`.slice(0, 256);
   const totalValue = canonicalItems.reduce((sum, item) => sum + item.totalSale, 0);
+  const dedupeKey = editalProposalDedupeKey(processNumber, orgName);
 
   let template: typeof proposalTemplates.$inferSelect | null = null;
   if (input.templateId) {
@@ -322,6 +366,18 @@ export async function createProposalFromReviewedEdital(
   }
 
   return db.transaction(async (tx) => {
+    const reservedProposalId = await reserveEditalProposalKey(tx, dedupeKey);
+    if (reservedProposalId) {
+      const opportunity = await resolveOpportunity(tx, input.processo, input.actor);
+      return {
+        proposalId: reservedProposalId,
+        addedCount: 0,
+        opportunityId: opportunity.id,
+        reusedOpportunity: true,
+        reusedProposal: true,
+      };
+    }
+
     const existingProposals = await tx
       .select({ id: proposals.id })
       .from(proposals)
@@ -336,6 +392,7 @@ export async function createProposalFromReviewedEdital(
 
     const opportunity = await resolveOpportunity(tx, input.processo, input.actor);
     if (existingProposals.length === 1) {
+      await completeEditalProposalKey(tx, dedupeKey, existingProposals[0].id);
       return {
         proposalId: existingProposals[0].id,
         addedCount: 0,
@@ -406,6 +463,8 @@ export async function createProposalFromReviewedEdital(
         message: "A oportunidade foi alterada concorrentemente durante a criação da proposta.",
       });
     }
+
+    await completeEditalProposalKey(tx, dedupeKey, proposalId);
 
     return {
       proposalId,
