@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, recordPriceHistory } from "../db";
 import { productSupplierOffers, products } from "../../drizzle/schema";
 import { logger } from "../_core/logger";
-import type { ScrapedProduct } from "./scraperEngine";
+import type { ScrapedProduct } from "./scraperContracts";
 import type { NormalizedAvailability } from "./captureCoreService";
 import type {
   CaptureOfferMatchRecord,
@@ -43,14 +43,6 @@ export function toLegacyAvailability(value: NormalizedAvailability): string {
   return "desconhecido";
 }
 
-function resolveAvailability(
-  availability: NormalizedAvailability,
-  existing?: CaptureOfferMatchRecord | null,
-): string {
-  if (availability === "unknown" && existing?.availability) return existing.availability;
-  return toLegacyAvailability(availability);
-}
-
 function resolveOptionalString(
   next: string | null | undefined,
   current: string | null | undefined,
@@ -60,14 +52,11 @@ function resolveOptionalString(
   return current ?? null;
 }
 
-function resolvePromoPrice(
-  scraped: ScrapedProduct,
-  existing?: CaptureOfferMatchRecord | null,
-): string | null {
-  if (scraped.pricePromo !== undefined && scraped.pricePromo !== null) {
-    return String(scraped.pricePromo);
-  }
-  return existing?.promoPrice ?? null;
+function resolvePromoPrice(scraped: ScrapedProduct): string | null {
+  if (scraped.pricePromo === undefined || scraped.pricePromo === null) return null;
+  const promo = Number(scraped.pricePromo);
+  if (!Number.isFinite(promo) || promo <= 0) return null;
+  return String(promo);
 }
 
 function validatePrice(scraped: ScrapedProduct): number {
@@ -80,8 +69,14 @@ function validatePrice(scraped: ScrapedProduct): number {
 
 /**
  * Persistência reutilizável dentro de uma transação já aberta.
- * Não registra histórico aqui: histórico é um efeito derivado e deve acontecer
- * apenas depois do commit da alteração operacional.
+ *
+ * Regra temporal: preço/estoque/disponibilidade/promoção representam a captura
+ * atual. Se a fonte não observou estoque ou disponibilidade, o valor atual deve
+ * ficar desconhecido; nunca herdamos esses campos de uma observação antiga.
+ * Metadados de identidade (SKU/link/imagem) podem ser preservados.
+ *
+ * Não registra histórico aqui: histórico é efeito derivado e acontece somente
+ * após o commit da alteração operacional.
  */
 export async function persistCapturedOffer(
   executor: CaptureDbExecutor,
@@ -96,9 +91,9 @@ export async function persistCapturedOffer(
     supplierName: input.supplierName,
     link: resolveOptionalString(input.scraped.productUrl, input.existingOffer?.link),
     image: resolveOptionalString(input.scraped.imageUrl, input.existingOffer?.image),
-    availability: resolveAvailability(input.availability, input.existingOffer),
-    promoPrice: resolvePromoPrice(input.scraped, input.existingOffer),
-    stock: input.scraped.stock ?? input.existingOffer?.stock ?? null,
+    availability: toLegacyAvailability(input.availability),
+    promoPrice: resolvePromoPrice(input.scraped),
+    stock: input.scraped.stock ?? null,
     updatedAt: now,
   };
 
@@ -155,9 +150,7 @@ export async function recordCapturedOfferHistory(
   }
 }
 
-/**
- * Persiste oferta em transação própria e registra histórico apenas após commit.
- */
+/** Persiste oferta em transação própria e registra histórico apenas após commit. */
 export async function applyCapturedOffer(
   input: ApplyCapturedOfferInput,
 ): Promise<ApplyCapturedOfferResult> {
