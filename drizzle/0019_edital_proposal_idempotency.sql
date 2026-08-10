@@ -1,8 +1,11 @@
-ALTER TABLE `proposals` ADD COLUMN `editalDedupeKey` varchar(64) GENERATED ALWAYS AS (
-  CASE
-    WHEN `origem` = 'edital' AND `processNumber` IS NOT NULL AND `orgName` IS NOT NULL
-      THEN SHA2(CONCAT(TRIM(`processNumber`), '||', TRIM(`orgName`)), 256)
-    ELSE NULL
-  END
-) STORED;--> statement-breakpoint
-CREATE UNIQUE INDEX `uq_proposals_edital_dedupe` ON `proposals` (`editalDedupeKey`);
+CREATE TABLE IF NOT EXISTS `edital_proposal_keys` (
+  `dedupeKey` varchar(64) NOT NULL,
+  `proposalId` int NULL,
+  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `completedAt` timestamp NULL,
+  PRIMARY KEY (`dedupeKey`),
+  UNIQUE KEY `uq_edital_proposal_keys_proposal` (`proposalId`),
+  CONSTRAINT `edital_proposal_keys_proposal_fk`
+    FOREIGN KEY (`proposalId`) REFERENCES `proposals`(`id`)
+    ON DELETE SET NULL ON UPDATE NO ACTION
+);
