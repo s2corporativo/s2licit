@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { JSDOM } from "jsdom";
 import { logger } from "../_core/logger";
 import { parsePrecoBR } from "../utils/number";
@@ -117,7 +118,6 @@ export async function fetchAndParsePage(
       if (absolute) unique.add(absolute);
     }
 
-    // JSON-LD ItemList é mais resistente a mudanças de CSS.
     for (const product of findJsonLdProducts(document)) {
       const absolute = absoluteUrl(product?.url, response.url);
       if (absolute) unique.add(absolute);
@@ -273,5 +273,5 @@ export function generateContentHash(product: ExtractedProduct): string {
     sku: product.sku,
     ean: product.ean,
   });
-  return require("crypto").createHash("sha256").update(content).digest("hex");
+  return createHash("sha256").update(content).digest("hex");
 }
