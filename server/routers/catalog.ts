@@ -4,6 +4,7 @@ import { recordAudit } from "../services/auditService";
 import { ensureCatalogKnowledgeSchema } from "../services/catalogKnowledgeSchema";
 import {
   catalogQualitySummary,
+  createCanonicalProduct,
   getCanonicalProductDetail,
   listCanonicalCatalog,
   restoreCanonicalProduct,
@@ -45,12 +46,59 @@ const masterPatch = z.object({
   isActive: z.enum(["yes", "no"]).optional(),
 }).strict();
 
+const createInput = z.object({
+  name: z.string().min(1).max(512),
+  code: z.string().max(128).nullable().optional(),
+  description: z.string().nullable().optional(),
+  activeIngredient: z.string().max(512).nullable().optional(),
+  manufacturer: z.string().max(256).nullable().optional(),
+  unit: z.string().max(64).nullable().optional(),
+  concentration: z.string().max(128).nullable().optional(),
+  presentation: z.string().max(256).nullable().optional(),
+  pharmaceuticalForm: z.string().max(128).nullable().optional(),
+  barcode: z.string().max(128).nullable().optional(),
+  gtin: z.string().max(64).nullable().optional(),
+  ean: z.string().max(64).nullable().optional(),
+  mapa: z.string().max(128).nullable().optional(),
+  registroRegulatorio: z.enum(["MAPA", "ANVISA", "FORN"]).nullable().optional(),
+  catmasCode: z.string().max(32).nullable().optional(),
+  catmatCode: z.string().max(32).nullable().optional(),
+  fichaTecnica: z.string().nullable().optional(),
+  subcategoria: z.string().max(256).nullable().optional(),
+  ncm: z.string().max(16).nullable().optional(),
+  especieAnimal: z.string().max(256).nullable().optional(),
+  viaAdministracao: z.string().max(128).nullable().optional(),
+  classeTerapeutica: z.string().max(256).nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
+  productUrl: z.string().nullable().optional(),
+  categoryId: z.number().int().positive().nullable().optional(),
+  supplierId: z.number().int().positive().nullable().optional(),
+  initialPrice: z.string().nullable().optional(),
+  supplierCode: z.string().max(128).nullable().optional(),
+  supplierLink: z.string().nullable().optional(),
+}).strict();
+
 async function initialized<T>(fn: () => Promise<T>): Promise<T> {
   await ensureCatalogKnowledgeSchema();
   return fn();
 }
 
 export const catalogRouter = router({
+  create: editorProcedure
+    .input(createInput)
+    .mutation(async ({ input, ctx }) => initialized(async () => {
+      const result = await createCanonicalProduct(input, ctx.user.id);
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "canonical_product_create",
+        entity: "products",
+        entityId: result.productId,
+        summary: `Produto canônico criado: ${input.name}`,
+        changes: { categoryId: input.categoryId, supplierId: input.supplierId },
+      });
+      return result;
+    })),
+
   list: protectedProcedure.input(z.object({
     search: z.string().max(256).optional(),
     categoryId: z.number().int().positive().optional(),
