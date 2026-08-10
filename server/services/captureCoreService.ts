@@ -9,7 +9,6 @@ import {
   suppliers,
 } from "../../drizzle/schema";
 import {
-  captureAiFeedback,
   captureConnectorHealth,
   captureJobEvents,
   captureJobs,
@@ -19,7 +18,11 @@ import {
 import { combinedStringSimilarity, normalizeText } from "../matching/productMatcher";
 import { captureSupplierProducts } from "./scraperCaptureAdapter";
 import { getConnectorCapabilities } from "./captureConnectorCapabilities";
-import { explainCaptureAnomaly, recordCaptureAiFeedback, resolveAmbiguousProductMatch } from "./captureAiService";
+import {
+  explainCaptureAnomaly,
+  recordCaptureAiFeedback,
+  resolveAmbiguousProductMatch,
+} from "./captureAiService";
 import type { ScrapedProduct } from "./scraperEngine";
 import { logger } from "../_core/logger";
 
@@ -29,11 +32,11 @@ const REVIEW_PRICE_CHANGE = Number(process.env.CAPTURE_REVIEW_PRICE_CHANGE || 0.
 const BLOCK_PRICE_CHANGE = Number(process.env.CAPTURE_BLOCK_PRICE_CHANGE || 3.00);
 const FULL_MIN_COVERAGE = Number(process.env.CAPTURE_FULL_MIN_COVERAGE || 0.50);
 const FULL_WARN_COVERAGE = Number(process.env.CAPTURE_FULL_WARN_COVERAGE || 0.75);
+const STORE_UNCHANGED = process.env.CAPTURE_STORE_UNCHANGED === "true";
 
 export type CaptureMode = "search" | "refresh" | "full";
 export type CaptureTrigger = "manual" | "scheduled" | "bulk" | "proposal" | "api";
-
-type Availability = "in_stock" | "out_of_stock" | "limited" | "backorder" | "unknown";
+export type NormalizedAvailability = "in_stock" | "out_of_stock" | "limited" | "backorder" | "unknown";
 
 type ProductInfo = {
   id: number;
@@ -61,7 +64,9 @@ type OfferInfo = {
   availability: string | null;
 };
 
-function asAvailability(value?: string | null, stock?: number | null): Availability {
+type ObservationAction = "no_change" | "update" | "create" | "review" | "blocked";
+
+export function normalizeCaptureAvailability(value?: string | null, stock?: number | null): NormalizedAvailability {
   const text = String(value || "").toLowerCase();
   if (stock === 0 || /indispon|out.?of.?stock|esgot/.test(text)) return "out_of_stock";
   if (stock != null && stock > 0) return stock <= 5 ? "limited" : "in_stock";
@@ -70,14 +75,14 @@ function asAvailability(value?: string | null, stock?: number | null): Availabil
   return "unknown";
 }
 
-function offerAvailability(value: Availability): string {
+function toLegacyAvailability(value: NormalizedAvailability): string {
   if (value === "in_stock" || value === "limited") return "disponivel";
   if (value === "out_of_stock") return "indisponivel";
   if (value === "backorder") return "sob_encomenda";
   return "desconhecido";
 }
 
-function normalizedEan(value?: string | null): string | null {
+export function normalizeCaptureEan(value?: string | null): string | null {
   const digits = String(value || "").replace(/\D/g, "");
   return /^\d{8,14}$/.test(digits) ? digits : null;
 }
@@ -89,25 +94,25 @@ function packSignature(name?: string | null): string {
   return Array.from(new Set(tokens)).sort().join("|");
 }
 
-function presentationCompatible(a?: string | null, b?: string | null): boolean {
-  const sa = packSignature(a);
-  const sb = packSignature(b);
-  return !sa || !sb || sa === sb;
+export function capturePresentationCompatible(a?: string | null, b?: string | null): boolean {
+  const left = packSignature(a);
+  const right = packSignature(b);
+  return !left || !right || left === right;
 }
 
-function contentHash(input: {
+function makeContentHash(input: {
   sku?: string | null;
   ean?: string | null;
   name: string;
   price?: number | null;
   promo?: number | null;
   stock?: number | null;
-  availability: Availability;
+  availability: NormalizedAvailability;
 }): string {
   return createHash("sha256")
     .update(JSON.stringify({
       sku: input.sku || null,
-      ean: normalizedEan(input.ean),
+      ean: normalizeCaptureEan(input.ean),
       name: normalizeText(input.name),
       price: input.price ?? null,
       promo: input.promo ?? null,
@@ -117,7 +122,46 @@ function contentHash(input: {
     .digest("hex");
 }
 
-async function event(
+export function evaluateCapturePriceChange(newPrice: number, previous?: string | number | null) {
+  const oldPrice = Number(previous || 0);
+  if (!Number.isFinite(newPrice) || newPrice <= 0) {
+    return { level: "block" as const, change: null as number | null };
+  }
+  if (!oldPrice || oldPrice <= 0) return { level: "ok" as const, change: null as number | null };
+  const change = Math.abs(newPrice - oldPrice) / oldPrice;
+  if (change >= BLOCK_PRICE_CHANGE) return { level: "block" as const, change };
+  if (change >= REVIEW_PRICE_CHANGE) return { level: "review" as const, change };
+  return { level: "ok" as const, change };
+}
+
+export function evaluateCaptureQuality(input: {
+  mode: CaptureMode;
+  captured: number;
+  baseline?: number | null;
+  warnings?: number;
+}) {
+  let score = 100;
+  let quarantine = false;
+  const reasons: string[] = [];
+  if (input.captured === 0) {
+    return { score: 0, quarantine: true, reasons: ["Nenhum produto foi capturado."] };
+  }
+  if (input.mode === "full" && input.baseline && input.baseline > 0) {
+    const coverage = input.captured / input.baseline;
+    if (coverage < FULL_MIN_COVERAGE) {
+      quarantine = true;
+      score -= 60;
+      reasons.push(`Cobertura ${(coverage * 100).toFixed(1)}% abaixo do mínimo histórico.`);
+    } else if (coverage < FULL_WARN_COVERAGE) {
+      score -= 25;
+      reasons.push(`Cobertura reduzida: ${(coverage * 100).toFixed(1)}% do baseline.`);
+    }
+  }
+  score -= Math.min((input.warnings ?? 0) * 2, 20);
+  return { score: Math.max(0, score), quarantine, reasons };
+}
+
+async function addEvent(
   jobId: number,
   stage: string,
   message: string,
@@ -126,7 +170,9 @@ async function event(
 ) {
   const db = await getDb();
   if (!db) return;
-  await db.insert(captureJobEvents).values({ captureJobId: jobId, stage, message, level, data }).catch(() => undefined);
+  await db.insert(captureJobEvents)
+    .values({ captureJobId: jobId, stage, message, level, data })
+    .catch(() => undefined);
   await db.update(captureJobs)
     .set({ progressStage: stage, progressMessage: message, heartbeatAt: new Date() })
     .where(eq(captureJobs.id, jobId))
@@ -151,29 +197,21 @@ export async function enqueueCaptureJob(input: {
   if (config.enabled !== "yes") throw new Error("Esta configuração de captura está desativada.");
   if (!config.tosAprovado) throw new Error("Captura bloqueada: termos de uso ainda não aprovados.");
 
-  const capabilities = getConnectorCapabilities(
-    config.scraperType,
-    config.customSelectors as any,
-  );
-
+  const capabilities = getConnectorCapabilities(config.scraperType, config.customSelectors as any);
   let mode = input.mode ?? "full";
   if (mode === "full" && !capabilities.fullCatalog) {
-    // Search-only não fica mais quebrado no scheduler: atualiza apenas ofertas
-    // conhecidas pela busca do próprio fornecedor.
     if (capabilities.search) mode = input.query?.trim() ? "search" : "refresh";
     else throw new Error("O conector não suporta catálogo completo nem busca sob demanda.");
   }
   if (mode === "search" && !input.query?.trim()) throw new Error("Busca exige termo, SKU ou EAN.");
 
-  const [active] = await db
-    .select({ id: captureJobs.id, status: captureJobs.status })
+  const [active] = await db.select({ id: captureJobs.id, status: captureJobs.status })
     .from(captureJobs)
     .where(and(
       eq(captureJobs.scraperConfigId, input.scraperConfigId),
       inArray(captureJobs.status, ["queued", "running"]),
     ))
-    .orderBy(desc(captureJobs.createdAt))
-    .limit(1);
+    .orderBy(desc(captureJobs.createdAt)).limit(1);
   if (active) return { id: active.id, status: active.status, reused: true as const, mode };
 
   const [inserted] = await db.insert(captureJobs).values({
@@ -189,22 +227,19 @@ export async function enqueueCaptureJob(input: {
     progressMessage: "Captura aguardando worker.",
   });
   const id = Number((inserted as any).insertId);
-  await event(id, "queued", `Job criado (${mode}/${input.trigger ?? "manual"}).`);
+  await addEvent(id, "queued", `Job criado (${mode}/${input.trigger ?? "manual"}).`);
   return { id, status: "queued" as const, reused: false as const, mode };
 }
 
 export async function getActiveCaptureJob(scraperConfigId: number) {
   const db = await getDb();
   if (!db) return null;
-  const [job] = await db
-    .select()
-    .from(captureJobs)
+  const [job] = await db.select().from(captureJobs)
     .where(and(
       eq(captureJobs.scraperConfigId, scraperConfigId),
       inArray(captureJobs.status, ["queued", "running"]),
     ))
-    .orderBy(desc(captureJobs.createdAt))
-    .limit(1);
+    .orderBy(desc(captureJobs.createdAt)).limit(1);
   return job ?? null;
 }
 
@@ -258,10 +293,9 @@ export async function listCaptureJobHistory(scraperConfigId: number, limit = 20)
   }));
 }
 
-async function catalogContext(supplierId: number) {
+async function loadCatalogContext(supplierId: number) {
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível");
-
   const productRows: ProductInfo[] = await db.select({
     id: products.id,
     supplierId: products.supplierId,
@@ -290,59 +324,46 @@ async function catalogContext(supplierId: number) {
 
   const byId = new Map(productRows.map((row) => [row.id, row]));
   const eanMap = new Map<string, ProductInfo | null>();
-  const buckets = new Map<string, ProductInfo[]>();
+  const nameBuckets = new Map<string, ProductInfo[]>();
   for (const row of productRows) {
     for (const raw of [row.ean, row.gtin, row.barcode]) {
-      const ean = normalizedEan(raw);
+      const ean = normalizeCaptureEan(raw);
       if (!ean) continue;
       if (!eanMap.has(ean)) eanMap.set(ean, row);
-      else if (eanMap.get(ean)?.id !== row.id) eanMap.set(ean, null); // duplicidade global: não automatiza
+      else if (eanMap.get(ean)?.id !== row.id) eanMap.set(ean, null);
     }
-    const word = normalizeText(row.name).split(/\s+/).find((part) => part.length >= 3);
-    if (word) {
-      const bucket = buckets.get(word) ?? [];
-      bucket.push(row);
-      buckets.set(word, bucket);
-    }
+    const first = normalizeText(row.name).split(/\s+/).find((word) => word.length >= 3);
+    if (first) nameBuckets.set(first, [...(nameBuckets.get(first) ?? []), row]);
   }
+
   const offerByCode = new Map<string, OfferInfo>();
   const offerByProduct = new Map<number, OfferInfo>();
   for (const offer of offers) {
     if (offer.supplierCode) offerByCode.set(offer.supplierCode.trim(), offer);
     offerByProduct.set(offer.productId, offer);
   }
-  return { byId, eanMap, buckets, offerByCode, offerByProduct };
-}
-
-function priceAnomaly(newPrice: number, previous?: string | null) {
-  const oldPrice = Number(previous || 0);
-  if (!Number.isFinite(newPrice) || newPrice <= 0) return { level: "block" as const, change: null };
-  if (!oldPrice || oldPrice <= 0) return { level: "ok" as const, change: null };
-  const change = Math.abs(newPrice - oldPrice) / oldPrice;
-  if (change >= BLOCK_PRICE_CHANGE) return { level: "block" as const, change };
-  if (change >= REVIEW_PRICE_CHANGE) return { level: "review" as const, change };
-  return { level: "ok" as const, change };
+  return { byId, eanMap, nameBuckets, offerByCode, offerByProduct };
 }
 
 async function upsertOffer(input: {
   productId: number;
   supplierId: number;
   supplierName: string;
-  product: ScrapedProduct;
-  availability: Availability;
+  scraped: ScrapedProduct;
+  availability: NormalizedAvailability;
   existing?: OfferInfo;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível");
   const values = {
-    price: String(input.product.price),
-    supplierCode: input.product.code ?? null,
+    price: String(input.scraped.price),
+    supplierCode: input.scraped.code ?? null,
     supplierName: input.supplierName,
-    link: input.product.productUrl ?? null,
-    image: input.product.imageUrl ?? null,
-    availability: offerAvailability(input.availability),
-    promoPrice: input.product.pricePromo != null ? String(input.product.pricePromo) : null,
-    stock: input.product.stock ?? null,
+    link: input.scraped.productUrl ?? null,
+    image: input.scraped.imageUrl ?? null,
+    availability: toLegacyAvailability(input.availability),
+    promoPrice: input.scraped.pricePromo != null ? String(input.scraped.pricePromo) : null,
+    stock: input.scraped.stock ?? null,
     updatedAt: new Date(),
   };
   if (input.existing) {
@@ -355,31 +376,34 @@ async function upsertOffer(input: {
       createdAt: new Date(),
     });
   }
-  await recordPriceHistory({ productId: input.productId, supplierId: input.supplierId, price: String(input.product.price) })
-    .catch(() => undefined);
+  await recordPriceHistory({
+    productId: input.productId,
+    supplierId: input.supplierId,
+    price: String(input.scraped.price),
+  }).catch(() => undefined);
 }
 
-async function createProductFromObservation(input: {
+async function createNewProduct(input: {
   supplierId: number;
   supplierName: string;
-  product: ScrapedProduct;
-  availability: Availability;
+  scraped: ScrapedProduct;
+  availability: NormalizedAvailability;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível");
-  const ean = normalizedEan(input.product.ean);
+  const ean = normalizeCaptureEan(input.scraped.ean);
   const [inserted] = await db.insert(products).values({
     supplierId: input.supplierId,
-    name: input.product.name.slice(0, 512),
-    price: String(input.product.price),
-    codigoFornecedor: input.product.code ?? null,
-    code: input.product.code ?? null,
+    name: input.scraped.name.slice(0, 512),
+    price: String(input.scraped.price),
+    codigoFornecedor: input.scraped.code ?? null,
+    code: input.scraped.code ?? null,
     ean,
     gtin: ean,
-    unit: input.product.unit ?? null,
-    imageUrl: input.product.imageUrl ?? null,
-    productUrl: input.product.productUrl ?? input.product.fonteUrl ?? null,
-    stock: input.product.stock != null ? String(input.product.stock) : null,
+    unit: input.scraped.unit ?? null,
+    imageUrl: input.scraped.imageUrl ?? null,
+    productUrl: input.scraped.productUrl ?? input.scraped.fonteUrl ?? null,
+    stock: input.scraped.stock != null ? String(input.scraped.stock) : null,
     statusConfiabilidade: "pendente_revisao",
     isActive: "yes",
   });
@@ -388,40 +412,13 @@ async function createProductFromObservation(input: {
     productId,
     supplierId: input.supplierId,
     supplierName: input.supplierName,
-    product: input.product,
+    scraped: input.scraped,
     availability: input.availability,
   });
   return productId;
 }
 
-function preliminaryQuality(input: {
-  mode: CaptureMode;
-  captured: number;
-  baseline?: number | null;
-  warnings: number;
-}) {
-  let score = 100;
-  let quarantine = false;
-  const reasons: string[] = [];
-  if (input.captured === 0) {
-    return { score: 0, quarantine: true, reasons: ["Nenhum produto foi capturado."] };
-  }
-  if (input.mode === "full" && input.baseline && input.baseline > 0) {
-    const coverage = input.captured / input.baseline;
-    if (coverage < FULL_MIN_COVERAGE) {
-      quarantine = true;
-      score -= 60;
-      reasons.push(`Cobertura ${(coverage * 100).toFixed(1)}% abaixo do mínimo histórico.`);
-    } else if (coverage < FULL_WARN_COVERAGE) {
-      score -= 25;
-      reasons.push(`Cobertura reduzida: ${(coverage * 100).toFixed(1)}% do baseline.`);
-    }
-  }
-  score -= Math.min(input.warnings * 2, 20);
-  return { score: Math.max(0, score), quarantine, reasons };
-}
-
-async function healthRow(scraperConfigId: number) {
+async function getHealth(scraperConfigId: number) {
   const db = await getDb();
   if (!db) return null;
   const [row] = await db.select().from(captureConnectorHealth)
@@ -429,9 +426,8 @@ async function healthRow(scraperConfigId: number) {
   return row ?? null;
 }
 
-async function updateHealth(input: {
+async function saveHealth(input: {
   job: CaptureJob;
-  supplierId: number;
   score: number;
   captured: number;
   successful: boolean;
@@ -440,13 +436,13 @@ async function updateHealth(input: {
 }) {
   const db = await getDb();
   if (!db) return;
-  const existing = await healthRow(input.job.scraperConfigId);
+  const existing = await getHealth(input.job.scraperConfigId);
   const now = new Date();
   const baseline = input.successful && input.job.mode === "full"
     ? Math.round(existing?.baselineItems ? existing.baselineItems * 0.8 + input.captured * 0.2 : input.captured)
     : existing?.baselineItems ?? null;
   const values = {
-    supplierId: input.supplierId,
+    supplierId: input.job.supplierId,
     status: (input.successful
       ? input.score >= 90 ? "healthy" : input.score >= 70 ? "attention" : "degraded"
       : "degraded") as "healthy" | "attention" | "degraded",
@@ -460,17 +456,153 @@ async function updateHealth(input: {
     capabilities: input.capabilities,
     updatedAt: now,
   };
-  if (existing) {
-    await db.update(captureConnectorHealth).set(values).where(eq(captureConnectorHealth.id, existing.id));
-  } else {
-    await db.insert(captureConnectorHealth).values({
-      scraperConfigId: input.job.scraperConfigId,
-      ...values,
-    });
-  }
+  if (existing) await db.update(captureConnectorHealth).set(values).where(eq(captureConnectorHealth.id, existing.id));
+  else await db.insert(captureConnectorHealth).values({ scraperConfigId: input.job.scraperConfigId, ...values });
 }
 
-/** Processa um job já reclamado pelo worker. */
+async function chooseProductMatch(
+  job: CaptureJob,
+  scraped: ScrapedProduct,
+  ctx: Awaited<ReturnType<typeof loadCatalogContext>>,
+): Promise<{
+  product: ProductInfo | null;
+  existingOffer?: OfferInfo;
+  deterministic: boolean;
+  confidence: number;
+  actionHint?: ObservationAction;
+  reason: string;
+}> {
+  const ean = normalizeCaptureEan(scraped.ean);
+  if (ean && ctx.eanMap.has(ean)) {
+    const exact = ctx.eanMap.get(ean);
+    if (exact) {
+      return {
+        product: exact,
+        existingOffer: ctx.offerByProduct.get(exact.id),
+        deterministic: true,
+        confidence: 1,
+        reason: "EAN/GTIN exato.",
+      };
+    }
+    return {
+      product: null,
+      deterministic: false,
+      confidence: 0,
+      actionHint: "review",
+      reason: "EAN duplicado no catálogo mestre; automação bloqueada.",
+    };
+  }
+
+  if (scraped.code) {
+    const offer = ctx.offerByCode.get(scraped.code.trim());
+    const candidate = offer ? ctx.byId.get(offer.productId) : undefined;
+    if (candidate) {
+      const candidateEan = normalizeCaptureEan(candidate.ean || candidate.gtin || candidate.barcode);
+      if (ean && candidateEan && ean !== candidateEan) {
+        return {
+          product: candidate,
+          existingOffer: offer,
+          deterministic: false,
+          confidence: 0,
+          actionHint: "blocked",
+          reason: "SKU conhecido aponta para produto com EAN conflitante.",
+        };
+      }
+      return {
+        product: candidate,
+        existingOffer: offer,
+        deterministic: true,
+        confidence: 0.99,
+        reason: "SKU já vinculado a este fornecedor.",
+      };
+    }
+  }
+
+  const normalized = normalizeText(scraped.name);
+  const first = normalized.split(/\s+/).find((word) => word.length >= 3) ?? "";
+  const candidates = (ctx.nameBuckets.get(first) ?? [])
+    .map((candidate) => ({
+      candidate,
+      score: combinedStringSimilarity(normalized, normalizeText(candidate.name)),
+    }))
+    .filter(({ candidate }) => {
+      const candidateEan = normalizeCaptureEan(candidate.ean || candidate.gtin || candidate.barcode);
+      return !(ean && candidateEan && ean !== candidateEan);
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+
+  const best = candidates[0];
+  if (best && best.score >= AUTO_NAME_MATCH && capturePresentationCompatible(scraped.name, best.candidate.name)) {
+    return {
+      product: best.candidate,
+      existingOffer: ctx.offerByProduct.get(best.candidate.id),
+      deterministic: true,
+      confidence: best.score,
+      reason: `Nome/apresentação com similaridade ${(best.score * 100).toFixed(1)}%.`,
+    };
+  }
+
+  if (best && best.score >= AI_NAME_MATCH_MIN) {
+    const ai = await resolveAmbiguousProductMatch({
+      supplierId: job.supplierId,
+      observed: {
+        name: scraped.name,
+        ean,
+        sku: scraped.code,
+        unit: scraped.unit,
+        price: scraped.price,
+      },
+      candidates: candidates.map(({ candidate, score }) => ({
+        id: candidate.id,
+        name: candidate.name,
+        ean: candidate.ean || candidate.gtin || candidate.barcode,
+        code: candidate.code || candidate.codigoFornecedor,
+        manufacturer: candidate.manufacturer,
+        presentation: candidate.presentation,
+        unit: candidate.unit,
+        score,
+      })),
+    });
+    if (ai?.selectedProductId && ai.confidence >= 0.92 && ai.compatiblePresentation) {
+      const selected = ctx.byId.get(ai.selectedProductId) ?? null;
+      return {
+        product: selected,
+        existingOffer: selected ? ctx.offerByProduct.get(selected.id) : undefined,
+        deterministic: false,
+        confidence: ai.confidence,
+        actionHint: "review",
+        reason: `IA sugeriu match: ${ai.reason}`,
+      };
+    }
+    return {
+      product: null,
+      deterministic: false,
+      confidence: ai?.confidence ?? best.score,
+      actionHint: "review",
+      reason: ai?.reason || "Nome semelhante, mas identidade insuficiente para automação.",
+    };
+  }
+
+  if (ean) {
+    return {
+      product: null,
+      deterministic: true,
+      confidence: 0.97,
+      actionHint: "create",
+      reason: "EAN válido e inexistente no catálogo; novo produto determinístico.",
+    };
+  }
+
+  return {
+    product: null,
+    deterministic: false,
+    confidence: 0,
+    actionHint: "review",
+    reason: "Produto novo sem EAN confiável; requer validação.",
+  };
+}
+
 export async function processCaptureJob(jobId: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível");
@@ -479,22 +611,23 @@ export async function processCaptureJob(jobId: number): Promise<void> {
 
   const startedAt = job.startedAt ?? new Date();
   let supplierName = `Fornecedor #${job.supplierId}`;
-  let errorMessage: string | null = null;
   try {
     const [supplier] = await db.select({ name: suppliers.name }).from(suppliers)
       .where(eq(suppliers.id, job.supplierId)).limit(1);
     if (supplier) supplierName = supplier.name;
 
-    await event(job.id, "capture", `Iniciando captura ${job.mode} de ${supplierName}.`);
+    await addEvent(job.id, "capture", `Iniciando captura ${job.mode} de ${supplierName}.`);
     const captured = await captureSupplierProducts({
       scraperConfigId: job.scraperConfigId,
       mode: job.mode,
       query: job.query,
     });
-    for (const warning of captured.warnings.slice(0, 30)) await event(job.id, "capture", warning, "warning");
+    for (const warning of captured.warnings.slice(0, 30)) {
+      await addEvent(job.id, "capture", warning, "warning");
+    }
 
-    const previousHealth = await healthRow(job.scraperConfigId);
-    const gate = preliminaryQuality({
+    const previousHealth = await getHealth(job.scraperConfigId);
+    const gate = evaluateCaptureQuality({
       mode: job.mode,
       captured: captured.products.length,
       baseline: previousHealth?.baselineItems,
@@ -508,7 +641,7 @@ export async function processCaptureJob(jobId: number): Promise<void> {
 
     if (gate.quarantine) {
       const reason = gate.reasons.join(" ");
-      await event(job.id, "quality", `Captura em quarentena: ${reason}`, "error");
+      await addEvent(job.id, "quality", `Captura em quarentena: ${reason}`, "error");
       const aiDiagnosis = await explainCaptureAnomaly({
         supplierName,
         capturedItems: captured.products.length,
@@ -516,7 +649,7 @@ export async function processCaptureJob(jobId: number): Promise<void> {
         errorItems: 0,
         warnings: captured.warnings,
       });
-      if (aiDiagnosis) await event(job.id, "ai_diagnosis", aiDiagnosis, "warning");
+      if (aiDiagnosis) await addEvent(job.id, "ai_diagnosis", aiDiagnosis, "warning");
       await db.update(captureJobs).set({
         status: "quarantine",
         completedAt: new Date(),
@@ -524,9 +657,8 @@ export async function processCaptureJob(jobId: number): Promise<void> {
         progressMessage: reason,
         errorMessage: reason,
       }).where(eq(captureJobs.id, job.id));
-      await updateHealth({
+      await saveHealth({
         job,
-        supplierId: job.supplierId,
         score: gate.score,
         captured: captured.products.length,
         successful: false,
@@ -542,8 +674,8 @@ export async function processCaptureJob(jobId: number): Promise<void> {
       return;
     }
 
-    await event(job.id, "matching", `Quality gate aprovado (${gate.score.toFixed(0)}/100). Iniciando matching.`);
-    const ctx = await catalogContext(job.supplierId);
+    await addEvent(job.id, "matching", `Quality gate aprovado (${gate.score.toFixed(0)}/100). Iniciando matching.`);
+    const ctx = await loadCatalogContext(job.supplierId);
     const observations: Array<typeof supplierProductObservations.$inferInsert> = [];
     let matched = 0;
     let changed = 0;
@@ -553,139 +685,49 @@ export async function processCaptureJob(jobId: number): Promise<void> {
 
     for (const scraped of captured.products) {
       try {
-        const availability = asAvailability(scraped.availability, scraped.stock);
-        const ean = normalizedEan(scraped.ean);
-        let product: ProductInfo | null = null;
-        let existingOffer: OfferInfo | undefined;
-        let confidence = 0;
-        let deterministic = false;
-        let reason = "";
-        let action: "no_change" | "update" | "create" | "review" | "blocked" = "review";
+        const availability = normalizeCaptureAvailability(scraped.availability, scraped.stock);
+        const match = await chooseProductMatch(job, scraped, ctx);
+        let product = match.product;
+        let existingOffer = match.existingOffer;
+        let action: ObservationAction = match.actionHint ?? "no_change";
+        let reason = match.reason;
 
         if (!Number.isFinite(scraped.price) || scraped.price <= 0) {
           action = "blocked";
           reason = "Preço inválido ou ausente.";
-        } else {
-          if (ean && ctx.eanMap.has(ean)) {
-            const exact = ctx.eanMap.get(ean);
-            if (exact) {
-              product = exact;
-              deterministic = true;
-              confidence = 1;
-              reason = "EAN/GTIN exato.";
-            } else {
-              action = "review";
-              reason = "EAN duplicado no catálogo mestre; automação bloqueada.";
-            }
-          }
-
-          if (!product && action !== "review" && scraped.code) {
-            const offer = ctx.offerByCode.get(scraped.code.trim());
-            const candidate = offer ? ctx.byId.get(offer.productId) : undefined;
-            if (candidate) {
-              const candidateEan = normalizedEan(candidate.ean || candidate.gtin || candidate.barcode);
-              if (ean && candidateEan && ean !== candidateEan) {
-                action = "blocked";
-                reason = "SKU conhecido aponta para produto com EAN conflitante.";
-              } else {
-                product = candidate;
-                existingOffer = offer;
-                deterministic = true;
-                confidence = 0.99;
-                reason = "SKU já vinculado a este fornecedor.";
-              }
-            }
-          }
-
-          if (!product && action !== "blocked" && action !== "review") {
-            const normalized = normalizeText(scraped.name);
-            const first = normalized.split(/\s+/).find((word) => word.length >= 3) ?? "";
-            const candidates = (ctx.buckets.get(first) ?? [])
-              .map((candidate) => ({
-                candidate,
-                score: combinedStringSimilarity(normalized, normalizeText(candidate.name)),
-              }))
-              .filter(({ candidate }) => {
-                const candidateEan = normalizedEan(candidate.ean || candidate.gtin || candidate.barcode);
-                return !(ean && candidateEan && ean !== candidateEan);
-              })
-              .sort((a, b) => b.score - a.score)
-              .slice(0, 5);
-            const best = candidates[0];
-            if (best && best.score >= AUTO_NAME_MATCH && presentationCompatible(scraped.name, best.candidate.name)) {
-              product = best.candidate;
-              deterministic = true;
-              confidence = best.score;
-              reason = `Nome/apresentação com similaridade ${(best.score * 100).toFixed(1)}%.`;
-            } else if (best && best.score >= AI_NAME_MATCH_MIN) {
-              const ai = await resolveAmbiguousProductMatch({
-                supplierId: job.supplierId,
-                observed: { name: scraped.name, ean, sku: scraped.code, unit: scraped.unit, price: scraped.price },
-                candidates: candidates.map(({ candidate, score }) => ({
-                  id: candidate.id,
-                  name: candidate.name,
-                  ean: candidate.ean || candidate.gtin || candidate.barcode,
-                  code: candidate.code || candidate.codigoFornecedor,
-                  manufacturer: candidate.manufacturer,
-                  presentation: candidate.presentation,
-                  unit: candidate.unit,
-                  score,
-                })),
-              });
-              if (ai?.selectedProductId && ai.confidence >= 0.92 && ai.compatiblePresentation) {
-                product = ctx.byId.get(ai.selectedProductId) ?? null;
-                confidence = ai.confidence;
-                action = "review"; // IA sozinha nunca aplica identidade automaticamente.
-                reason = `IA sugeriu match: ${ai.reason}`;
-              } else {
-                action = "review";
-                reason = ai?.reason || "Nome semelhante, mas identidade insuficiente para automação.";
-              }
-            } else if (ean) {
-              action = "create";
-              confidence = 0.97;
-              reason = "EAN válido e inexistente no catálogo; novo produto determinístico.";
-            } else {
-              action = "review";
-              reason = "Produto novo sem EAN confiável; requer validação.";
-            }
-          }
-
-          if (product) {
-            existingOffer = existingOffer ?? ctx.offerByProduct.get(product.id);
-            const anomaly = priceAnomaly(scraped.price, existingOffer?.price);
-            if (anomaly.level === "block") {
-              action = "blocked";
-              reason = anomaly.change == null
-                ? "Preço inválido."
-                : `Variação de preço ${(anomaly.change * 100).toFixed(1)}% bloqueada.`;
-            } else if (anomaly.level === "review") {
-              action = "review";
-              reason = `Variação de preço ${(anomaly.change! * 100).toFixed(1)}% requer revisão.`;
-            } else if (deterministic) {
-              const same = existingOffer &&
-                Number(existingOffer.price || 0) === scraped.price &&
-                Number(existingOffer.promoPrice || 0) === Number(scraped.pricePromo || 0) &&
-                Number(existingOffer.stock ?? -1) === Number(scraped.stock ?? -1) &&
-                String(existingOffer.availability || "") === offerAvailability(availability);
-              action = same ? "no_change" : "update";
-            }
+        } else if (product) {
+          const anomaly = evaluateCapturePriceChange(scraped.price, existingOffer?.price);
+          if (anomaly.level === "block") {
+            action = "blocked";
+            reason = anomaly.change == null
+              ? "Preço inválido."
+              : `Variação de preço ${(anomaly.change * 100).toFixed(1)}% bloqueada.`;
+          } else if (anomaly.level === "review") {
+            action = "review";
+            reason = `Variação de preço ${(anomaly.change! * 100).toFixed(1)}% requer revisão.`;
+          } else if (match.deterministic) {
+            const same = Boolean(existingOffer) &&
+              Number(existingOffer?.price || 0) === scraped.price &&
+              Number(existingOffer?.promoPrice || 0) === Number(scraped.pricePromo || 0) &&
+              Number(existingOffer?.stock ?? -1) === Number(scraped.stock ?? -1) &&
+              String(existingOffer?.availability || "") === toLegacyAvailability(availability);
+            action = same ? "no_change" : "update";
           }
         }
 
         if (action === "create") {
-          const productId = await createProductFromObservation({
+          const productId = await createNewProduct({
             supplierId: job.supplierId,
             supplierName,
-            product: scraped,
+            scraped,
             availability,
           });
           product = {
             id: productId,
             supplierId: job.supplierId,
             name: scraped.name,
-            ean,
-            gtin: ean,
+            ean: normalizeCaptureEan(scraped.ean),
+            gtin: normalizeCaptureEan(scraped.ean),
             barcode: null,
             code: scraped.code ?? null,
             codigoFornecedor: scraped.code ?? null,
@@ -702,12 +744,12 @@ export async function processCaptureJob(jobId: number): Promise<void> {
             productId: product.id,
             supplierId: job.supplierId,
             supplierName,
-            product: scraped,
+            scraped,
             availability,
             existing: existingOffer,
           });
-          // Compatibilidade temporária: products.price permanece como cache do
-          // fornecedor proprietário, mas product_supplier_offers é a fonte real.
+          // Compatibilidade temporária. A oferta é a fonte de verdade; products.price
+          // funciona apenas como cache quando o produto pertence ao fornecedor.
           if (product.supplierId === job.supplierId) {
             const updates: Record<string, unknown> = { price: String(scraped.price), updatedAt: new Date() };
             if (scraped.imageUrl && !product.imageUrl) updates.imageUrl = scraped.imageUrl;
@@ -720,54 +762,56 @@ export async function processCaptureJob(jobId: number): Promise<void> {
         if (product) matched++;
         if (action === "review" || action === "blocked") review++;
 
-        observations.push({
-          captureJobId: job.id,
-          scraperConfigId: job.scraperConfigId,
-          supplierId: job.supplierId,
-          productId: product?.id ?? null,
-          supplierSku: scraped.code ?? null,
-          ean,
-          rawName: scraped.name.slice(0, 512),
-          normalizedName: normalizeText(scraped.name).slice(0, 512),
-          rawPrice: String(scraped.price),
-          price: String(scraped.price),
-          normalPrice: scraped.priceNormal != null ? String(scraped.priceNormal) : null,
-          promoPrice: scraped.pricePromo != null ? String(scraped.pricePromo) : null,
-          stock: scraped.stock ?? null,
-          availability,
-          productUrl: scraped.productUrl ?? null,
-          imageUrl: scraped.imageUrl ?? null,
-          sourceType: captured.products.find((item) => item === scraped)?.sourceType ?? "browser",
-          sourceUrl: scraped.fonteUrl ?? scraped.productUrl ?? null,
-          contentHash: contentHash({
-            sku: scraped.code,
-            ean,
-            name: scraped.name,
-            price: scraped.price,
-            promo: scraped.pricePromo,
-            stock: scraped.stock,
+        if (STORE_UNCHANGED || action !== "no_change") {
+          observations.push({
+            captureJobId: job.id,
+            scraperConfigId: job.scraperConfigId,
+            supplierId: job.supplierId,
+            productId: product?.id ?? null,
+            supplierSku: scraped.code ?? null,
+            ean: normalizeCaptureEan(scraped.ean),
+            rawName: scraped.name.slice(0, 512),
+            normalizedName: normalizeText(scraped.name).slice(0, 512),
+            rawPrice: String(scraped.price),
+            price: String(scraped.price),
+            normalPrice: scraped.priceNormal != null ? String(scraped.priceNormal) : null,
+            promoPrice: scraped.pricePromo != null ? String(scraped.pricePromo) : null,
+            stock: scraped.stock ?? null,
             availability,
-          }),
-          confidence: String(Math.round(confidence * 10000) / 100),
-          action,
-          reason,
-          rawPayload: {
-            name: scraped.name,
-            code: scraped.code,
-            ean: scraped.ean,
-            unit: scraped.unit,
-            availability: scraped.availability,
-            consultedAt: scraped.consultadoEm,
-          },
-        });
+            productUrl: scraped.productUrl ?? null,
+            imageUrl: scraped.imageUrl ?? null,
+            sourceType: scraped.sourceType,
+            sourceUrl: scraped.fonteUrl ?? scraped.productUrl ?? null,
+            contentHash: makeContentHash({
+              sku: scraped.code,
+              ean: scraped.ean,
+              name: scraped.name,
+              price: scraped.price,
+              promo: scraped.pricePromo,
+              stock: scraped.stock,
+              availability,
+            }),
+            confidence: String(Math.round(match.confidence * 10000) / 100),
+            action,
+            reason,
+            rawPayload: {
+              name: scraped.name,
+              code: scraped.code,
+              ean: scraped.ean,
+              unit: scraped.unit,
+              availability: scraped.availability,
+              consultedAt: scraped.consultadoEm,
+            },
+          });
+        }
       } catch (error) {
         errors++;
-        await event(job.id, "item", `Falha em item: ${(error as Error).message}`, "error");
+        await addEvent(job.id, "item", `Falha em item: ${(error as Error).message}`, "error");
       }
     }
 
-    for (let i = 0; i < observations.length; i += 500) {
-      await db.insert(supplierProductObservations).values(observations.slice(i, i + 500));
+    for (let index = 0; index < observations.length; index += 500) {
+      await db.insert(supplierProductObservations).values(observations.slice(index, index + 500));
     }
 
     let score = gate.score;
@@ -776,7 +820,7 @@ export async function processCaptureJob(jobId: number): Promise<void> {
     score -= Math.min(errorRatio * 100, 30);
     score -= Math.min(reviewRatio * 20, 15);
     score = Math.max(0, Math.min(score, 100));
-    const finalStatus = errors > 0 || review > 0 ? "partial" : "success";
+    const finalStatus: "success" | "partial" = errors > 0 || review > 0 ? "partial" : "success";
 
     await db.update(captureJobs).set({
       status: finalStatus,
@@ -793,10 +837,13 @@ export async function processCaptureJob(jobId: number): Promise<void> {
       errorMessage: errors ? `${errors} item(ns) com erro.` : null,
     }).where(eq(captureJobs.id, job.id));
 
-    await event(job.id, "done", `Captura concluída: ${captured.products.length} itens, ${changed} alterações, ${review} revisões, ${errors} erros.`);
-    await updateHealth({
+    await addEvent(
+      job.id,
+      "done",
+      `Captura concluída: ${captured.products.length} itens, ${changed} alterações, ${review} revisões, ${errors} erros.`,
+    );
+    await saveHealth({
       job,
-      supplierId: job.supplierId,
       score,
       captured: captured.products.length,
       successful: true,
@@ -816,7 +863,7 @@ export async function processCaptureJob(jobId: number): Promise<void> {
 
     await db.insert(scraperLogs).values({
       scraperConfigId: job.scraperConfigId,
-      status: finalStatus === "success" ? "success" : "success",
+      status: "success",
       startedAt,
       completedAt: new Date(),
       durationMs: Date.now() - startedAt.getTime(),
@@ -827,9 +874,9 @@ export async function processCaptureJob(jobId: number): Promise<void> {
       errorMessage: finalStatus === "partial" ? `${review} revisão(ões), ${errors} erro(s)` : null,
     }).catch(() => undefined);
   } catch (error) {
-    errorMessage = (error as Error).message;
+    const errorMessage = (error as Error).message;
     logger.error(`[CaptureCore] Job #${job.id} falhou:`, error);
-    await event(job.id, "failed", errorMessage, "error");
+    await addEvent(job.id, "failed", errorMessage, "error");
     await db.update(captureJobs).set({
       status: "failed",
       completedAt: new Date(),
@@ -842,9 +889,8 @@ export async function processCaptureJob(jobId: number): Promise<void> {
       lastRunStatus: "failed",
       lastRunErrorMessage: errorMessage.slice(0, 500),
     }).where(eq(scraperConfigs.id, job.scraperConfigId)).catch(() => undefined);
-    await updateHealth({
+    await saveHealth({
       job,
-      supplierId: job.supplierId,
       score: 0,
       captured: 0,
       successful: false,
@@ -873,13 +919,35 @@ export async function listCaptureReviewQueue(input: {
 }) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [inArray(supplierProductObservations.action, ["review", "blocked"] as const)];
-  if (input.scraperConfigId) conditions.push(eq(supplierProductObservations.scraperConfigId, input.scraperConfigId));
-  if (input.supplierId) conditions.push(eq(supplierProductObservations.supplierId, input.supplierId));
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
+  if (input.scraperConfigId && input.supplierId) {
+    return db.select().from(supplierProductObservations)
+      .where(and(
+        inArray(supplierProductObservations.action, ["review", "blocked"]),
+        eq(supplierProductObservations.scraperConfigId, input.scraperConfigId),
+        eq(supplierProductObservations.supplierId, input.supplierId),
+      ))
+      .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
+  }
+  if (input.scraperConfigId) {
+    return db.select().from(supplierProductObservations)
+      .where(and(
+        inArray(supplierProductObservations.action, ["review", "blocked"]),
+        eq(supplierProductObservations.scraperConfigId, input.scraperConfigId),
+      ))
+      .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
+  }
+  if (input.supplierId) {
+    return db.select().from(supplierProductObservations)
+      .where(and(
+        inArray(supplierProductObservations.action, ["review", "blocked"]),
+        eq(supplierProductObservations.supplierId, input.supplierId),
+      ))
+      .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
+  }
   return db.select().from(supplierProductObservations)
-    .where(and(...conditions))
-    .orderBy(desc(supplierProductObservations.capturedAt))
-    .limit(Math.min(Math.max(input.limit ?? 100, 1), 500));
+    .where(inArray(supplierProductObservations.action, ["review", "blocked"]))
+    .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
 }
 
 export async function decideCaptureObservation(input: {
@@ -912,7 +980,7 @@ export async function decideCaptureObservation(input: {
   }
 
   const productId = input.expectedProductId ?? obs.productId;
-  if (!productId) throw new Error("Para aprovar produto não identificado, selecione o produto mestre correspondente.");
+  if (!productId) throw new Error("Selecione o produto mestre correspondente antes de aprovar.");
   const [product] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
   if (!product) throw new Error("Produto mestre selecionado não existe.");
   const [supplier] = await db.select({ name: suppliers.name }).from(suppliers)
@@ -926,14 +994,16 @@ export async function decideCaptureObservation(input: {
     stock: productSupplierOffers.stock,
     availability: productSupplierOffers.availability,
   }).from(productSupplierOffers)
-    .where(and(eq(productSupplierOffers.productId, productId), eq(productSupplierOffers.supplierId, obs.supplierId)))
-    .limit(1);
+    .where(and(
+      eq(productSupplierOffers.productId, productId),
+      eq(productSupplierOffers.supplierId, obs.supplierId),
+    )).limit(1);
 
   await upsertOffer({
     productId,
     supplierId: obs.supplierId,
     supplierName: supplier?.name || `Fornecedor #${obs.supplierId}`,
-    product: {
+    scraped: {
       name: obs.rawName,
       code: obs.supplierSku ?? undefined,
       ean: obs.ean ?? undefined,
