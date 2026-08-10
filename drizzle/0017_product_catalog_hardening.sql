@@ -3,8 +3,30 @@
 -- relacionados exclusivamente pelas ofertas. DDL pertence à migração, nunca ao
 -- processo web.
 
-ALTER TABLE `products`
-  DROP FOREIGN KEY `products_supplierId_suppliers_id_fk`;
+-- O nome da FK histórica pode variar conforme a versão que criou o banco.
+-- Descobre a constraint real para não acoplar o deploy a um nome específico.
+SELECT `CONSTRAINT_NAME`
+INTO @products_supplier_fk
+FROM `information_schema`.`KEY_COLUMN_USAGE`
+WHERE `TABLE_SCHEMA` = DATABASE()
+  AND `TABLE_NAME` = 'products'
+  AND `COLUMN_NAME` = 'supplierId'
+  AND `REFERENCED_TABLE_NAME` = 'suppliers'
+LIMIT 1;
+--> statement-breakpoint
+
+SET @drop_products_supplier_fk = IF(
+  @products_supplier_fk IS NULL,
+  'SELECT 1',
+  CONCAT('ALTER TABLE `products` DROP FOREIGN KEY `', REPLACE(@products_supplier_fk, '`', '``'), '`')
+);
+--> statement-breakpoint
+
+PREPARE drop_products_supplier_fk_stmt FROM @drop_products_supplier_fk;
+--> statement-breakpoint
+EXECUTE drop_products_supplier_fk_stmt;
+--> statement-breakpoint
+DEALLOCATE PREPARE drop_products_supplier_fk_stmt;
 --> statement-breakpoint
 
 ALTER TABLE `products`
