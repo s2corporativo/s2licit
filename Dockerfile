@@ -41,6 +41,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     default-mysql-client \
     util-linux \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
