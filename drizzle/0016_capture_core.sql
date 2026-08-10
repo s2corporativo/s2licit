@@ -46,6 +46,16 @@ CREATE INDEX `idx_capture_jobs_supplier` ON `capture_jobs` (`supplierId`,`create
 --> statement-breakpoint
 CREATE INDEX `idx_capture_jobs_heartbeat` ON `capture_jobs` (`status`,`heartbeatAt`);
 --> statement-breakpoint
+CREATE TRIGGER `capture_jobs_bi_active_key`
+BEFORE INSERT ON `capture_jobs`
+FOR EACH ROW
+SET NEW.`activeKey` = IF(NEW.`status` IN ('queued','running'), CONCAT('scraper:', NEW.`scraperConfigId`), NULL);
+--> statement-breakpoint
+CREATE TRIGGER `capture_jobs_bu_active_key`
+BEFORE UPDATE ON `capture_jobs`
+FOR EACH ROW
+SET NEW.`activeKey` = IF(NEW.`status` IN ('queued','running'), CONCAT('scraper:', NEW.`scraperConfigId`), NULL);
+--> statement-breakpoint
 CREATE TABLE `supplier_product_observations` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`captureJobId` int NOT NULL,
