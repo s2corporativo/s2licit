@@ -131,7 +131,7 @@ describe("externalHttpRequest", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error?.type).toBe("CONTRACT");
-    expect(result.error?.code).toBe("RUNTIME_VALIDATION_FAILED");
+    expect(result.error?.code).toBe("CONTRACT_VALIDATION_FAILED");
   });
 
   it("aborts responses that exceed maxBodyBytes", async () => {
