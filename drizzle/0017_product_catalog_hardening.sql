@@ -5,6 +5,9 @@
 
 -- O nome da FK histórica pode variar conforme a versão que criou o banco.
 -- Descobre a constraint real para não acoplar o deploy a um nome específico.
+SET @products_supplier_fk = NULL;
+--> statement-breakpoint
+
 SELECT `CONSTRAINT_NAME`
 INTO @products_supplier_fk
 FROM `information_schema`.`KEY_COLUMN_USAGE`
