@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, gte, like, lte, sql, type SQL } from "drizzle-orm";
 import {
   proposalItems,
@@ -63,6 +64,26 @@ function explicitSaleTotal(
   const qty = Number(quantity ?? 0);
   if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
   return (price * qty).toFixed(2);
+}
+
+async function lockDraftProposal(tx: Transaction, proposalId: number): Promise<void> {
+  await tx.execute(
+    sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${proposalId} FOR UPDATE`,
+  );
+  const [proposal] = await tx
+    .select({ status: proposals.status })
+    .from(proposals)
+    .where(eq(proposals.id, proposalId))
+    .limit(1);
+  if (!proposal) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+  }
+  if (proposal.status !== "draft") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "A proposta já saiu do rascunho. O conteúdo comercial está congelado.",
+    });
+  }
 }
 
 async function recalcProposalTotalInTransaction(
@@ -133,7 +154,13 @@ export async function getProposalWithItems(id: number) {
 export async function createProposal(data: InsertProposal) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const result = await db.insert(proposals).values(data);
+  if (data.status && data.status !== "draft") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Novas propostas devem ser criadas como rascunho e avançadas pelo lifecycle.",
+    });
+  }
+  const result = await db.insert(proposals).values({ ...data, status: "draft" });
   const id = getInsertId(result);
   if (!id) throw new Error("Proposal insert did not return an id");
   return id;
@@ -142,13 +169,27 @@ export async function createProposal(data: InsertProposal) {
 export async function updateProposal(id: number, data: Partial<InsertProposal>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(proposals).set(data).where(eq(proposals.id, id));
+  if (data.status !== undefined) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Status deve ser alterado pelo lifecycle da proposta.",
+    });
+  }
+  return db.transaction(async (tx) => {
+    await lockDraftProposal(tx, id);
+    await tx.update(proposals).set(data).where(eq(proposals.id, id));
+    return { success: true as const };
+  });
 }
 
 export async function deleteProposal(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.delete(proposals).where(eq(proposals.id, id));
+  return db.transaction(async (tx) => {
+    await lockDraftProposal(tx, id);
+    await tx.delete(proposals).where(eq(proposals.id, id));
+    return { success: true as const };
+  });
 }
 
 export async function recalcProposalTotal(proposalId: number) {
@@ -166,9 +207,7 @@ export async function addProposalItem(data: InsertProposalItem) {
   if (!db) throw new Error("DB not available");
 
   return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${data.proposalId} FOR UPDATE`,
-    );
+    await lockDraftProposal(tx, data.proposalId);
     const [existing] = await tx
       .select({ max: sql<number>`COALESCE(MAX(${proposalItems.itemNumber}), 0)` })
       .from(proposalItems)
@@ -195,6 +234,16 @@ export async function updateProposalItem(id: number, data: Partial<InsertProposa
   if (!db) throw new Error("DB not available");
 
   return db.transaction(async (tx) => {
+    const [reference] = await tx
+      .select({ proposalId: proposalItems.proposalId })
+      .from(proposalItems)
+      .where(eq(proposalItems.id, id))
+      .limit(1);
+    if (!reference) throw new TRPCError({ code: "NOT_FOUND", message: "Item de proposta não encontrado." });
+
+    // Ordem de locks uniforme: proposta primeiro, item depois. Evita deadlock
+    // com lifecycle/add/remove e impede corrida com envio da proposta.
+    await lockDraftProposal(tx, reference.proposalId);
     await tx.execute(
       sql`SELECT ${proposalItems.id} FROM ${proposalItems} WHERE ${proposalItems.id} = ${id} FOR UPDATE`,
     );
@@ -203,7 +252,9 @@ export async function updateProposalItem(id: number, data: Partial<InsertProposa
       .from(proposalItems)
       .where(eq(proposalItems.id, id))
       .limit(1);
-    if (!existing) throw new Error("Proposal item not found");
+    if (!existing || existing.proposalId !== reference.proposalId) {
+      throw new TRPCError({ code: "CONFLICT", message: "O item foi alterado durante a edição." });
+    }
 
     if (data.suggestedPrice !== undefined || data.quantity !== undefined) {
       const suggestedPrice =
@@ -223,6 +274,14 @@ export async function removeProposalItem(id: number) {
   if (!db) throw new Error("DB not available");
 
   return db.transaction(async (tx) => {
+    const [reference] = await tx
+      .select({ proposalId: proposalItems.proposalId })
+      .from(proposalItems)
+      .where(eq(proposalItems.id, id))
+      .limit(1);
+    if (!reference) return { success: true as const, unchanged: true as const };
+
+    await lockDraftProposal(tx, reference.proposalId);
     await tx.execute(
       sql`SELECT ${proposalItems.id} FROM ${proposalItems} WHERE ${proposalItems.id} = ${id} FOR UPDATE`,
     );
@@ -231,7 +290,9 @@ export async function removeProposalItem(id: number) {
       .from(proposalItems)
       .where(eq(proposalItems.id, id))
       .limit(1);
-    if (!existing) return { success: true as const, unchanged: true as const };
+    if (!existing || existing.proposalId !== reference.proposalId) {
+      throw new TRPCError({ code: "CONFLICT", message: "O item foi alterado durante a exclusão." });
+    }
 
     await tx.delete(proposalItems).where(eq(proposalItems.id, id));
     await recalcProposalTotalInTransaction(tx, existing.proposalId);
@@ -282,6 +343,9 @@ export async function advanceProposalStatus(
   const target = newStatus as ProposalStatus;
 
   return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${id} FOR UPDATE`,
+    );
     const [current] = await tx
       .select({ status: proposals.status })
       .from(proposals)
