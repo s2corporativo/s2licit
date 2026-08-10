@@ -1,85 +1,32 @@
-import { createHash } from "crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDb, recordPriceHistory } from "../db";
-import {
-  productSupplierOffers,
-  products,
-  scraperConfigs,
-  scraperLogs,
-  suppliers,
-} from "../../drizzle/schema";
+import { getDb } from "../db";
+import { scraperConfigs } from "../../drizzle/schema";
 import {
   captureConnectorHealth,
   captureJobEvents,
   captureJobs,
-  supplierProductObservations,
-  type CaptureJob,
 } from "../../drizzle/captureCoreSchema";
-import { combinedStringSimilarity, normalizeText } from "../matching/productMatcher";
-import { captureSupplierProducts } from "./scraperCaptureAdapter";
 import { getConnectorCapabilities } from "./captureConnectorCapabilities";
-import {
-  explainCaptureAnomaly,
-  recordCaptureAiFeedback,
-  resolveAmbiguousProductMatch,
-} from "./captureAiService";
-import type { ScrapedProduct } from "./scraperEngine";
-import { logger } from "../_core/logger";
 
-const AUTO_NAME_MATCH = Number(process.env.CAPTURE_AUTO_NAME_MATCH || 0.94);
-const AI_NAME_MATCH_MIN = Number(process.env.CAPTURE_AI_NAME_MATCH_MIN || 0.82);
 const REVIEW_PRICE_CHANGE = Number(process.env.CAPTURE_REVIEW_PRICE_CHANGE || 0.60);
 const BLOCK_PRICE_CHANGE = Number(process.env.CAPTURE_BLOCK_PRICE_CHANGE || 3.00);
 const FULL_MIN_COVERAGE = Number(process.env.CAPTURE_FULL_MIN_COVERAGE || 0.50);
 const FULL_WARN_COVERAGE = Number(process.env.CAPTURE_FULL_WARN_COVERAGE || 0.75);
-const STORE_UNCHANGED = process.env.CAPTURE_STORE_UNCHANGED === "true";
 
 export type CaptureMode = "search" | "refresh" | "full";
 export type CaptureTrigger = "manual" | "scheduled" | "bulk" | "proposal" | "api";
 export type NormalizedAvailability = "in_stock" | "out_of_stock" | "limited" | "backorder" | "unknown";
 
-type ProductInfo = {
-  id: number;
-  supplierId: number;
-  name: string;
-  ean: string | null;
-  gtin: string | null;
-  barcode: string | null;
-  code: string | null;
-  codigoFornecedor: string | null;
-  manufacturer: string | null;
-  presentation: string | null;
-  unit: string | null;
-  price: string | null;
-  imageUrl: string | null;
-};
-
-type OfferInfo = {
-  id: number;
-  productId: number;
-  supplierCode: string | null;
-  price: string | null;
-  promoPrice: string | null;
-  stock: number | null;
-  availability: string | null;
-};
-
-type ObservationAction = "no_change" | "update" | "create" | "review" | "blocked";
-
-export function normalizeCaptureAvailability(value?: string | null, stock?: number | null): NormalizedAvailability {
-  const text = String(value || "").toLowerCase();
+export function normalizeCaptureAvailability(
+  value?: string | null,
+  stock?: number | null,
+): NormalizedAvailability {
+  const text = String(value || "").trim().toLowerCase();
   if (stock === 0 || /indispon|out.?of.?stock|esgot/.test(text)) return "out_of_stock";
   if (stock != null && stock > 0) return stock <= 5 ? "limited" : "in_stock";
-  if (/dispon|in.?stock/.test(text)) return "in_stock";
   if (/backorder|encomenda|sob pedido/.test(text)) return "backorder";
+  if (/dispon|in.?stock/.test(text)) return "in_stock";
   return "unknown";
-}
-
-function toLegacyAvailability(value: NormalizedAvailability): string {
-  if (value === "in_stock" || value === "limited") return "disponivel";
-  if (value === "out_of_stock") return "indisponivel";
-  if (value === "backorder") return "sob_encomenda";
-  return "desconhecido";
 }
 
 export function normalizeCaptureEan(value?: string | null): string | null {
@@ -88,9 +35,13 @@ export function normalizeCaptureEan(value?: string | null): string | null {
 }
 
 function packSignature(name?: string | null): string {
-  const text = normalizeText(name || "");
-  const tokens = [...text.matchAll(/\b(\d+(?:[.,]\d+)?)\s*(mg|mcg|g|kg|ml|l|un|und|unidades?|comprimidos?|capsulas?|ampolas?|frascos?|doses?)\b/gi)]
-    .map((match) => `${match[1].replace(",", ".")}${match[2].toLowerCase()}`);
+  const text = String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const tokens = [...text.matchAll(
+    /\b(\d+(?:[.,]\d+)?)\s*(mg|mcg|g|kg|ml|l|un|und|unidades?|comprimidos?|capsulas?|ampolas?|frascos?|doses?)\b/gi,
+  )].map((match) => `${match[1].replace(",", ".")}${match[2].toLowerCase()}`);
   return Array.from(new Set(tokens)).sort().join("|");
 }
 
@@ -100,34 +51,14 @@ export function capturePresentationCompatible(a?: string | null, b?: string | nu
   return !left || !right || left === right;
 }
 
-function makeContentHash(input: {
-  sku?: string | null;
-  ean?: string | null;
-  name: string;
-  price?: number | null;
-  promo?: number | null;
-  stock?: number | null;
-  availability: NormalizedAvailability;
-}): string {
-  return createHash("sha256")
-    .update(JSON.stringify({
-      sku: input.sku || null,
-      ean: normalizeCaptureEan(input.ean),
-      name: normalizeText(input.name),
-      price: input.price ?? null,
-      promo: input.promo ?? null,
-      stock: input.stock ?? null,
-      availability: input.availability,
-    }))
-    .digest("hex");
-}
-
 export function evaluateCapturePriceChange(newPrice: number, previous?: string | number | null) {
   const oldPrice = Number(previous || 0);
   if (!Number.isFinite(newPrice) || newPrice <= 0) {
     return { level: "block" as const, change: null as number | null };
   }
-  if (!oldPrice || oldPrice <= 0) return { level: "ok" as const, change: null as number | null };
+  if (!Number.isFinite(oldPrice) || oldPrice <= 0) {
+    return { level: "ok" as const, change: null as number | null };
+  }
   const change = Math.abs(newPrice - oldPrice) / oldPrice;
   if (change >= BLOCK_PRICE_CHANGE) return { level: "block" as const, change };
   if (change >= REVIEW_PRICE_CHANGE) return { level: "review" as const, change };
@@ -143,9 +74,11 @@ export function evaluateCaptureQuality(input: {
   let score = 100;
   let quarantine = false;
   const reasons: string[] = [];
+
   if (input.captured === 0) {
     return { score: 0, quarantine: true, reasons: ["Nenhum produto foi capturado."] };
   }
+
   if (input.mode === "full" && input.baseline && input.baseline > 0) {
     const coverage = input.captured / input.baseline;
     if (coverage < FULL_MIN_COVERAGE) {
@@ -157,8 +90,17 @@ export function evaluateCaptureQuality(input: {
       reasons.push(`Cobertura reduzida: ${(coverage * 100).toFixed(1)}% do baseline.`);
     }
   }
+
   score -= Math.min((input.warnings ?? 0) * 2, 20);
   return { score: Math.max(0, score), quarantine, reasons };
+}
+
+function isDuplicateActiveJob(error: unknown): boolean {
+  const code = String((error as { code?: unknown })?.code ?? "").toLowerCase();
+  const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
+  return code === "er_dup_entry" ||
+    message.includes("uq_capture_jobs_active_key") ||
+    (message.includes("duplicate") && message.includes("activekey"));
 }
 
 async function addEvent(
@@ -179,6 +121,19 @@ async function addEvent(
     .catch(() => undefined);
 }
 
+export async function getActiveCaptureJob(scraperConfigId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [job] = await db.select().from(captureJobs)
+    .where(and(
+      eq(captureJobs.scraperConfigId, scraperConfigId),
+      inArray(captureJobs.status, ["queued", "running"]),
+    ))
+    .orderBy(desc(captureJobs.createdAt))
+    .limit(1);
+  return job ?? null;
+}
+
 export async function enqueueCaptureJob(input: {
   scraperConfigId: number;
   mode?: CaptureMode;
@@ -192,67 +147,74 @@ export async function enqueueCaptureJob(input: {
   if (!db) throw new Error("Banco indisponível");
 
   const [config] = await db.select().from(scraperConfigs)
-    .where(eq(scraperConfigs.id, input.scraperConfigId)).limit(1);
+    .where(eq(scraperConfigs.id, input.scraperConfigId))
+    .limit(1);
   if (!config) throw new Error("Configuração de captura não encontrada.");
   if (config.enabled !== "yes") throw new Error("Esta configuração de captura está desativada.");
   if (!config.tosAprovado) throw new Error("Captura bloqueada: termos de uso ainda não aprovados.");
 
-  const capabilities = getConnectorCapabilities(config.scraperType, config.customSelectors as any);
-  let mode = input.mode ?? "full";
-  if (mode === "full" && !capabilities.fullCatalog) {
-    if (capabilities.search) mode = input.query?.trim() ? "search" : "refresh";
-    else throw new Error("O conector não suporta catálogo completo nem busca sob demanda.");
+  const active = await getActiveCaptureJob(input.scraperConfigId);
+  if (active) {
+    return { id: active.id, status: active.status, reused: true as const, mode: active.mode };
   }
-  if (mode === "search" && !input.query?.trim()) throw new Error("Busca exige termo, SKU ou EAN.");
 
-  const [active] = await db.select({ id: captureJobs.id, status: captureJobs.status })
-    .from(captureJobs)
-    .where(and(
-      eq(captureJobs.scraperConfigId, input.scraperConfigId),
-      inArray(captureJobs.status, ["queued", "running"]),
-    ))
-    .orderBy(desc(captureJobs.createdAt)).limit(1);
-  if (active) return { id: active.id, status: active.status, reused: true as const, mode };
+  const capabilities = getConnectorCapabilities(config.scraperType, config.customSelectors as any);
+  const requested = input.mode ?? "full";
+  let mode: CaptureMode = requested;
+  if (requested === "full" && !capabilities.fullCatalog) {
+    if (!capabilities.search) {
+      throw new Error("O conector não suporta catálogo completo nem atualização seletiva.");
+    }
+    mode = input.query?.trim() ? "search" : "refresh";
+  }
+  if (mode === "search" && (!capabilities.search || !input.query?.trim())) {
+    throw new Error("Busca exige um conector com busca e um termo, SKU ou EAN.");
+  }
+  if (mode === "refresh" && !capabilities.search && !capabilities.fullCatalog) {
+    throw new Error("O conector não possui estratégia de atualização incremental.");
+  }
 
-  const [inserted] = await db.insert(captureJobs).values({
-    scraperConfigId: input.scraperConfigId,
-    supplierId: config.supplierId,
-    mode,
-    trigger: input.trigger ?? "manual",
-    query: input.query?.trim() || null,
-    priority: Math.max(0, Math.min(input.priority ?? 50, 100)),
-    createdByUserId: input.createdByUserId ?? null,
-    meta: { ...(input.meta ?? {}), capabilities },
-    progressStage: "queued",
-    progressMessage: "Captura aguardando worker.",
-  });
-  const id = Number((inserted as any).insertId);
-  await addEvent(id, "queued", `Job criado (${mode}/${input.trigger ?? "manual"}).`);
-  return { id, status: "queued" as const, reused: false as const, mode };
-}
-
-export async function getActiveCaptureJob(scraperConfigId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const [job] = await db.select().from(captureJobs)
-    .where(and(
-      eq(captureJobs.scraperConfigId, scraperConfigId),
-      inArray(captureJobs.status, ["queued", "running"]),
-    ))
-    .orderBy(desc(captureJobs.createdAt)).limit(1);
-  return job ?? null;
+  const activeKey = `scraper:${config.id}`;
+  try {
+    const [inserted] = await db.insert(captureJobs).values({
+      scraperConfigId: config.id,
+      supplierId: config.supplierId,
+      activeKey,
+      mode,
+      trigger: input.trigger ?? "manual",
+      query: input.query?.trim() || null,
+      priority: Math.max(0, Math.min(input.priority ?? 50, 100)),
+      createdByUserId: input.createdByUserId ?? null,
+      meta: { ...(input.meta ?? {}), capabilities },
+      progressStage: "queued",
+      progressMessage: "Captura aguardando worker.",
+    });
+    const id = Number((inserted as { insertId?: number }).insertId);
+    await addEvent(id, "queued", `Job criado (${mode}/${input.trigger ?? "manual"}).`);
+    return { id, status: "queued" as const, reused: false as const, mode };
+  } catch (error) {
+    if (!isDuplicateActiveJob(error)) throw error;
+    const winner = await getActiveCaptureJob(input.scraperConfigId);
+    if (!winner) throw error;
+    return { id: winner.id, status: winner.status, reused: true as const, mode: winner.mode };
+  }
 }
 
 export async function getCaptureJobStatus(scraperConfigId: number) {
   const db = await getDb();
-  if (!db) return { status: "idle", log: [] as string[], startedAt: null as Date | null };
+  if (!db) return { status: "idle" as const, log: [] as string[], startedAt: null as Date | null };
+
   const [job] = await db.select().from(captureJobs)
     .where(eq(captureJobs.scraperConfigId, scraperConfigId))
-    .orderBy(desc(captureJobs.createdAt)).limit(1);
-  if (!job) return { status: "idle", log: [] as string[], startedAt: null as Date | null };
+    .orderBy(desc(captureJobs.createdAt))
+    .limit(1);
+  if (!job) return { status: "idle" as const, log: [] as string[], startedAt: null as Date | null };
+
   const rows = await db.select().from(captureJobEvents)
     .where(eq(captureJobEvents.captureJobId, job.id))
-    .orderBy(desc(captureJobEvents.createdAt)).limit(80);
+    .orderBy(desc(captureJobEvents.createdAt))
+    .limit(80);
+
   return {
     id: job.id,
     status: job.status,
@@ -275,14 +237,18 @@ export async function listCaptureJobHistory(scraperConfigId: number, limit = 20)
   if (!db) return [];
   const rows = await db.select().from(captureJobs)
     .where(eq(captureJobs.scraperConfigId, scraperConfigId))
-    .orderBy(desc(captureJobs.createdAt)).limit(Math.min(Math.max(limit, 1), 100));
+    .orderBy(desc(captureJobs.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 100));
+
   return rows.map((job) => ({
     id: job.id,
     scraperConfigId: job.scraperConfigId,
     status: job.status === "partial" ? "success" : job.status === "quarantine" ? "failed" : job.status,
     startedAt: job.startedAt ?? job.createdAt,
     completedAt: job.completedAt,
-    durationMs: job.startedAt && job.completedAt ? job.completedAt.getTime() - job.startedAt.getTime() : null,
+    durationMs: job.startedAt && job.completedAt
+      ? job.completedAt.getTime() - job.startedAt.getTime()
+      : null,
     productsScraped: job.capturedItems,
     productsMatched: job.matchedItems,
     productsUpdated: job.changedItems,
@@ -293,763 +259,28 @@ export async function listCaptureJobHistory(scraperConfigId: number, limit = 20)
   }));
 }
 
-async function loadCatalogContext(supplierId: number) {
-  const db = await getDb();
-  if (!db) throw new Error("Banco indisponível");
-  const productRows: ProductInfo[] = await db.select({
-    id: products.id,
-    supplierId: products.supplierId,
-    name: products.name,
-    ean: products.ean,
-    gtin: products.gtin,
-    barcode: products.barcode,
-    code: products.code,
-    codigoFornecedor: products.codigoFornecedor,
-    manufacturer: products.manufacturer,
-    presentation: products.presentation,
-    unit: products.unit,
-    price: products.price,
-    imageUrl: products.imageUrl,
-  }).from(products).where(eq(products.isActive, "yes"));
-
-  const offers: OfferInfo[] = await db.select({
-    id: productSupplierOffers.id,
-    productId: productSupplierOffers.productId,
-    supplierCode: productSupplierOffers.supplierCode,
-    price: productSupplierOffers.price,
-    promoPrice: productSupplierOffers.promoPrice,
-    stock: productSupplierOffers.stock,
-    availability: productSupplierOffers.availability,
-  }).from(productSupplierOffers).where(eq(productSupplierOffers.supplierId, supplierId));
-
-  const byId = new Map(productRows.map((row) => [row.id, row]));
-  const eanMap = new Map<string, ProductInfo | null>();
-  const nameBuckets = new Map<string, ProductInfo[]>();
-  for (const row of productRows) {
-    for (const raw of [row.ean, row.gtin, row.barcode]) {
-      const ean = normalizeCaptureEan(raw);
-      if (!ean) continue;
-      if (!eanMap.has(ean)) eanMap.set(ean, row);
-      else if (eanMap.get(ean)?.id !== row.id) eanMap.set(ean, null);
-    }
-    const first = normalizeText(row.name).split(/\s+/).find((word) => word.length >= 3);
-    if (first) nameBuckets.set(first, [...(nameBuckets.get(first) ?? []), row]);
-  }
-
-  const offerByCode = new Map<string, OfferInfo>();
-  const offerByProduct = new Map<number, OfferInfo>();
-  for (const offer of offers) {
-    if (offer.supplierCode) offerByCode.set(offer.supplierCode.trim(), offer);
-    offerByProduct.set(offer.productId, offer);
-  }
-  return { byId, eanMap, nameBuckets, offerByCode, offerByProduct };
-}
-
-async function upsertOffer(input: {
-  productId: number;
-  supplierId: number;
-  supplierName: string;
-  scraped: ScrapedProduct;
-  availability: NormalizedAvailability;
-  existing?: OfferInfo;
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("Banco indisponível");
-  const values = {
-    price: String(input.scraped.price),
-    supplierCode: input.scraped.code ?? null,
-    supplierName: input.supplierName,
-    link: input.scraped.productUrl ?? null,
-    image: input.scraped.imageUrl ?? null,
-    availability: toLegacyAvailability(input.availability),
-    promoPrice: input.scraped.pricePromo != null ? String(input.scraped.pricePromo) : null,
-    stock: input.scraped.stock ?? null,
-    updatedAt: new Date(),
-  };
-  if (input.existing) {
-    await db.update(productSupplierOffers).set(values).where(eq(productSupplierOffers.id, input.existing.id));
-  } else {
-    await db.insert(productSupplierOffers).values({
-      productId: input.productId,
-      supplierId: input.supplierId,
-      ...values,
-      createdAt: new Date(),
-    });
-  }
-  await recordPriceHistory({
-    productId: input.productId,
-    supplierId: input.supplierId,
-    price: String(input.scraped.price),
-  }).catch(() => undefined);
-}
-
-async function createNewProduct(input: {
-  supplierId: number;
-  supplierName: string;
-  scraped: ScrapedProduct;
-  availability: NormalizedAvailability;
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("Banco indisponível");
-  const ean = normalizeCaptureEan(input.scraped.ean);
-  const [inserted] = await db.insert(products).values({
-    supplierId: input.supplierId,
-    name: input.scraped.name.slice(0, 512),
-    price: String(input.scraped.price),
-    codigoFornecedor: input.scraped.code ?? null,
-    code: input.scraped.code ?? null,
-    ean,
-    gtin: ean,
-    unit: input.scraped.unit ?? null,
-    imageUrl: input.scraped.imageUrl ?? null,
-    productUrl: input.scraped.productUrl ?? input.scraped.fonteUrl ?? null,
-    stock: input.scraped.stock != null ? String(input.scraped.stock) : null,
-    statusConfiabilidade: "pendente_revisao",
-    isActive: "yes",
-  });
-  const productId = Number((inserted as any).insertId);
-  await upsertOffer({
-    productId,
-    supplierId: input.supplierId,
-    supplierName: input.supplierName,
-    scraped: input.scraped,
-    availability: input.availability,
-  });
-  return productId;
-}
-
-async function getHealth(scraperConfigId: number) {
-  const db = await getDb();
-  if (!db) return null;
-  const [row] = await db.select().from(captureConnectorHealth)
-    .where(eq(captureConnectorHealth.scraperConfigId, scraperConfigId)).limit(1);
-  return row ?? null;
-}
-
-async function saveHealth(input: {
-  job: CaptureJob;
-  score: number;
-  captured: number;
-  successful: boolean;
-  capabilities: Record<string, unknown>;
-  error?: string | null;
-}) {
-  const db = await getDb();
-  if (!db) return;
-  const existing = await getHealth(input.job.scraperConfigId);
-  const now = new Date();
-  const baseline = input.successful && input.job.mode === "full"
-    ? Math.round(existing?.baselineItems ? existing.baselineItems * 0.8 + input.captured * 0.2 : input.captured)
-    : existing?.baselineItems ?? null;
-  const values = {
-    supplierId: input.job.supplierId,
-    status: (input.successful
-      ? input.score >= 90 ? "healthy" : input.score >= 70 ? "attention" : "degraded"
-      : "degraded") as "healthy" | "attention" | "degraded",
-    score: String(Math.max(0, Math.min(input.score, 100))),
-    baselineItems: baseline,
-    lastCapturedItems: input.captured,
-    consecutiveFailures: input.successful ? 0 : (existing?.consecutiveFailures ?? 0) + 1,
-    lastSuccessAt: input.successful ? now : existing?.lastSuccessAt ?? null,
-    lastFailureAt: input.successful ? existing?.lastFailureAt ?? null : now,
-    lastError: input.error ?? null,
-    capabilities: input.capabilities,
-    updatedAt: now,
-  };
-  if (existing) await db.update(captureConnectorHealth).set(values).where(eq(captureConnectorHealth.id, existing.id));
-  else await db.insert(captureConnectorHealth).values({ scraperConfigId: input.job.scraperConfigId, ...values });
-}
-
-async function chooseProductMatch(
-  job: CaptureJob,
-  scraped: ScrapedProduct,
-  ctx: Awaited<ReturnType<typeof loadCatalogContext>>,
-): Promise<{
-  product: ProductInfo | null;
-  existingOffer?: OfferInfo;
-  deterministic: boolean;
-  confidence: number;
-  actionHint?: ObservationAction;
-  reason: string;
-}> {
-  const ean = normalizeCaptureEan(scraped.ean);
-  if (ean && ctx.eanMap.has(ean)) {
-    const exact = ctx.eanMap.get(ean);
-    if (exact) {
-      return {
-        product: exact,
-        existingOffer: ctx.offerByProduct.get(exact.id),
-        deterministic: true,
-        confidence: 1,
-        reason: "EAN/GTIN exato.",
-      };
-    }
-    return {
-      product: null,
-      deterministic: false,
-      confidence: 0,
-      actionHint: "review",
-      reason: "EAN duplicado no catálogo mestre; automação bloqueada.",
-    };
-  }
-
-  if (scraped.code) {
-    const offer = ctx.offerByCode.get(scraped.code.trim());
-    const candidate = offer ? ctx.byId.get(offer.productId) : undefined;
-    if (candidate) {
-      const candidateEan = normalizeCaptureEan(candidate.ean || candidate.gtin || candidate.barcode);
-      if (ean && candidateEan && ean !== candidateEan) {
-        return {
-          product: candidate,
-          existingOffer: offer,
-          deterministic: false,
-          confidence: 0,
-          actionHint: "blocked",
-          reason: "SKU conhecido aponta para produto com EAN conflitante.",
-        };
-      }
-      return {
-        product: candidate,
-        existingOffer: offer,
-        deterministic: true,
-        confidence: 0.99,
-        reason: "SKU já vinculado a este fornecedor.",
-      };
-    }
-  }
-
-  const normalized = normalizeText(scraped.name);
-  const first = normalized.split(/\s+/).find((word) => word.length >= 3) ?? "";
-  const candidates = (ctx.nameBuckets.get(first) ?? [])
-    .map((candidate) => ({
-      candidate,
-      score: combinedStringSimilarity(normalized, normalizeText(candidate.name)),
-    }))
-    .filter(({ candidate }) => {
-      const candidateEan = normalizeCaptureEan(candidate.ean || candidate.gtin || candidate.barcode);
-      return !(ean && candidateEan && ean !== candidateEan);
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
-
-  const best = candidates[0];
-  if (best && best.score >= AUTO_NAME_MATCH && capturePresentationCompatible(scraped.name, best.candidate.name)) {
-    return {
-      product: best.candidate,
-      existingOffer: ctx.offerByProduct.get(best.candidate.id),
-      deterministic: true,
-      confidence: best.score,
-      reason: `Nome/apresentação com similaridade ${(best.score * 100).toFixed(1)}%.`,
-    };
-  }
-
-  if (best && best.score >= AI_NAME_MATCH_MIN) {
-    const ai = await resolveAmbiguousProductMatch({
-      supplierId: job.supplierId,
-      observed: {
-        name: scraped.name,
-        ean,
-        sku: scraped.code,
-        unit: scraped.unit,
-        price: scraped.price,
-      },
-      candidates: candidates.map(({ candidate, score }) => ({
-        id: candidate.id,
-        name: candidate.name,
-        ean: candidate.ean || candidate.gtin || candidate.barcode,
-        code: candidate.code || candidate.codigoFornecedor,
-        manufacturer: candidate.manufacturer,
-        presentation: candidate.presentation,
-        unit: candidate.unit,
-        score,
-      })),
-    });
-    if (ai?.selectedProductId && ai.confidence >= 0.92 && ai.compatiblePresentation) {
-      const selected = ctx.byId.get(ai.selectedProductId) ?? null;
-      return {
-        product: selected,
-        existingOffer: selected ? ctx.offerByProduct.get(selected.id) : undefined,
-        deterministic: false,
-        confidence: ai.confidence,
-        actionHint: "review",
-        reason: `IA sugeriu match: ${ai.reason}`,
-      };
-    }
-    return {
-      product: null,
-      deterministic: false,
-      confidence: ai?.confidence ?? best.score,
-      actionHint: "review",
-      reason: ai?.reason || "Nome semelhante, mas identidade insuficiente para automação.",
-    };
-  }
-
-  if (ean) {
-    return {
-      product: null,
-      deterministic: true,
-      confidence: 0.97,
-      actionHint: "create",
-      reason: "EAN válido e inexistente no catálogo; novo produto determinístico.",
-    };
-  }
-
-  return {
-    product: null,
-    deterministic: false,
-    confidence: 0,
-    actionHint: "review",
-    reason: "Produto novo sem EAN confiável; requer validação.",
-  };
-}
-
-export async function processCaptureJob(jobId: number): Promise<void> {
-  const db = await getDb();
-  if (!db) throw new Error("Banco indisponível");
-  const [job] = await db.select().from(captureJobs).where(eq(captureJobs.id, jobId)).limit(1);
-  if (!job) throw new Error(`Capture job #${jobId} não encontrado.`);
-
-  const startedAt = job.startedAt ?? new Date();
-  let supplierName = `Fornecedor #${job.supplierId}`;
-  try {
-    const [supplier] = await db.select({ name: suppliers.name }).from(suppliers)
-      .where(eq(suppliers.id, job.supplierId)).limit(1);
-    if (supplier) supplierName = supplier.name;
-
-    await addEvent(job.id, "capture", `Iniciando captura ${job.mode} de ${supplierName}.`);
-    const captured = await captureSupplierProducts({
-      scraperConfigId: job.scraperConfigId,
-      mode: job.mode,
-      query: job.query,
-    });
-    for (const warning of captured.warnings.slice(0, 30)) {
-      await addEvent(job.id, "capture", warning, "warning");
-    }
-
-    const previousHealth = await getHealth(job.scraperConfigId);
-    const gate = evaluateCaptureQuality({
-      mode: job.mode,
-      captured: captured.products.length,
-      baseline: previousHealth?.baselineItems,
-      warnings: captured.warnings.length,
-    });
-    await db.update(captureJobs).set({
-      capturedItems: captured.products.length,
-      expectedItems: previousHealth?.baselineItems ?? captured.expectedItems ?? null,
-      qualityScore: String(gate.score),
-    }).where(eq(captureJobs.id, job.id));
-
-    if (gate.quarantine) {
-      const reason = gate.reasons.join(" ");
-      await addEvent(job.id, "quality", `Captura em quarentena: ${reason}`, "error");
-      const aiDiagnosis = await explainCaptureAnomaly({
-        supplierName,
-        capturedItems: captured.products.length,
-        baselineItems: previousHealth?.baselineItems,
-        errorItems: 0,
-        warnings: captured.warnings,
-      });
-      if (aiDiagnosis) await addEvent(job.id, "ai_diagnosis", aiDiagnosis, "warning");
-      await db.update(captureJobs).set({
-        status: "quarantine",
-        completedAt: new Date(),
-        progressStage: "quarantine",
-        progressMessage: reason,
-        errorMessage: reason,
-      }).where(eq(captureJobs.id, job.id));
-      await saveHealth({
-        job,
-        score: gate.score,
-        captured: captured.products.length,
-        successful: false,
-        capabilities: captured.capabilities as unknown as Record<string, unknown>,
-        error: reason,
-      });
-      await db.update(scraperConfigs).set({
-        lastRunAt: new Date(),
-        lastRunStatus: "failed",
-        lastRunErrorMessage: reason.slice(0, 500),
-        productsScrapedCount: captured.products.length,
-      }).where(eq(scraperConfigs.id, job.scraperConfigId));
-      return;
-    }
-
-    await addEvent(job.id, "matching", `Quality gate aprovado (${gate.score.toFixed(0)}/100). Iniciando matching.`);
-    const ctx = await loadCatalogContext(job.supplierId);
-    const observations: Array<typeof supplierProductObservations.$inferInsert> = [];
-    let matched = 0;
-    let changed = 0;
-    let created = 0;
-    let review = 0;
-    let errors = 0;
-
-    for (const scraped of captured.products) {
-      try {
-        const availability = normalizeCaptureAvailability(scraped.availability, scraped.stock);
-        const match = await chooseProductMatch(job, scraped, ctx);
-        let product = match.product;
-        let existingOffer = match.existingOffer;
-        let action: ObservationAction = match.actionHint ?? "no_change";
-        let reason = match.reason;
-
-        if (!Number.isFinite(scraped.price) || scraped.price <= 0) {
-          action = "blocked";
-          reason = "Preço inválido ou ausente.";
-        } else if (product) {
-          const anomaly = evaluateCapturePriceChange(scraped.price, existingOffer?.price);
-          if (anomaly.level === "block") {
-            action = "blocked";
-            reason = anomaly.change == null
-              ? "Preço inválido."
-              : `Variação de preço ${(anomaly.change * 100).toFixed(1)}% bloqueada.`;
-          } else if (anomaly.level === "review") {
-            action = "review";
-            reason = `Variação de preço ${(anomaly.change! * 100).toFixed(1)}% requer revisão.`;
-          } else if (match.deterministic) {
-            const same = Boolean(existingOffer) &&
-              Number(existingOffer?.price || 0) === scraped.price &&
-              Number(existingOffer?.promoPrice || 0) === Number(scraped.pricePromo || 0) &&
-              Number(existingOffer?.stock ?? -1) === Number(scraped.stock ?? -1) &&
-              String(existingOffer?.availability || "") === toLegacyAvailability(availability);
-            action = same ? "no_change" : "update";
-          }
-        }
-
-        if (action === "create") {
-          const productId = await createNewProduct({
-            supplierId: job.supplierId,
-            supplierName,
-            scraped,
-            availability,
-          });
-          product = {
-            id: productId,
-            supplierId: job.supplierId,
-            name: scraped.name,
-            ean: normalizeCaptureEan(scraped.ean),
-            gtin: normalizeCaptureEan(scraped.ean),
-            barcode: null,
-            code: scraped.code ?? null,
-            codigoFornecedor: scraped.code ?? null,
-            manufacturer: null,
-            presentation: null,
-            unit: scraped.unit ?? null,
-            price: String(scraped.price),
-            imageUrl: scraped.imageUrl ?? null,
-          };
-          created++;
-          changed++;
-        } else if (action === "update" && product) {
-          await upsertOffer({
-            productId: product.id,
-            supplierId: job.supplierId,
-            supplierName,
-            scraped,
-            availability,
-            existing: existingOffer,
-          });
-          // Compatibilidade temporária. A oferta é a fonte de verdade; products.price
-          // funciona apenas como cache quando o produto pertence ao fornecedor.
-          if (product.supplierId === job.supplierId) {
-            const updates: Record<string, unknown> = { price: String(scraped.price), updatedAt: new Date() };
-            if (scraped.imageUrl && !product.imageUrl) updates.imageUrl = scraped.imageUrl;
-            if (scraped.productUrl) updates.productUrl = scraped.productUrl;
-            await db.update(products).set(updates).where(eq(products.id, product.id));
-          }
-          changed++;
-        }
-
-        if (product) matched++;
-        if (action === "review" || action === "blocked") review++;
-
-        if (STORE_UNCHANGED || action !== "no_change") {
-          observations.push({
-            captureJobId: job.id,
-            scraperConfigId: job.scraperConfigId,
-            supplierId: job.supplierId,
-            productId: product?.id ?? null,
-            supplierSku: scraped.code ?? null,
-            ean: normalizeCaptureEan(scraped.ean),
-            rawName: scraped.name.slice(0, 512),
-            normalizedName: normalizeText(scraped.name).slice(0, 512),
-            rawPrice: String(scraped.price),
-            price: String(scraped.price),
-            normalPrice: scraped.priceNormal != null ? String(scraped.priceNormal) : null,
-            promoPrice: scraped.pricePromo != null ? String(scraped.pricePromo) : null,
-            stock: scraped.stock ?? null,
-            availability,
-            productUrl: scraped.productUrl ?? null,
-            imageUrl: scraped.imageUrl ?? null,
-            sourceType: scraped.sourceType,
-            sourceUrl: scraped.fonteUrl ?? scraped.productUrl ?? null,
-            contentHash: makeContentHash({
-              sku: scraped.code,
-              ean: scraped.ean,
-              name: scraped.name,
-              price: scraped.price,
-              promo: scraped.pricePromo,
-              stock: scraped.stock,
-              availability,
-            }),
-            confidence: String(Math.round(match.confidence * 10000) / 100),
-            action,
-            reason,
-            rawPayload: {
-              name: scraped.name,
-              code: scraped.code,
-              ean: scraped.ean,
-              unit: scraped.unit,
-              availability: scraped.availability,
-              consultedAt: scraped.consultadoEm,
-            },
-          });
-        }
-      } catch (error) {
-        errors++;
-        await addEvent(job.id, "item", `Falha em item: ${(error as Error).message}`, "error");
-      }
-    }
-
-    for (let index = 0; index < observations.length; index += 500) {
-      await db.insert(supplierProductObservations).values(observations.slice(index, index + 500));
-    }
-
-    let score = gate.score;
-    const errorRatio = captured.products.length ? errors / captured.products.length : 1;
-    const reviewRatio = captured.products.length ? review / captured.products.length : 0;
-    score -= Math.min(errorRatio * 100, 30);
-    score -= Math.min(reviewRatio * 20, 15);
-    score = Math.max(0, Math.min(score, 100));
-    const finalStatus: "success" | "partial" = errors > 0 || review > 0 ? "partial" : "success";
-
-    await db.update(captureJobs).set({
-      status: finalStatus,
-      completedAt: new Date(),
-      progressStage: "done",
-      progressMessage: `${captured.products.length} capturados; ${changed} alterados; ${review} para revisão.`,
-      capturedItems: captured.products.length,
-      matchedItems: matched,
-      changedItems: changed,
-      createdItems: created,
-      reviewItems: review,
-      errorItems: errors,
-      qualityScore: String(score),
-      errorMessage: errors ? `${errors} item(ns) com erro.` : null,
-    }).where(eq(captureJobs.id, job.id));
-
-    await addEvent(
-      job.id,
-      "done",
-      `Captura concluída: ${captured.products.length} itens, ${changed} alterações, ${review} revisões, ${errors} erros.`,
-    );
-    await saveHealth({
-      job,
-      score,
-      captured: captured.products.length,
-      successful: true,
-      capabilities: captured.capabilities as unknown as Record<string, unknown>,
-      error: errors ? `${errors} item(ns) com erro.` : null,
-    });
-
-    await db.update(scraperConfigs).set({
-      lastRunAt: new Date(),
-      lastRunStatus: "success",
-      lastRunErrorMessage: finalStatus === "partial" ? `${review} revisão(ões), ${errors} erro(s)` : null,
-      productsScrapedCount: captured.products.length,
-      productsMatchedCount: matched,
-      productsUpdatedCount: changed,
-      productsCreatedCount: created,
-    }).where(eq(scraperConfigs.id, job.scraperConfigId));
-
-    await db.insert(scraperLogs).values({
-      scraperConfigId: job.scraperConfigId,
-      status: "success",
-      startedAt,
-      completedAt: new Date(),
-      durationMs: Date.now() - startedAt.getTime(),
-      productsScraped: captured.products.length,
-      productsMatched: matched,
-      productsUpdated: changed,
-      productsCreated: created,
-      errorMessage: finalStatus === "partial" ? `${review} revisão(ões), ${errors} erro(s)` : null,
-    }).catch(() => undefined);
-  } catch (error) {
-    const errorMessage = (error as Error).message;
-    logger.error(`[CaptureCore] Job #${job.id} falhou:`, error);
-    await addEvent(job.id, "failed", errorMessage, "error");
-    await db.update(captureJobs).set({
-      status: "failed",
-      completedAt: new Date(),
-      progressStage: "failed",
-      progressMessage: errorMessage,
-      errorMessage,
-    }).where(eq(captureJobs.id, job.id));
-    await db.update(scraperConfigs).set({
-      lastRunAt: new Date(),
-      lastRunStatus: "failed",
-      lastRunErrorMessage: errorMessage.slice(0, 500),
-    }).where(eq(scraperConfigs.id, job.scraperConfigId)).catch(() => undefined);
-    await saveHealth({
-      job,
-      score: 0,
-      captured: 0,
-      successful: false,
-      capabilities: {},
-      error: errorMessage,
-    }).catch(() => undefined);
-    await db.insert(scraperLogs).values({
-      scraperConfigId: job.scraperConfigId,
-      status: "failed",
-      startedAt,
-      completedAt: new Date(),
-      durationMs: Date.now() - startedAt.getTime(),
-      productsScraped: 0,
-      productsMatched: 0,
-      productsUpdated: 0,
-      productsCreated: 0,
-      errorMessage: errorMessage.slice(0, 500),
-    }).catch(() => undefined);
-  }
-}
-
-export async function listCaptureReviewQueue(input: {
-  scraperConfigId?: number;
-  supplierId?: number;
-  limit?: number;
-}) {
-  const db = await getDb();
-  if (!db) return [];
-  const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
-  if (input.scraperConfigId && input.supplierId) {
-    return db.select().from(supplierProductObservations)
-      .where(and(
-        inArray(supplierProductObservations.action, ["review", "blocked"]),
-        eq(supplierProductObservations.scraperConfigId, input.scraperConfigId),
-        eq(supplierProductObservations.supplierId, input.supplierId),
-      ))
-      .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
-  }
-  if (input.scraperConfigId) {
-    return db.select().from(supplierProductObservations)
-      .where(and(
-        inArray(supplierProductObservations.action, ["review", "blocked"]),
-        eq(supplierProductObservations.scraperConfigId, input.scraperConfigId),
-      ))
-      .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
-  }
-  if (input.supplierId) {
-    return db.select().from(supplierProductObservations)
-      .where(and(
-        inArray(supplierProductObservations.action, ["review", "blocked"]),
-        eq(supplierProductObservations.supplierId, input.supplierId),
-      ))
-      .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
-  }
-  return db.select().from(supplierProductObservations)
-    .where(inArray(supplierProductObservations.action, ["review", "blocked"]))
-    .orderBy(desc(supplierProductObservations.capturedAt)).limit(limit);
-}
-
-export async function decideCaptureObservation(input: {
-  observationId: number;
-  decision: "approve" | "reject";
-  expectedProductId?: number | null;
-  userId?: number | null;
-  notes?: string | null;
-}) {
-  const db = await getDb();
-  if (!db) throw new Error("Banco indisponível");
-  const [obs] = await db.select().from(supplierProductObservations)
-    .where(eq(supplierProductObservations.id, input.observationId)).limit(1);
-  if (!obs) throw new Error("Observação não encontrada.");
-
-  if (input.decision === "reject") {
-    await db.update(supplierProductObservations)
-      .set({ action: "blocked", reason: input.notes || "Rejeitado por revisão humana." })
-      .where(eq(supplierProductObservations.id, obs.id));
-    await recordCaptureAiFeedback({
-      supplierId: obs.supplierId,
-      observationId: obs.id,
-      decision: obs.productId ? "reject_update" : "wrong_match",
-      observedName: obs.rawName,
-      expectedProductId: input.expectedProductId ?? null,
-      notes: input.notes,
-      createdByUserId: input.userId,
-    });
-    return { applied: false, status: "rejected" as const };
-  }
-
-  const productId = input.expectedProductId ?? obs.productId;
-  if (!productId) throw new Error("Selecione o produto mestre correspondente antes de aprovar.");
-  const [product] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
-  if (!product) throw new Error("Produto mestre selecionado não existe.");
-  const [supplier] = await db.select({ name: suppliers.name }).from(suppliers)
-    .where(eq(suppliers.id, obs.supplierId)).limit(1);
-  const [existing] = await db.select({
-    id: productSupplierOffers.id,
-    productId: productSupplierOffers.productId,
-    supplierCode: productSupplierOffers.supplierCode,
-    price: productSupplierOffers.price,
-    promoPrice: productSupplierOffers.promoPrice,
-    stock: productSupplierOffers.stock,
-    availability: productSupplierOffers.availability,
-  }).from(productSupplierOffers)
-    .where(and(
-      eq(productSupplierOffers.productId, productId),
-      eq(productSupplierOffers.supplierId, obs.supplierId),
-    )).limit(1);
-
-  await upsertOffer({
-    productId,
-    supplierId: obs.supplierId,
-    supplierName: supplier?.name || `Fornecedor #${obs.supplierId}`,
-    scraped: {
-      name: obs.rawName,
-      code: obs.supplierSku ?? undefined,
-      ean: obs.ean ?? undefined,
-      price: Number(obs.price || 0),
-      priceNormal: obs.normalPrice != null ? Number(obs.normalPrice) : undefined,
-      pricePromo: obs.promoPrice != null ? Number(obs.promoPrice) : undefined,
-      stock: obs.stock ?? undefined,
-      productUrl: obs.productUrl ?? undefined,
-      imageUrl: obs.imageUrl ?? undefined,
-    },
-    availability: obs.availability,
-    existing: existing ?? undefined,
-  });
-  await db.update(supplierProductObservations)
-    .set({ productId, action: "update", reason: input.notes || "Aprovado por revisão humana." })
-    .where(eq(supplierProductObservations.id, obs.id));
-  await recordCaptureAiFeedback({
-    supplierId: obs.supplierId,
-    observationId: obs.id,
-    decision: obs.productId === productId ? "approve_update" : "correct_match",
-    observedName: obs.rawName,
-    expectedProductId: productId,
-    notes: input.notes,
-    createdByUserId: input.userId,
-  });
-  return { applied: true, status: "approved" as const, productId };
-}
-
 export async function getConnectorHealthList() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(captureConnectorHealth).orderBy(desc(captureConnectorHealth.updatedAt));
+  return db.select().from(captureConnectorHealth)
+    .orderBy(desc(captureConnectorHealth.updatedAt));
 }
 
 export async function recoverStaleCaptureJobs(maxAgeMinutes = 15) {
   const db = await getDb();
   if (!db) return 0;
   const running = await db.select().from(captureJobs).where(eq(captureJobs.status, "running"));
-  const cutoff = Date.now() - maxAgeMinutes * 60_000;
+  const cutoff = Date.now() - Math.max(2, maxAgeMinutes) * 60_000;
   let recovered = 0;
+
   for (const job of running) {
     const heartbeat = job.heartbeatAt?.getTime() ?? job.startedAt?.getTime() ?? job.updatedAt.getTime();
     if (heartbeat >= cutoff) continue;
+
     const retry = job.attempts < job.maxAttempts;
     await db.update(captureJobs).set({
       status: retry ? "queued" : "failed",
+      activeKey: retry ? `scraper:${job.scraperConfigId}` : null,
       workerId: null,
       heartbeatAt: null,
       startedAt: retry ? null : job.startedAt,
@@ -1062,5 +293,28 @@ export async function recoverStaleCaptureJobs(maxAgeMinutes = 15) {
     }).where(eq(captureJobs.id, job.id));
     recovered++;
   }
+
   return recovered;
+}
+
+/** Compatibilidade da fachada antiga: a política efetiva é sempre a V2 segura. */
+export async function listCaptureReviewQueue(input: {
+  scraperConfigId?: number;
+  supplierId?: number;
+  limit?: number;
+}) {
+  const { listSafeCaptureReviewQueue } = await import("./captureSafeProcessor");
+  return listSafeCaptureReviewQueue(input);
+}
+
+/** Compatibilidade da fachada antiga: aprovação/criação passa sempre pelo V2 seguro. */
+export async function decideCaptureObservation(input: {
+  observationId: number;
+  decision: "approve" | "reject";
+  expectedProductId?: number | null;
+  userId?: number | null;
+  notes?: string | null;
+}) {
+  const { decideSafeCaptureObservation } = await import("./captureSafeProcessor");
+  return decideSafeCaptureObservation(input);
 }
