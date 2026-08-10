@@ -13,16 +13,53 @@ import {
 import { buildQuotationResponse } from "../services/emailQuotationResponseService";
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 import { ensureOpportunityFromQuotation } from "../services/opportunityWorkflowService";
+import {
+  autoConfirmThreshold,
+  isAutoPipelineEnabled,
+  isAutoSendEnabled,
+  runAutoPipelineForPending,
+  runAutoPipelineForQuotation,
+} from "../services/quotationAutoPipelineService";
 
 /**
  * Cotações recebidas por e-mail (COTEP/Compras MG, FUNARB, COPASA, Cemig...).
  */
 export const emailQuotationsRouter = router({
-  /** Status da configuração IMAP/SMTP (para a UI mostrar orientação). */
+  /** Status da configuração IMAP/SMTP e da automação (para a UI mostrar orientação). */
   status: protectedProcedure.query(() => ({
     imapConfigured: isImapConfigured(),
     smtpConfigured: isSmtpConfigured(),
+    autoPipelineEnabled: isAutoPipelineEnabled(),
+    autoSendEnabled: isAutoSendEnabled(),
+    autoConfirmThreshold: autoConfirmThreshold(),
   })),
+
+  /** Roda o pipeline automático (auto-confirmação + geração de proposta) sob demanda. */
+  autoPipeline: adminProcedure
+    .input(
+      z
+        .object({
+          quotationId: z.number().int().positive().optional(),
+          limit: z.number().int().min(1).max(200).default(50),
+        })
+        .optional(),
+    )
+    .mutation(async ({ input }) => {
+      if (input?.quotationId) {
+        const one = await runAutoPipelineForQuotation(input.quotationId);
+        return {
+          enabled: isAutoPipelineEnabled(),
+          processed: 1,
+          autoConfirmedItems: one.autoConfirmedItems,
+          proposalsGenerated: one.proposalGenerated ? 1 : 0,
+          sent: one.sent ? 1 : 0,
+          blocked: one.blockedReason ? 1 : 0,
+          errors: [] as string[],
+          quotations: [one],
+        };
+      }
+      return runAutoPipelineForPending({ limit: input?.limit });
+    }),
 
   /** Dispara a sincronização da caixa de entrada (somente admin). */
   sync: adminProcedure

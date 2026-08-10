@@ -98,6 +98,21 @@ export async function ensureScraperColumns(): Promise<void> {
 }
 
 /**
+ * Colunas do pipeline automático de cotação→proposta: PDF gerado, carimbo de
+ * geração, margem aplicada e trilha de confirmação automática de match.
+ */
+export async function ensureQuotationAutomationColumns(): Promise<void> {
+  try {
+    await ensureColumn("email_quotations", "propostaPdfUrl", "TEXT NULL");
+    await ensureColumn("email_quotations", "propostaGeradaEm", "TIMESTAMP NULL");
+    await ensureColumn("email_quotations", "propostaMargemPercent", "DECIMAL(5,2) NULL");
+    await ensureColumn("email_quotation_items", "matchAuto", "BOOLEAN NOT NULL DEFAULT FALSE");
+  } catch (err) {
+    logger.error("[Schema] Falha ao garantir colunas do pipeline de proposta automática:", err);
+  }
+}
+
+/**
  * IPI/PIS/COFINS como tipos de 1ª classe no Motor Tributário (§9). Estende o
  * enum tax_rules.tipo de forma idempotente (só altera se ainda não os inclui).
  */

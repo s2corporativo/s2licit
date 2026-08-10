@@ -21,6 +21,10 @@ import {
   getS2PortalUrl,
   type S2TargetPortal,
 } from "./s2TargetPortals";
+import {
+  fetchAuthenticatedPortalHtml,
+  isPortalAuthDiscoveryEnabled,
+} from "./portalAuthenticatedDiscoveryService";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
 import { logger } from "../_core/logger";
 
@@ -40,7 +44,7 @@ export interface S2PortalOpportunityItem {
 }
 
 export interface S2PortalOpportunity {
-  source: InstitutionalSource;
+  source: S2TargetPortal;
   externalId: string;
   subject: string;
   orgao: string;
@@ -85,7 +89,7 @@ function truncate(value: string, max = 512): string {
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
 
-function stableId(source: InstitutionalSource, url: string, text: string): string {
+function stableId(source: S2TargetPortal, url: string, text: string): string {
   return createHash("sha256")
     .update(`${source}|${url}|${normalizeText(text).slice(0, 2_000)}`)
     .digest("hex")
@@ -188,7 +192,7 @@ function isActiveCandidate(text: string): boolean {
  * público e não tenta autenticar, resolver CAPTCHA ou contornar permissões.
  */
 export function parseInstitutionalPortalHtml(
-  source: InstitutionalSource,
+  source: S2TargetPortal,
   html: string,
   portalUrl: string,
 ): S2PortalOpportunity[] {
@@ -337,11 +341,38 @@ async function fetchInstitutionalOpportunities(
     errors.push(`${definition.label} (navegador): ${(error as Error).message}`);
   }
 
+  // Terceira tentativa: área autenticada com credencial do cofre (portais que
+  // só listam cotações ao fornecedor logado). CAPTCHA interrompe com aviso.
+  const authenticated = await fetchAuthenticatedOpportunities(source, errors);
+  if (authenticated.length > 0) return authenticated;
+
   const guidance = definition.discovery === "authenticated_assisted"
     ? "O portal não expôs uma listagem pública utilizável. A participação permanece disponível pelo Agente de Propostas com credencial do cofre e aprovação humana."
     : `Nenhuma oportunidade pública ativa foi identificada. Caso o endereço público mude, configure ${definition.environmentUrl ?? "a URL do portal"}.`;
   errors.push(`${definition.label}: ${guidance}`);
   return [];
+}
+
+/**
+ * Descoberta autenticada: entra no portal com a credencial do cofre e passa o
+ * HTML da área logada pelos mesmos parsers do radar público. Sem credencial ou
+ * com a chave desligada, devolve lista vazia em silêncio (o radar público já
+ * cobriu o que era possível).
+ */
+async function fetchAuthenticatedOpportunities(
+  source: S2TargetPortal,
+  errors: string[],
+): Promise<S2PortalOpportunity[]> {
+  if (!isPortalAuthDiscoveryEnabled()) return [];
+  const definition = S2_TARGET_PORTAL_DEFINITIONS[source];
+  try {
+    const html = await fetchAuthenticatedPortalHtml(source);
+    if (!html) return [];
+    return parseInstitutionalPortalHtml(source, html, getS2PortalUrl(source));
+  } catch (error) {
+    errors.push(`${definition.label} (autenticado): ${(error as Error).message}`);
+    return [];
+  }
 }
 
 async function loadTambasaCatalog(): Promise<TambasaCatalogProduct[]> {
@@ -464,6 +495,28 @@ export async function syncS2PortalOpportunities(options?: {
       target.matchedItems = result.matchedItems;
       target.unmatchedItems = result.unmatchedItems;
       target.errors.push(...result.errors);
+    }
+
+    // Fallback autenticado das fundações: se o mural público não trouxe nada e
+    // há credencial no cofre, tenta a área logada do fornecedor.
+    for (const source of foundationSources) {
+      const target = stats.get(source)!;
+      if (target.found > 0) continue;
+      const authenticated = await fetchAuthenticatedOpportunities(source, target.errors);
+      if (authenticated.length === 0) continue;
+      const catalog = await loadTambasaCatalog();
+      target.found += authenticated.length;
+      for (const opportunity of authenticated) {
+        try {
+          const persisted = await persistOpportunity(opportunity, catalog);
+          if (persisted.imported) target.imported++;
+          else target.skipped++;
+          target.matchedItems += persisted.matched;
+          target.unmatchedItems += persisted.unmatched;
+        } catch (error) {
+          target.errors.push(`${opportunity.externalId}: ${(error as Error).message}`);
+        }
+      }
     }
   }
 

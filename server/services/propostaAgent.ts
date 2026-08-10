@@ -62,7 +62,7 @@ export class CaptchaRequerIntervencaoError extends Error {
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "agrega" | "generico";
+export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "fiemg" | "agrega" | "generico";
 
 export interface PortalConfig {
   nome: string;
@@ -290,6 +290,35 @@ export const PORTAL_CONFIGS: Record<PortalType, PortalConfig> = {
       botaoSalvar: 'button[id*="Salvar"], input[value*="Salvar"], button[type="submit"]',
       botaoEnviar: 'button[id*="Enviar"], input[value*="Enviar"]',
       confirmacaoEnvio: 'button[id*="Confirmar"], input[value="Confirmar"], input[value="OK"]',
+    },
+  },
+
+  // ── FIEMG / SESI / SENAI (Sistema FIEMG) ──────────────────────────────────
+  // Portal: compras.fiemg.com.br — mural público + área do fornecedor (ASP.NET).
+  // Login do fornecedor cadastrado no portal de compras do Sistema FIEMG.
+  fiemg: {
+    nome: "FIEMG / SESI / SENAI (Sistema FIEMG)",
+    loginUrl: "https://compras.fiemg.com.br/portal/",
+    notasImportantes:
+      "Portal de compras do Sistema FIEMG (FIEMG, SESI, SENAI, IEL, CIEMG). " +
+      "O mural de processos é público; a participação exige login do fornecedor. " +
+      "Portal ASP.NET — confira os seletores na primeira execução. " +
+      "O robô loga e pré-preenche; você revisa e envia.",
+    estrategia: "form_padrao",
+    seletores: {
+      loginCpfCnpj: 'input[name*="Login"], input[name*="Usuario"], input[id*="Login"], input[id*="Usuario"], input[name*="cnpj"], input[placeholder*="CNPJ"], input[placeholder*="usu"]',
+      loginSenha: 'input[type="password"], input[name*="Senha"], input[id*="Senha"]',
+      loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"], input[value="Acessar"], input[id*="btnLogin"], #btnEntrar',
+      loginSucesso: "fornecedor",
+      buscaProcesso: 'input[id*="Processo"], input[name*="processo"], input[id*="Numero"], input[name*="numero"]',
+      buscaBotao: 'input[value="Pesquisar"], button[id*="pesquisar"], input[id*="btnPesquisar"]',
+      tabelaItens: 'table[id*="grd"] tr, table tbody tr, tr[class*="Grid"], [class*="item"]',
+      inputPreco: 'input[id*="Preco"], input[name*="preco"], input[id*="Valor"], input[name*="valor"], input[type="number"]',
+      inputMarca: 'input[id*="Marca"], input[name*="marca"], input[name*="fabricante"]',
+      inputValidade: 'input[id*="Validade"], input[name*="validade"], input[name*="prazo"]',
+      botaoSalvar: 'input[value*="Salvar"], button[id*="salvar"], button[type="submit"]',
+      botaoEnviar: 'input[value*="Enviar"], button[id*="enviar"]',
+      confirmacaoEnvio: 'input[value="Confirmar"], button[id*="confirmar"], input[value="OK"]',
     },
   },
 
@@ -543,6 +572,23 @@ export class PropostaAgente {
 
     this.addLog(`✅ Login realizado. URL: ${urlAtual}`);
     await this.capturarTela("Após login");
+  }
+
+  /**
+   * Após o login, navega até uma URL do portal e devolve o HTML renderizado.
+   * Usado pela descoberta autenticada de cotações (radar com credencial do
+   * cofre): o HTML retornado passa pelos mesmos parsers do radar público.
+   * Mantém a conformidade do agente — se um CAPTCHA aparecer na navegação,
+   * o fluxo é interrompido e exige intervenção humana.
+   */
+  async coletarHtml(urlAlvo: string): Promise<string> {
+    if (!this.page) throw new Error("Não autenticado: faça login antes de coletar páginas.");
+    assertSafeExternalUrl(urlAlvo, "URL do portal");
+    this.addLog(`📄 Coletando página autenticada: ${urlAlvo}`);
+    await this.page.goto(urlAlvo, { waitUntil: "networkidle2", timeout: 45000 });
+    await new Promise(r => setTimeout(r, 1500));
+    await this.verificarCaptcha(urlAlvo);
+    return this.page.content();
   }
 
   async navegarParaLicitacao(numeroProcesso: string, urlDireta?: string): Promise<void> {

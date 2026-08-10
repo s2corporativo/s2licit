@@ -4,6 +4,10 @@ import { getDb } from "../db";
 import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
+import {
+  isAutoPipelineEnabled,
+  runAutoPipelineForPending,
+} from "./quotationAutoPipelineService";
 import { syncS2PortalOpportunitiesSafely } from "./s2PortalOpportunityOrchestrator";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
@@ -62,6 +66,44 @@ async function notifyJobFailure(title: string, detail: string): Promise<void> {
 
 let emailSyncRunning = false;
 let portalOpportunitySyncRunning = false;
+let autoPipelineRunning = false;
+
+/**
+ * Pipeline automático cotação→proposta: auto-confirma matches de alta
+ * confiança e gera o PDF da proposta das cotações completas. Roda após cada
+ * sincronização (e-mail e portais). O envio automático segue regido pela
+ * chave QUOTATION_AUTO_SEND_ENABLED (padrão desligado — aprovação humana).
+ */
+export async function runQuotationAutoPipeline(): Promise<void> {
+  if (!isAutoPipelineEnabled()) return;
+  if (autoPipelineRunning) {
+    logger.warn("[Scheduler] Pipeline de proposta automática ainda em andamento — pulando este ciclo.");
+    return;
+  }
+  autoPipelineRunning = true;
+  try {
+    const result = await runAutoPipelineForPending({ limit: 50 });
+    if (result.proposalsGenerated > 0) {
+      const enviadas = result.sent > 0 ? ` (${result.sent} enviada(s) automaticamente)` : "";
+      await notifyOwner({
+        title: "Propostas geradas automaticamente — Sistema S2",
+        content:
+          `${result.proposalsGenerated} proposta(s) geradas a partir de cotações recebidas${enviadas}. ` +
+          `Acesse a fila de cotações para revisar e enviar.`,
+      });
+    }
+    if (result.errors.length > 0) {
+      logger.warn(
+        `[Scheduler] Pipeline de proposta automática com ${result.errors.length} erro(s): ` +
+          result.errors.slice(0, 5).join("; "),
+      );
+    }
+  } catch (err) {
+    logger.error("[Scheduler] Falha no pipeline de proposta automática:", (err as Error).message);
+  } finally {
+    autoPipelineRunning = false;
+  }
+}
 
 /** Roda a sincronização de e-mail uma vez, com log resumido e guarda de sobreposição. */
 async function runEmailSync(): Promise<void> {
@@ -77,6 +119,8 @@ async function runEmailSync(): Promise<void> {
         `[Scheduler] Cotações e-mail: ${result.imported} importadas, ${result.skipped} já existentes, ${result.errors.length} avisos.`,
       );
     }
+    // Cotação nova na fila → tenta gerar a proposta automaticamente.
+    if (result.imported > 0) await runQuotationAutoPipeline();
   } catch (err) {
     logger.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
   } finally {
@@ -106,6 +150,8 @@ export async function runPortalOpportunitySync(): Promise<void> {
       const detail = result.errors.slice(0, 8).join("; ");
       logger.warn(`[Scheduler] Radar dos seis portais com ${result.errors.length} aviso(s): ${detail}`);
     }
+    // Oportunidade nova na fila → tenta gerar a proposta automaticamente.
+    if (result.imported > 0) await runQuotationAutoPipeline();
   } catch (err) {
     const detail = (err as Error).message;
     logger.error("[Scheduler] Falha no radar dos seis portais:", detail);

@@ -1495,6 +1495,10 @@ export const emailQuotations = mysqlTable(
     categoria: varchar("categoria", { length: 128 }),   // categoria dominante (para segmentar win rate)
     resultadoObs: text("resultadoObs"),
     resultadoEm: timestamp("resultadoEm"),
+    // Proposta gerada automaticamente pelo pipeline (PDF pronto para revisão/envio)
+    propostaPdfUrl: text("propostaPdfUrl"),
+    propostaGeradaEm: timestamp("propostaGeradaEm"),
+    propostaMargemPercent: decimal("propostaMargemPercent", { precision: 5, scale: 2 }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -1524,6 +1528,8 @@ export const emailQuotationItems = mysqlTable(
     matchScore: decimal("matchScore", { precision: 5, scale: 4 }), // 0.0000 a 1.0000
     matchMethod: mysqlEnum("matchMethod", ["catmas", "catmat", "nome", "manual", "nenhum"]).default("nenhum").notNull(),
     matchConfirmado: boolean("matchConfirmado").notNull().default(false),
+    // Trilha de auditoria: a confirmação foi feita pelo pipeline automático?
+    matchAuto: boolean("matchAuto").notNull().default(false),
     precoSugerido: decimal("precoSugerido", { precision: 15, scale: 4 }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
