@@ -1,15 +1,17 @@
-import puppeteer, { type Browser, type Page } from "puppeteer";
+import type { Page } from "puppeteer";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { scraperConfigs } from "../../drizzle/schema";
 import { decryptPassword } from "../utils/encryption";
 import {
-  FORNECEDOR_CONFIGS,
-  type SelectorConfig,
-} from "./scraperEngine";
-import { enqueueCaptureJob } from "./captureCoreService";
-import { assertSafeExternalUrl } from "../utils/urlGuard";
+  assertSafeExternalUrl,
+  assertSafeExternalUrlResolved,
+} from "../utils/urlGuard";
 import { logger } from "../_core/logger";
+import { BrowserCaptureEngine } from "./browserCaptureEngine";
+import { enqueueCaptureJob } from "./captureCoreService";
+import { FORNECEDOR_CONFIGS } from "./scraperPresets";
+import type { SelectorConfig } from "./scraperContracts";
 
 const TAMBASA_HOME = "https://tambasa.com/";
 const TAMBASA_HOSTS = new Set(["tambasa.com", "www.tambasa.com"]);
@@ -18,8 +20,8 @@ const MAX_ALLOWED_CATEGORIES = 3_000;
 const DEFAULT_NAVIGATION_WAIT_MS = 1_200;
 
 /**
- * Lock local apenas para evitar duplicação acidental dentro da mesma instância.
- * A sincronização efetiva é protegida pelo activeKey persistente do Capture Core.
+ * Lock local somente evita trabalho duplicado na mesma instância. O fluxo de
+ * captura efetivo continua protegido pelo activeKey persistente do Capture Core.
  */
 const runningConfigIds = new Set<number>();
 
@@ -116,67 +118,6 @@ async function pageHasProducts(page: Page): Promise<boolean> {
   });
 }
 
-async function openLoginModalIfNeeded(
-  page: Page,
-  cfg: SelectorConfig,
-): Promise<void> {
-  if (await page.$(cfg.loginEmail)) return;
-  if (!cfg.loginTrigger) return;
-
-  const trigger = await page.$(cfg.loginTrigger);
-  if (!trigger) return;
-
-  await trigger.click();
-  await sleep(800);
-}
-
-async function loginTambasa(
-  page: Page,
-  cfg: SelectorConfig,
-  loginIdentifier: string,
-  password: string,
-): Promise<void> {
-  const loginUrl = cfg.loginUrl ?? TAMBASA_HOME;
-  assertSafeExternalUrl(loginUrl, "URL de login Tambasa");
-
-  await page.goto(loginUrl, {
-    waitUntil: "networkidle2",
-    timeout: 30_000,
-  });
-
-  await openLoginModalIfNeeded(page, cfg);
-  await page.waitForSelector(cfg.loginEmail, { visible: true, timeout: 12_000 });
-  await page.waitForSelector(cfg.loginPassword, { visible: true, timeout: 12_000 });
-
-  await page.click(cfg.loginEmail);
-  await page.type(cfg.loginEmail, loginIdentifier, { delay: 35 });
-  await page.click(cfg.loginPassword);
-  await page.type(cfg.loginPassword, password, { delay: 35 });
-
-  await Promise.all([
-    page
-      .waitForNavigation({ waitUntil: "networkidle2", timeout: 30_000 })
-      .catch(() => undefined),
-    page.click(cfg.loginSubmit),
-  ]);
-  await sleep(1_000);
-
-  const logged = cfg.loginSuccessSelector
-    ? await page.evaluate(
-        (selector) => Boolean(document.querySelector(selector)),
-        cfg.loginSuccessSelector,
-      )
-    : !(await page.evaluate(() =>
-        Array.from(document.querySelectorAll('input[type="password"]')).some(
-          (element) => (element as HTMLElement).offsetParent !== null,
-        ),
-      ));
-
-  if (!logged) {
-    throw new Error("Não foi possível confirmar o login autenticado na Tambasa.");
-  }
-}
-
 function resolveLoginIdentifier(raw: string | null | undefined): string {
   const value = raw?.trim();
   if (!value) return "";
@@ -233,6 +174,8 @@ async function loadTambasaConfig(scraperConfigId: number) {
   }
 
   const baseConfig = FORNECEDOR_CONFIGS.tambasa;
+  if (!baseConfig) throw new Error("Preset Tambasa ausente.");
+
   const custom = (
     config.customSelectors && typeof config.customSelectors === "object"
       ? config.customSelectors
@@ -266,122 +209,113 @@ async function loadTambasaConfig(scraperConfigId: number) {
   };
 }
 
-async function createBrowser(): Promise<Browser> {
-  return puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
-  });
+/**
+ * Descobre categorias usando uma página que já pertence ao BrowserCaptureEngine.
+ * Não cria navegador, não autentica e não possui política de rede paralela.
+ */
+export async function discoverTambasaCategoriesOnPage(
+  page: Page,
+  selectors: SelectorConfig,
+  maxCategories: number,
+): Promise<TambasaCategoryDiscovery> {
+  const startedAt = Date.now();
+  const warnings: string[] = [];
+  const discovered = new Set<string>();
+  const visited = new Set<string>();
+  const productBearing = new Set<string>();
+  const queue: string[] = [];
+  let cursor = 0;
+
+  const seedLinks = await collectCatalogLinks(page);
+  for (const url of [...seedLinks, ...selectors.categoryUrls]) {
+    const normalized = normalizeTambasaCatalogUrl(url);
+    if (!normalized || discovered.has(normalized)) continue;
+    discovered.add(normalized);
+    queue.push(normalized);
+  }
+
+  if (queue.length === 0) {
+    throw new Error("A Tambasa não apresentou links de categorias após o login.");
+  }
+
+  const navigationWaitMs = normalizeNavigationWait(selectors.navigationWait);
+  while (cursor < queue.length && visited.size < maxCategories) {
+    const url = queue[cursor];
+    cursor += 1;
+    if (visited.has(url)) continue;
+    visited.add(url);
+
+    try {
+      const safe = await assertSafeExternalUrlResolved(url, "URL de categoria Tambasa");
+      await page.goto(safe.toString(), {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await assertSafeExternalUrlResolved(page.url(), "URL Tambasa após redirecionamento");
+      await sleep(navigationWaitMs);
+
+      if (await pageHasProducts(page)) productBearing.add(url);
+
+      const links = await collectCatalogLinks(page);
+      for (const link of links) {
+        if (discovered.size >= maxCategories) break;
+        if (discovered.has(link)) continue;
+        discovered.add(link);
+        queue.push(link);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (warnings.length < 200) warnings.push(`${url}: ${message}`);
+      logger.warn(`[TambasaCatalog] Falha controlada em categoria: ${message}`);
+    }
+  }
+
+  const source = productBearing.size > 0 ? productBearing : discovered;
+  const categoryUrls = [...source].sort(
+    (left, right) =>
+      categoryDepth(right) - categoryDepth(left) || left.localeCompare(right),
+  );
+
+  if (categoryUrls.length === 0) {
+    throw new Error("Nenhuma página de catálogo utilizável foi descoberta na Tambasa.");
+  }
+
+  return {
+    categoriesDiscovered: discovered.size,
+    categoriesVisited: visited.size,
+    productBearingCategories: productBearing.size,
+    categoryUrls,
+    truncated: cursor < queue.length,
+    warnings,
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 async function discoverTambasaCategoriesInternal(
   scraperConfigId: number,
   maxCategories: number,
 ): Promise<TambasaCategoryDiscovery> {
-  const startedAt = Date.now();
-  const {
-    loginIdentifier,
-    password,
-    selectors,
-  } = await loadTambasaConfig(scraperConfigId);
-
-  const browser = await createBrowser();
-  const warnings: string[] = [];
+  const { config, loginIdentifier, password, selectors } = await loadTambasaConfig(scraperConfigId);
+  const engine = new BrowserCaptureEngine();
 
   try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 900 });
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    await engine.login(
+      selectors.loginUrl ?? TAMBASA_HOME,
+      loginIdentifier,
+      password,
+      selectors,
+      config.supplierId,
     );
 
-    await loginTambasa(page, selectors, loginIdentifier, password);
+    const page = engine.authenticatedPage;
+    if (!page) throw new Error("Página autenticada da Tambasa indisponível.");
+
     logger.info(
-      `[TambasaCatalog] Login confirmado para descoberta do catálogo #${scraperConfigId}.`,
+      `[TambasaCatalog] Login confirmado pelo BrowserCaptureEngine para configuração #${scraperConfigId}.`,
     );
-
-    const discovered = new Set<string>();
-    const visited = new Set<string>();
-    const productBearing = new Set<string>();
-    const queue: string[] = [];
-    let cursor = 0;
-
-    const seedLinks = await collectCatalogLinks(page);
-    for (const url of [...seedLinks, ...selectors.categoryUrls]) {
-      const normalized = normalizeTambasaCatalogUrl(url);
-      if (!normalized || discovered.has(normalized)) continue;
-      discovered.add(normalized);
-      queue.push(normalized);
-    }
-
-    if (queue.length === 0) {
-      throw new Error("A Tambasa não apresentou links de categorias após o login.");
-    }
-
-    const navigationWaitMs = normalizeNavigationWait(selectors.navigationWait);
-
-    while (cursor < queue.length && visited.size < maxCategories) {
-      const url = queue[cursor];
-      cursor += 1;
-
-      if (visited.has(url)) continue;
-      visited.add(url);
-
-      try {
-        assertSafeExternalUrl(url, "URL de categoria Tambasa");
-        await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: 30_000,
-        });
-        await sleep(navigationWaitMs);
-
-        if (await pageHasProducts(page)) productBearing.add(url);
-
-        const links = await collectCatalogLinks(page);
-        for (const link of links) {
-          if (discovered.size >= maxCategories) break;
-          if (discovered.has(link)) continue;
-          discovered.add(link);
-          queue.push(link);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (warnings.length < 200) warnings.push(`${url}: ${message}`);
-        logger.warn(`[TambasaCatalog] Falha ao inspecionar ${url}: ${message}`);
-      }
-    }
-
-    const source = productBearing.size > 0 ? productBearing : discovered;
-    const categoryUrls = [...source].sort(
-      (left, right) =>
-        categoryDepth(right) - categoryDepth(left) || left.localeCompare(right),
-    );
-
-    if (categoryUrls.length === 0) {
-      throw new Error("Nenhuma página de catálogo utilizável foi descoberta na Tambasa.");
-    }
-
-    return {
-      categoriesDiscovered: discovered.size,
-      categoriesVisited: visited.size,
-      productBearingCategories: productBearing.size,
-      categoryUrls,
-      truncated: cursor < queue.length,
-      warnings,
-      durationMs: Date.now() - startedAt,
-    };
+    return await discoverTambasaCategoriesOnPage(page, selectors, maxCategories);
   } finally {
-    await browser.close().catch((error) => {
-      logger.warn(
-        "[TambasaCatalog] Falha ao fechar navegador de descoberta:",
-        (error as Error).message,
-      );
-    });
+    await engine.close();
   }
 }
 
@@ -417,9 +351,9 @@ export async function discoverTambasaCategories(
 }
 
 /**
- * Compatibilidade controlada do fluxo antigo "expandir e sincronizar".
- * Descoberta continua específica da Tambasa, mas a sincronização não chama mais
- * o scraper legado: persiste as rotas e enfileira o Capture Core seguro.
+ * Compatibilidade do fluxo antigo "expandir e sincronizar". A descoberta usa o
+ * mesmo runtime seguro do Capture Core e a sincronização apenas enfileira job;
+ * nunca escreve produto/oferta diretamente.
  */
 export async function expandAndSyncTambasaCatalog(
   scraperConfigId: number,
