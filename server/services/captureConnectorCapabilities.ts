@@ -1,4 +1,5 @@
-import { FORNECEDOR_CONFIGS, type SelectorConfig } from "./scraperEngine";
+import type { SelectorConfig } from "./scraperContracts";
+import { FORNECEDOR_CONFIGS } from "./scraperPresets";
 
 export type CaptureMethod = "api" | "http" | "browser" | "hybrid";
 
