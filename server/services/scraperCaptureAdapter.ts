@@ -1,5 +1,4 @@
 import { asc, and, eq } from "drizzle-orm";
-import type { Page } from "puppeteer";
 import { z } from "zod";
 import { getDb } from "../db";
 import {
@@ -11,12 +10,12 @@ import {
 import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
+import { FORNECEDOR_CONFIGS } from "./scraperEngine";
 import {
-  FORNECEDOR_CONFIGS,
-  ScraperEngine,
   type ScrapedProduct,
   type SelectorConfig,
-} from "./scraperEngine";
+} from "./scraperContracts";
+import { BrowserCaptureEngine } from "./browserCaptureEngine";
 import { discoverTambasaCategories } from "./tambasaCatalogService";
 import {
   chooseCaptureMode,
@@ -36,7 +35,6 @@ export type CapturedSupplierProduct = ScrapedProduct & {
 export interface CaptureAdapterInput {
   scraperConfigId: number;
   mode: "search" | "refresh" | "full";
-  /** Busca: um termo. Refresh: termos/SKUs separados por quebra de linha. */
   query?: string | null;
 }
 
@@ -89,10 +87,7 @@ function readBoundedIntegerEnv(
 
 function normalizeConfiguredUrl(raw: string, context: string): string {
   const probeUrl = raw.replace(/\{q\}|\{termo\}/gi, "capture-probe");
-  const url = assertSafeExternalUrl(probeUrl, context);
-  if (url.username || url.password) {
-    throw new Error(`${context} não pode conter credenciais embutidas na URL.`);
-  }
+  assertSafeExternalUrl(probeUrl, context);
   return raw.trim();
 }
 
@@ -166,8 +161,6 @@ function resolveLoginIdentifier(raw: string | null | undefined): string {
   const value = raw?.trim();
   if (!value) return "";
 
-  // Instalações antigas podem ter armazenado o identificador criptografado.
-  // Se não for ciphertext válido, preserva o usuário/CNPJ/e-mail em texto.
   try {
     const decrypted = decryptPassword(value).trim();
     return decrypted || value;
@@ -414,8 +407,7 @@ function allowedHosts(selectors: SelectorConfig, loginUrl: string): Set<string> 
       const probe = raw.replace(/\{q\}|\{termo\}/gi, "capture-probe");
       hosts.add(assertSafeExternalUrl(probe, "URL do conector").hostname.toLowerCase());
     } catch {
-      // A configuração já foi validada em loadConfig. Mantemos esta função
-      // defensiva para não ampliar hosts em caso de mutação inesperada.
+      // Configuração já foi validada; URL inesperada não amplia o allowlist do probe.
     }
   }
 
@@ -443,9 +435,8 @@ async function drainProbe(
 }
 
 /**
- * Captura sem persistência. O adapter é responsável apenas por autenticação,
- * navegação e normalização da evidência de origem. Matching, quality gate e
- * mutação do catálogo pertencem ao Capture Core.
+ * Adapter de captura sem persistência. Autenticação/navegação pertencem ao
+ * BrowserCaptureEngine; matching, quality gate e mutação pertencem ao Core.
  */
 export async function captureSupplierProducts(
   input: CaptureAdapterInput,
@@ -493,9 +484,7 @@ export async function captureSupplierProducts(
   }
 
   const loginUrl = resolveLoginUrl(selectors);
-  assertSafeExternalUrl(loginUrl, "URL de login");
-
-  const engine = new ScraperEngine();
+  const engine = new BrowserCaptureEngine();
   const capturedProducts: CapturedSupplierProduct[] = [];
   let probe: NetworkJsonProbe | null = null;
 
@@ -508,9 +497,7 @@ export async function captureSupplierProducts(
       config.supplierId,
     );
 
-    // TODO arquitetural eliminado quando ScraperEngine expuser um accessor
-    // somente-leitura para a página autenticada. O cast não altera estado.
-    const page = (engine as unknown as { page: Page | null }).page;
+    const page = engine.authenticatedPage;
     if (page && capabilities.method === "hybrid") {
       probe = attachNetworkJsonProductProbe(
         page,
