@@ -113,6 +113,13 @@
       "when": 1785853954790,
       "tag": "0015_proposal_outcome_and_order_link",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1786325400000,
+      "tag": "0016_product_catalog_compendium",
+      "breakpoints": true
     }
   ]
 }
