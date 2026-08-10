@@ -136,11 +136,8 @@ function enqueueTelemetry(event: TelemetryEvent): void {
     return;
   }
   telemetryQueue.push(event);
-  if (telemetryQueue.length >= TELEMETRY_BATCH_SIZE) {
-    void flushTelemetryBatch();
-  } else {
-    scheduleTelemetryFlush();
-  }
+  if (telemetryQueue.length >= TELEMETRY_BATCH_SIZE) void flushTelemetryBatch();
+  else scheduleTelemetryFlush();
 }
 
 /** Permite flush explícito em shutdown controlado e em testes. */
@@ -216,6 +213,10 @@ function recordCircuitFailure(key: string): void {
   if (state.failures.length >= CIRCUIT_FAILURE_THRESHOLD) state.openUntil = now + CIRCUIT_OPEN_MS;
 }
 
+function shouldAffectCircuit(error: IntegrationError): boolean {
+  return ["NETWORK", "UPSTREAM", "TIMEOUT", "RATE_LIMIT"].includes(error.type);
+}
+
 function parseIpv4(address: string): number[] | null {
   const parts = address.split(".").map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
@@ -243,6 +244,19 @@ function isNonPublicIpv4(address: string): boolean {
   );
 }
 
+function ipv4FromMappedIpv6(address: string): string | null {
+  const normalized = address.toLowerCase().split("%")[0];
+  const dotted = normalized.match(/^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) return dotted[1];
+  if (!normalized.startsWith("::ffff:")) return null;
+  const tail = normalized.slice("::ffff:".length).split(":");
+  if (tail.length !== 2) return null;
+  const high = Number.parseInt(tail[0], 16);
+  const low = Number.parseInt(tail[1], 16);
+  if (!Number.isInteger(high) || !Number.isInteger(low) || high < 0 || high > 0xffff || low < 0 || low > 0xffff) return null;
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
 function isNonPublicIpv6(address: string): boolean {
   const normalized = address.toLowerCase().split("%")[0];
   if (normalized === "::" || normalized === "::1") return true;
@@ -250,8 +264,11 @@ function isNonPublicIpv6(address: string): boolean {
   if (/^fe[89ab]/.test(normalized)) return true;
   if (normalized.startsWith("ff")) return true;
   if (normalized.startsWith("2001:db8:")) return true;
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return mapped ? isNonPublicIpv4(mapped[1]) : false;
+  if (normalized.startsWith("::ffff:") || /^::\d+\.\d+\.\d+\.\d+$/.test(normalized)) {
+    const mapped = ipv4FromMappedIpv6(normalized);
+    return mapped ? isNonPublicIpv4(mapped) : true;
+  }
+  return false;
 }
 
 function isNonPublicIp(address: string): boolean {
@@ -261,7 +278,7 @@ function isNonPublicIp(address: string): boolean {
   return true;
 }
 
-async function assertAllowedUrl(rawUrl: string, request: ExternalHttpRequest): Promise<URL> {
+async function assertAllowedUrl(rawUrl: string, request: ExternalHttpRequest<unknown>): Promise<URL> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -282,7 +299,7 @@ async function assertAllowedUrl(rawUrl: string, request: ExternalHttpRequest): P
   }
   if (request.networkPolicy === "allow-private") return url;
 
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
     throw new IntegrationError("Destino local/privado bloqueado pela política de rede.", {
       type: "CONFIGURATION",
@@ -300,7 +317,7 @@ async function assertAllowedUrl(rawUrl: string, request: ExternalHttpRequest): P
     return url;
   }
 
-  let addresses: Awaited<ReturnType<typeof lookup>>;
+  let addresses: Array<{ address: string; family: number }>;
   try {
     addresses = await lookup(hostname, { all: true, verbatim: true });
   } catch (error) {
@@ -377,7 +394,7 @@ function isReplayableBody(body: BodyInit | null | undefined): boolean {
   return ArrayBuffer.isView(body);
 }
 
-function mayRetry(request: ExternalHttpRequest): boolean {
+function mayRetry(request: ExternalHttpRequest<unknown>): boolean {
   const method = (request.method ?? "GET").toUpperCase();
   const idempotent = request.idempotent === true || method === "GET" || method === "HEAD" || method === "OPTIONS";
   return idempotent && isReplayableBody(request.body);
@@ -393,7 +410,7 @@ function stripSensitiveHeaders(headers: Record<string, string>): Record<string, 
 }
 
 async function fetchWithValidatedRedirects(input: {
-  request: ExternalHttpRequest;
+  request: ExternalHttpRequest<unknown>;
   initialUrl: string;
   headers: Record<string, string>;
   signal: AbortSignal;
@@ -439,7 +456,7 @@ async function fetchWithValidatedRedirects(input: {
 }
 
 function telemetryForResponse(input: {
-  request: ExternalHttpRequest;
+  request: ExternalHttpRequest<unknown>;
   url: string;
   statusCode: number;
   contentType: string;
@@ -468,7 +485,7 @@ function telemetryForResponse(input: {
  * e telemetria possuem limites globais fixos. Telemetria sai do hot path e não
  * altera a latência funcional da chamada externa.
  */
-export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequest): Promise<ExternalHttpResponse<T>> {
+export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequest<T>): Promise<ExternalHttpResponse<T>> {
   const startedAt = Date.now();
   const requestId = randomUUID();
   const timeoutMs = Math.max(1_000, request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -531,6 +548,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
     const attemptBudgetMs = Math.max(1, Math.min(timeoutMs, remainingMs));
     const timer = setTimeout(() => controller.abort(), attemptBudgetMs);
     let response: Response | undefined;
+    let responseBody = "";
 
     try {
       const baseHeaders: Record<string, string> = {
@@ -550,7 +568,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
       lastFinalUrl = fetched.finalUrl;
 
       const contentType = response.headers.get("content-type") ?? "";
-      const text = await readBodyLimited(response, maxBodyBytes);
+      responseBody = await readBodyLimited(response, maxBodyBytes);
       const durationMs = Date.now() - startedAt;
 
       if (!response.ok) {
@@ -564,7 +582,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
           durationMs: Date.now() - attemptStartedAt,
           success: false,
           errorMessage: httpError.message,
-          body: text,
+          body: responseBody,
         });
 
         if (httpError.retryable && attempt < maxAttempts) {
@@ -575,7 +593,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
           continue;
         }
 
-        recordCircuitFailure(key);
+        if (shouldAffectCircuit(httpError)) recordCircuitFailure(key);
         return {
           ok: false,
           source: request.source,
@@ -584,7 +602,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
           statusCode: response.status,
           contentType,
           data: null,
-          text,
+          text: responseBody,
           fetchedAt: new Date(),
           durationMs,
           attempts: attempt,
@@ -593,19 +611,19 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
         };
       }
 
-      let data: T | null = null;
       const expected = request.expected ?? "json";
+      let decoded: unknown;
       if (expected === "text") {
-        data = text as T;
-      } else if (expected === "json" || (expected === "any" && contentLooksJson(contentType, text))) {
-        if (!contentLooksJson(contentType, text)) {
+        decoded = responseBody;
+      } else if (expected === "json" || (expected === "any" && contentLooksJson(contentType, responseBody))) {
+        if (!contentLooksJson(contentType, responseBody)) {
           throw new IntegrationError(`Contrato inválido: resposta não JSON (Content-Type: ${contentType || "ausente"}).`, {
             type: "CONTRACT",
             code: "NON_JSON_RESPONSE",
           });
         }
         try {
-          data = JSON.parse(text) as T;
+          decoded = JSON.parse(responseBody) as unknown;
         } catch (error) {
           throw new IntegrationError("Contrato inválido: JSON malformado.", {
             type: "PARSE",
@@ -614,7 +632,22 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
           });
         }
       } else {
-        data = text as T;
+        decoded = responseBody;
+      }
+
+      let data: T;
+      if (request.validator) {
+        try {
+          data = request.validator(decoded);
+        } catch (error) {
+          throw new IntegrationError("Resposta externa não atende ao contrato esperado.", {
+            type: "CONTRACT",
+            code: "CONTRACT_VALIDATION_FAILED",
+            cause: error,
+          });
+        }
+      } else {
+        data = decoded as T;
       }
 
       recordCircuitSuccess(key);
@@ -625,7 +658,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
         contentType,
         durationMs: Date.now() - attemptStartedAt,
         success: true,
-        body: text,
+        body: responseBody,
       });
       return {
         ok: true,
@@ -635,7 +668,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
         statusCode: response.status,
         contentType,
         data,
-        text,
+        text: responseBody,
         fetchedAt: new Date(),
         durationMs,
         attempts: attempt,
@@ -652,6 +685,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
         durationMs: Date.now() - attemptStartedAt,
         success: false,
         errorMessage: classified.message,
+        body: responseBody || undefined,
       });
 
       if (classified.retryable && attempt < maxAttempts) {
@@ -665,7 +699,7 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
         continue;
       }
 
-      recordCircuitFailure(key);
+      if (shouldAffectCircuit(classified)) recordCircuitFailure(key);
       return {
         ok: false,
         source: request.source,
@@ -686,8 +720,8 @@ export async function externalHttpRequest<T = unknown>(request: ExternalHttpRequ
     }
   }
 
-  recordCircuitFailure(key);
   const fallback = lastError ?? new IntegrationError("Falha externa sem detalhe.", { type: "UNKNOWN" });
+  if (shouldAffectCircuit(fallback)) recordCircuitFailure(key);
   return {
     ok: false,
     source: request.source,
