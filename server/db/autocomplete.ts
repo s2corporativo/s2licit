@@ -1,5 +1,10 @@
 import { and, asc, eq, like, or } from "drizzle-orm";
-import { categories, products, suppliers } from "../../drizzle/schema";
+import { categories, products } from "../../drizzle/schema";
+import {
+  bestOfferPriceSql,
+  bestOfferSupplierIdSql,
+  bestOfferSupplierNameSql,
+} from "./catalogOfferExpressions";
 import { escapeLike } from "./_helpers";
 import { getDb } from "./_client";
 
@@ -8,7 +13,6 @@ export async function autocompleteSearch(query: string, limit = 10) {
   if (!db) return [];
   const term = `%${escapeLike(query)}%`;
 
-  // Busca em múltiplos campos e agrupa por tipo de sugestão
   const rows = await db
     .select({
       id: products.id,
@@ -18,15 +22,14 @@ export async function autocompleteSearch(query: string, limit = 10) {
       manufacturer: products.manufacturer,
       concentration: products.concentration,
       presentation: products.presentation,
-      price: products.price,
+      price: bestOfferPriceSql,
       priceUnit: products.priceUnit,
       imageUrl: products.imageUrl,
-      supplierName: suppliers.name,
+      supplierName: bestOfferSupplierNameSql,
       categoryName: categories.name,
       categoryColor: categories.color,
     })
     .from(products)
-    .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(
       and(
@@ -37,18 +40,19 @@ export async function autocompleteSearch(query: string, limit = 10) {
           like(products.manufacturer, term),
           like(products.code, term),
           like(products.barcode, term),
+          like(products.gtin, term),
+          like(products.ean, term),
           like(products.concentration, term),
           like(products.presentation, term),
-          like(products.description, term)
-        )!
-      )
+          like(products.description, term),
+        )!,
+      ),
     )
     .orderBy(asc(products.name))
-    .limit(limit * 3); // fetch more to allow deduplication
+    .limit(limit * 3);
 
-  // Build suggestion list: deduplicate by name+supplier
-  const seen = new Set<string>();
-  const suggestions: {
+  const seen = new Set<number>();
+  const suggestions: Array<{
     id: number;
     label: string;
     sublabel: string;
@@ -59,55 +63,60 @@ export async function autocompleteSearch(query: string, limit = 10) {
     supplierName: string | null;
     categoryName: string | null;
     categoryColor: string | null;
-  }[] = [];
+  }> = [];
 
   for (const row of rows) {
-    const key = `${row.name}|${row.supplierName}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      const parts = [row.concentration, row.presentation].filter(Boolean).join(" · ");
-      suggestions.push({
-        id: row.id,
-        label: row.name,
-        sublabel: [row.supplierName, parts].filter(Boolean).join(" — "),
-        type: "product",
-        imageUrl: row.imageUrl,
-        price: row.price,
-        priceUnit: row.priceUnit,
-        supplierName: row.supplierName,
-        categoryName: row.categoryName,
-        categoryColor: row.categoryColor,
-      });
-    }
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    const parts = [row.concentration, row.presentation].filter(Boolean).join(" · ");
+    suggestions.push({
+      id: row.id,
+      label: row.name,
+      sublabel: [row.supplierName, parts].filter(Boolean).join(" — "),
+      type: "product",
+      imageUrl: row.imageUrl,
+      price: row.price,
+      priceUnit: row.priceUnit,
+      supplierName: row.supplierName,
+      categoryName: row.categoryName,
+      categoryColor: row.categoryColor,
+    });
     if (suggestions.length >= limit) break;
   }
 
-  // Also add unique activeIngredient suggestions
-  const aiSeen = new Set<string>();
+  const ingredientSeen = new Set<string>();
   for (const row of rows) {
-    if (row.activeIngredient) {
-      const ai = row.activeIngredient.trim();
-      if (!aiSeen.has(ai) && ai.toLowerCase().includes(query.toLowerCase())) {
-        aiSeen.add(ai);
-        suggestions.push({
-          id: -1,
-          label: ai,
-          sublabel: "Princípio ativo",
-          type: "activeIngredient",
-          imageUrl: null,
-          price: null,
-          priceUnit: null,
-          supplierName: null,
-          categoryName: row.categoryName,
-          categoryColor: row.categoryColor,
-        });
-      }
+    if (!row.activeIngredient) continue;
+    const ingredient = row.activeIngredient.trim();
+    if (
+      ingredientSeen.has(ingredient) ||
+      !ingredient.toLowerCase().includes(query.toLowerCase())
+    ) {
+      continue;
     }
+    ingredientSeen.add(ingredient);
+    suggestions.push({
+      id: -1,
+      label: ingredient,
+      sublabel: "Princípio ativo",
+      type: "activeIngredient",
+      imageUrl: null,
+      price: null,
+      priceUnit: null,
+      supplierName: null,
+      categoryName: row.categoryName,
+      categoryColor: row.categoryColor,
+    });
   }
 
   return suggestions.slice(0, limit + 5);
 }
 
+/**
+ * Contrato legado de comparação por princípio ativo. Continua disponível para
+ * consumidores antigos, mas o resumo comercial já vem da melhor oferta
+ * canônica; novos fluxos de equivalência devem usar o Compêndio.
+ */
 export async function compareByActiveIngredient(activeIngredient: string, categoryId?: number) {
   const db = await getDb();
   if (!db) return [];
@@ -127,21 +136,20 @@ export async function compareByActiveIngredient(activeIngredient: string, catego
       manufacturer: products.manufacturer,
       concentration: products.concentration,
       presentation: products.presentation,
-      price: products.price,
+      price: bestOfferPriceSql,
       priceUnit: products.priceUnit,
       unit: products.unit,
       description: products.description,
-      supplierId: products.supplierId,
+      supplierId: bestOfferSupplierIdSql,
       categoryId: products.categoryId,
-      supplierName: suppliers.name,
+      supplierName: bestOfferSupplierNameSql,
       categoryName: categories.name,
       categoryColor: categories.color,
       imageUrl: products.imageUrl,
       productUrl: products.productUrl,
     })
     .from(products)
-    .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(and(...conditions))
-    .orderBy(asc(products.price));
+    .orderBy(asc(bestOfferPriceSql), asc(products.name));
 }
