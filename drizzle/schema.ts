@@ -310,6 +310,10 @@ export const proposals = mysqlTable("proposals", {
   origem: varchar("origem", { length: 32 }).default("manual"),
   // ID da oportunidade do Radar que originou esta proposta (nullable)
   radarOpportunityId: int("radarOpportunityId"),
+  // Cotação de e-mail/portal que originou esta proposta — permite localizar
+  // (ou reaproveitar, de forma idempotente) a proposta ao "preencher no
+  // portal" a partir da fila de cotações.
+  emailQuotationId: int("emailQuotationId").references(() => emailQuotations.id, { onDelete: "set null" }),
   // Registrados ao marcar status "cancelled" por perda para concorrente
   // (distinto de cancelamento interno, que deixa os dois campos vazios) —
   // alimenta o win rate consolidado em routers/desempenho.ts junto com
@@ -1476,7 +1480,7 @@ export const emailQuotations = mysqlTable(
     // Prazo para responder a cotação (para alertas de prazo)
     prazoResposta: date("prazoResposta"),
     // Origem da extração dos itens
-    sourceType: mysqlEnum("sourceType", ["spreadsheet", "pdf", "docx", "body", "manual"]).default("body").notNull(),
+    sourceType: mysqlEnum("sourceType", ["spreadsheet", "pdf", "docx", "image", "body", "manual"]).default("body").notNull(),
     sourceFilename: varchar("sourceFilename", { length: 512 }),
     status: mysqlEnum("status", ["nova", "processando", "revisao", "respondida", "descartada", "erro"])
       .default("nova")
@@ -1592,6 +1596,11 @@ export const portalCredentials = mysqlTable(
     senhaCriptografada: text("senhaCriptografada").notNull(),
     cnpj: varchar("cnpj", { length: 18 }),
     ativo: boolean("ativo").notNull().default(true),
+    // Reuso de sessão autenticada (cookies do Puppeteer, criptografados) —
+    // evita logar de novo a cada execução do radar (menos exposição a CAPTCHA
+    // e a bloqueio de conta por tentativas repetidas de login).
+    sessaoCookies: text("sessaoCookies"),
+    sessaoExpiraEm: timestamp("sessaoExpiraEm"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },

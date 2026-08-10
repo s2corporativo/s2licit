@@ -97,6 +97,20 @@ export default function AgenteProposta() {
     }
   }, [status, refetchHistorico]);
 
+  // Chegando da fila de cotações ("Preencher no portal"): pré-preenche a
+  // proposta recém-criada a partir da URL (?propostaId=&portalType=).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const propostaIdParam = params.get("propostaId");
+    const portalTypeParam = params.get("portalType") as PortalType | null;
+    if (!propostaIdParam) return;
+    setForm((current) => ({
+      ...current,
+      propostaId: propostaIdParam,
+      portalType: portalTypeParam && TARGET_PORTALS.includes(portalTypeParam) ? portalTypeParam : current.portalType,
+    }));
+  }, []);
+
   useEffect(() => {
     if (
       portaisOperacionais.length > 0 &&

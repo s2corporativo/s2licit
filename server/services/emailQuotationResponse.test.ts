@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyMargin } from "./emailQuotationResponseService";
+import { applyMargin, resolveItemMarginPercent } from "./emailQuotationResponseService";
 
 describe("applyMargin (margem sobre venda)", () => {
   it("usa a fórmula custo/(1-m), igual ao PricingService", () => {
@@ -24,5 +24,24 @@ describe("applyMargin (margem sobre venda)", () => {
     const venda = applyMargin(custo, 25);
     const margemReal = (venda - custo) / venda; // lucro / preço de venda
     expect(margemReal).toBeCloseTo(0.25, 4);
+  });
+});
+
+describe("resolveItemMarginPercent (margem por categoria)", () => {
+  it("usa a margem da categoria quando há regra ativa", () => {
+    const regras = new Map([[10, 40]]);
+    expect(resolveItemMarginPercent(10, regras, 15)).toBe(40);
+  });
+
+  it("cai para a margem padrão sem regra de categoria", () => {
+    const regras = new Map([[10, 40]]);
+    expect(resolveItemMarginPercent(20, regras, 15)).toBe(15);
+    expect(resolveItemMarginPercent(null, regras, 15)).toBe(15);
+    expect(resolveItemMarginPercent(undefined, regras, 15)).toBe(15);
+  });
+
+  it("categoria sem produto casado (categoryId null) nunca ganha override", () => {
+    const regras = new Map([[10, 40]]);
+    expect(resolveItemMarginPercent(null, regras, 15)).toBe(15);
   });
 });

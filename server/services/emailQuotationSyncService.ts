@@ -15,7 +15,9 @@ import { matchQuotationItems } from "./emailQuotationMatchingService";
  * persiste como cotação em revisão. Deduplica por Message-ID.
  */
 
-const PROCESSABLE_ATTACHMENT = /\.(xlsx|xls|csv|pdf|docx)$/i;
+// Inclui imagens (foto/scan do pedido de cotação) — passam por OCR antes da
+// extração de itens, mesmo tratamento dado a anexos PDF/DOCX.
+const PROCESSABLE_ATTACHMENT = /\.(xlsx|xls|csv|pdf|docx|png|jpe?g|webp|gif)$/i;
 
 export interface SyncResult {
   imapConfigured: boolean;
@@ -63,7 +65,7 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
 
       // Extrai itens: prioriza anexos processáveis; senão, o corpo.
       let items: ExtractedItem[] = [];
-      let sourceType: "spreadsheet" | "pdf" | "docx" | "body" = "body";
+      let sourceType: "spreadsheet" | "pdf" | "docx" | "image" | "body" = "body";
       let sourceFilename: string | null = null;
 
       const attachment = email.attachments.find((a) => PROCESSABLE_ATTACHMENT.test(a.filename));

@@ -4,9 +4,11 @@ import {
   isAutoPipelineEnabled,
   isAutoSendEnabled,
   shouldAutoConfirm,
+  staleMatchedProducts,
   type AutoConfirmCandidate,
 } from "./quotationAutoPipelineService";
 import { portalTypeForSource } from "./portalAuthenticatedDiscoveryService";
+import type { FrescorPreco } from "./priceFreshnessService";
 
 function item(partial: Partial<AutoConfirmCandidate>): AutoConfirmCandidate {
   return {
@@ -84,6 +86,27 @@ describe("configuração por ambiente", () => {
   });
 });
 
+function frescor(partial: Partial<FrescorPreco>): FrescorPreco {
+  return { productId: 1, consultadoEm: null, vencido: false, restanteMs: 0, ...partial };
+}
+
+describe("staleMatchedProducts (gate de frescor de preço)", () => {
+  it("bloqueia produto com histórico de consulta vencido", () => {
+    const result = staleMatchedProducts([frescor({ productId: 1, consultadoEm: Date.now() - 1000, vencido: true })]);
+    expect(result).toHaveLength(1);
+  });
+
+  it("NÃO bloqueia produto vencido sem histórico de consulta (preço estático)", () => {
+    const result = staleMatchedProducts([frescor({ productId: 1, consultadoEm: null, vencido: true })]);
+    expect(result).toHaveLength(0);
+  });
+
+  it("não bloqueia produto com histórico ainda vigente", () => {
+    const result = staleMatchedProducts([frescor({ productId: 1, consultadoEm: Date.now(), vencido: false })]);
+    expect(result).toHaveLength(0);
+  });
+});
+
 describe("portalTypeForSource (radar → cofre de credenciais)", () => {
   it("mapeia os portais com automação de login", () => {
     expect(portalTypeForSource("funarbe")).toBe("funarbe");
@@ -91,9 +114,6 @@ describe("portalTypeForSource (radar → cofre de credenciais)", () => {
     expect(portalTypeForSource("fiemg")).toBe("fiemg");
     expect(portalTypeForSource("fundep")).toBe("fundep");
     expect(portalTypeForSource("copasa")).toBe("copasa");
-  });
-
-  it("CEMIG ainda não tem automação de login — retorna null", () => {
-    expect(portalTypeForSource("cemig")).toBeNull();
+    expect(portalTypeForSource("cemig")).toBe("cemig");
   });
 });

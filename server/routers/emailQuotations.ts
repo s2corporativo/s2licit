@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { adminProcedure, editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { emailQuotationItems, emailQuotations } from "../../drizzle/schema";
+import { auditLogs, emailQuotationItems, emailQuotations } from "../../drizzle/schema";
 import { isImapConfigured } from "../services/emailInboxService";
 import {
   getEmailQuotationWithItems,
@@ -13,6 +13,8 @@ import {
 import { buildQuotationResponse } from "../services/emailQuotationResponseService";
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 import { ensureOpportunityFromQuotation } from "../services/opportunityWorkflowService";
+import { recordAudit } from "../services/auditService";
+import { prepareProposalFromQuotation } from "../services/quotationPortalHandoffService";
 import {
   autoConfirmThreshold,
   isAutoPipelineEnabled,
@@ -61,6 +63,44 @@ export const emailQuotationsRouter = router({
       return runAutoPipelineForPending({ limit: input?.limit });
     }),
 
+  /**
+   * Fecha o ciclo: cria (de forma idempotente) uma proposta a partir da
+   * cotação já precificada, para o Agente de Propostas preencher no portal.
+   */
+  prepararParaPortal: editorProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ input }) => prepareProposalFromQuotation(input.id)),
+
+  /**
+   * Taxa de acerto da auto-confirmação: entre os matches que a automação
+   * confirmou sozinha, quantos o operador depois corrigiu para outro
+   * produto. Base para calibrar QUOTATION_AUTO_CONFIRM_THRESHOLD — ver
+   * docs/PROJETO-AUTOMACAO-COTACAO-PROPOSTA.md.
+   */
+  autoMatchAccuracy: protectedProcedure
+    .input(z.object({ diasJanela: z.number().int().min(1).max(365).default(90) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { confirmados: 0, corrigidos: 0, taxaAcerto: null as number | null };
+      const desde = new Date(Date.now() - (input?.diasJanela ?? 90) * 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({ action: auditLogs.action })
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.entity, "email_quotation_items"),
+            gte(auditLogs.createdAt, desde),
+          ),
+        );
+      const confirmados = rows.filter((r) => r.action === "AUTO_MATCH_CONFIRMED").length;
+      const corrigidos = rows.filter((r) => r.action === "AUTO_MATCH_CORRECTED").length;
+      return {
+        confirmados,
+        corrigidos,
+        taxaAcerto: confirmados > 0 ? Number((((confirmados - corrigidos) / confirmados) * 100).toFixed(1)) : null,
+      };
+    }),
+
   /** Dispara a sincronização da caixa de entrada (somente admin). */
   sync: adminProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).default(25) }).optional())
@@ -101,18 +141,44 @@ export const emailQuotationsRouter = router({
         precoSugerido: z.string().optional().nullable(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB indisponível." });
+
+      const [current] = await db
+        .select()
+        .from(emailQuotationItems)
+        .where(eq(emailQuotationItems.id, input.itemId))
+        .limit(1);
+
       await db
         .update(emailQuotationItems)
         .set({
           produtoMatchId: input.produtoMatchId,
           matchMethod: "manual",
           matchConfirmado: input.produtoMatchId != null,
+          // Uma correção manual encerra a trilha de "auto": mesmo que o
+          // operador reconfirme o MESMO produto, a decisão passou a ser
+          // humana — não conta mais como acerto nem erro da automação.
+          matchAuto: false,
           precoSugerido: input.precoSugerido ?? undefined,
         })
         .where(eq(emailQuotationItems.id, input.itemId));
+
+      // Calibração do limiar (§ auto-confirmação): registra quando o operador
+      // substitui um match que a automação havia confirmado sozinha por um
+      // produto DIFERENTE — é a correção que importa para medir acerto/erro.
+      if (current?.matchAuto && current.produtoMatchId !== input.produtoMatchId) {
+        await recordAudit({
+          userId: ctx.user?.id ?? null,
+          action: "AUTO_MATCH_CORRECTED",
+          entity: "email_quotation_items",
+          entityId: input.itemId,
+          summary: `Match automático corrigido pelo operador (produto ${current.produtoMatchId} → ${input.produtoMatchId})`,
+          changes: { de: current.produtoMatchId, para: input.produtoMatchId },
+        });
+      }
+
       return { success: true };
     }),
 
@@ -138,6 +204,8 @@ export const emailQuotationsRouter = router({
         itemCount: result.itemCount,
         itemsSemPreco: result.itemsSemPreco,
         marginPercent: result.marginPercent,
+        effectiveMarginPercent: result.effectiveMarginPercent,
+        categoryOverrides: result.categoryOverrides,
         funilId: opportunity.id,
       };
     }),

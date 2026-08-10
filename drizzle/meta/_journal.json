@@ -120,6 +120,13 @@
       "when": 1786401247635,
       "tag": "0016_public_gamma_corps",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786403169929,
+      "tag": "0017_fine_black_bolt",
+      "breakpoints": true
     }
   ]
 }

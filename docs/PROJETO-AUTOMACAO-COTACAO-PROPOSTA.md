@@ -1,6 +1,6 @@
 # Projeto: automação cotação→proposta (e-mail + portais autenticados)
 
-**Data:** 2026-08-10 · **Status:** implementado (este PR)
+**Data:** 2026-08-10 · **Status:** implementado, com melhorias incrementais (v2)
 
 ## 1. Objetivo
 
@@ -59,22 +59,86 @@ coleta o HTML da área do fornecedor e o entrega aos mesmos parsers e ao mesmo
 matching do radar público. Ordem de tentativa por portal: HTML público →
 navegador (páginas dinâmicas) → **área autenticada**.
 
-- FIEMG entrou no cofre de credenciais (`PORTAL_CONFIGS.fiemg`), com seletores
-  ASP.NET a confirmar na primeira execução real.
+- FIEMG e CEMIG entraram no cofre de credenciais (`PORTAL_CONFIGS.fiemg`/
+  `.cemig`), com seletores a confirmar na primeira execução real.
 - **Conformidade preservada:** CAPTCHA nunca é resolvido — é detectado, o
   fluxo é interrompido e fica registrado que precisa de intervenção humana.
-- CEMIG segue apenas com mural público (login ainda não mapeado).
+- **Reuso de sessão** (v2): a sessão (cookies) fica salva e criptografada
+  junto da credencial (`portal_credentials.sessaoCookies`/`sessaoExpiraEm`,
+  TTL configurável em `PORTAL_SESSION_REUSE_TTL_HOURS`, padrão 6h). Enquanto
+  válida, o robô reaproveita a sessão em vez de logar de novo — menos
+  exposição a CAPTCHA e menor risco de bloqueio de conta por tentativas
+  repetidas. Login completo é o fallback automático quando a sessão expira
+  ou não confirma.
+- **Teste de fumaça semanal** (v2, `runPortalLoginSmokeTest`, segunda-feira às
+  6h): para cada portal com credencial cadastrada, tenta *só* logar — sem
+  coletar nem preencher nada — e avisa (notificação/WhatsApp) se algum login
+  parou de funcionar, para flagrar mudança de layout antes que uma cotação
+  real fique de fora por falha silenciosa.
 - Desligável com `PORTAL_AUTH_DISCOVERY_ENABLED=false`.
 
-### 3.3 Banco de dados
+### 3.3 Margem por categoria (v2)
 
-Migração `0016` (+ `ensureQuotationAutomationColumns()` no boot para bancos
-legados):
+`emailQuotationResponseService.priceQuotationItems` resolve a margem de cada
+item pela regra de precificação da categoria do produto casado (tela **Regras
+por Categoria**) quando ativa; sem regra, cai na margem padrão (empresa ou
+parâmetro). Medicamento e material de limpeza, por exemplo, podem sair na
+mesma proposta com margens diferentes. O núcleo de precificação é
+compartilhado entre o PDF de orçamento e a proposta preparada para o portal
+(`quotationPortalHandoffService`) — os dois preços nunca divergem.
+
+### 3.4 Frescor de preço (v2)
+
+Antes de gerar a proposta automaticamente, o pipeline verifica (via
+`priceFreshnessService`) se algum produto casado tem preço **consultado e
+vencido** (mais velho que a validade configurada em Configurações). Se sim, a
+cotação fica na revisão humana em vez de sair com custo desatualizado. Produto
+sem histórico de consulta (preço de cadastro estático) não é bloqueado por
+esta regra.
+
+### 3.5 Calibração da auto-confirmação (v2)
+
+Toda auto-confirmação grava `AUTO_MATCH_CONFIRMED` na auditoria; se o operador
+depois substitui o produto de um item que foi auto-confirmado, grava-se
+`AUTO_MATCH_CORRECTED` (e o item deixa de contar como automático). A query
+`emailQuotations.autoMatchAccuracy` expõe confirmados/corrigidos/taxa de
+acerto dos últimos N dias — exibida na própria tela da fila (banner do
+pipeline) para orientar o ajuste de `QUOTATION_AUTO_CONFIRM_THRESHOLD`.
+
+### 3.6 Extração de anexo em imagem (v2)
+
+Anexos fotografados/escaneados (PNG/JPG/WEBP/GIF) de um pedido de cotação
+passam a ser tratados como anexo processável: OCR por IA de visão
+(`ocrService`) extrai o texto, que segue pelo mesmo extrator por IA já usado
+em PDF/DOCX. Novo `sourceType: "image"`.
+
+### 3.7 Fechar o ciclo com o portal (v2)
+
+Para cotação vinda de um portal, o botão **"Preencher no portal"** (tela da
+fila) cria — de forma idempotente (`proposals.emailQuotationId`) — uma
+proposta com os preços já calculados (margem por categoria incluída) e abre o
+Agente de Propostas já com o formulário preenchido, para o robô logar e
+pré-preencher no portal (revisão e envio continuam humanos).
+
+### 3.8 Alerta cirúrgico de prazo (v2)
+
+Além do resumo diário (8h), quando o pipeline não consegue concluir uma
+cotação (item pendente, preço vencido) e o prazo de resposta está a ≤2 dias,
+um alerta imediato é disparado (notificação/WhatsApp) — em vez de esperar até
+o próximo resumo diário.
+
+### 3.9 Banco de dados
+
+Migrações `0016` e `0017` (+ `ensure*Columns()` idempotentes no boot para
+bancos legados):
 
 - `email_quotations.propostaPdfUrl` — PDF gerado automaticamente
 - `email_quotations.propostaGeradaEm` — carimbo de geração (idempotência)
-- `email_quotations.propostaMargemPercent` — margem aplicada
+- `email_quotations.propostaMargemPercent` — margem efetiva aplicada
+- `email_quotations.sourceType` — enum estendido com `'image'`
 - `email_quotation_items.matchAuto` — auditoria da confirmação automática
+- `portal_credentials.sessaoCookies` / `sessaoExpiraEm` — reuso de sessão
+- `proposals.emailQuotationId` — vínculo idempotente proposta↔cotação
 
 ## 4. Fluxo completo (visão do operador)
 
@@ -96,32 +160,39 @@ e agora também autenticado)           ▼
 ## 5. Configuração
 
 ```
-QUOTATION_AUTO_PIPELINE_ENABLED=true    # pipeline ligado (padrão)
-QUOTATION_AUTO_CONFIRM_THRESHOLD=0.92   # limiar de auto-confirmação
-QUOTATION_AUTO_SEND_ENABLED=false       # envio sem revisão: opt-in explícito
-PORTAL_AUTH_DISCOVERY_ENABLED=true      # radar autenticado com o cofre
+QUOTATION_AUTO_PIPELINE_ENABLED=true      # pipeline ligado (padrão)
+QUOTATION_AUTO_CONFIRM_THRESHOLD=0.92     # limiar de auto-confirmação
+QUOTATION_AUTO_SEND_ENABLED=false         # envio sem revisão: opt-in explícito
+PORTAL_AUTH_DISCOVERY_ENABLED=true        # radar autenticado com o cofre
+PORTAL_SESSION_REUSE_TTL_HOURS=6          # validade da sessão reaproveitada
+PORTAL_LOGIN_SMOKETEST_ENABLED=true       # teste de fumaça semanal de login
+PORTAL_LOGIN_SMOKETEST_CRON=0 6 * * 1     # segunda-feira às 6h
 ```
 
 Pré-requisitos operacionais: IMAP/SMTP configurados (tela Configurações ou
-`.env`), credenciais dos portais cadastradas na tela **Portais** (cofre), e
-catálogo de produtos com preços atualizados (o matching sugere o custo a
-partir dele).
+`.env`), credenciais dos portais cadastradas na tela **Portais** (cofre),
+catálogo de produtos com preços atualizados e consultados (o matching sugere
+o custo a partir dele; o frescor exige que a consulta tenha data), e — para
+margem por categoria — regras cadastradas em **Regras por Categoria**.
 
 ## 6. Riscos e salvaguardas
 
 | Risco | Salvaguarda |
 | --- | --- |
-| Proposta com produto errado | Limiar alto (0,92) + códigos determinísticos; item duvidoso segura a cotação na revisão |
+| Proposta com produto errado | Limiar alto (0,92) + códigos determinísticos; item duvidoso segura a cotação na revisão; taxa de acerto monitorada (§3.5) |
 | Envio indevido sem revisão | Auto-envio desligado por padrão; opt-in explícito e por escrito no `.env` |
-| Preço defasado/custo zero | Item sem custo positivo bloqueia a geração |
-| Quebra de layout dos portais | Seletores tolerantes + fallback público→navegador→autenticado; erros viram avisos no radar, nunca derrubam o job |
+| Preço defasado/custo zero | Item sem custo positivo bloqueia a geração; preço consultado e vencido também bloqueia (§3.4) |
+| Cotação travada perde o prazo | Alerta cirúrgico quando bloqueada e prazo ≤2 dias (§3.8), além do resumo diário |
+| Quebra de layout dos portais | Seletores tolerantes + fallback público→navegador→autenticado; teste de fumaça semanal avisa antes de afetar uma cotação real (§3.2) |
+| Bloqueio de conta / CAPTCHA por login repetido | Reuso de sessão reduz a frequência de login (§3.2) |
 | CAPTCHA | Nunca resolvido; detectado → interrompe e pede intervenção humana |
-| Auditoria (Lei 14.133/TCU) | `matchAuto`, margem e carimbo de geração persistidos; oportunidade criada no funil |
+| Auditoria (Lei 14.133/TCU) | `matchAuto`/correções, margem efetiva e carimbo de geração persistidos; oportunidade criada no funil |
 
 ## 7. Próximos passos sugeridos (fora deste PR)
 
-1. Ajustar seletores reais de FIEMG/Funarbe na primeira execução com credencial.
-2. UI: badge "proposta gerada automaticamente" + botão de envio na fila.
-3. Métricas: taxa de auto-confirmação correta (feedback do operador ao corrigir
-   um match auto-confirmado) para calibrar o limiar.
-4. CEMIG autenticada, quando houver credencial e mapeamento de login.
+1. Ajustar seletores reais de FIEMG/Funarbe/CEMIG na primeira execução com credencial.
+2. Rasterizar PDF escaneado sem camada de texto para OCR (hoje só a imagem
+   anexada em si passa por OCR; um PDF-imagem sem texto extraível ainda
+   depende de revisão manual).
+3. Painel dedicado (além do banner na fila) para a taxa de acerto da
+   auto-confirmação, com série histórica.

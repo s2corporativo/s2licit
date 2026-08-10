@@ -4,6 +4,8 @@ import { emailQuotationItems, emailQuotations } from "../../drizzle/schema";
 import { buildQuotationResponse } from "./emailQuotationResponseService";
 import { isSmtpConfigured, sendEmail } from "./emailSenderService";
 import { ensureOpportunityFromQuotation } from "./opportunityWorkflowService";
+import { avaliarFrescorPrecos, type FrescorPreco } from "./priceFreshnessService";
+import { recordAudit } from "./auditService";
 import { storagePut } from "../storage";
 import { logger } from "../_core/logger";
 
@@ -42,6 +44,16 @@ export function isAutoPipelineEnabled(): boolean {
 
 export function isAutoSendEnabled(): boolean {
   return process.env.QUOTATION_AUTO_SEND_ENABLED === "true";
+}
+
+/**
+ * Filtra produtos com preço VENCIDO e QUE TÊM histórico de consulta datado —
+ * pura e testável. Produto sem `consultadoEm` não entra aqui: a política do
+ * pipeline automático é não bloquear preço estático (cadastro, NF-e), só o
+ * que foi de fato consultado e ficou velho.
+ */
+export function staleMatchedProducts(frescor: FrescorPreco[]): FrescorPreco[] {
+  return frescor.filter((f) => f.consultadoEm != null && f.vencido);
 }
 
 export interface AutoConfirmCandidate {
@@ -156,6 +168,15 @@ export async function runAutoPipelineForQuotation(
       .where(eq(emailQuotationItems.id, item.id));
     item.matchConfirmado = true;
     result.autoConfirmedItems++;
+    // Trilha de auditoria: base para calibrar o limiar (quantas confirmações
+    // automáticas depois são corrigidas manualmente pelo operador).
+    await recordAudit({
+      action: "AUTO_MATCH_CONFIRMED",
+      entity: "email_quotation_items",
+      entityId: item.id,
+      summary: `Match auto-confirmado (${item.matchMethod}, score ${item.matchScore ?? "—"})`,
+      changes: { produtoMatchId: item.produtoMatchId, matchMethod: item.matchMethod, matchScore: item.matchScore },
+    });
   }
 
   // 2. Todos confirmados e com preço? Senão, a cotação fica para revisão humana.
@@ -175,7 +196,24 @@ export async function runAutoPipelineForQuotation(
     return result;
   }
 
-  // 3. Geração da proposta (mesmo caminho validado do fluxo manual)
+  // 3. Frescor do preço de custo — item cujo produto tem preço vencido
+  //    (histórico de consulta mais velho que a validade configurada) segura a
+  //    cotação na revisão humana. Produto sem histórico de consulta não é
+  //    considerado vencido aqui: nesse caso o preço vem de cadastro estático
+  //    (NF-e, planilha), não de uma consulta datada a revalidar.
+  const matchedProductIds = items
+    .map((item) => item.produtoMatchId)
+    .filter((id): id is number => id != null);
+  const frescor = await avaliarFrescorPrecos(matchedProductIds);
+  const vencidos = staleMatchedProducts(frescor);
+  if (vencidos.length > 0) {
+    result.blockedReason =
+      `${vencidos.length} produto(s) com preço vencido — revalide a consulta antes de gerar a proposta.`;
+    return result;
+  }
+
+  // 4. Geração da proposta (mesmo caminho validado do fluxo manual, com
+  //    margem por categoria quando houver regra ativa)
   const response = await buildQuotationResponse(quotationId);
   const pdfBuffer = Buffer.from(response.pdfBase64, "base64");
   const stored = await storagePut(
@@ -189,7 +227,7 @@ export async function runAutoPipelineForQuotation(
     .set({
       propostaPdfUrl: stored.url,
       propostaGeradaEm: new Date(),
-      propostaMargemPercent: String(response.marginPercent.toFixed(2)),
+      propostaMargemPercent: String(response.effectiveMarginPercent.toFixed(2)),
       valorProposto: String(response.total.toFixed(2)),
     })
     .where(eq(emailQuotations.id, quotationId));

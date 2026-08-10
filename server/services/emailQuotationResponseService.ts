@@ -1,4 +1,8 @@
+import { inArray } from "drizzle-orm";
+import { getDb } from "../db";
 import { getCompanySettings } from "../db";
+import { products } from "../../drizzle/schema";
+import { getActiveCategoryPricingRules } from "../db/categoryPricingQueries";
 import { getEmailQuotationWithItems } from "./emailQuotationSyncService";
 import {
   calculateQuotationTotals,
@@ -12,6 +16,12 @@ import { calculateSalePrice } from "./pricingSafety";
  * Monta e gera o PDF de orçamento-resposta a partir de uma cotação recebida
  * por e-mail. Somente itens com match confirmado e custo positivo podem
  * participar. A margem é calculada sobre a receita, nunca como markup.
+ *
+ * Margem por categoria: quando o produto casado pertence a uma categoria com
+ * regra de precificação ativa (tela Regras por Categoria), a margem daquela
+ * regra prevalece sobre a margem padrão da empresa/parâmetro — por exemplo,
+ * medicamento e material de limpeza podem ter margens diferentes na mesma
+ * proposta. Itens sem regra de categoria usam a margem padrão normalmente.
  */
 
 export interface BuildResponseResult {
@@ -19,7 +29,12 @@ export interface BuildResponseResult {
   total: number;
   itemCount: number;
   itemsSemPreco: number;
+  /** Margem padrão usada como base (empresa ou parâmetro informado). */
   marginPercent: number;
+  /** Margem efetiva real (lucro/venda) considerando eventuais overrides por categoria. */
+  effectiveMarginPercent: number;
+  /** Quantos itens usaram margem de categoria em vez da margem padrão. */
+  categoryOverrides: number;
 }
 
 /**
@@ -32,10 +47,81 @@ export function applyMargin(basePrice: number, marginPercent: number): number {
   return calculateSalePrice({ cost: basePrice, marginPercent });
 }
 
-export async function buildQuotationResponse(
+/**
+ * Resolve a margem de um item: a regra de categoria ativa prevalece sobre a
+ * margem padrão. Pura e testável — recebe as regras já carregadas (por
+ * categoryId) em vez de consultar o banco.
+ */
+export function resolveItemMarginPercent(
+  categoryId: number | null | undefined,
+  rulesByCategoryId: Map<number, number>,
+  defaultMarginPercent: number,
+): number {
+  if (categoryId == null) return defaultMarginPercent;
+  const override = rulesByCategoryId.get(categoryId);
+  return override != null ? override : defaultMarginPercent;
+}
+
+/** Carrega as regras de margem por categoria ativas, já num Map categoryId→margem. */
+async function loadActiveMarginRulesByCategory(): Promise<Map<number, number>> {
+  const rules = await getActiveCategoryPricingRules();
+  const map = new Map<number, number>();
+  for (const rule of rules) {
+    const margin = Number(rule.marginPercentage);
+    if (Number.isFinite(margin)) map.set(rule.categoryId, margin);
+  }
+  return map;
+}
+
+/** Carrega categoryId dos produtos casados, em lote (productId → categoryId). */
+async function loadProductCategories(
+  productIds: Array<number | null>,
+): Promise<Map<number, number | null>> {
+  const ids = [...new Set(productIds.filter((id): id is number => id != null))];
+  const map = new Map<number, number | null>();
+  if (ids.length === 0) return map;
+  const db = await getDb();
+  if (!db) return map;
+  const rows = await db
+    .select({ id: products.id, categoryId: products.categoryId })
+    .from(products)
+    .where(inArray(products.id, ids));
+  for (const row of rows) map.set(row.id, row.categoryId ?? null);
+  return map;
+}
+
+export interface PricedQuotationItem {
+  quotationItemId: number;
+  produtoMatchId: number | null;
+  descricao: string;
+  quantidade: number;
+  unidade: string | null;
+  custoUnitario: number;
+  unitPrice: number;
+  totalPrice: number;
+  marginPercent: number;
+}
+
+export interface PricedQuotationResult {
+  quotation: NonNullable<Awaited<ReturnType<typeof getEmailQuotationWithItems>>>["quotation"];
+  items: PricedQuotationItem[];
+  subtotal: number;
+  marginPercent: number;
+  effectiveMarginPercent: number;
+  categoryOverrides: number;
+}
+
+/**
+ * Calcula o preço de venda de cada item de uma cotação (margem por categoria
+ * quando houver regra ativa, senão a margem padrão). Núcleo compartilhado
+ * pelo PDF de orçamento (`buildQuotationResponse`) e pelo "preencher no
+ * portal" (`quotationPortalHandoffService`) — os dois preços devem ser
+ * exatamente os mesmos.
+ */
+export async function priceQuotationItems(
   quotationId: number,
-  options?: { marginPercent?: number; validDays?: number },
-): Promise<BuildResponseResult> {
+  options?: { marginPercent?: number },
+): Promise<PricedQuotationResult> {
   const data = await getEmailQuotationWithItems(quotationId);
   if (!data) throw new Error("Cotação não encontrada.");
 
@@ -71,19 +157,62 @@ export async function buildQuotationResponse(
     );
   }
 
-  const pdfItems: QuotationItem[] = data.items.map((item) => {
+  const marginRulesByCategory = await loadActiveMarginRulesByCategory();
+  const categoryByProductId = await loadProductCategories(
+    data.items.map((item) => item.produtoMatchId),
+  );
+
+  let categoryOverrides = 0;
+  let totalCusto = 0;
+  const items: PricedQuotationItem[] = data.items.map((item) => {
     const base = Number(item.precoSugerido);
     const quantity = item.quantidade != null ? Number(item.quantidade) : 1;
     const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
-    const unitPrice = Number(applyMargin(base, marginPercent).toFixed(2));
+    const categoryId = item.produtoMatchId != null ? categoryByProductId.get(item.produtoMatchId) : null;
+    const itemMargin = resolveItemMarginPercent(categoryId, marginRulesByCategory, marginPercent);
+    if (itemMargin !== marginPercent) categoryOverrides++;
+    const unitPrice = Number(applyMargin(base, itemMargin).toFixed(2));
+    totalCusto += base * safeQuantity;
 
     return {
-      productName: item.descricao,
-      quantity: safeQuantity,
+      quotationItemId: item.id,
+      produtoMatchId: item.produtoMatchId,
+      descricao: item.descricao,
+      quantidade: safeQuantity,
+      unidade: item.unidade,
+      custoUnitario: base,
       unitPrice,
       totalPrice: unitPrice * safeQuantity,
+      marginPercent: itemMargin,
     };
   });
+
+  const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
+  const effectiveMarginPercent = subtotal > 0 ? ((subtotal - totalCusto) / subtotal) * 100 : marginPercent;
+
+  return {
+    quotation: data.quotation,
+    items,
+    subtotal: Number(subtotal.toFixed(2)),
+    marginPercent,
+    effectiveMarginPercent: Number(effectiveMarginPercent.toFixed(2)),
+    categoryOverrides,
+  };
+}
+
+export async function buildQuotationResponse(
+  quotationId: number,
+  options?: { marginPercent?: number; validDays?: number },
+): Promise<BuildResponseResult> {
+  const priced = await priceQuotationItems(quotationId, { marginPercent: options?.marginPercent });
+  const company = await getCompanySettings();
+
+  const pdfItems: QuotationItem[] = priced.items.map((item) => ({
+    productName: item.descricao,
+    quantity: item.quantidade,
+    unitPrice: item.unitPrice,
+    totalPrice: item.totalPrice,
+  }));
 
   const { subtotal } = calculateQuotationTotals(pdfItems);
   const validDays = options?.validDays ?? 30;
@@ -92,13 +221,13 @@ export async function buildQuotationResponse(
     number: `COT-${quotationId}`,
     date: new Date(),
     validUntil: new Date(Date.now() + validDays * 24 * 60 * 60 * 1000),
-    clientName: data.quotation.orgao ?? data.quotation.fromName ?? undefined,
-    clientEmail: data.quotation.fromAddress ?? undefined,
+    clientName: priced.quotation.orgao ?? priced.quotation.fromName ?? undefined,
+    clientEmail: priced.quotation.fromAddress ?? undefined,
     items: pdfItems,
     subtotal,
     total: subtotal,
-    notes: data.quotation.subject
-      ? `Em resposta à solicitação: ${data.quotation.subject}`
+    notes: priced.quotation.subject
+      ? `Em resposta à solicitação: ${priced.quotation.subject}`
       : undefined,
     company: {
       name: company?.name || "Empresa não configurada",
@@ -118,6 +247,8 @@ export async function buildQuotationResponse(
     total: subtotal,
     itemCount: pdfItems.length,
     itemsSemPreco: 0,
-    marginPercent,
+    marginPercent: priced.marginPercent,
+    effectiveMarginPercent: priced.effectiveMarginPercent,
+    categoryOverrides: priced.categoryOverrides,
   };
 }

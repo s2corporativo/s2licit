@@ -113,6 +113,47 @@ export async function ensureQuotationAutomationColumns(): Promise<void> {
 }
 
 /**
+ * Inclui "image" no enum sourceType de email_quotations (anexo fotografado/
+ * escaneado de um pedido de cotação passa por OCR, como já ocorre na captura
+ * inteligente). Idempotente: só altera se o valor ainda não existe.
+ */
+export async function ensureEmailQuotationImageSourceType(): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const [rows] = await db.execute(
+      sql`SELECT COLUMN_TYPE as t FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_quotations' AND COLUMN_NAME = 'sourceType'`,
+    );
+    const tipo = String((rows as any)[0]?.t ?? "");
+    if (!tipo || tipo.includes("'image'")) return;
+    await db.execute(
+      sql.raw(
+        "ALTER TABLE `email_quotations` MODIFY COLUMN `sourceType` " +
+          "ENUM('spreadsheet','pdf','docx','image','body','manual') NOT NULL DEFAULT 'body'",
+      ),
+    );
+    logger.info("[Schema] Enum email_quotations.sourceType estendido com 'image'.");
+  } catch (err) {
+    logger.error("[Schema] Falha ao estender email_quotations.sourceType:", err);
+  }
+}
+
+/**
+ * Reuso de sessão autenticada nos portais (cookies criptografados + validade)
+ * e vínculo proposta↔cotação (idempotência do "preencher no portal").
+ */
+export async function ensurePortalSessionColumns(): Promise<void> {
+  try {
+    await ensureColumn("portal_credentials", "sessaoCookies", "TEXT NULL");
+    await ensureColumn("portal_credentials", "sessaoExpiraEm", "TIMESTAMP NULL");
+    await ensureColumn("proposals", "emailQuotationId", "INT NULL");
+  } catch (err) {
+    logger.error("[Schema] Falha ao garantir colunas de sessão de portal:", err);
+  }
+}
+
+/**
  * IPI/PIS/COFINS como tipos de 1ª classe no Motor Tributário (§9). Estende o
  * enum tax_rules.tipo de forma idempotente (só altera se ainda não os inclui).
  */
