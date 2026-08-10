@@ -41,7 +41,6 @@ async function runScheduledWithDistributedLock(
       logger.info(`[Scheduler] ${label}: outra instância já executa este ciclo — ignorando.`);
     }
   } catch (error) {
-    // Segurança operacional: falha da trava nunca cai para execução destravada.
     logger.error(`[Scheduler] ${label}: falha ao obter/usar trava distribuída`, error);
   }
 }
@@ -212,32 +211,28 @@ async function runScheduledScrapers(): Promise<void> {
       if (lastRunDay === today || scraperFiredOn.get(config.id) === today) continue;
       scraperFiredOn.set(config.id, today);
 
-      // A trava global do ciclo impede duas instâncias de chegarem aqui ao
-      // mesmo tempo. A deduplicação por lastRunAt permanece como segunda linha.
-      const runPromise = isTambasa
-        ? expandAndSyncTambasaCatalog(config.id).then((result) => result.scraper)
-        : executarScraper(config.id);
+      try {
+        const result = isTambasa
+          ? (await expandAndSyncTambasaCatalog(config.id)).scraper
+          : await executarScraper(config.id);
 
-      runPromise
-        .then((result) => {
-          logger.info(
-            `[Scheduler] Scraper #${config.id}: ${result.success ? "sucesso" : "falhou"} (${result.productsScraped} produtos capturados).`,
-          );
-          if (!result.success) {
-            const detail = result.errors?.length ? `\nErros: ${result.errors.slice(0, 3).join("; ")}` : "";
-            void notifyJobFailure(
-              "Falha na captura agendada — Sistema S2",
-              `A captura do fornecedor ${result.supplierName || `(config #${config.id})`} falhou.${detail}`,
-            );
-          }
-        })
-        .catch((error) => {
-          logger.error(`[Scheduler] Scraper #${config.id} falhou:`, (error as Error).message);
-          void notifyJobFailure(
+        logger.info(
+          `[Scheduler] Scraper #${config.id}: ${result.success ? "sucesso" : "falhou"} (${result.productsScraped} produtos capturados).`,
+        );
+        if (!result.success) {
+          const detail = result.errors?.length ? `\nErros: ${result.errors.slice(0, 3).join("; ")}` : "";
+          await notifyJobFailure(
             "Falha na captura agendada — Sistema S2",
-            `A captura do fornecedor (config #${config.id}) lançou erro: ${(error as Error).message}`,
+            `A captura do fornecedor ${result.supplierName || `(config #${config.id})`} falhou.${detail}`,
           );
-        });
+        }
+      } catch (error) {
+        logger.error(`[Scheduler] Scraper #${config.id} falhou:`, (error as Error).message);
+        await notifyJobFailure(
+          "Falha na captura agendada — Sistema S2",
+          `A captura do fornecedor (config #${config.id}) lançou erro: ${(error as Error).message}`,
+        );
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
@@ -323,9 +318,13 @@ export function initScheduledJobs(): void {
   if (enabled(process.env.ALERTS_ENABLED, true)) {
     const expression = process.env.ALERTS_CRON || DEFAULT_ALERTS_CRON;
     if (cron.validate(expression)) {
-      cron.schedule(expression, () => {
-        void runScheduledWithDistributedLock("s2_job_daily_alerts", "Alertas diários", runDailyAlerts);
-      }, { timezone: SCRAPER_TIMEZONE });
+      cron.schedule(
+        expression,
+        () => {
+          void runScheduledWithDistributedLock("s2_job_daily_alerts", "Alertas diários", runDailyAlerts);
+        },
+        { timezone: SCRAPER_TIMEZONE },
+      );
       logger.info(`[Scheduler] Alertas diários agendados (${expression}, horário de Brasília).`);
     } else {
       logger.warn(`[Scheduler] ALERTS_CRON inválido: "${expression}" — alertas diários desativados.`);
@@ -357,9 +356,13 @@ export function initScheduledJobs(): void {
   if (enabled(process.env.BACKUP_ENABLED, true)) {
     const expression = process.env.BACKUP_CRON || DEFAULT_BACKUP_CRON;
     if (cron.validate(expression)) {
-      cron.schedule(expression, () => {
-        void runScheduledWithDistributedLock("s2_job_backup", "Backup automático", runBackupJob);
-      }, { timezone: SCRAPER_TIMEZONE });
+      cron.schedule(
+        expression,
+        () => {
+          void runScheduledWithDistributedLock("s2_job_backup", "Backup automático", runBackupJob);
+        },
+        { timezone: SCRAPER_TIMEZONE },
+      );
       logger.info(`[Scheduler] Backup automático do banco agendado (${expression}, horário de Brasília).`);
     } else {
       logger.warn(`[Scheduler] BACKUP_CRON inválido: "${expression}" — backup automático desativado.`);
