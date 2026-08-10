@@ -1,16 +1,15 @@
 name: Capture Core Validation
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/capture-core-autonomo
-  workflow_dispatch:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: capture-core-validation-${{ github.ref }}
+  group: capture-core-validation-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -36,9 +35,10 @@ jobs:
           --health-retries=10
 
     steps:
-      - name: Checkout
+      - name: Checkout PR head
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Setup Node
@@ -137,4 +137,4 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'chore(db): generate capture core drizzle snapshot'
-          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
