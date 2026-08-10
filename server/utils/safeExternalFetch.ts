@@ -2,20 +2,24 @@ import { promises as dns } from "dns";
 import { isIP } from "net";
 import { assertSafeExternalUrl } from "./urlGuard";
 
+function isPrivateIpv4(address: string): boolean {
+  const p = address.split(".").map(Number);
+  if (p.length !== 4 || p.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return false;
+  return p[0] === 10 || p[0] === 127 || p[0] === 0 ||
+    (p[0] === 169 && p[1] === 254) ||
+    (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+    (p[0] === 192 && p[1] === 168) ||
+    (p[0] === 100 && p[1] >= 64 && p[1] <= 127);
+}
+
 function isPrivateIp(address: string): boolean {
-  const ip = address.toLowerCase();
-  if (isIP(ip) === 4) {
-    const p = ip.split(".").map(Number);
-    return p[0] === 10 || p[0] === 127 || p[0] === 0 ||
-      (p[0] === 169 && p[1] === 254) ||
-      (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
-      (p[0] === 192 && p[1] === 168) ||
-      (p[0] === 100 && p[1] >= 64 && p[1] <= 127);
-  }
-  if (isIP(ip) === 6) {
-    return ip === "::1" || ip === "::" || ip.startsWith("fe80:") ||
-      ip.startsWith("fc") || ip.startsWith("fd") || ip.startsWith("::ffff:127.") ||
-      ip.startsWith("::ffff:10.") || ip.startsWith("::ffff:192.168.");
+  const ip = address.replace(/^\[|\]$/g, "").toLowerCase();
+  if (isIP(ip) === 4) return isPrivateIpv4(ip);
+  if (isIP(ip) !== 6) return false;
+  if (ip === "::1" || ip === "::" || ip.startsWith("fe80:") || ip.startsWith("fc") || ip.startsWith("fd")) return true;
+  if (ip.startsWith("::ffff:")) {
+    const mapped = ip.slice("::ffff:".length);
+    return isIP(mapped) === 4 && isPrivateIpv4(mapped);
   }
   return false;
 }
@@ -51,36 +55,37 @@ export async function safeExternalFetchText(
     await validateResolved(url);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response: Response;
     try {
-      response = await fetch(url, {
+      const response = await fetch(url, {
         headers: options.headers,
         redirect: "manual",
         signal: controller.signal,
       });
+
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error(`Redirect ${response.status} sem Location`);
+        if (redirects === maxRedirects) throw new Error("Limite de redirects externos excedido");
+        current = new URL(location, url).toString();
+        continue;
+      }
+
+      const declared = Number(response.headers.get("content-length") || 0);
+      if (Number.isFinite(declared) && declared > maxBytes) {
+        throw new Error(`Resposta externa excede limite de ${maxBytes} bytes`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > maxBytes) throw new Error(`Resposta externa excede limite de ${maxBytes} bytes`);
+      return {
+        url: url.toString(),
+        status: response.status,
+        ok: response.ok,
+        headers: response.headers,
+        text: buffer.toString("utf8"),
+      };
     } finally {
       clearTimeout(timer);
     }
-
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get("location");
-      if (!location) throw new Error(`Redirect ${response.status} sem Location`);
-      if (redirects === maxRedirects) throw new Error("Limite de redirects externos excedido");
-      current = new URL(location, url).toString();
-      continue;
-    }
-
-    const declared = Number(response.headers.get("content-length") || 0);
-    if (declared > maxBytes) throw new Error(`Resposta externa excede limite de ${maxBytes} bytes`);
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > maxBytes) throw new Error(`Resposta externa excede limite de ${maxBytes} bytes`);
-    return {
-      url: url.toString(),
-      status: response.status,
-      ok: response.ok,
-      headers: response.headers,
-      text: buffer.toString("utf8"),
-    };
   }
   throw new Error("Falha inesperada ao buscar URL externa");
 }
