@@ -15,13 +15,6 @@ export interface ConnectorCapabilities {
   notes?: string;
 }
 
-/**
- * Capacidades conhecidas por conector.
- *
- * A regra importante aqui é não oferecer "catálogo completo" para um portal
- * que só possui busca por termo. Isso corrige Bartofil/Basso, que antes eram
- * disparados como full-scan mesmo sem categoryUrls e terminavam com zero itens.
- */
 const KNOWN: Record<string, Partial<ConnectorCapabilities>> = {
   tambasa: {
     method: "hybrid",
@@ -29,35 +22,35 @@ const KNOWN: Record<string, Partial<ConnectorCapabilities>> = {
     search: false,
     structuredData: true,
     stock: true,
-    notes: "Priorizar dados estruturados/API interna; DOM é fallback.",
+    notes: "Dados estruturados/API interna preferenciais; DOM é fallback.",
   },
   bartofil: {
     method: "hybrid",
     fullCatalog: false,
     search: true,
     structuredData: false,
-    notes: "SPA: busca sob demanda até endpoint JSON interno ser homologado para catálogo integral.",
+    notes: "SPA: busca/refresh observam JSON interno da sessão; DOM é fallback.",
   },
   bassopancotte: {
     method: "hybrid",
     fullCatalog: false,
     search: true,
     structuredData: false,
-    notes: "SPA/React Native Web: busca sob demanda; DOM é fallback.",
+    notes: "SPA/React Native Web: busca/refresh observam JSON interno; DOM é fallback.",
   },
   magazinemedica: {
     method: "hybrid",
     fullCatalog: true,
     search: true,
     structuredData: true,
-    notes: "Catálogo público/structured data preferencial; sessão autenticada quando necessária.",
+    notes: "Catálogo público/structured data preferencial; browser para sessão autenticada.",
   },
   utilidadesclinicas: {
     method: "hybrid",
     fullCatalog: true,
     search: true,
     structuredData: true,
-    notes: "Magento: structured data/HTTP quando possível; browser para sessão autenticada.",
+    notes: "Magento: structured data/JSON/HTTP quando possível; browser para autenticação.",
   },
   cristalia: {
     method: "browser",
@@ -99,12 +92,17 @@ export function chooseCaptureMode(
   query?: string | null,
 ): "search" | "refresh" | "full" {
   const hasQuery = Boolean(query?.trim());
-  if (hasQuery && capabilities.search) return "search";
+  if (requested === "search") {
+    if (hasQuery && capabilities.search) return "search";
+    throw new Error("Este conector não suporta busca por termo ou a busca foi enviada sem termo.");
+  }
+  if (requested === "refresh") {
+    if (capabilities.search || capabilities.fullCatalog) return "refresh";
+    throw new Error("Este conector não possui estratégia de atualização incremental.");
+  }
   if (requested === "full" && capabilities.fullCatalog) return "full";
-  if (requested === "refresh" && (capabilities.search || capabilities.fullCatalog)) return "refresh";
-  if (capabilities.fullCatalog) return "full";
   if (capabilities.search && hasQuery) return "search";
   throw new Error(
-    "Este conector não suporta varredura integral. Informe um termo/SKU para busca sob demanda ou homologue um endpoint de catálogo.",
+    "Este conector não suporta varredura integral. Use atualização seletiva/busca ou homologue um endpoint de catálogo.",
   );
 }
