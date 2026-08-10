@@ -160,18 +160,31 @@ export async function reconcileLegacyCatalog(): Promise<{
       `);
       const isNullable = String(rowsOf(colRows)[0]?.nullable ?? "NO") === "YES";
 
-      if (constraintName && (deleteRule !== "SET NULL" || !isNullable)) {
-        const safeConstraint = constraintName.replace(/`/g, "``");
-        await db.execute(sql.raw(`ALTER TABLE products DROP FOREIGN KEY \`${safeConstraint}\``));
+      const mustRebuild = !constraintName || deleteRule !== "SET NULL" || !isNullable;
+      if (mustRebuild) {
+        if (constraintName) {
+          const safeConstraint = constraintName.replace(/`/g, "``");
+          await db.execute(sql.raw(`ALTER TABLE products DROP FOREIGN KEY \`${safeConstraint}\``));
+        }
         if (!isNullable) await db.execute(sql.raw("ALTER TABLE products MODIFY COLUMN supplierId INT NULL"));
-        await db.execute(sql.raw(`ALTER TABLE products ADD CONSTRAINT fk_products_supplier_nullable FOREIGN KEY (supplierId) REFERENCES suppliers(id) ON DELETE SET NULL`));
-        supplierFkChanged = true;
-      } else if (!constraintName && !isNullable) {
-        await db.execute(sql.raw("ALTER TABLE products MODIFY COLUMN supplierId INT NULL"));
-        await db.execute(sql.raw(`ALTER TABLE products ADD CONSTRAINT fk_products_supplier_nullable FOREIGN KEY (supplierId) REFERENCES suppliers(id) ON DELETE SET NULL`));
+
+        // Pode haver uma constraint com o nome canônico deixada por tentativa
+        // parcial. Confere antes de criar para manter a rotina idempotente.
+        const [namedRows] = await db.execute(sql`
+          SELECT COUNT(*) AS total
+          FROM information_schema.TABLE_CONSTRAINTS
+          WHERE CONSTRAINT_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'products'
+            AND CONSTRAINT_NAME = 'fk_products_supplier_nullable'
+        `);
+        if (Number(rowsOf(namedRows)[0]?.total ?? 0) === 0) {
+          await db.execute(sql.raw(`ALTER TABLE products ADD CONSTRAINT fk_products_supplier_nullable FOREIGN KEY (supplierId) REFERENCES suppliers(id) ON DELETE SET NULL`));
+        }
         supplierFkChanged = true;
       }
     } catch (error) {
+      // O delete de fornecedor já é lógico; portanto a falha desta melhoria de
+      // schema não reintroduz cascade operacional, mas permanece visível no health.
       logger.warn("[CatalogReconcile] Não foi possível migrar a FK de fornecedor automaticamente:", (error as Error).message);
     }
 
