@@ -2,19 +2,20 @@
  * PNCP — adapter oficial de contratações, itens e resultados homologados.
  *
  * Toda comunicação passa pelo ExternalHttpClient e toda resposta externa é
- * validada antes de virar modelo de domínio.
+ * validada dentro da fronteira de transporte antes de virar modelo de domínio.
  */
 import { z } from "zod";
-import { parseDate, generateDedupeKey } from "./baseConnector";
+import { generateDedupeKey, parseDate } from "./baseConnector";
 import type { NormalizedLicitacao } from "./baseConnector";
 import { externalHttpRequest } from "../integrations/core/externalHttpClient";
-import { IntegrationError } from "../integrations/core/integrationError";
+import { classifyThrownError, IntegrationError } from "../integrations/core/integrationError";
 import { failureResult, successResult } from "../integrations/core/integrationResult";
-import type { IntegrationResult } from "../integrations/core/types";
+import type { ExternalHttpResponse, IntegrationResult } from "../integrations/core/types";
 
 const PNCP_CONSULTA_BASE = "https://pncp.gov.br/api/consulta";
 const PNCP_ORGAOS_BASE = "https://pncp.gov.br/api/pncp";
 const MAX_PUBLICACAO_PAGES = 20;
+const MAX_ORG_RESOURCE_PAGES = 100;
 const PAGE_SIZE = 50;
 
 const PncpLicitacaoSchema = z.object({
@@ -62,6 +63,7 @@ const PncpPublicacaoResponseSchema = z.object({
 }).passthrough();
 
 export type PncpLicitacao = z.infer<typeof PncpLicitacaoSchema>;
+type PncpPublicacaoResponse = z.infer<typeof PncpPublicacaoResponseSchema>;
 
 const PncpItemSchema = z.object({
   numeroItem: z.number(),
@@ -73,6 +75,8 @@ const PncpItemSchema = z.object({
   catalogoItemId: z.union([z.string(), z.number()]).optional().nullable(),
   categoriaItem: z.string().optional().nullable(),
 }).passthrough();
+
+type PncpRawItem = z.infer<typeof PncpItemSchema>;
 
 export interface PncpItem {
   numeroItem: number;
@@ -95,6 +99,8 @@ const PncpResultadoSchema = z.object({
   dataResultadoPncp: z.string().optional().nullable(),
 }).passthrough();
 
+type PncpRawResultado = z.infer<typeof PncpResultadoSchema>;
+
 export interface PncpItemResultado {
   numeroItem: number;
   fornecedorNome: string | null;
@@ -103,6 +109,38 @@ export interface PncpItemResultado {
   valorUnitarioHomologado: number | null;
   valorTotalHomologado: number | null;
   dataResultado: string | null;
+}
+
+interface PncpPageResult {
+  data: PncpLicitacao[];
+  totalRegistros: number;
+  totalPaginas: number;
+  requestId: string;
+  durationMs: number;
+}
+
+interface ModalidadeResult {
+  modalidade: number;
+  data: PncpLicitacao[];
+  pagesFetched: number;
+  totalPages: number;
+  totalRecords: number;
+  truncated: boolean;
+  requestId: string | null;
+}
+
+interface PagedPayload<T> {
+  rows: T[];
+  totalPaginas: number;
+}
+
+function responseError<T>(response: ExternalHttpResponse<T>, fallback: string): IntegrationError {
+  return new IntegrationError(response.error?.message ?? fallback, {
+    type: response.error?.type ?? "UPSTREAM",
+    retryable: response.error?.retryable ?? false,
+    upstreamStatus: response.statusCode || undefined,
+    code: response.error?.code,
+  });
 }
 
 function unwrapArrayPayload(payload: unknown): { rows: unknown[]; totalPaginas: number } {
@@ -115,9 +153,22 @@ function unwrapArrayPayload(payload: unknown): { rows: unknown[]; totalPaginas: 
         ? object.resultado
         : [];
     const totalPaginas = Number(object.totalPaginas ?? object.totalPages ?? 1);
-    return { rows, totalPaginas: Number.isFinite(totalPaginas) && totalPaginas > 0 ? totalPaginas : 1 };
+    return {
+      rows,
+      totalPaginas: Number.isFinite(totalPaginas) && totalPaginas > 0 ? Math.floor(totalPaginas) : 1,
+    };
   }
   return { rows: [], totalPaginas: 1 };
+}
+
+function pageValidator<T>(schema: z.ZodType<T>): (payload: unknown) => PagedPayload<T> {
+  return (payload) => {
+    const unwrapped = unwrapArrayPayload(payload);
+    return {
+      rows: z.array(schema).parse(unwrapped.rows),
+      totalPaginas: unwrapped.totalPaginas,
+    };
+  };
 }
 
 export async function buscarLicitacoesPNCP(
@@ -126,89 +177,141 @@ export async function buscarLicitacoesPNCP(
   pagina = 1,
   tamanhoPagina = PAGE_SIZE,
   codigoModalidade = 8,
-): Promise<{ data: PncpLicitacao[]; totalRegistros: number; totalPaginas: number }> {
+): Promise<PncpPageResult> {
   const params = new URLSearchParams({
     dataInicial,
     dataFinal,
     pagina: String(pagina),
-    tamanhoPagina: String(Math.min(tamanhoPagina, PAGE_SIZE)),
+    tamanhoPagina: String(Math.min(Math.max(1, tamanhoPagina), PAGE_SIZE)),
     codigoModalidadeContratacao: String(codigoModalidade),
   });
   const url = `${PNCP_CONSULTA_BASE}/v1/contratacoes/publicacao?${params}`;
-  const response = await externalHttpRequest<unknown>({
+  const response = await externalHttpRequest<PncpPublicacaoResponse>({
     source: "pncp",
     operation: "contratacoes.publicacao",
     url,
     expected: "json",
     timeoutMs: 25_000,
+    deadlineMs: 55_000,
     maxRetries: 2,
+    validator: (payload) => PncpPublicacaoResponseSchema.parse(payload),
   });
-  if (!response.ok || !response.data) {
-    throw new IntegrationError(response.error?.message ?? `PNCP HTTP ${response.statusCode}`, {
-      type: response.error?.type === "TIMEOUT" ? "TIMEOUT" : response.error?.type === "RATE_LIMIT" ? "RATE_LIMIT" : "UPSTREAM",
-      retryable: response.error?.retryable ?? false,
-      upstreamStatus: response.statusCode || undefined,
-    });
-  }
-  const parsed = PncpPublicacaoResponseSchema.safeParse(response.data);
-  if (!parsed.success) {
-    throw new IntegrationError("Contrato da consulta de publicações do PNCP divergiu do schema esperado.", {
-      type: "CONTRACT",
-      code: "PNCP_PUBLICACAO_SCHEMA",
-      cause: parsed.error,
-    });
-  }
+  if (!response.ok || !response.data) throw responseError(response, `PNCP HTTP ${response.statusCode}`);
+
   return {
-    data: parsed.data.data,
-    totalRegistros: parsed.data.totalRegistros,
-    totalPaginas: parsed.data.totalPaginas,
+    data: response.data.data,
+    totalRegistros: response.data.totalRegistros,
+    totalPaginas: Math.max(1, response.data.totalPaginas),
+    requestId: response.requestId,
+    durationMs: response.durationMs,
   };
 }
 
+async function fetchModalidadeAll(
+  dataInicial: string,
+  dataFinal: string,
+  modalidade: number,
+): Promise<ModalidadeResult> {
+  const collected = new Map<string, PncpLicitacao>();
+  let pagina = 1;
+  let totalPages = 1;
+  let totalRecords = 0;
+  let pagesFetched = 0;
+  let requestId: string | null = null;
+
+  while (pagina <= totalPages && pagina <= MAX_PUBLICACAO_PAGES) {
+    const result = await buscarLicitacoesPNCP(dataInicial, dataFinal, pagina, PAGE_SIZE, modalidade);
+    requestId ??= result.requestId;
+    pagesFetched += 1;
+    totalPages = Math.max(1, result.totalPaginas);
+    totalRecords = Math.max(totalRecords, result.totalRegistros);
+    for (const licitacao of result.data) collected.set(licitacao.numeroControlePNCP, licitacao);
+    pagina += 1;
+  }
+
+  return {
+    modalidade,
+    data: Array.from(collected.values()),
+    pagesFetched,
+    totalPages,
+    totalRecords,
+    truncated: totalPages > MAX_PUBLICACAO_PAGES,
+    requestId,
+  };
+}
+
+/**
+ * Modalidades independentes são processadas em paralelo; páginas da mesma
+ * modalidade permanecem sequenciais. Com M<=6 e cap de 20 páginas, memória de
+ * resultados é deterministicamente limitada ao volume retornado por 120 páginas.
+ */
 export async function buscarLicitacoesMultiModalidadeResult(
   dataInicial: string,
   dataFinal: string,
   modalidades = [8, 6],
 ): Promise<IntegrationResult<PncpLicitacao[]>> {
   const startedAt = Date.now();
-  const collected = new Map<string, PncpLicitacao>();
-  const errors: string[] = [];
-  let pages = 0;
-  for (const modalidade of modalidades) {
-    try {
-      let pagina = 1;
-      let totalPaginas = 1;
-      while (pagina <= totalPaginas && pagina <= MAX_PUBLICACAO_PAGES) {
-        const result = await buscarLicitacoesPNCP(dataInicial, dataFinal, pagina, PAGE_SIZE, modalidade);
-        pages += 1;
-        totalPaginas = Math.max(1, result.totalPaginas);
-        for (const licitacao of result.data) collected.set(licitacao.numeroControlePNCP, licitacao);
-        pagina += 1;
-      }
-    } catch (error) {
-      errors.push(`Modalidade ${modalidade}: ${(error as Error).message}`);
-    }
+  if (!modalidades.length) {
+    return successResult({
+      source: "pncp",
+      operation: "contratacoes.multi-modalidade",
+      data: [],
+      startedAt,
+      metadata: { pages: 0, records: 0, sourceUrl: PNCP_CONSULTA_BASE, schemaVersion: "pncp-2.5" },
+    });
   }
-  if (errors.length === modalidades.length) {
+
+  const settled = await Promise.allSettled(
+    modalidades.map((modalidade) => fetchModalidadeAll(dataInicial, dataFinal, modalidade)),
+  );
+  const successes = settled
+    .filter((result): result is PromiseFulfilledResult<ModalidadeResult> => result.status === "fulfilled")
+    .map((result) => result.value);
+  const failures = settled
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => classifyThrownError(result.reason));
+
+  if (!successes.length) {
+    const primary = failures[0] ?? new IntegrationError("PNCP indisponível.", { type: "UPSTREAM", retryable: true });
+    const message = failures.map((error) => error.message).join(" | ") || primary.message;
     return failureResult({
       source: "pncp",
       operation: "contratacoes.multi-modalidade",
       data: [],
       startedAt,
-      error: new IntegrationError(errors.join(" | "), { type: "UPSTREAM", retryable: true }),
-      metadata: { pages, records: 0, sourceUrl: PNCP_CONSULTA_BASE },
+      error: new IntegrationError(message.slice(0, 2_000), {
+        type: primary.type,
+        retryable: failures.some((error) => error.retryable),
+        upstreamStatus: primary.upstreamStatus,
+        code: primary.code,
+      }),
+      metadata: { pages: 0, records: 0, sourceUrl: PNCP_CONSULTA_BASE, schemaVersion: "pncp-2.5" },
     });
   }
+
+  const collected = new Map<string, PncpLicitacao>();
+  for (const result of successes) {
+    for (const licitacao of result.data) collected.set(licitacao.numeroControlePNCP, licitacao);
+  }
+  const truncated = successes.some((result) => result.truncated);
+  const partial = failures.length > 0 || truncated;
+  const pagesFetched = successes.reduce((sum, result) => sum + result.pagesFetched, 0);
+  const sourceTotalPages = Math.max(1, ...successes.map((result) => result.totalPages));
+  const sourceTotalRecords = successes.reduce((sum, result) => sum + result.totalRecords, 0);
+
   return successResult({
     source: "pncp",
     operation: "contratacoes.multi-modalidade",
     data: Array.from(collected.values()),
     startedAt,
-    status: errors.length ? "PARTIAL" : undefined,
+    requestId: successes.find((result) => result.requestId)?.requestId ?? undefined,
+    status: partial ? "PARTIAL" : undefined,
     metadata: {
-      pages,
+      pages: pagesFetched,
       records: collected.size,
-      partial: errors.length > 0,
+      sourceTotalPages,
+      sourceTotalRecords,
+      partial,
       sourceUrl: PNCP_CONSULTA_BASE,
       schemaVersion: "pncp-2.5",
     },
@@ -223,82 +326,77 @@ export async function buscarLicitacoesMultiModalidade(
   modalidades = [8, 6],
 ): Promise<{ data: PncpLicitacao[]; totalRegistros: number; totalPaginas: number }> {
   if (pagina !== 1) {
-    const results = await Promise.all(modalidades.map((modalidade) => buscarLicitacoesPNCP(dataInicial, dataFinal, pagina, PAGE_SIZE, modalidade)));
-    const data = results.flatMap((result) => result.data);
+    const results = await Promise.all(
+      modalidades.map((modalidade) => buscarLicitacoesPNCP(dataInicial, dataFinal, pagina, PAGE_SIZE, modalidade)),
+    );
     return {
-      data,
+      data: results.flatMap((result) => result.data),
       totalRegistros: results.reduce((sum, result) => sum + result.totalRegistros, 0),
       totalPaginas: Math.max(1, ...results.map((result) => result.totalPaginas)),
     };
   }
+
   const result = await buscarLicitacoesMultiModalidadeResult(dataInicial, dataFinal, modalidades);
   if (["UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "AUTH_ERROR", "CONTRACT_ERROR", "CONFIG_ERROR"].includes(result.status)) {
     throw new Error(result.error?.message ?? "PNCP indisponível.");
   }
-  return { data: result.data, totalRegistros: result.data.length, totalPaginas: result.metadata?.pages ?? 1 };
+  return {
+    data: result.data,
+    totalRegistros: result.metadata?.sourceTotalRecords ?? result.data.length,
+    totalPaginas: result.metadata?.sourceTotalPages ?? 1,
+  };
 }
 
-async function fetchPagedOrgResource(
+async function fetchPagedOrgResource<T>(
   operation: string,
   baseUrl: string,
-): Promise<unknown[]> {
-  const first = await externalHttpRequest<unknown>({
+  schema: z.ZodType<T>,
+): Promise<T[]> {
+  const first = await externalHttpRequest<PagedPayload<T>>({
     source: "pncp",
     operation,
     url: baseUrl,
     expected: "json",
     timeoutMs: 25_000,
+    deadlineMs: 55_000,
     maxRetries: 2,
+    validator: pageValidator(schema),
   });
-  if (!first.ok) {
+  if (!first.ok || !first.data) {
     if (first.statusCode === 404) return [];
-    throw new IntegrationError(first.error?.message ?? `PNCP HTTP ${first.statusCode}`, {
-      type: first.error?.type === "TIMEOUT" ? "TIMEOUT" : "UPSTREAM",
-      retryable: first.error?.retryable ?? false,
-      upstreamStatus: first.statusCode || undefined,
-    });
+    throw responseError(first, `PNCP HTTP ${first.statusCode}`);
   }
-  const unwrapped = unwrapArrayPayload(first.data);
-  const rows = [...unwrapped.rows];
-  // O manual atual pode retornar lista integral. Se houver metadados explícitos
-  // de paginação, percorremos as demais páginas; caso contrário, não inventamos
-  // query params não declarados pelo contrato.
-  if (unwrapped.totalPaginas > 1) {
-    for (let page = 2; page <= Math.min(unwrapped.totalPaginas, 100); page++) {
-      const separator = baseUrl.includes("?") ? "&" : "?";
-      const response = await externalHttpRequest<unknown>({
-        source: "pncp",
-        operation,
-        url: `${baseUrl}${separator}pagina=${page}&tamanhoPagina=500`,
-        expected: "json",
-        timeoutMs: 25_000,
-        maxRetries: 2,
-      });
-      if (!response.ok) {
-        throw new IntegrationError(response.error?.message ?? `PNCP HTTP ${response.statusCode}`, {
-          type: "UPSTREAM",
-          retryable: response.error?.retryable ?? false,
-          upstreamStatus: response.statusCode || undefined,
-        });
-      }
-      rows.push(...unwrapArrayPayload(response.data).rows);
-    }
+
+  if (first.data.totalPaginas > MAX_ORG_RESOURCE_PAGES) {
+    throw new IntegrationError(
+      `PNCP informou ${first.data.totalPaginas} páginas para ${operation}, acima do limite seguro de ${MAX_ORG_RESOURCE_PAGES}.`,
+      { type: "CONTRACT", code: "PNCP_PAGINATION_LIMIT_EXCEEDED" },
+    );
+  }
+
+  const rows = [...first.data.rows];
+  for (let page = 2; page <= first.data.totalPaginas; page += 1) {
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    const response = await externalHttpRequest<PagedPayload<T>>({
+      source: "pncp",
+      operation,
+      url: `${baseUrl}${separator}pagina=${page}&tamanhoPagina=500`,
+      expected: "json",
+      timeoutMs: 25_000,
+      deadlineMs: 55_000,
+      maxRetries: 2,
+      validator: pageValidator(schema),
+    });
+    if (!response.ok || !response.data) throw responseError(response, `PNCP HTTP ${response.statusCode}`);
+    rows.push(...response.data.rows);
   }
   return rows;
 }
 
 export async function buscarItensPNCP(cnpj: string, ano: number, sequencial: number): Promise<PncpItem[]> {
   const url = `${PNCP_ORGAOS_BASE}/v1/orgaos/${cnpj}/compras/${ano}/${sequencial}/itens`;
-  const rows = await fetchPagedOrgResource("compras.itens", url);
-  const parsed = z.array(PncpItemSchema).safeParse(rows);
-  if (!parsed.success) {
-    throw new IntegrationError("Contrato de itens do PNCP divergiu do schema esperado.", {
-      type: "CONTRACT",
-      code: "PNCP_ITENS_SCHEMA",
-      cause: parsed.error,
-    });
-  }
-  return parsed.data.map((item) => ({
+  const rows = await fetchPagedOrgResource<PncpRawItem>("compras.itens", url, PncpItemSchema);
+  return rows.map((item) => ({
     numeroItem: item.numeroItem,
     descricao: item.descricao,
     quantidade: item.quantidade ?? undefined,
@@ -317,16 +415,8 @@ export async function buscarResultadosItemPNCP(
   numeroItem: number,
 ): Promise<PncpItemResultado[]> {
   const url = `${PNCP_ORGAOS_BASE}/v1/orgaos/${cnpj}/compras/${ano}/${sequencial}/itens/${numeroItem}/resultados`;
-  const rows = await fetchPagedOrgResource("compras.itens.resultados", url);
-  const parsed = z.array(PncpResultadoSchema).safeParse(rows);
-  if (!parsed.success) {
-    throw new IntegrationError("Contrato de resultados do PNCP divergiu do schema esperado.", {
-      type: "CONTRACT",
-      code: "PNCP_RESULTADOS_SCHEMA",
-      cause: parsed.error,
-    });
-  }
-  return parsed.data.map((row) => ({
+  const rows = await fetchPagedOrgResource<PncpRawResultado>("compras.itens.resultados", url, PncpResultadoSchema);
+  return rows.map((row) => ({
     numeroItem,
     fornecedorNome: row.nomeRazaoSocialFornecedor ?? row.niFornecedor ?? null,
     fornecedorCnpjCpf: row.niFornecedor ?? null,
