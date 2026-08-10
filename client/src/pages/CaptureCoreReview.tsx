@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, HeartPulse, Loader2, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import CaptureConnectorWizard from "@/components/CaptureConnectorWizard";
 
 function money(value: unknown) {
   const number = Number(value);
@@ -25,6 +25,7 @@ export default function CaptureCoreReview() {
   const { data: health = [] } = trpc.captureCore.health.useQuery();
   const [productIds, setProductIds] = useState<Record<number, string>>({});
   const [terms, setTerms] = useState("");
+  const [showConnectorWizard, setShowConnectorWizard] = useState(false);
 
   const decide = trpc.captureCore.decideObservation.useMutation({
     onSuccess: async (result) => {
@@ -68,10 +69,23 @@ export default function CaptureCoreReview() {
             Alterações determinísticas e seguras são aplicadas automaticamente. Conflitos de identidade, variações anormais e itens sem evidência suficiente ficam aqui para decisão humana e passam a alimentar a memória supervisionada da IA.
           </p>
         </div>
-        <Link href="/scraper-fornecedores" className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 no-underline hover:bg-slate-50">
-          Configurar fornecedores
-        </Link>
+        <button
+          type="button"
+          onClick={() => setShowConnectorWizard((value) => !value)}
+          className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          {showConnectorWizard ? "Ocultar configuração" : "Adicionar conector"}
+        </button>
       </header>
+
+      {showConnectorWizard && (
+        <CaptureConnectorWizard
+          onSaved={() => {
+            void utils.captureCore.health.invalidate();
+            setShowConnectorWizard(false);
+          }}
+        />
+      )}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Pendentes de revisão" value={pendingCount} helper="Observações não aplicadas" />
