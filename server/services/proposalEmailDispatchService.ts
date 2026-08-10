@@ -136,7 +136,7 @@ export async function reserveProposalEmailDispatch(input: {
         if (!existing.messageId) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "O SMTP confirmou o envio, mas o Message-ID não foi persistido. Revisão manual necessária.",
+            message: "O envio foi confirmado, mas o Message-ID não está disponível. Revisão manual necessária.",
           });
         }
         return {
@@ -183,6 +183,7 @@ export async function reserveProposalEmailDispatch(input: {
       recipient,
       subject,
       state: "sending",
+      messageId,
       requestedBy: input.actor.slice(0, 128),
     });
 
@@ -197,10 +198,7 @@ export async function reserveProposalEmailDispatch(input: {
   });
 }
 
-/**
- * Libera uma reserva que falhou ANTES de chamar o SMTP. Como nenhum efeito
- * externo ocorreu, a proposta pode ser corrigida e reenviada normalmente.
- */
+/** Libera apenas falha anterior à chamada SMTP; nenhum efeito externo ocorreu. */
 export async function releaseProposalEmailDispatchReservation(input: {
   proposalId: number;
   token: string;
@@ -294,6 +292,64 @@ export async function markProposalEmailDispatchAmbiguous(input: {
         eq(proposalEmailDispatches.state, "sending"),
       ),
     );
+}
+
+/**
+ * Única válvula manual para estado externo ambíguo. Exige decisão explícita do
+ * administrador após conferir a caixa de enviados/provedor SMTP.
+ */
+export async function resolveAmbiguousProposalEmailDispatch(input: {
+  proposalId: number;
+  resolution: "confirmed_sent" | "confirmed_not_sent";
+  actor: string;
+}): Promise<{ resolution: typeof input.resolution; messageId: string | null }> {
+  const db = await getDb();
+  if (!db) {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
+  }
+
+  return db.transaction(async (tx) => {
+    const proposal = await lockProposal(tx, input.proposalId);
+    const [dispatch] = await tx
+      .select()
+      .from(proposalEmailDispatches)
+      .where(eq(proposalEmailDispatches.proposalId, input.proposalId))
+      .limit(1);
+    if (!dispatch) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Despacho de e-mail não encontrado." });
+    }
+    assertKnownState(dispatch.state);
+    if (dispatch.state !== "ambiguous" && dispatch.state !== "sending") {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `Despacho em estado ${dispatch.state} não requer resolução manual.`,
+      });
+    }
+
+    if (input.resolution === "confirmed_not_sent") {
+      if (proposal.status !== "draft") {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "A proposta já avançou de status; não é seguro liberar um novo envio.",
+        });
+      }
+      await tx
+        .delete(proposalEmailDispatches)
+        .where(eq(proposalEmailDispatches.proposalId, input.proposalId));
+      return { resolution: input.resolution, messageId: dispatch.messageId };
+    }
+
+    const messageId = dispatch.messageId || deterministicMessageId(input.proposalId, dispatch.dispatchToken);
+    await tx
+      .update(proposalEmailDispatches)
+      .set({
+        state: "sent_pending_state",
+        messageId,
+        lastError: `Envio confirmado manualmente por ${input.actor.slice(0, 128)}.`,
+      })
+      .where(eq(proposalEmailDispatches.proposalId, input.proposalId));
+    return { resolution: input.resolution, messageId };
+  });
 }
 
 export async function getProposalEmailDispatch(proposalId: number) {
