@@ -1,4 +1,8 @@
-import mysql, { type Connection } from "mysql2/promise";
+import mysql, {
+  type Connection,
+  type ResultSetHeader,
+  type RowDataPacket,
+} from "mysql2/promise";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const DATABASE_URL = process.env.DATABASE_URL?.trim();
@@ -34,7 +38,7 @@ describeDatabase("Capture Core — invariantes MySQL", () => {
   });
 
   async function insertJob(status: string): Promise<number> {
-    const [result] = await connection.execute<mysql.ResultSetHeader>(
+    const [result] = await connection.execute<ResultSetHeader>(
       `INSERT INTO \`capture_jobs\`
         (\`scraperConfigId\`, \`supplierId\`, \`status\`)
        VALUES (?, ?, ?)`,
@@ -44,7 +48,7 @@ describeDatabase("Capture Core — invariantes MySQL", () => {
   }
 
   async function activeKey(jobId: number): Promise<string | null> {
-    const [rows] = await connection.execute<mysql.RowDataPacket[]>(
+    const [rows] = await connection.execute<RowDataPacket[]>(
       "SELECT `activeKey` FROM `capture_jobs` WHERE `id` = ? LIMIT 1",
       [jobId],
     );
@@ -69,7 +73,7 @@ describeDatabase("Capture Core — invariantes MySQL", () => {
   });
 
   it("libera activeKey em estado terminal e permite um novo job ativo", async () => {
-    const [rows] = await connection.execute<mysql.RowDataPacket[]>(
+    const [rows] = await connection.execute<RowDataPacket[]>(
       "SELECT `id` FROM `capture_jobs` WHERE `scraperConfigId` = ? ORDER BY `id` ASC LIMIT 1",
       [TEST_CONFIG_ID],
     );
