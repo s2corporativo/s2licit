@@ -17,13 +17,15 @@ const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Logs = lazy(() => import("./pages/Logs"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Categorias = lazy(() => import("./pages/Categorias"));
-const Equivalencias = lazy(() => import("./pages/Equivalencias"));
+const EquivalenciasLegado = lazy(() => import("./pages/Equivalencias"));
+const CompendioEquivalencias = lazy(() => import("./pages/CompendioEquivalencias"));
 const Fornecedores = lazy(() => import("./pages/Fornecedores"));
 const ImportarPlanilha = lazy(() => import("./pages/ImportarPlanilha"));
 const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
 const Propostas = lazy(() => import("./pages/Propostas"));
 const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
-const Produtos = lazy(() => import("./pages/Produtos"));
+const ProdutosLegado = lazy(() => import("./pages/Produtos"));
+const CentralProdutos = lazy(() => import("./pages/CentralProdutos"));
 const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
@@ -32,7 +34,6 @@ const AnaliseJuridica = lazy(() => import("./pages/AnaliseJuridica"));
 const Integracoes = lazy(() => import("./pages/Integracoes"));
 const Sinonimos = lazy(() => import("./pages/Sinonimos"));
 const TemplatesProposta = lazy(() => import("./pages/TemplatesProposta"));
-const DataQualityDashboard = lazy(() => named(import("./pages/DataQualityDashboard"), "DataQualityDashboard"));
 const ImportarNfe = lazy(() => named(import("./pages/ImportarNfe"), "ImportarNfe"));
 const AplicarPrecificacao = lazy(() => import("./pages/AplicarPrecificacao"));
 const RegrasCategoria = lazy(() => import("./pages/RegrasCategoria"));
@@ -89,17 +90,18 @@ function Router() {
                 <Route path="/busca-global" component={BuscaGlobal} />
                 <Route path="/busca"><Redirect to="/busca-global?modo=precos" /></Route>
                 <Route path="/manual" component={Manual} />
-                <Route path="/centro-operacional">
-                  <RequireAuth message="Acesse a Central Operacional após fazer login." minRole="editor"><CentroOperacional /></RequireAuth>
-                </Route>
-                <Route path="/diagnostico">
-                  <RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor"><Diagnostico /></RequireAuth>
-                </Route>
+                <Route path="/centro-operacional"><RequireAuth message="Acesse a Central Operacional após fazer login." minRole="editor"><CentroOperacional /></RequireAuth></Route>
+                <Route path="/diagnostico"><RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor"><Diagnostico /></RequireAuth></Route>
                 <Route path="/comparacao" component={Comparacao} />
+
+                {/* Catálogo: novas rotas canônicas + rotas legadas mantidas para transição segura. */}
+                <Route path="/produtos/legado" component={ProdutosLegado} />
+                <Route path="/produtos" component={CentralProdutos} />
+                <Route path="/equivalencias/legado" component={EquivalenciasLegado} />
+                <Route path="/equivalencias" component={CompendioEquivalencias} />
+                <Route path="/qualidade"><Redirect to="/produtos?tab=qualidade" /></Route>
                 <Route path="/categorias" component={Categorias} />
-                <Route path="/produtos" component={Produtos} />
-                <Route path="/equivalencias" component={Equivalencias} />
-                <Route path="/qualidade"><RequireAuth message="Acesse o Dashboard de Qualidade após fazer login." minRole="editor"><DataQualityDashboard /></RequireAuth></Route>
+
                 <Route path="/fornecedores"><RequireAuth message="Gerencie fornecedores após fazer login." minRole="editor"><Fornecedores /></RequireAuth></Route>
                 <Route path="/importar"><RequireAuth message="Importe planilhas após fazer login." minRole="editor"><ImportarPlanilha /></RequireAuth></Route>
                 <Route path="/importar-nfe"><RequireAuth message="Importe NFe após fazer login." minRole="editor"><ImportarNfe /></RequireAuth></Route>
@@ -134,11 +136,14 @@ function Router() {
                 <Route path="/propostas/:id"><RequireAuth message="Edite propostas após fazer login."><PropostaEditor /></RequireAuth></Route>
                 <Route path="/propostas-admin"><Redirect to="/propostas" /></Route>
                 <Route path="/financeiro"><RequireAuth message="Acesse o controle financeiro após fazer login."><ControleFinanceiro /></RequireAuth></Route>
+
+                {/* Ferramentas especializadas ficam acessíveis, mas saem da navegação principal. */}
                 <Route path="/enriquecimento"><RequireAuth message="Faça login para acessar o enriquecimento de catálogo."><EnriquecimentoCatalogo /></RequireAuth></Route>
                 <Route path="/reclassificacao"><RequireAuth message="Faça login para acessar a reclassificação em lote." minRole="editor"><ReclassificacaoIA /></RequireAuth></Route>
+                <Route path="/imagens"><RequireAuth message="Gerencie imagens de produtos após fazer login."><GestaoImagens /></RequireAuth></Route>
+
                 <Route path="/edital"><RequireAuth message="Importe editais após fazer login." minRole="editor"><ImportarEdital /></RequireAuth></Route>
                 <Route path="/analise-juridica"><RequireAuth message="Faça login para usar a análise jurídica." minRole="editor"><AnaliseJuridica /></RequireAuth></Route>
-                <Route path="/imagens"><RequireAuth message="Gerencie imagens de produtos após fazer login."><GestaoImagens /></RequireAuth></Route>
                 <Route path="/configuracao"><RequireAuth message="Acesse as configurações após fazer login." minRole="admin"><ConfiguracaoEmpresa /></RequireAuth></Route>
                 <Route path="/sinonimos"><RequireAuth message="Faça login para gerenciar sinônimos de matching."><Sinonimos /></RequireAuth></Route>
                 <Route path="/templates-proposta"><RequireAuth message="Faça login para gerenciar templates de proposta."><TemplatesProposta /></RequireAuth></Route>
