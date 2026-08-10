@@ -1,33 +1,85 @@
 /**
- * comprasGovConnector.ts
- * Segunda fonte do Radar: Compras.gov.br — Dados Abertos (SIASG).
+ * Compras.gov.br — fonte oficial complementar do Radar.
  *
- * Complementa o PNCP com licitações de UASGs federais (pregões, tomadas de
- * preço, concorrências) publicadas no ComprasNet/SIASG. Muitos pregões
- * federais aparecem aqui com detalhe de item que o PNCP nem sempre expõe.
- *
- * API pública, sem autenticação (dados abertos). Retorno HAL+JSON:
- *   { _embedded: { licitacoes: [...] }, count, _links }
- *
- * PRINCÍPIO À PROVA DE FALHA: qualquer erro (endpoint fora do ar, mudança de
- * contrato, timeout) resulta em lista vazia — NUNCA lança para o Radar. O erro
- * fica registrado em api_logs (via robustFetch) para diagnóstico posterior.
- * Assim uma fonte instável jamais derruba a busca nem "finge" resultado.
+ * Estratégia:
+ * 1) API oficial atual de Dados Abertos (Módulo 07 - Contratações 14.133);
+ * 2) fallback temporário para o endpoint SIASG legado quando a API atual estiver
+ *    indisponível/incompatível;
+ * 3) nunca converte falha em lista vazia silenciosa.
  */
-
-import { robustFetch, parseDate, generateDedupeKey } from "./baseConnector";
+import { z } from "zod";
+import { parseDate, generateDedupeKey } from "./baseConnector";
 import type { NormalizedLicitacao } from "./baseConnector";
+import { externalHttpRequest } from "../integrations/core/externalHttpClient";
+import { classifyThrownError, IntegrationError } from "../integrations/core/integrationError";
+import { failureResult, successResult } from "../integrations/core/integrationResult";
+import type { IntegrationResult } from "../integrations/core/types";
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-/** Respeita o rate limit do Dados Abertos (conservador). */
-const PAGE_DELAY_MS = 400;
-/** Teto de páginas por busca — evita varreduras longas em janelas amplas. */
-const MAX_PAGES = 8;
-const PAGE_SIZE = 500;
+const CURRENT_BASE = "https://dadosabertos.compras.gov.br";
+const LEGACY_BASE = "https://compras.dados.gov.br";
+const PAGE_SIZE = 250;
+const MAX_PAGES = 12;
 
-const COMPRAS_BASE = "https://compras.dados.gov.br";
+const ModernRawSchema = z.object({
+  idCompra: z.union([z.string(), z.number()]).optional().nullable(),
+  numeroControlePNCP: z.string().optional().nullable(),
+  numeroControlePncp: z.string().optional().nullable(),
+  orgaoEntidadeRazaoSocial: z.string().optional().nullable(),
+  unidadeOrgaoNomeUnidade: z.string().optional().nullable(),
+  unidadeOrgaoCodigoUnidade: z.union([z.string(), z.number()]).optional().nullable(),
+  unidadeOrgaoUfSigla: z.string().optional().nullable(),
+  unidadeOrgaoMunicipioNome: z.string().optional().nullable(),
+  numeroCompra: z.union([z.string(), z.number()]).optional().nullable(),
+  numeroProcesso: z.union([z.string(), z.number()]).optional().nullable(),
+  modalidadeNome: z.string().optional().nullable(),
+  codigoModalidade: z.union([z.string(), z.number()]).optional().nullable(),
+  objetoCompra: z.string().optional().nullable(),
+  objeto: z.string().optional().nullable(),
+  informacaoComplementar: z.string().optional().nullable(),
+  dataPublicacaoPncp: z.string().optional().nullable(),
+  dataAberturaProposta: z.string().optional().nullable(),
+  dataEncerramentoProposta: z.string().optional().nullable(),
+  valorTotalEstimado: z.union([z.string(), z.number()]).optional().nullable(),
+  valorTotalHomologado: z.union([z.string(), z.number()]).optional().nullable(),
+  situacaoCompraNome: z.string().optional().nullable(),
+  linkSistemaOrigem: z.string().optional().nullable(),
+}).passthrough();
 
-/** Modalidades SIASG (código → nome legível). */
+const ModernResponseSchema = z.object({
+  resultado: z.array(ModernRawSchema).default([]),
+  totalRegistros: z.number().optional().default(0),
+  totalPaginas: z.number().optional().default(1),
+  paginasRestantes: z.number().optional().default(0),
+}).passthrough();
+
+type ModernRaw = z.infer<typeof ModernRawSchema>;
+
+const LegacyRawSchema = z.object({
+  identificador: z.string().optional(),
+  uasg: z.union([z.number(), z.string()]).optional(),
+  nome_uasg: z.string().optional(),
+  orgao: z.string().optional(),
+  nome_orgao: z.string().optional(),
+  modalidade: z.union([z.number(), z.string()]).optional(),
+  numero_aviso: z.union([z.number(), z.string()]).optional(),
+  objeto: z.string().optional(),
+  situacao_aviso: z.string().optional(),
+  data_publicacao: z.string().optional(),
+  data_abertura_proposta: z.string().optional(),
+  uf: z.string().optional(),
+  nome_municipio: z.string().optional(),
+  municipio: z.string().optional(),
+  valor_estimado: z.union([z.number(), z.string()]).optional(),
+  _links: z.object({ self: z.object({ href: z.string().optional() }).optional() }).optional(),
+}).passthrough();
+
+const LegacyResponseSchema = z.object({
+  _embedded: z.object({ licitacoes: z.array(LegacyRawSchema).optional() }).optional(),
+  count: z.number().optional(),
+}).passthrough();
+
+type LegacyRaw = z.infer<typeof LegacyRawSchema>;
+
 const MODALIDADE_NOME: Record<number, string> = {
   1: "Convite",
   2: "Tomada de Preços",
@@ -41,150 +93,266 @@ const MODALIDADE_NOME: Record<number, string> = {
   33: "Registro de Preços",
 };
 
-interface ComprasLicitacaoRaw {
-  identificador?: string;
-  uasg?: number | string;
-  nome_uasg?: string;
-  orgao?: string;
-  nome_orgao?: string;
-  modalidade?: number | string;
-  numero_aviso?: number | string;
-  objeto?: string;
-  situacao_aviso?: string;
-  data_publicacao?: string;
-  data_abertura_proposta?: string;
-  data_entrega_edital?: string;
-  uf?: string;
-  nome_municipio?: string;
-  municipio?: string;
-  valor_estimado?: number | string;
-  _links?: { self?: { href?: string } };
+function toNumber(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value !== "string") return 0;
+  const normalized = value.includes(",")
+    ? value.replace(/\./g, "").replace(",", ".")
+    : value;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
 }
 
-interface ComprasResponse {
-  _embedded?: { licitacoes?: ComprasLicitacaoRaw[] };
-  count?: number;
-  _links?: { next?: { href?: string } };
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
-function toNumber(v: unknown): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(/\./g, "").replace(",", "."));
-    return isNaN(n) ? 0 : n;
-  }
-  return 0;
+function modalidadeNome(value: unknown): string {
+  const code = typeof value === "number" ? value : Number(value);
+  return MODALIDADE_NOME[code] ?? (value ? `Modalidade ${value}` : "Licitação");
 }
 
-function modalidadeNome(m: unknown): string {
-  const code = typeof m === "number" ? m : Number(m);
-  return MODALIDADE_NOME[code] ?? (m ? `Modalidade ${m}` : "Licitação");
-}
-
-/**
- * Normaliza uma licitação do Compras.gov.br para o modelo unificado. Pura e
- * testável (não faz I/O).
- */
-export function normalizeComprasLicitacao(l: ComprasLicitacaoRaw): NormalizedLicitacao {
-  const orgao = l.nome_orgao ?? l.orgao ?? l.nome_uasg ?? "Órgão federal";
-  const unidade = l.nome_uasg ?? orgao;
-  const objeto = l.objeto ?? "";
-  const dataPublicacao = parseDate(l.data_publicacao);
-  const dataAbertura = parseDate(l.data_abertura_proposta);
-  const uasg = l.uasg != null ? String(l.uasg) : "";
-  const aviso = l.numero_aviso != null ? String(l.numero_aviso) : "";
-  const sourceId = l.identificador ?? (uasg && aviso ? `${uasg}-${aviso}` : `${uasg}${aviso}`);
-
-  const links: string[] = [];
-  const href = l._links?.self?.href;
-  if (href) {
-    links.push(href.startsWith("http") ? href : `${COMPRAS_BASE}${href}`);
-  } else if (uasg) {
-    // Link de consulta pública no ComprasNet como fallback.
-    links.push(`https://www.gov.br/compras/pt-br?uasg=${uasg}`);
-  }
+export function normalizeComprasGovModern(raw: ModernRaw): NormalizedLicitacao {
+  const orgao = raw.orgaoEntidadeRazaoSocial ?? raw.unidadeOrgaoNomeUnidade ?? "Órgão público";
+  const unidade = raw.unidadeOrgaoNomeUnidade ?? orgao;
+  const objeto = raw.objetoCompra ?? raw.objeto ?? "";
+  const dataPublicacao = parseDate(raw.dataPublicacaoPncp);
+  const dataAbertura = parseDate(raw.dataAberturaProposta);
+  const idCompra = raw.idCompra != null ? String(raw.idCompra) : "";
+  const numeroControle = raw.numeroControlePNCP ?? raw.numeroControlePncp ?? "";
+  const numeroCompra = raw.numeroCompra != null ? String(raw.numeroCompra) : "";
+  const sourceId = idCompra || numeroControle || generateDedupeKey(orgao, objeto, dataAbertura);
+  const links = [raw.linkSistemaOrigem, numeroControle ? `https://pncp.gov.br/app/editais/${numeroControle}` : null]
+    .filter((link): link is string => Boolean(link));
 
   return {
     source: "comprasgov",
-    sourceId: sourceId || generateDedupeKey(orgao, objeto, dataAbertura),
+    sourceId,
     orgao,
     unidadeCompradora: unidade,
-    modalidade: modalidadeNome(l.modalidade),
-    numeroProcesso: aviso || sourceId,
+    modalidade: raw.modalidadeNome ?? modalidadeNome(raw.codigoModalidade),
+    numeroProcesso: raw.numeroProcesso != null ? String(raw.numeroProcesso) : numeroCompra || sourceId,
     objeto,
-    descricaoDetalhada: "",
-    uf: (l.uf ?? "").toUpperCase(),
-    municipio: l.nome_municipio ?? l.municipio ?? "",
+    descricaoDetalhada: raw.informacaoComplementar ?? "",
+    uf: (raw.unidadeOrgaoUfSigla ?? "").toUpperCase(),
+    municipio: raw.unidadeOrgaoMunicipioNome ?? "",
     dataPublicacao,
     dataAbertura,
-    dataEncerramento: null,
-    valorEstimado: toNumber(l.valor_estimado),
-    status: l.situacao_aviso ?? "Publicado",
+    dataEncerramento: parseDate(raw.dataEncerramentoProposta),
+    valorEstimado: toNumber(raw.valorTotalEstimado),
+    status: raw.situacaoCompraNome ?? "Publicado",
     links,
     dedupeKey: generateDedupeKey(orgao, objeto, dataAbertura),
   };
 }
 
-function dentroDaJanela(dataStr: string | undefined, inicio: Date, fim: Date): boolean {
-  const d = parseDate(dataStr);
-  if (!d) return false;
-  // Compara só a data (ignora hora) para não perder o último dia.
-  const t = d.getTime();
-  return t >= inicio.getTime() && t <= fim.getTime() + 24 * 60 * 60 * 1000;
+export function normalizeComprasLicitacao(raw: LegacyRaw): NormalizedLicitacao {
+  const orgao = raw.nome_orgao ?? raw.orgao ?? raw.nome_uasg ?? "Órgão federal";
+  const unidade = raw.nome_uasg ?? orgao;
+  const objeto = raw.objeto ?? "";
+  const dataPublicacao = parseDate(raw.data_publicacao);
+  const dataAbertura = parseDate(raw.data_abertura_proposta);
+  const uasg = raw.uasg != null ? String(raw.uasg) : "";
+  const aviso = raw.numero_aviso != null ? String(raw.numero_aviso) : "";
+  const sourceId = raw.identificador ?? (uasg && aviso ? `${uasg}-${aviso}` : `${uasg}${aviso}`);
+  const href = raw._links?.self?.href;
+  const links = href
+    ? [href.startsWith("http") ? href : `${LEGACY_BASE}${href}`]
+    : uasg
+      ? [`https://www.gov.br/compras/pt-br?uasg=${uasg}`]
+      : [];
+  return {
+    source: "comprasgov",
+    sourceId: sourceId || generateDedupeKey(orgao, objeto, dataAbertura),
+    orgao,
+    unidadeCompradora: unidade,
+    modalidade: modalidadeNome(raw.modalidade),
+    numeroProcesso: aviso || sourceId,
+    objeto,
+    descricaoDetalhada: "",
+    uf: (raw.uf ?? "").toUpperCase(),
+    municipio: raw.nome_municipio ?? raw.municipio ?? "",
+    dataPublicacao,
+    dataAbertura,
+    dataEncerramento: null,
+    valorEstimado: toNumber(raw.valor_estimado),
+    status: raw.situacao_aviso ?? "Publicado",
+    links,
+    dedupeKey: generateDedupeKey(orgao, objeto, dataAbertura),
+  };
 }
 
-/**
- * Busca licitações do Compras.gov.br publicadas na janela [inicio, fim].
- *
- * A API SIASG não filtra por intervalo de datas de forma confiável em todas as
- * versões, então buscamos as páginas mais recentes (opcionalmente por UF) e
- * filtramos a janela em memória. Sempre à prova de falha: em qualquer erro
- * retorna o que já tiver (possivelmente vazio) sem lançar.
- *
- * @param inicio  início da janela (Date)
- * @param fim     fim da janela (Date)
- * @param uf      UF opcional (ex.: "MG") para reduzir o volume
- */
+async function fetchCurrent(
+  inicio: Date,
+  fim: Date,
+  uf?: string,
+): Promise<{ data: NormalizedLicitacao[]; requestId: string; pages: number }> {
+  const collected = new Map<string, NormalizedLicitacao>();
+  let requestId = "";
+  let pages = 0;
+  let totalPages = 1;
+
+  for (let page = 1; page <= Math.min(totalPages, MAX_PAGES); page++) {
+    const params = new URLSearchParams({
+      pagina: String(page),
+      tamanhoPagina: String(PAGE_SIZE),
+      dataPublicacaoPncpInicial: isoDate(inicio),
+      dataPublicacaoPncpFinal: isoDate(fim),
+    });
+    if (uf) params.set("unidadeOrgaoUfSigla", uf.toUpperCase());
+    const url = `${CURRENT_BASE}/modulo-contratacoes/1_consultarContratacoes_PNCP_14133?${params}`;
+    const response = await externalHttpRequest<unknown>({
+      source: "comprasgov",
+      operation: "contratacoes.list.current",
+      url,
+      expected: "json",
+      timeoutMs: 25_000,
+      maxRetries: 2,
+    });
+    requestId ||= response.requestId;
+    if (!response.ok || !response.data) {
+      throw new IntegrationError(response.error?.message ?? `Compras.gov HTTP ${response.statusCode}`, {
+        type: response.error?.type === "TIMEOUT" ? "TIMEOUT" : response.error?.type === "RATE_LIMIT" ? "RATE_LIMIT" : "UPSTREAM",
+        retryable: response.error?.retryable ?? false,
+        upstreamStatus: response.statusCode || undefined,
+      });
+    }
+    const parsed = ModernResponseSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new IntegrationError("Contrato da API atual do Compras.gov divergiu do schema esperado.", {
+        type: "CONTRACT",
+        code: "COMPRASGOV_CURRENT_SCHEMA",
+        cause: parsed.error,
+      });
+    }
+    pages += 1;
+    totalPages = Math.max(1, parsed.data.totalPaginas || 1);
+    for (const raw of parsed.data.resultado) {
+      const normalized = normalizeComprasGovModern(raw);
+      collected.set(normalized.sourceId || normalized.dedupeKey, normalized);
+    }
+    if (parsed.data.resultado.length === 0 || parsed.data.paginasRestantes === 0) break;
+  }
+
+  return { data: Array.from(collected.values()), requestId, pages };
+}
+
+async function fetchLegacy(
+  inicio: Date,
+  fim: Date,
+  uf?: string,
+): Promise<{ data: NormalizedLicitacao[]; requestId: string; pages: number }> {
+  const collected = new Map<string, NormalizedLicitacao>();
+  let requestId = "";
+  let pages = 0;
+  for (let page = 1; page <= 8; page++) {
+    const offset = (page - 1) * 500;
+    const ufParam = uf ? `&uf=${encodeURIComponent(uf.toUpperCase())}` : "";
+    const url = `${LEGACY_BASE}/licitacoes/v1/licitacoes.json?ordenacao=-data_publicacao&tam_pagina=500&offset=${offset}${ufParam}`;
+    const response = await externalHttpRequest<unknown>({
+      source: "comprasgov",
+      operation: "contratacoes.list.legacy-fallback",
+      url,
+      expected: "json",
+      timeoutMs: 25_000,
+      maxRetries: 1,
+    });
+    requestId ||= response.requestId;
+    if (!response.ok || !response.data) {
+      throw new IntegrationError(response.error?.message ?? `Compras.gov legado HTTP ${response.statusCode}`, {
+        type: "UPSTREAM",
+        retryable: response.error?.retryable ?? false,
+        upstreamStatus: response.statusCode || undefined,
+      });
+    }
+    const parsed = LegacyResponseSchema.safeParse(response.data);
+    if (!parsed.success) {
+      throw new IntegrationError("Contrato do fallback legado do Compras.gov divergiu do esperado.", {
+        type: "CONTRACT",
+        code: "COMPRASGOV_LEGACY_SCHEMA",
+        cause: parsed.error,
+      });
+    }
+    pages += 1;
+    const rows = parsed.data._embedded?.licitacoes ?? [];
+    if (!rows.length) break;
+    let reachedBeforeWindow = false;
+    for (const raw of rows) {
+      const published = parseDate(raw.data_publicacao);
+      if (!published) continue;
+      if (published.getTime() < inicio.getTime()) reachedBeforeWindow = true;
+      if (published.getTime() >= inicio.getTime() && published.getTime() <= fim.getTime() + 86_400_000) {
+        const normalized = normalizeComprasLicitacao(raw);
+        collected.set(normalized.sourceId || normalized.dedupeKey, normalized);
+      }
+    }
+    if (reachedBeforeWindow) break;
+  }
+  return { data: Array.from(collected.values()), requestId, pages };
+}
+
+export async function buscarLicitacoesComprasGovResult(
+  inicio: Date,
+  fim: Date,
+  uf?: string,
+): Promise<IntegrationResult<NormalizedLicitacao[]>> {
+  const startedAt = Date.now();
+  try {
+    const current = await fetchCurrent(inicio, fim, uf);
+    return successResult({
+      source: "comprasgov",
+      operation: "contratacoes.list",
+      data: current.data,
+      startedAt,
+      requestId: current.requestId,
+      metadata: {
+        pages: current.pages,
+        records: current.data.length,
+        sourceUrl: CURRENT_BASE,
+        schemaVersion: "comprasgov-2026-v2",
+      },
+    });
+  } catch (currentError) {
+    try {
+      const legacy = await fetchLegacy(inicio, fim, uf);
+      const error = classifyThrownError(currentError);
+      return successResult({
+        source: "comprasgov",
+        operation: "contratacoes.list",
+        data: legacy.data,
+        startedAt,
+        requestId: legacy.requestId,
+        status: "PARTIAL",
+        metadata: {
+          pages: legacy.pages,
+          records: legacy.data.length,
+          partial: true,
+          sourceUrl: LEGACY_BASE,
+          schemaVersion: `legacy-fallback:${error.type}`,
+        },
+      });
+    } catch (legacyError) {
+      return failureResult({
+        source: "comprasgov",
+        operation: "contratacoes.list",
+        data: [],
+        startedAt,
+        error: classifyThrownError(legacyError),
+        metadata: { partial: true, sourceUrl: CURRENT_BASE },
+      });
+    }
+  }
+}
+
+/** Compatibilidade: consumidores legados recebem dados, mas falha real lança. */
 export async function buscarLicitacoesComprasGov(
   inicio: Date,
   fim: Date,
   uf?: string,
 ): Promise<NormalizedLicitacao[]> {
-  const coletadas: NormalizedLicitacao[] = [];
-  const ufParam = uf ? `&uf=${encodeURIComponent(uf.toUpperCase())}` : "";
-
-  for (let pagina = 1; pagina <= MAX_PAGES; pagina++) {
-    const offset = (pagina - 1) * PAGE_SIZE;
-    const url = `${COMPRAS_BASE}/licitacoes/v1/licitacoes.json?ordenacao=-data_publicacao&tam_pagina=${PAGE_SIZE}&offset=${offset}${ufParam}`;
-
-    const result = await robustFetch(url, "comprasgov");
-    if (!result.success || !result.payload) {
-      // Erro já logado em api_logs. Interrompe e devolve o que houver.
-      break;
-    }
-
-    const json = result.payload as ComprasResponse;
-    const linha = json._embedded?.licitacoes ?? [];
-    if (linha.length === 0) break;
-
-    let algumaNaJanela = false;
-    for (const raw of linha) {
-      if (dentroDaJanela(raw.data_publicacao, inicio, fim)) {
-        algumaNaJanela = true;
-        coletadas.push(normalizeComprasLicitacao(raw));
-      }
-    }
-
-    // Como pedimos ordenação por data desc, se uma página inteira já está
-    // antes da janela, as próximas também estarão — pode parar.
-    const ultima = linha[linha.length - 1];
-    const ultimaData = parseDate(ultima?.data_publicacao);
-    if (!algumaNaJanela && ultimaData && ultimaData.getTime() < inicio.getTime()) {
-      break;
-    }
-
-    if (pagina < MAX_PAGES) await sleep(PAGE_DELAY_MS);
+  const result = await buscarLicitacoesComprasGovResult(inicio, fim, uf);
+  if (["UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "AUTH_ERROR", "CONTRACT_ERROR", "CONFIG_ERROR"].includes(result.status)) {
+    throw new Error(result.error?.message ?? "Compras.gov indisponível.");
   }
-
-  return coletadas;
+  return result.data;
 }
