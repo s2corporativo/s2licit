@@ -1,14 +1,13 @@
 import { inArray } from "drizzle-orm";
 import { aiSettings, emailSettings, integrationSettings } from "../../../drizzle/schema";
-import { getDb } from "../../db";
 import { logger } from "../../_core/logger";
+import { getDb } from "../../db";
 import { decryptPassword } from "../../utils/encryption";
 
 /**
  * Snapshot imutável do ambiente de boot. Runtime nunca escreve em process.env.
  * Isso preserva o fallback original mesmo depois de uma credencial da interface
- * ser removida, eliminando o comportamento em que "voltar ao ambiente" só
- * funcionava depois de reiniciar o processo.
+ * ser removida.
  */
 const BOOTSTRAP_ENV = Object.freeze({ ...process.env });
 
@@ -31,7 +30,6 @@ const GENERAL_KEYS = [
   "WHATSAPP_WEBHOOK_URL",
   "WHATSAPP_TO",
   "USD_BRL_RATE",
-  // FIEMG_LICITACOES_URL é mantida apenas como alias de compatibilidade.
   "FIEMG_LICITACOES_URL",
   "FIEMG_OPPORTUNITIES_URL",
   "COMPRASMG_OPPORTUNITIES_URL",
@@ -75,13 +73,16 @@ const KNOWN_ENV_KEYS = [
   "SMTP_FROM",
 ] as const;
 
+const IMAP_KEYS = ["IMAP_HOST", "IMAP_PORT", "IMAP_USER", "IMAP_PASSWORD", "IMAP_TLS", "IMAP_MAILBOX"] as const;
+const SMTP_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_SECURE", "SMTP_FROM"] as const;
+
 function setValue(
   values: Map<string, string>,
   origins: Map<string, CredentialOrigin>,
   key: string,
   value: unknown,
   origin: CredentialOrigin,
-) {
+): void {
   if (value == null) return;
   const normalized = String(value).trim();
   if (!normalized) return;
@@ -89,88 +90,128 @@ function setValue(
   origins.set(key, origin);
 }
 
+function clearValue(
+  values: Map<string, string>,
+  origins: Map<string, CredentialOrigin>,
+  key: string,
+): void {
+  values.delete(key);
+  origins.delete(key);
+}
+
+function clearValues(
+  values: Map<string, string>,
+  origins: Map<string, CredentialOrigin>,
+  keys: readonly string[],
+): void {
+  for (const key of keys) clearValue(values, origins, key);
+}
+
+/**
+ * Se existe override criptografado, o fallback de ambiente é removido antes da
+ * decriptação. Uma chave corrompida/rotacionada falha fechada em vez de misturar
+ * credenciais de duas origens diferentes.
+ */
 function decryptInto(
   values: Map<string, string>,
   origins: Map<string, CredentialOrigin>,
   key: string,
   encrypted: string | null | undefined,
-) {
+): void {
   if (!encrypted) return;
+  clearValue(values, origins, key);
   try {
     setValue(values, origins, key, decryptPassword(encrypted), "interface");
   } catch (error) {
-    logger.error(`[CredentialResolver] Não foi possível decriptar ${key}:`, error);
+    logger.error(`[CredentialResolver] Não foi possível decriptar ${key}; override ficou indisponível.`, error);
   }
 }
 
-async function loadSnapshot(): Promise<RuntimeSnapshot> {
+function bootstrapSnapshot(): RuntimeSnapshot {
   const values = new Map<string, string>();
   const origins = new Map<string, CredentialOrigin>();
-
   for (const key of KNOWN_ENV_KEYS) {
     const value = BOOTSTRAP_ENV[key];
     if (value?.trim()) setValue(values, origins, key, value, "ambiente");
   }
+  return { values, origins, loadedAt: Date.now() };
+}
 
-  const db = await getDb().catch(() => null);
-  if (!db) return { values, origins, loadedAt: Date.now() };
+function refreshTimestamp(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  return {
+    values: new Map(snapshot.values),
+    origins: new Map(snapshot.origins),
+    loadedAt: Date.now(),
+  };
+}
 
-  try {
-    const [aiRows, emailRows, generalRows] = await Promise.all([
-      db.select().from(aiSettings).limit(1),
-      db.select().from(emailSettings).limit(1),
-      db
-        .select()
-        .from(integrationSettings)
-        .where(inArray(integrationSettings.chave, [...GENERAL_KEYS])),
-    ]);
+async function loadSnapshot(): Promise<RuntimeSnapshot> {
+  const base = bootstrapSnapshot();
+  const { values, origins } = base;
+  const db = await getDb();
+  if (!db) return base;
 
-    const ai = aiRows[0];
-    if (ai) {
-      setValue(values, origins, "AI_PROVIDER", ai.aiProvider, "interface");
-      decryptInto(values, origins, "ANTHROPIC_API_KEY", ai.anthropicApiKeyEnc);
-      setValue(values, origins, "ANTHROPIC_MODEL", ai.anthropicModel, "interface");
-      decryptInto(values, origins, "GROQ_API_KEY", ai.groqApiKeyEnc);
-      setValue(values, origins, "GROQ_MODEL", ai.groqModel, "interface");
-      setValue(values, origins, "BUILT_IN_FORGE_API_URL", ai.forgeApiUrl, "interface");
-      decryptInto(values, origins, "BUILT_IN_FORGE_API_KEY", ai.forgeApiKeyEnc);
-    }
+  const [aiRows, emailRows, generalRows] = await Promise.all([
+    db.select().from(aiSettings).limit(1),
+    db.select().from(emailSettings).limit(1),
+    db
+      .select()
+      .from(integrationSettings)
+      .where(inArray(integrationSettings.chave, [...GENERAL_KEYS])),
+  ]);
 
-    const email = emailRows[0];
-    if (email) {
-      if (email.imapHost) {
-        setValue(values, origins, "IMAP_HOST", email.imapHost, "interface");
-        setValue(values, origins, "IMAP_PORT", email.imapPort, "interface");
-        setValue(values, origins, "IMAP_USER", email.imapUser, "interface");
-        decryptInto(values, origins, "IMAP_PASSWORD", email.imapPasswordEnc);
-        setValue(values, origins, "IMAP_TLS", email.imapTls ? "true" : "false", "interface");
-        setValue(values, origins, "IMAP_MAILBOX", email.imapMailbox || "INBOX", "interface");
-      }
-      if (email.smtpHost) {
-        setValue(values, origins, "SMTP_HOST", email.smtpHost, "interface");
-        setValue(values, origins, "SMTP_PORT", email.smtpPort, "interface");
-        setValue(values, origins, "SMTP_USER", email.smtpUser, "interface");
-        decryptInto(values, origins, "SMTP_PASSWORD", email.smtpPasswordEnc);
-        setValue(values, origins, "SMTP_SECURE", email.smtpSecure ? "true" : "false", "interface");
-        setValue(values, origins, "SMTP_FROM", email.smtpFrom, "interface");
-      }
-    }
+  const ai = aiRows[0];
+  if (ai) {
+    setValue(values, origins, "AI_PROVIDER", ai.aiProvider, "interface");
+    decryptInto(values, origins, "ANTHROPIC_API_KEY", ai.anthropicApiKeyEnc);
+    setValue(values, origins, "ANTHROPIC_MODEL", ai.anthropicModel, "interface");
+    decryptInto(values, origins, "GROQ_API_KEY", ai.groqApiKeyEnc);
+    setValue(values, origins, "GROQ_MODEL", ai.groqModel, "interface");
+    setValue(values, origins, "BUILT_IN_FORGE_API_URL", ai.forgeApiUrl, "interface");
+    decryptInto(values, origins, "BUILT_IN_FORGE_API_KEY", ai.forgeApiKeyEnc);
+  }
 
-    for (const row of generalRows) {
-      if (!row.valorEnc) continue;
-      decryptInto(values, origins, row.chave, row.valorEnc);
-    }
-  } catch (error) {
-    logger.error("[CredentialResolver] Falha ao carregar overrides do banco:", error);
+  const email = emailRows[0];
+  if (email?.imapHost) {
+    clearValues(values, origins, IMAP_KEYS);
+    setValue(values, origins, "IMAP_HOST", email.imapHost, "interface");
+    setValue(values, origins, "IMAP_PORT", email.imapPort, "interface");
+    setValue(values, origins, "IMAP_USER", email.imapUser, "interface");
+    decryptInto(values, origins, "IMAP_PASSWORD", email.imapPasswordEnc);
+    setValue(values, origins, "IMAP_TLS", email.imapTls ? "true" : "false", "interface");
+    setValue(values, origins, "IMAP_MAILBOX", email.imapMailbox || "INBOX", "interface");
+  }
+  if (email?.smtpHost) {
+    clearValues(values, origins, SMTP_KEYS);
+    setValue(values, origins, "SMTP_HOST", email.smtpHost, "interface");
+    setValue(values, origins, "SMTP_PORT", email.smtpPort, "interface");
+    setValue(values, origins, "SMTP_USER", email.smtpUser, "interface");
+    decryptInto(values, origins, "SMTP_PASSWORD", email.smtpPasswordEnc);
+    setValue(values, origins, "SMTP_SECURE", email.smtpSecure ? "true" : "false", "interface");
+    setValue(values, origins, "SMTP_FROM", email.smtpFrom, "interface");
+  }
+
+  for (const row of generalRows) {
+    if (!row.valorEnc) continue;
+    decryptInto(values, origins, row.chave, row.valorEnc);
   }
 
   return { values, origins, loadedAt: Date.now() };
 }
 
+/**
+ * Em falha transitória do banco, mantém o último snapshot válido. No primeiro
+ * carregamento, quando ainda não existe snapshot, usa somente o ambiente de
+ * bootstrap. Assim uma indisponibilidade do DB não troca credenciais em voo.
+ */
 async function snapshot(force = false): Promise<RuntimeSnapshot> {
   if (!force && cached && Date.now() - cached.loadedAt < CACHE_TTL_MS) return cached;
-  if (!force && loadPromise) return loadPromise;
-  loadPromise = loadSnapshot();
+  if (loadPromise) return loadPromise;
+
+  loadPromise = loadSnapshot().catch((error) => {
+    logger.error("[CredentialResolver] Falha ao renovar configuração; mantendo último snapshot válido.", error);
+    return cached ? refreshTimestamp(cached) : bootstrapSnapshot();
+  });
   try {
     cached = await loadPromise;
     return cached;
@@ -202,15 +243,20 @@ export async function resolveCredentials(keys: string[]): Promise<Record<string,
   return Object.fromEntries(keys.map((key) => [key, current.values.get(key)]));
 }
 
+function validPort(value: string | undefined, fallback: number): number {
+  const parsed = Number(value ?? fallback);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? parsed : fallback;
+}
+
 export async function getEmailRuntimeConfig() {
   const current = await snapshot();
   const get = (key: string) => current.values.get(key);
-  const imapPort = Number(get("IMAP_PORT") ?? 993);
-  const smtpPort = Number(get("SMTP_PORT") ?? 587);
+  const imapPort = validPort(get("IMAP_PORT"), 993);
+  const smtpPort = validPort(get("SMTP_PORT"), 587);
   return {
     imap: {
       host: get("IMAP_HOST") ?? "",
-      port: Number.isFinite(imapPort) ? imapPort : 993,
+      port: imapPort,
       user: get("IMAP_USER") ?? "",
       password: get("IMAP_PASSWORD") ?? "",
       tls: (get("IMAP_TLS") ?? "true") !== "false",
@@ -218,7 +264,7 @@ export async function getEmailRuntimeConfig() {
     },
     smtp: {
       host: get("SMTP_HOST") ?? "",
-      port: Number.isFinite(smtpPort) ? smtpPort : 587,
+      port: smtpPort,
       user: get("SMTP_USER") ?? "",
       password: get("SMTP_PASSWORD") ?? "",
       secure: (get("SMTP_SECURE") ?? (smtpPort === 465 ? "true" : "false")) === "true",
@@ -230,6 +276,10 @@ export async function getEmailRuntimeConfig() {
 export async function getAiRuntimeConfig() {
   const current = await snapshot();
   const get = (key: string) => current.values.get(key);
+  const requestedTimeout = Number(get("LLM_TIMEOUT_MS") ?? 90_000);
+  const timeoutMs = Number.isFinite(requestedTimeout)
+    ? Math.min(300_000, Math.max(5_000, requestedTimeout))
+    : 90_000;
   return {
     provider: (get("AI_PROVIDER") ?? "auto").toLowerCase(),
     anthropicApiKey: get("ANTHROPIC_API_KEY") ?? "",
@@ -238,7 +288,7 @@ export async function getAiRuntimeConfig() {
     groqModel: get("GROQ_MODEL") ?? "llama-3.3-70b-versatile",
     forgeApiUrl: get("BUILT_IN_FORGE_API_URL") ?? "",
     forgeApiKey: get("BUILT_IN_FORGE_API_KEY") ?? "",
-    timeoutMs: Math.max(5_000, Number(get("LLM_TIMEOUT_MS") ?? 90_000) || 90_000),
+    timeoutMs,
   };
 }
 
