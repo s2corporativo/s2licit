@@ -2,6 +2,7 @@ CREATE TABLE `capture_jobs` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`scraperConfigId` int NOT NULL,
 	`supplierId` int NOT NULL,
+	`activeKey` varchar(96),
 	`mode` enum('search','refresh','full') NOT NULL DEFAULT 'full',
 	`trigger` enum('manual','scheduled','bulk','proposal','api') NOT NULL DEFAULT 'manual',
 	`status` enum('queued','running','success','partial','failed','quarantine','cancelled') NOT NULL DEFAULT 'queued',
@@ -31,6 +32,7 @@ CREATE TABLE `capture_jobs` (
 	`createdAt` timestamp NOT NULL DEFAULT (now()),
 	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `capture_jobs_id` PRIMARY KEY(`id`),
+	CONSTRAINT `uq_capture_jobs_active_key` UNIQUE(`activeKey`),
 	CONSTRAINT `capture_jobs_scraper_fk` FOREIGN KEY (`scraperConfigId`) REFERENCES `scraper_configs`(`id`) ON DELETE cascade,
 	CONSTRAINT `capture_jobs_supplier_fk` FOREIGN KEY (`supplierId`) REFERENCES `suppliers`(`id`) ON DELETE cascade,
 	CONSTRAINT `capture_jobs_user_fk` FOREIGN KEY (`createdByUserId`) REFERENCES `users`(`id`) ON DELETE set null
