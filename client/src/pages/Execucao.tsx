@@ -1,95 +1,64 @@
 import { useMemo, useState } from "react";
-import { BriefcaseBusiness, CheckCircle2, Loader2, PackageCheck, Truck } from "lucide-react";
+import { BriefcaseBusiness, CheckCircle2, Loader2, PackageCheck, Plus, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { formatBRL, formatDateBR } from "@/lib/format";
 
 type Tab = "pedidos" | "entregas" | "contratos";
-
 const ORDER_STATUS = ["solicitado", "confirmado", "faturado", "enviado", "recebido", "divergente", "cancelado"] as const;
 const DELIVERY_STATUS = ["preparando", "transito", "entregue", "atrasada", "devolvida"] as const;
+const INPUT = "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400";
+const money = (value: string) => Number(value.replace(/\./g, "").replace(",", ".")) || 0;
 
 export default function Execucao() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const requested = params.get("tab");
   const [tab, setTab] = useState<Tab>(requested === "contratos" || requested === "entregas" ? requested : "pedidos");
-
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <section className="rounded-2xl bg-blue-950 p-5 text-white">
-        <div className="flex items-start gap-3">
-          <PackageCheck size={26} className="mt-0.5" />
-          <div>
-            <p className="m-0 text-[10px] font-black uppercase tracking-[0.16em] text-blue-200">Após adjudicação</p>
-            <h1 className="mb-1 mt-1 text-2xl font-black">Execução</h1>
-            <p className="m-0 text-sm text-blue-100">Contrato, compra e entrega no mesmo fluxo. Mudanças vinculadas atualizam a oportunidade automaticamente; recebimentos e pagamentos ficam no Financeiro.</p>
-          </div>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-        <TabButton active={tab === "pedidos"} onClick={() => setTab("pedidos")} icon={<PackageCheck size={15} />} label="Pedidos" />
-        <TabButton active={tab === "entregas"} onClick={() => setTab("entregas")} icon={<Truck size={15} />} label="Entregas" />
-        <TabButton active={tab === "contratos"} onClick={() => setTab("contratos")} icon={<BriefcaseBusiness size={15} />} label="Contratos" />
-      </div>
-
-      {tab === "pedidos" && <Orders />}
-      {tab === "entregas" && <Deliveries />}
-      {tab === "contratos" && <Contracts />}
+      <section className="rounded-2xl bg-blue-950 p-5 text-white"><div className="flex items-start gap-3"><PackageCheck size={26} className="mt-0.5" /><div><p className="m-0 text-[10px] font-black uppercase tracking-[0.16em] text-blue-200">Após adjudicação</p><h1 className="mb-1 mt-1 text-2xl font-black">Execução</h1><p className="m-0 text-sm text-blue-100">Contrato, compra e entrega no mesmo fluxo. Mudanças vinculadas atualizam a oportunidade automaticamente; recebimentos e pagamentos ficam no Financeiro.</p></div></div></section>
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><TabButton active={tab === "pedidos"} onClick={() => setTab("pedidos")} icon={<PackageCheck size={15} />} label="Pedidos" /><TabButton active={tab === "entregas"} onClick={() => setTab("entregas")} icon={<Truck size={15} />} label="Entregas" /><TabButton active={tab === "contratos"} onClick={() => setTab("contratos")} icon={<BriefcaseBusiness size={15} />} label="Contratos" /></div>
+      {tab === "pedidos" && <Orders />}{tab === "entregas" && <Deliveries />}{tab === "contratos" && <Contracts />}
     </div>
   );
 }
 
 function Orders() {
   const query = trpc.posVenda.pedidos.useQuery();
+  const opportunities = trpc.opportunities.list.useQuery();
   const utils = trpc.useUtils();
-  const change = trpc.opportunities.updateOrderStatus.useMutation({
-    onSuccess: async () => {
-      await Promise.all([
-        utils.posVenda.pedidos.invalidate(),
-        utils.opportunities.list.invalidate(),
-        utils.opportunities.summary.invalidate(),
-        utils.agenda.proximos.invalidate(),
-      ]);
-      toast.success("Pedido e fluxo atualizados.");
-    },
-    onError: (error) => toast.error(error.message),
-  });
-  if (query.isLoading) return <Loading />;
-  const rows = query.data ?? [];
-  if (!rows.length) return <Empty title="Nenhum pedido em execução" text="Quando uma proposta vencedora gerar compra, o pedido aparecerá aqui." />;
-  return <div className="space-y-2">{rows.map((row) => <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-sm font-black text-slate-900">{row.descricao}</div><div className="mt-1 text-xs text-slate-500">{row.fornecedorNome} · {formatBRL(Number(row.valorTotal))}{row.prazoEntrega ? ` · entrega ${formatDateBR(row.prazoEntrega)}` : ""}</div>{row.vinculo && <div className="mt-1 text-[10px] text-slate-400">Vínculo: {row.vinculo}</div>}</div><select value={row.status} disabled={change.isPending} onChange={(event) => change.mutate({ id: row.id, status: event.target.value as typeof ORDER_STATUS[number] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{ORDER_STATUS.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></article>)}</div>;
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ fornecedorNome: "", descricao: "", valorTotal: "", prazoEntrega: "", vinculo: "", funilId: "" });
+  const invalidate = async () => Promise.all([utils.posVenda.pedidos.invalidate(), utils.opportunities.list.invalidate(), utils.opportunities.summary.invalidate(), utils.agenda.proximos.invalidate()]);
+  const create = trpc.posVenda.salvarPedido.useMutation({ onSuccess: async () => { setOpen(false); setForm({ fornecedorNome: "", descricao: "", valorTotal: "", prazoEntrega: "", vinculo: "", funilId: "" }); await invalidate(); toast.success("Pedido criado."); }, onError: (e) => toast.error(e.message) });
+  const change = trpc.opportunities.updateOrderStatus.useMutation({ onSuccess: async () => { await invalidate(); toast.success("Pedido e fluxo atualizados."); }, onError: (e) => toast.error(e.message) });
+  return <section className="space-y-3"><Header title="Pedidos de compra" onAdd={() => setOpen((v) => !v)} />{open && <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 md:grid-cols-3"><Field label="Fornecedor *"><input value={form.fornecedorNome} onChange={(e) => setForm({ ...form, fornecedorNome: e.target.value })} className={INPUT} /></Field><Field label="Descrição *"><input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} className={INPUT} /></Field><Field label="Valor total *"><input value={form.valorTotal} onChange={(e) => setForm({ ...form, valorTotal: e.target.value })} className={INPUT} /></Field><Field label="Prazo entrega"><input type="date" value={form.prazoEntrega} onChange={(e) => setForm({ ...form, prazoEntrega: e.target.value })} className={INPUT} /></Field><Field label="Empenho / AF / contrato"><input value={form.vinculo} onChange={(e) => setForm({ ...form, vinculo: e.target.value })} className={INPUT} /></Field><Field label="Oportunidade"><select value={form.funilId} onChange={(e) => setForm({ ...form, funilId: e.target.value })} className={INPUT}><option value="">Sem vínculo</option>{(opportunities.data ?? []).filter((o) => o.macroEtapa === "execucao").map((o) => <option key={o.id} value={o.id}>#{o.id} {o.titulo}</option>)}</select></Field><div className="md:col-span-3 flex justify-end"><button disabled={create.isPending || form.fornecedorNome.length < 2 || form.descricao.length < 3 || money(form.valorTotal) <= 0} onClick={() => create.mutate({ fornecedorNome: form.fornecedorNome, descricao: form.descricao, valorTotal: money(form.valorTotal), prazoEntrega: form.prazoEntrega || undefined, vinculo: form.vinculo || undefined, funilId: form.funilId ? Number(form.funilId) : undefined })} className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">Salvar pedido</button></div></div>}{query.isLoading ? <Loading /> : (query.data ?? []).length === 0 ? <Empty title="Nenhum pedido em execução" text="Crie o pedido aqui ou gere a partir de uma proposta vencedora." /> : <div className="space-y-2">{(query.data ?? []).map((row) => <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-sm font-black text-slate-900">{row.descricao}</div><div className="mt-1 text-xs text-slate-500">{row.fornecedorNome} · {formatBRL(Number(row.valorTotal))}{row.prazoEntrega ? ` · entrega ${formatDateBR(row.prazoEntrega)}` : ""}</div>{row.vinculo && <div className="mt-1 text-[10px] text-slate-400">Vínculo: {row.vinculo}</div>}</div><select value={row.status} disabled={change.isPending} onChange={(e) => change.mutate({ id: row.id, status: e.target.value as typeof ORDER_STATUS[number] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{ORDER_STATUS.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></article>)}</div>}</section>;
 }
 
 function Deliveries() {
   const query = trpc.posVenda.entregas.useQuery();
+  const orders = trpc.posVenda.pedidos.useQuery();
   const utils = trpc.useUtils();
-  const change = trpc.opportunities.updateDeliveryStatus.useMutation({
-    onSuccess: async () => {
-      await Promise.all([
-        utils.posVenda.entregas.invalidate(),
-        utils.opportunities.list.invalidate(),
-        utils.opportunities.summary.invalidate(),
-        utils.agenda.proximos.invalidate(),
-      ]);
-      toast.success("Entrega e fluxo atualizados.");
-    },
-    onError: (error) => toast.error(error.message),
-  });
-  if (query.isLoading) return <Loading />;
-  const rows = query.data ?? [];
-  if (!rows.length) return <Empty title="Nenhuma entrega em acompanhamento" text="Entregas vinculadas à execução aparecerão aqui." />;
-  return <div className="space-y-2">{rows.map((row) => <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-sm font-black text-slate-900">{row.descricao}</div><div className="mt-1 text-xs text-slate-500">{[row.transportadora, row.rastreio, row.previsao ? `previsão ${formatDateBR(row.previsao)}` : null].filter(Boolean).join(" · ")}</div>{row.entregueEm && <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700"><CheckCircle2 size={11} /> entregue {formatDateBR(row.entregueEm)}</div>}</div><select value={row.status} disabled={change.isPending} onChange={(event) => change.mutate({ id: row.id, status: event.target.value as typeof DELIVERY_STATUS[number] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{DELIVERY_STATUS.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></article>)}</div>;
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ descricao: "", transportadora: "", rastreio: "", previsao: "", orderId: "" });
+  const invalidate = async () => Promise.all([utils.posVenda.entregas.invalidate(), utils.opportunities.list.invalidate(), utils.opportunities.summary.invalidate(), utils.agenda.proximos.invalidate()]);
+  const create = trpc.posVenda.salvarEntrega.useMutation({ onSuccess: async () => { setOpen(false); setForm({ descricao: "", transportadora: "", rastreio: "", previsao: "", orderId: "" }); await invalidate(); toast.success("Entrega criada."); }, onError: (e) => toast.error(e.message) });
+  const change = trpc.opportunities.updateDeliveryStatus.useMutation({ onSuccess: async () => { await invalidate(); toast.success("Entrega e fluxo atualizados."); }, onError: (e) => toast.error(e.message) });
+  return <section className="space-y-3"><Header title="Entregas" onAdd={() => setOpen((v) => !v)} />{open && <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 md:grid-cols-3"><Field label="Descrição *"><input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} className={INPUT} /></Field><Field label="Transportadora"><input value={form.transportadora} onChange={(e) => setForm({ ...form, transportadora: e.target.value })} className={INPUT} /></Field><Field label="Rastreio"><input value={form.rastreio} onChange={(e) => setForm({ ...form, rastreio: e.target.value })} className={INPUT} /></Field><Field label="Previsão"><input type="date" value={form.previsao} onChange={(e) => setForm({ ...form, previsao: e.target.value })} className={INPUT} /></Field><Field label="Pedido"><select value={form.orderId} onChange={(e) => setForm({ ...form, orderId: e.target.value })} className={INPUT}><option value="">Sem vínculo</option>{(orders.data ?? []).filter((o) => o.status !== "cancelado").map((o) => <option key={o.id} value={o.id}>#{o.id} {o.descricao}</option>)}</select></Field><div className="flex items-end justify-end"><button disabled={create.isPending || form.descricao.length < 3} onClick={() => create.mutate({ descricao: form.descricao, transportadora: form.transportadora || undefined, rastreio: form.rastreio || undefined, previsao: form.previsao || undefined, orderId: form.orderId ? Number(form.orderId) : undefined })} className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">Salvar entrega</button></div></div>}{query.isLoading ? <Loading /> : (query.data ?? []).length === 0 ? <Empty title="Nenhuma entrega em acompanhamento" text="Registre uma entrega e vincule ao pedido quando disponível." /> : <div className="space-y-2">{(query.data ?? []).map((row) => <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-sm font-black text-slate-900">{row.descricao}</div><div className="mt-1 text-xs text-slate-500">{[row.transportadora, row.rastreio, row.previsao ? `previsão ${formatDateBR(row.previsao)}` : null].filter(Boolean).join(" · ")}</div>{row.entregueEm && <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700"><CheckCircle2 size={11} /> entregue {formatDateBR(row.entregueEm)}</div>}</div><select value={row.status} disabled={change.isPending} onChange={(e) => change.mutate({ id: row.id, status: e.target.value as typeof DELIVERY_STATUS[number] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{DELIVERY_STATUS.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></article>)}</div>}</section>;
 }
 
 function Contracts() {
   const query = trpc.operationalGovernance.listContracts.useQuery();
-  if (query.isLoading) return <Loading />;
-  const rows = query.data ?? [];
-  if (!rows.length) return <Empty title="Nenhum contrato cadastrado" text="Contratos e instrumentos pós-adjudicação aparecerão aqui." />;
-  return <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><th className="p-3">Contrato</th><th className="p-3">Órgão</th><th className="p-3">Valor</th><th className="p-3">Saldo</th><th className="p-3">Fim vigência</th><th className="p-3">Status</th></tr></thead><tbody>{rows.map((row: any) => <tr key={row.id} className="border-b border-slate-100 last:border-0"><td className="p-3 font-bold text-slate-900">{row.numeroContrato}</td><td className="p-3 text-slate-600">{row.orgao}</td><td className="p-3 font-semibold">{formatBRL(Number(row.valorContratado ?? 0))}</td><td className="p-3">{formatBRL(Number(row.saldoContratual ?? 0))}</td><td className="p-3">{row.fimVigencia ? formatDateBR(row.fimVigencia) : "—"}{row.daysToExpire != null && row.daysToExpire <= 45 && <div className="text-[10px] font-bold text-amber-700">{row.daysToExpire} dia(s)</div>}</td><td className="p-3"><span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">{row.status}</span></td></tr>)}</tbody></table></div>;
+  const opportunities = trpc.opportunities.list.useQuery();
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ orgao: "", numeroContrato: "", objeto: "", valorContratado: "", saldoContratual: "", inicioVigencia: "", fimVigencia: "", funilId: "", status: "active" as "draft" | "active" | "suspended" | "expired" | "closed" | "cancelled" });
+  const save = trpc.operationalGovernance.saveContract.useMutation({ onSuccess: async () => { setOpen(false); await Promise.all([utils.operationalGovernance.listContracts.invalidate(), utils.opportunities.list.invalidate(), utils.agenda.proximos.invalidate()]); toast.success("Contrato salvo."); }, onError: (e) => toast.error(e.message) });
+  return <section className="space-y-3"><Header title="Contratos" onAdd={() => setOpen((v) => !v)} />{open && <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 md:grid-cols-3"><Field label="Órgão *"><input value={form.orgao} onChange={(e) => setForm({ ...form, orgao: e.target.value })} className={INPUT} /></Field><Field label="Contrato *"><input value={form.numeroContrato} onChange={(e) => setForm({ ...form, numeroContrato: e.target.value })} className={INPUT} /></Field><Field label="Oportunidade"><select value={form.funilId} onChange={(e) => setForm({ ...form, funilId: e.target.value })} className={INPUT}><option value="">Sem vínculo</option>{(opportunities.data ?? []).filter((o) => o.macroEtapa === "execucao").map((o) => <option key={o.id} value={o.id}>#{o.id} {o.titulo}</option>)}</select></Field><Field label="Objeto"><input value={form.objeto} onChange={(e) => setForm({ ...form, objeto: e.target.value })} className={INPUT} /></Field><Field label="Valor contratado *"><input value={form.valorContratado} onChange={(e) => setForm({ ...form, valorContratado: e.target.value })} className={INPUT} /></Field><Field label="Saldo contratual"><input value={form.saldoContratual} onChange={(e) => setForm({ ...form, saldoContratual: e.target.value })} className={INPUT} /></Field><Field label="Início"><input type="date" value={form.inicioVigencia} onChange={(e) => setForm({ ...form, inicioVigencia: e.target.value })} className={INPUT} /></Field><Field label="Fim"><input type="date" value={form.fimVigencia} onChange={(e) => setForm({ ...form, fimVigencia: e.target.value })} className={INPUT} /></Field><Field label="Status"><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as typeof form.status })} className={INPUT}><option value="draft">Rascunho</option><option value="active">Ativo</option><option value="suspended">Suspenso</option><option value="expired">Expirado</option><option value="closed">Encerrado</option><option value="cancelled">Cancelado</option></select></Field><div className="md:col-span-3 flex justify-end"><button disabled={save.isPending || form.orgao.length < 2 || !form.numeroContrato || money(form.valorContratado) < 0} onClick={() => save.mutate({ funilId: form.funilId ? Number(form.funilId) : undefined, orgao: form.orgao, numeroContrato: form.numeroContrato, objeto: form.objeto || undefined, valorContratado: money(form.valorContratado), saldoContratual: form.saldoContratual ? money(form.saldoContratual) : money(form.valorContratado), inicioVigencia: form.inicioVigencia || undefined, fimVigencia: form.fimVigencia || undefined, status: form.status })} className="rounded-lg bg-blue-950 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">Salvar contrato</button></div></div>}{query.isLoading ? <Loading /> : (query.data ?? []).length === 0 ? <Empty title="Nenhum contrato cadastrado" text="Registre o instrumento e, quando possível, vincule-o à oportunidade vencedora." /> : <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] font-black uppercase tracking-wider text-slate-500"><th className="p-3">Contrato</th><th className="p-3">Órgão</th><th className="p-3">Valor</th><th className="p-3">Saldo</th><th className="p-3">Fim vigência</th><th className="p-3">Status</th></tr></thead><tbody>{(query.data ?? []).map((row: any) => <tr key={row.id} className="border-b border-slate-100 last:border-0"><td className="p-3 font-bold text-slate-900">{row.numeroContrato}</td><td className="p-3 text-slate-600">{row.orgao}</td><td className="p-3 font-semibold">{formatBRL(Number(row.valorContratado ?? 0))}</td><td className="p-3">{formatBRL(Number(row.saldoContratual ?? 0))}</td><td className="p-3">{row.fimVigencia ? formatDateBR(row.fimVigencia) : "—"}{row.daysToExpire != null && row.daysToExpire <= 45 && <div className="text-[10px] font-bold text-amber-700">{row.daysToExpire} dia(s)</div>}</td><td className="p-3"><span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">{row.status}</span></td></tr>)}</tbody></table></div>}</section>;
 }
 
+function Header({ title, onAdd }: { title: string; onAdd: () => void }) { return <div className="flex items-center justify-between"><h2 className="text-sm font-black text-slate-900">{title}</h2><button onClick={onAdd} className="inline-flex items-center gap-1 rounded-lg bg-blue-950 px-3 py-2 text-xs font-bold text-white"><Plus size={13} /> Novo</button></div>; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">{label}</span>{children}</label>; }
 function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) { return <button onClick={onClick} className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold ${active ? "bg-blue-950 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{icon}{label}</button>; }
 function Loading() { return <div className="flex min-h-48 items-center justify-center text-slate-400"><Loader2 className="animate-spin" size={20} /></div>; }
 function Empty({ title, text }: { title: string; text: string }) { return <div className="rounded-xl border border-dashed border-slate-200 bg-white p-12 text-center"><div className="text-sm font-black text-slate-700">{title}</div><div className="mt-1 text-xs text-slate-400">{text}</div></div>; }
