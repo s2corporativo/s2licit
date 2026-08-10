@@ -13,13 +13,6 @@ import {
 } from "drizzle-orm/mysql-core";
 import { products, scraperConfigs, suppliers, users } from "./schema";
 
-/**
- * Fila persistente de captura.
- *
- * Substitui os Maps/Sets em memória usados para saber se um scraper está
- * executando. O job sobrevive a restart do processo e serve simultaneamente
- * como fila, status em tempo real, heartbeat, histórico e base de métricas.
- */
 export const captureJobs = mysqlTable(
   "capture_jobs",
   {
@@ -30,11 +23,6 @@ export const captureJobs = mysqlTable(
     supplierId: int("supplierId")
       .notNull()
       .references(() => suppliers.id, { onDelete: "cascade" }),
-    /**
-     * Chave preenchida apenas enquanto queued/running. UNIQUE + múltiplos NULL
-     * do MySQL garantem um único job ativo por configuração mesmo com várias
-     * instâncias do backend enfileirando ao mesmo tempo.
-     */
     activeKey: varchar("activeKey", { length: 96 }),
     mode: mysqlEnum("mode", ["search", "refresh", "full"]).default("full").notNull(),
     trigger: mysqlEnum("trigger", ["manual", "scheduled", "bulk", "proposal", "api"])
@@ -84,11 +72,7 @@ export const captureJobs = mysqlTable(
   ],
 );
 
-/**
- * Evidência de cada preço/estoque observado no fornecedor.
- * A observação é separada da oferta atual para permitir auditoria, reprocesso,
- * detecção de anomalia e evolução do matching sem precisar raspar novamente.
- */
+/** Evidência imutável-ish da observação, separada da decisão humana. */
 export const supplierProductObservations = mysqlTable(
   "supplier_product_observations",
   {
@@ -132,6 +116,11 @@ export const supplierProductObservations = mysqlTable(
       .notNull(),
     reason: text("reason"),
     rawPayload: json("rawPayload").$type<Record<string, unknown>>(),
+    reviewStatus: mysqlEnum("reviewStatus", ["pending", "approved", "rejected"])
+      .default("pending")
+      .notNull(),
+    reviewedAt: timestamp("reviewedAt"),
+    reviewedByUserId: int("reviewedByUserId").references(() => users.id, { onDelete: "set null" }),
     capturedAt: timestamp("capturedAt").defaultNow().notNull(),
   },
   (table) => [
@@ -140,6 +129,7 @@ export const supplierProductObservations = mysqlTable(
     index("idx_observations_ean").on(table.ean),
     index("idx_observations_product").on(table.productId, table.capturedAt),
     index("idx_observations_hash").on(table.supplierId, table.contentHash),
+    index("idx_observations_review_queue").on(table.reviewStatus, table.action, table.capturedAt),
   ],
 );
 
@@ -188,6 +178,7 @@ export const captureAiFeedback = mysqlTable(
   (table) => [
     index("idx_capture_ai_feedback_supplier").on(table.supplierId, table.createdAt),
     index("idx_capture_ai_feedback_observation").on(table.observationId),
+    index("idx_capture_ai_feedback_lookup").on(table.supplierId, table.observedName, table.reusable),
   ],
 );
 
