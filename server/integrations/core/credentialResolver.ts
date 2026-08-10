@@ -220,8 +220,18 @@ async function snapshot(force = false): Promise<RuntimeSnapshot> {
   }
 }
 
+/**
+ * Marca o snapshot atual como vencido sem apagá-lo. A próxima leitura força o
+ * reload do banco; se o banco falhar nesse intervalo, o último snapshot válido
+ * continua disponível e não há regressão súbita para valores de bootstrap.
+ */
 export function invalidateCredentialCache(): void {
-  cached = null;
+  if (!cached) return;
+  cached = {
+    values: new Map(cached.values),
+    origins: new Map(cached.origins),
+    loadedAt: 0,
+  };
 }
 
 export async function resolveCredential(key: string): Promise<string | undefined> {
