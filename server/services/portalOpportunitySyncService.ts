@@ -1,25 +1,31 @@
-import axios from "axios";
 import { JSDOM } from "jsdom";
-import puppeteer from "puppeteer";
 import { and, eq, like } from "drizzle-orm";
-import { getDb } from "../db";
 import {
   emailQuotationItems,
   emailQuotations,
   products,
   suppliers,
 } from "../../drizzle/schema";
-import { bestNameMatch } from "./emailQuotationMatchingService";
-import { assertSafeExternalUrl } from "../utils/urlGuard";
 import { logger } from "../_core/logger";
+import { getDb } from "../db";
+import { externalHttpRequest } from "../integrations/core/externalHttpClient";
+import { renderPublicHtml } from "../integrations/core/secureBrowserRenderer";
+import {
+  bestNameMatchFromIndex,
+  buildNameMatchIndex,
+  type CatalogProduct,
+  type NameMatchIndex,
+} from "./emailQuotationMatchingService";
 
 const FUNDEP_GROUPS_URL =
   "https://portaldecompras.fundep.ufmg.br/Publico/ConsultarGruposAtivos.aspx";
 const FUNARBE_OPEN_URL = "https://compras.funarbe.org.br/";
 const DEFAULT_MAX_FUNDEP_GROUPS = 80;
+const MAX_FUNDEP_GROUPS = 200;
 const HTTP_TIMEOUT_MS = 30_000;
+const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const USER_AGENT =
-  "Mozilla/5.0 (compatible; S2Licit/1.0; +https://github.com/s2corporativo/s2licit)";
+  "Mozilla/5.0 (compatible; S2Licit/2.0; procurement-integration-platform)";
 
 export type PortalOpportunitySource = "fundep" | "funarbe";
 
@@ -52,12 +58,6 @@ export interface PortalSyncResult {
   errors: string[];
 }
 
-interface TambasaCatalogProduct {
-  id: number;
-  name: string;
-  price: string | null;
-}
-
 function normalizeText(value: string | null | undefined): string {
   return (value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -73,14 +73,12 @@ function parsePtBrNumber(value: string | null | undefined): number | null {
 }
 
 function truncate(value: string, max = 512): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
 function parseRelativeDeadline(text: string, now: Date): Date | null {
   const normalized = normalizeText(text);
-  const match = normalized.match(
-    /Finaliza\s+em[^0-9]*(\d+)(?::(\d{1,2}))?\s*horas?/i,
-  );
+  const match = normalized.match(/Finaliza\s+em[^0-9]*(\d+)(?::(\d{1,2}))?\s*horas?/i);
   if (!match) return null;
   const hours = Number(match[1]);
   const minutes = Number(match[2] ?? "0");
@@ -135,27 +133,23 @@ export function parseFundepGroupHtml(
   const groupName =
     bodyText.match(/Grupo:\s*(.+?)(?=Informações importantes|Lote de compra|$)/i)?.[1]?.trim() ||
     "Compras Fundep";
-
   const byLot = new Map<string, PortalOpportunity>();
 
   for (const table of Array.from(document.querySelectorAll("table"))) {
-    const rows = Array.from(table.querySelectorAll("tr"));
-    for (const row of rows) {
+    for (const row of Array.from(table.querySelectorAll("tr"))) {
       const cells = Array.from(row.querySelectorAll("th,td")).map((cell) =>
         normalizeText(cell.textContent),
       );
       if (cells.length < 3) continue;
-
       const codeIndex = cells.findIndex((cell) => /^\d+\s*\*\s*\d+$/.test(cell));
       if (codeIndex < 0) continue;
-
       const codeMatch = cells[codeIndex].match(/^(\d+)\s*\*\s*(\d+)$/);
       if (!codeMatch) continue;
+
       const lotId = codeMatch[1];
       const numeroItem = Number(codeMatch[2]);
       const descricao = normalizeText(cells[codeIndex + 1]);
       if (!descricao || descricao.length < 3) continue;
-
       const quantidade = parsePtBrNumber(cells[codeIndex + 2]);
       const unidade = normalizeText(cells[codeIndex + 3]) || null;
       const context = nearestContextText(table, lotId);
@@ -170,7 +164,7 @@ export function parseFundepGroupHtml(
         portalUrl,
         prazoResposta: parseRelativeDeadline(context, now),
         bodyText: [
-          `Origem: Portal público de Compras Fundep`,
+          "Origem: Portal público de Compras Fundep",
           `Grupo: ${groupName}`,
           `Lote: ${lotId}`,
           natureza ? `Natureza: ${natureza}` : null,
@@ -179,7 +173,7 @@ export function parseFundepGroupHtml(
         ]
           .filter(Boolean)
           .join("\n"),
-        items: [],
+        items: [] as PortalOpportunityItem[],
       };
 
       if (!current.items.some((item) => item.numeroItem === numeroItem)) {
@@ -213,7 +207,7 @@ function extractFundepGroupUrls(html: string): string[] {
       const url = new URL(href, FUNDEP_GROUPS_URL);
       if (url.searchParams.get("CodigoGrupoProduto")) urls.add(url.toString());
     } catch {
-      // Link inválido é simplesmente ignorado.
+      // Link inválido é ignorado.
     }
   }
 
@@ -236,7 +230,6 @@ function extractFundepGroupUrls(html: string): string[] {
     );
     urls.add(url.toString());
   }
-
   return Array.from(urls);
 }
 
@@ -251,7 +244,12 @@ export function parseFunarbeHtml(html: string, portalUrl = FUNARBE_OPEN_URL): Po
     if (text.length < 12) return;
     if (!/(abert|cota[cç][aã]o|preg[aã]o|sele[cç][aã]o|tomada\s+de\s+pre[cç]os)/i.test(text)) return;
 
-    const href = hrefValue ? new URL(hrefValue, portalUrl).toString() : portalUrl;
+    let href = portalUrl;
+    try {
+      if (hrefValue) href = new URL(hrefValue, portalUrl).toString();
+    } catch {
+      href = portalUrl;
+    }
     const idMatch = text.match(
       /(?:processo|cota[cç][aã]o|preg[aã]o|sele[cç][aã]o|tomada|n[º°.]?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./-]{2,})/i,
     );
@@ -273,9 +271,10 @@ export function parseFunarbeHtml(html: string, portalUrl = FUNARBE_OPEN_URL): Po
       portalUrl: href,
       prazoResposta: parseAbsoluteDeadline(text),
       bodyText: `Origem: Portal público de Compras Funarbe\nProcesso: ${externalId}\nURL: ${href}\n\n${text}`,
-      items: description.length >= 20
-        ? [{ numeroItem: 1, descricao: description, quantidade: 1, unidade: "UN" }]
-        : [],
+      items:
+        description.length >= 20
+          ? [{ numeroItem: 1, descricao: description, quantidade: 1, unidade: "UN" }]
+          : [],
     });
   };
 
@@ -284,89 +283,89 @@ export function parseFunarbeHtml(html: string, portalUrl = FUNARBE_OPEN_URL): Po
       .map((cell) => normalizeText(cell.textContent))
       .filter(Boolean)
       .join(" | ");
-    const anchor = row.querySelector("a[href]");
-    addCandidate(text, anchor?.getAttribute("href"));
+    addCandidate(text, row.querySelector("a[href]")?.getAttribute("href"));
   }
-
   for (const anchor of Array.from(document.querySelectorAll("a[href]"))) {
     const parentText = normalizeText(anchor.parentElement?.textContent);
     addCandidate(parentText || anchor.textContent || "", anchor.getAttribute("href"));
   }
-
   return Array.from(opportunities.values());
 }
 
-async function fetchHtml(urlValue: string): Promise<string> {
-  const url = assertSafeExternalUrl(urlValue, "URL do portal");
-  const response = await axios.get<string>(url.toString(), {
-    timeout: HTTP_TIMEOUT_MS,
-    responseType: "text",
-    maxRedirects: 5,
+async function fetchHtml(
+  source: PortalOpportunitySource,
+  operation: string,
+  url: string,
+): Promise<string> {
+  const response = await externalHttpRequest<string>({
+    source,
+    operation,
+    url,
+    expected: "text",
+    accept: "text/html,application/xhtml+xml",
     headers: {
+      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
       "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml",
-      "Accept-Language": "pt-BR,pt;q=0.9",
+    },
+    timeoutMs: HTTP_TIMEOUT_MS,
+    deadlineMs: HTTP_TIMEOUT_MS * 2,
+    maxRetries: 2,
+    maxBodyBytes: MAX_HTML_BYTES,
+    validator: (payload) => {
+      if (typeof payload !== "string") throw new Error("Portal retornou conteúdo não textual.");
+      return payload;
     },
   });
-  return typeof response.data === "string" ? response.data : String(response.data ?? "");
+  if (!response.ok || response.data == null) {
+    throw new Error(response.error?.message ?? `HTTP ${response.statusCode}`);
+  }
+  return response.data;
 }
 
-async function fetchRenderedHtml(urlValue: string): Promise<string> {
-  const url = assertSafeExternalUrl(urlValue, "URL do portal");
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
+async function fetchRenderedHtml(source: PortalOpportunitySource, url: string): Promise<string> {
+  return renderPublicHtml({
+    source,
+    url,
+    userAgent: USER_AGENT,
+    navigationTimeoutMs: 45_000,
+    maxHtmlBytes: MAX_HTML_BYTES,
   });
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
-    await page.goto(url.toString(), { waitUntil: "networkidle2", timeout: 45_000 });
-    return await page.content();
-  } finally {
-    await browser.close();
-  }
 }
 
 async function mapWithConcurrency<T, R>(
-  values: T[],
+  values: readonly T[],
   concurrency: number,
   mapper: (value: T) => Promise<R>,
 ): Promise<R[]> {
-  const results: R[] = new Array(values.length);
+  if (!values.length) return [];
+  const results = new Array<R>(values.length);
   let cursor = 0;
-
-  async function worker() {
-    while (cursor < values.length) {
-      const index = cursor++;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= values.length) return;
       results[index] = await mapper(values[index]);
     }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
-  );
+  });
+  await Promise.all(workers);
   return results;
 }
 
-async function fetchFundepOpportunities(maxGroups: number, errors: string[]) {
-  const indexHtml = await fetchHtml(FUNDEP_GROUPS_URL);
+async function fetchFundepOpportunities(maxGroups: number, errors: string[]): Promise<PortalOpportunity[]> {
+  const indexHtml = await fetchHtml("fundep", "groups.index", FUNDEP_GROUPS_URL);
   const groupUrls = extractFundepGroupUrls(indexHtml).slice(0, maxGroups);
   if (groupUrls.length === 0) {
     errors.push("Fundep: nenhum grupo público foi identificado na página de grupos ativos.");
-    return [] as PortalOpportunity[];
+    return [];
   }
 
   const batches = await mapWithConcurrency(groupUrls, 4, async (url) => {
     try {
-      const html = await fetchHtml(url);
+      const html = await fetchHtml("fundep", "group.items", url);
       return parseFundepGroupHtml(html, url);
     } catch (error) {
-      errors.push(`Fundep (${url}): ${(error as Error).message}`);
+      errors.push(`Fundep (${new URL(url).hostname}): ${error instanceof Error ? error.message : String(error)}`);
       return [] as PortalOpportunity[];
     }
   });
@@ -374,32 +373,38 @@ async function fetchFundepOpportunities(maxGroups: number, errors: string[]) {
   const byId = new Map<string, PortalOpportunity>();
   for (const opportunity of batches.flat()) {
     const existing = byId.get(opportunity.externalId);
-    if (!existing || opportunity.items.length > existing.items.length) {
-      byId.set(opportunity.externalId, opportunity);
-    }
+    if (!existing || opportunity.items.length > existing.items.length) byId.set(opportunity.externalId, opportunity);
   }
   return Array.from(byId.values());
 }
 
-async function fetchFunarbeOpportunities(errors: string[]) {
+async function fetchFunarbeOpportunities(errors: string[]): Promise<PortalOpportunity[]> {
+  let staticSucceeded = false;
   try {
-    const html = await fetchHtml(FUNARBE_OPEN_URL);
+    const html = await fetchHtml("funarbe", "opportunities.html", FUNARBE_OPEN_URL);
+    staticSucceeded = true;
     const parsed = parseFunarbeHtml(html);
     if (parsed.length > 0) return parsed;
   } catch (error) {
-    errors.push(`Funarbe (HTML): ${(error as Error).message}`);
+    errors.push(`Funarbe (HTML): ${error instanceof Error ? error.message : String(error)}`);
   }
 
   try {
-    const rendered = await fetchRenderedHtml(FUNARBE_OPEN_URL);
-    return parseFunarbeHtml(rendered);
+    const rendered = await fetchRenderedHtml("funarbe", FUNARBE_OPEN_URL);
+    const parsed = parseFunarbeHtml(rendered);
+    if (parsed.length === 0 && staticSucceeded) {
+      errors.push(
+        "Funarbe: fonte respondeu, mas nenhum registro ativo foi reconhecido; valide possível mudança de layout antes de concluir ausência de oportunidades.",
+      );
+    }
+    return parsed;
   } catch (error) {
-    errors.push(`Funarbe (navegador): ${(error as Error).message}`);
-    return [] as PortalOpportunity[];
+    errors.push(`Funarbe (browser seguro): ${error instanceof Error ? error.message : String(error)}`);
+    return [];
   }
 }
 
-async function loadTambasaCatalog(): Promise<TambasaCatalogProduct[]> {
+async function loadTambasaCatalog(): Promise<CatalogProduct[]> {
   const db = await getDb();
   if (!db) return [];
   return db
@@ -410,74 +415,91 @@ async function loadTambasaCatalog(): Promise<TambasaCatalogProduct[]> {
     .limit(50_000);
 }
 
+function insertIdFromResult(result: unknown): number {
+  const header = Array.isArray(result) ? result[0] : result;
+  if (!header || typeof header !== "object" || !("insertId" in header)) {
+    throw new Error("Banco não retornou o ID da oportunidade inserida.");
+  }
+  const id = Number((header as { insertId?: unknown }).insertId);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error("ID inválido retornado ao inserir oportunidade.");
+  return id;
+}
+
 async function persistOpportunity(
   opportunity: PortalOpportunity,
-  tambasaCatalog: TambasaCatalogProduct[],
+  matchIndex: NameMatchIndex,
 ): Promise<{ imported: boolean; matched: number; unmatched: number }> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
 
   const messageId = `portal:${opportunity.source}:${opportunity.externalId}`;
-  const existing = await db
+  const [existing] = await db
     .select({ id: emailQuotations.id })
     .from(emailQuotations)
     .where(eq(emailQuotations.messageId, messageId))
     .limit(1);
-  if (existing.length > 0) return { imported: false, matched: 0, unmatched: 0 };
+  if (existing) return { imported: false, matched: 0, unmatched: 0 };
 
-  const matches = opportunity.items.map((item) => bestNameMatch(item.descricao, tambasaCatalog));
+  const matches = opportunity.items.map((item) => bestNameMatchFromIndex(item.descricao, matchIndex));
   const matched = matches.filter(Boolean).length;
 
-  const [inserted] = await db.insert(emailQuotations).values({
-    messageId,
-    fromName: opportunity.source === "fundep" ? "Portal Fundep" : "Portal Funarbe",
-    fromAddress: null,
-    subject: truncate(opportunity.subject, 512),
-    orgao: opportunity.orgao,
-    bodyText: truncate(opportunity.bodyText, 65_000),
-    receivedAt: new Date(),
-    prazoResposta: opportunity.prazoResposta,
-    sourceType: "body",
-    sourceFilename: null,
-    status: opportunity.items.length > 0 ? "revisao" : "nova",
-    totalItems: opportunity.items.length,
-    matchedItems: matched,
+  return db.transaction(async (tx) => {
+    const [duplicate] = await tx
+      .select({ id: emailQuotations.id })
+      .from(emailQuotations)
+      .where(eq(emailQuotations.messageId, messageId))
+      .limit(1);
+    if (duplicate) return { imported: false, matched: 0, unmatched: 0 };
+
+    const insertResult = await tx.insert(emailQuotations).values({
+      messageId,
+      fromName: opportunity.source === "fundep" ? "Portal Fundep" : "Portal Funarbe",
+      fromAddress: null,
+      subject: truncate(opportunity.subject, 512),
+      orgao: opportunity.orgao,
+      bodyText: truncate(opportunity.bodyText, 65_000),
+      receivedAt: new Date(),
+      prazoResposta: opportunity.prazoResposta,
+      sourceType: "body",
+      sourceFilename: null,
+      status: opportunity.items.length > 0 ? "revisao" : "nova",
+      totalItems: opportunity.items.length,
+      matchedItems: matched,
+    });
+    const quotationId = insertIdFromResult(insertResult);
+
+    if (opportunity.items.length > 0) {
+      await tx.insert(emailQuotationItems).values(
+        opportunity.items.map((item, index) => {
+          const match = matches[index];
+          return {
+            quotationId,
+            numeroItem: item.numeroItem,
+            descricao: truncate(item.descricao, 65_000),
+            quantidade: item.quantidade != null ? String(item.quantidade) : null,
+            unidade: item.unidade,
+            codigoCatalogo: item.codigoExterno ?? null,
+            produtoMatchId: match?.product.id ?? null,
+            matchScore: match ? String(Number(match.score.toFixed(4))) : null,
+            matchMethod: match ? ("nome" as const) : ("nenhum" as const),
+            matchConfirmado: false,
+            precoSugerido: match?.product.price ?? null,
+          };
+        }),
+      );
+    }
+    return {
+      imported: true,
+      matched,
+      unmatched: opportunity.items.length - matched,
+    };
   });
-  const quotationId = (inserted as { insertId?: number }).insertId;
-  if (!quotationId) throw new Error(`Não foi possível identificar a cotação criada (${messageId}).`);
-
-  if (opportunity.items.length > 0) {
-    await db.insert(emailQuotationItems).values(
-      opportunity.items.map((item, index) => {
-        const match = matches[index];
-        return {
-          quotationId,
-          numeroItem: item.numeroItem,
-          descricao: truncate(item.descricao, 65_000),
-          quantidade: item.quantidade != null ? String(item.quantidade) : null,
-          unidade: item.unidade,
-          codigoCatalogo: null,
-          produtoMatchId: match?.product.id ?? null,
-          matchScore: match ? String(Number(match.score.toFixed(4))) : null,
-          matchMethod: match ? ("nome" as const) : ("nenhum" as const),
-          matchConfirmado: false,
-          precoSugerido: match?.product.price ?? null,
-        };
-      }),
-    );
-  }
-
-  return {
-    imported: true,
-    matched,
-    unmatched: opportunity.items.length - matched,
-  };
 }
 
 /**
- * Captura oportunidades públicas da Fundep/Funarbe, cruza exclusivamente com
- * produtos Tambasa e as encaminha para a mesma fila auditável de cotações.
- * O envio permanece bloqueado até confirmação humana dos matches e preços.
+ * Captura oportunidades públicas de Fundep/Funarbe usando a plataforma única
+ * de integrações. As fontes são independentes e consultadas em paralelo; a
+ * persistência de cada cotação + itens é atômica.
  */
 export async function syncPortalOpportunities(options?: {
   sources?: PortalOpportunitySource[];
@@ -488,47 +510,44 @@ export async function syncPortalOpportunities(options?: {
     : (["fundep", "funarbe"] as PortalOpportunitySource[]);
   const maxFundepGroups = Math.min(
     Math.max(options?.maxFundepGroups ?? DEFAULT_MAX_FUNDEP_GROUPS, 1),
-    200,
+    MAX_FUNDEP_GROUPS,
   );
   const errors: string[] = [];
-  const opportunities: PortalOpportunity[] = [];
 
-  if (sources.includes("fundep")) {
-    opportunities.push(...(await fetchFundepOpportunities(maxFundepGroups, errors)));
-  }
-  if (sources.includes("funarbe")) {
-    opportunities.push(...(await fetchFunarbeOpportunities(errors)));
-  }
-
-  const tambasaCatalog = await loadTambasaCatalog();
+  const [fundep, funarbe, tambasaCatalog] = await Promise.all([
+    sources.includes("fundep") ? fetchFundepOpportunities(maxFundepGroups, errors) : Promise.resolve([]),
+    sources.includes("funarbe") ? fetchFunarbeOpportunities(errors) : Promise.resolve([]),
+    loadTambasaCatalog(),
+  ]);
+  const opportunities = [...fundep, ...funarbe];
   if (tambasaCatalog.length === 0) {
     errors.push(
       "Catálogo Tambasa vazio: configure o fornecedor Tambasa e execute a sincronização completa antes do matching.",
     );
   }
+  const matchIndex = buildNameMatchIndex(tambasaCatalog);
 
   let imported = 0;
   let skipped = 0;
   let matchedItems = 0;
   let unmatchedItems = 0;
-
   for (const opportunity of opportunities) {
     try {
-      const persisted = await persistOpportunity(opportunity, tambasaCatalog);
-      if (persisted.imported) imported++;
-      else skipped++;
+      const persisted = await persistOpportunity(opportunity, matchIndex);
+      if (persisted.imported) imported += 1;
+      else skipped += 1;
       matchedItems += persisted.matched;
       unmatchedItems += persisted.unmatched;
     } catch (error) {
       errors.push(
-        `${opportunity.source.toUpperCase()} ${opportunity.externalId}: ${(error as Error).message}`,
+        `${opportunity.source.toUpperCase()} ${opportunity.externalId}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
 
   logger.info(
     `[PortalSync] Fundep/Funarbe: ${opportunities.length} encontradas, ${imported} importadas, ` +
-      `${skipped} já existentes, ${matchedItems} itens casados com Tambasa.`,
+      `${skipped} já existentes, ${matchedItems} itens casados com Tambasa, ${errors.length} erro(s).`,
   );
 
   return {
