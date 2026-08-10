@@ -2,43 +2,12 @@ import { Link } from "wouter";
 import { Building2, FileUp, Images, Package, Search, Sparkles, Tags } from "lucide-react";
 
 const AREAS = [
-  {
-    href: "/produtos",
-    icon: Package,
-    title: "Produtos e preços",
-    text: "Cadastro, edição, histórico, ofertas por fornecedor e dados técnicos.",
-    primary: true,
-  },
-  {
-    href: "/fornecedores",
-    icon: Building2,
-    title: "Fornecedores",
-    text: "Fornecedores, disponibilidade e origem dos custos.",
-  },
-  {
-    href: "/busca-global?modo=precos",
-    icon: Search,
-    title: "Busca e equivalências",
-    text: "Encontrar menor preço, similares e alternativas no catálogo.",
-  },
-  {
-    href: "/captura-inteligente",
-    icon: FileUp,
-    title: "Fontes e importação",
-    text: "Captura multi-origem, planilhas, PDFs, XML e outras fontes.",
-  },
-  {
-    href: "/enriquecimento",
-    icon: Sparkles,
-    title: "Qualidade e enriquecimento",
-    text: "Completar ficha técnica, revisar qualidade e enriquecer dados com IA.",
-  },
-  {
-    href: "/imagens",
-    icon: Images,
-    title: "Imagens",
-    text: "Revisar e completar imagens vinculadas aos produtos.",
-  },
+  { href: "/produtos", icon: Package, title: "Produtos e preços", text: "Cadastro, edição, histórico, ofertas por fornecedor e dados técnicos.", primary: true },
+  { href: "/fornecedores", icon: Building2, title: "Fornecedores", text: "Fornecedores, disponibilidade e origem dos custos.", primary: false },
+  { href: "/busca-global?modo=precos", icon: Search, title: "Busca e equivalências", text: "Encontrar menor preço, similares e alternativas no catálogo.", primary: false },
+  { href: "/captura-inteligente", icon: FileUp, title: "Fontes e importação", text: "Captura multi-origem, planilhas, PDFs, XML e outras fontes.", primary: false },
+  { href: "/enriquecimento", icon: Sparkles, title: "Qualidade e enriquecimento", text: "Completar ficha técnica, revisar qualidade e enriquecer dados com IA.", primary: false },
+  { href: "/imagens", icon: Images, title: "Imagens", text: "Revisar e completar imagens vinculadas aos produtos.", primary: false },
 ] as const;
 
 export default function Catalogo() {
