@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { extractDocumentText } from "../services/documentTextService";
 import {
   analyzeAsLawyer,
@@ -9,43 +9,46 @@ import {
   type TipoDocumento,
 } from "../services/legalDocAnalysisService";
 
-/**
- * Análise jurídica de documentos: a IA reconhece o tipo de documento e o lê
- * como um advogado especialista em licitações/contratos públicos.
- */
+const analysisInput = z.object({
+  fileBase64: z.string().min(10),
+  fileName: z.string().trim().min(1).max(255),
+  mimeType: z.string().trim().min(1).max(128),
+  tipoForcado: z.enum(TIPOS_DOCUMENTO).optional(),
+});
+
 export const legalAnalysisRouter = router({
-  analisar: protectedProcedure
-    .input(
-      z.object({
-        fileBase64: z.string().min(10),
-        fileName: z.string(),
-        mimeType: z.string(),
-        // Permite ao usuário forçar o tipo se discordar da classificação da IA.
-        tipoForcado: z.enum(TIPOS_DOCUMENTO).optional(),
-      })
-    )
+  analisar: editorProcedure
+    .input(analysisInput)
     .mutation(async ({ input }) => {
-      const { text, totalChars } = await extractDocumentText(input);
-
+      const document = await extractDocumentText(input);
       const classificacao = input.tipoForcado
-        ? { tipo: input.tipoForcado as TipoDocumento, confianca: 1, justificativa: "Tipo definido manualmente." }
-        : await classifyDocument(text);
+        ? {
+            tipo: input.tipoForcado as TipoDocumento,
+            confianca: 1,
+            justificativa: "Tipo definido manualmente pelo operador.",
+          }
+        : await classifyDocument(document.text);
 
-      const analise = await analyzeAsLawyer(text, classificacao.tipo);
-
+      const analise = await analyzeAsLawyer(document.text, classificacao.tipo);
       return {
         classificacao: {
           ...classificacao,
           tipoLabel: TIPO_LABELS[classificacao.tipo],
         },
         analise,
-        totalChars,
-        truncado: totalChars > 120_000,
+        documento: {
+          totalChars: document.totalChars,
+          pageCount: document.pageCount ?? null,
+          ocrUsed: document.ocrUsed,
+          ocrPages: document.ocrPages,
+          ingestionTruncated: document.truncated,
+        },
+        cobertura: analise.cobertura,
+        completo: !document.truncated && !analise.cobertura.truncado,
       };
     }),
 
-  /** Lista os tipos suportados (para o seletor de tipo manual na UI). */
   tipos: protectedProcedure.query(() =>
-    TIPOS_DOCUMENTO.map((t) => ({ value: t, label: TIPO_LABELS[t] }))
+    TIPOS_DOCUMENTO.map((tipo) => ({ value: tipo, label: TIPO_LABELS[tipo] })),
   ),
 });
