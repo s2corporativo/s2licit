@@ -22,7 +22,7 @@ export default function Execucao() {
           <div>
             <p className="m-0 text-[10px] font-black uppercase tracking-[0.16em] text-blue-200">Após adjudicação</p>
             <h1 className="mb-1 mt-1 text-2xl font-black">Execução</h1>
-            <p className="m-0 text-sm text-blue-100">Contrato, compra e entrega no mesmo fluxo. Recebimentos e pagamentos permanecem no Financeiro.</p>
+            <p className="m-0 text-sm text-blue-100">Contrato, compra e entrega no mesmo fluxo. Mudanças vinculadas atualizam a oportunidade automaticamente; recebimentos e pagamentos ficam no Financeiro.</p>
           </div>
         </div>
       </section>
@@ -43,10 +43,15 @@ export default function Execucao() {
 function Orders() {
   const query = trpc.posVenda.pedidos.useQuery();
   const utils = trpc.useUtils();
-  const change = trpc.posVenda.mudarStatusPedido.useMutation({
+  const change = trpc.opportunities.updateOrderStatus.useMutation({
     onSuccess: async () => {
-      await Promise.all([utils.posVenda.pedidos.invalidate(), utils.opportunities.list.invalidate(), utils.opportunities.summary.invalidate()]);
-      toast.success("Pedido atualizado.");
+      await Promise.all([
+        utils.posVenda.pedidos.invalidate(),
+        utils.opportunities.list.invalidate(),
+        utils.opportunities.summary.invalidate(),
+        utils.agenda.proximos.invalidate(),
+      ]);
+      toast.success("Pedido e fluxo atualizados.");
     },
     onError: (error) => toast.error(error.message),
   });
@@ -59,17 +64,22 @@ function Orders() {
 function Deliveries() {
   const query = trpc.posVenda.entregas.useQuery();
   const utils = trpc.useUtils();
-  const save = trpc.posVenda.salvarEntrega.useMutation({
+  const change = trpc.opportunities.updateDeliveryStatus.useMutation({
     onSuccess: async () => {
-      await Promise.all([utils.posVenda.entregas.invalidate(), utils.opportunities.list.invalidate(), utils.opportunities.summary.invalidate()]);
-      toast.success("Entrega atualizada.");
+      await Promise.all([
+        utils.posVenda.entregas.invalidate(),
+        utils.opportunities.list.invalidate(),
+        utils.opportunities.summary.invalidate(),
+        utils.agenda.proximos.invalidate(),
+      ]);
+      toast.success("Entrega e fluxo atualizados.");
     },
     onError: (error) => toast.error(error.message),
   });
   if (query.isLoading) return <Loading />;
   const rows = query.data ?? [];
   if (!rows.length) return <Empty title="Nenhuma entrega em acompanhamento" text="Entregas vinculadas à execução aparecerão aqui." />;
-  return <div className="space-y-2">{rows.map((row) => <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-sm font-black text-slate-900">{row.descricao}</div><div className="mt-1 text-xs text-slate-500">{[row.transportadora, row.rastreio, row.previsao ? `previsão ${formatDateBR(row.previsao)}` : null].filter(Boolean).join(" · ")}</div>{row.entregueEm && <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700"><CheckCircle2 size={11} /> entregue {formatDateBR(row.entregueEm)}</div>}</div><select value={row.status} disabled={save.isPending} onChange={(event) => save.mutate({ id: row.id, descricao: row.descricao, transportadora: row.transportadora ?? undefined, rastreio: row.rastreio ?? undefined, previsao: row.previsao ? String(row.previsao).slice(0, 10) : undefined, recebedor: row.recebedor ?? undefined, status: event.target.value as typeof DELIVERY_STATUS[number], entregueEm: event.target.value === "entregue" ? new Date().toISOString().slice(0, 10) : row.entregueEm ? String(row.entregueEm).slice(0, 10) : undefined, orderId: row.orderId ?? undefined, funilId: row.funilId ?? undefined, observacoes: row.observacoes ?? undefined })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{DELIVERY_STATUS.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></article>)}</div>;
+  return <div className="space-y-2">{rows.map((row) => <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="text-sm font-black text-slate-900">{row.descricao}</div><div className="mt-1 text-xs text-slate-500">{[row.transportadora, row.rastreio, row.previsao ? `previsão ${formatDateBR(row.previsao)}` : null].filter(Boolean).join(" · ")}</div>{row.entregueEm && <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700"><CheckCircle2 size={11} /> entregue {formatDateBR(row.entregueEm)}</div>}</div><select value={row.status} disabled={change.isPending} onChange={(event) => change.mutate({ id: row.id, status: event.target.value as typeof DELIVERY_STATUS[number] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{DELIVERY_STATUS.map((status) => <option key={status} value={status}>{status}</option>)}</select></div></article>)}</div>;
 }
 
 function Contracts() {
