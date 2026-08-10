@@ -1,44 +1,90 @@
 /**
- * integrationSettingsService: credenciais de integrações configuradas pela
- * interface (WhatsApp e parâmetros gerais), guardadas criptografadas em
- * `integration_settings` e aplicadas em process.env no boot e a cada
- * salvamento — os serviços (whatsappService etc.) leem process.env em tempo
- * de execução, então a config da tela vale para o sistema inteiro na hora.
+ * Credenciais e parâmetros gerais administráveis pela interface.
  *
- * IA e e-mail têm serviços próprios (aiConfigService / emailConfigService);
- * este cobre o restante através de uma lista-branca de chaves conhecidas.
+ * Valores são armazenados criptografados em `integration_settings`. A leitura
+ * efetiva é feita pelo CredentialResolver, que combina overrides do banco com
+ * o snapshot imutável do ambiente de boot. Este serviço NÃO altera process.env.
  */
+import cron from "node-cron";
 import { eq, inArray } from "drizzle-orm";
 import { integrationSettings } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
-import { logger } from "../_core/logger";
+import {
+  invalidateCredentialCache,
+  resolveCredentialWithOrigin,
+} from "../integrations/core/credentialResolver";
 
-/**
- * Lista-branca de chaves aceitas. `secreta` controla se o valor volta mascarado
- * para a tela (tokens/senhas) ou em claro (parâmetros não sensíveis).
- */
-export const INTEGRATION_KEYS: Record<string, { label: string; secreta: boolean; grupo: string }> = {
+export const INTEGRATION_KEYS: Record<
+  string,
+  { label: string; secreta: boolean; grupo: string }
+> = {
   WHATSAPP_PHONE_ID: { label: "ID do telefone (Meta Cloud API)", secreta: false, grupo: "whatsapp" },
   WHATSAPP_TOKEN: { label: "Token de acesso", secreta: true, grupo: "whatsapp" },
   WHATSAPP_API_VERSION: { label: "Versão da API", secreta: false, grupo: "whatsapp" },
   WHATSAPP_WEBHOOK_URL: { label: "Webhook próprio (Z-API/Twilio/n8n)", secreta: true, grupo: "whatsapp" },
   WHATSAPP_TO: { label: "Número(s) de destino", secreta: false, grupo: "whatsapp" },
   USD_BRL_RATE: { label: "Cotação USD→BRL (custo de IA)", secreta: false, grupo: "geral" },
+  FIEMG_LICITACOES_URL: { label: "URL pública de licitações FIEMG", secreta: false, grupo: "geral" },
+  EMAIL_SYNC_ENABLED: { label: "Sincronização de e-mail ativa (true/false)", secreta: false, grupo: "geral" },
+  EMAIL_SYNC_CRON: { label: "Agenda de e-mail (cron)", secreta: false, grupo: "geral" },
+  ALERTS_ENABLED: { label: "Alertas automáticos ativos (true/false)", secreta: false, grupo: "geral" },
+  ALERTS_CRON: { label: "Agenda de alertas (cron)", secreta: false, grupo: "geral" },
+  SCRAPER_SCHEDULE_ENABLED: { label: "Captura programada ativa (true/false)", secreta: false, grupo: "geral" },
+  SCRAPER_SCHEDULE_CRON: { label: "Agenda de captura (cron)", secreta: false, grupo: "geral" },
+  PORTAL_OPPORTUNITY_SYNC_ENABLED: { label: "Radar automático ativo (true/false)", secreta: false, grupo: "geral" },
+  PORTAL_OPPORTUNITY_SYNC_CRON: { label: "Agenda do radar automático (cron)", secreta: false, grupo: "geral" },
 };
-
-type KeyName = keyof typeof INTEGRATION_KEYS;
 
 export type IntegrationView = Array<{
   chave: string;
   label: string;
   grupo: string;
   secreta: boolean;
-  /** Valor em claro só para chaves NÃO secretas; secretas voltam null. */
   valor: string | null;
   temValor: boolean;
   origem: "interface" | "ambiente" | "nao_configurado";
 }>;
+
+function validateValue(chave: string, value: string): string {
+  const valor = value.trim();
+  if (!valor) throw new Error(`${chave}: valor vazio.`);
+
+  if (chave.endsWith("_ENABLED") && !["true", "false", "1", "0"].includes(valor.toLowerCase())) {
+    throw new Error(`${chave}: use true ou false.`);
+  }
+  if (chave.endsWith("_CRON") && !cron.validate(valor)) {
+    throw new Error(`${chave}: expressão cron inválida.`);
+  }
+  if (chave === "FIEMG_LICITACOES_URL" || chave === "WHATSAPP_WEBHOOK_URL") {
+    let parsed: URL;
+    try {
+      parsed = new URL(valor);
+    } catch {
+      throw new Error(`${chave}: URL inválida.`);
+    }
+    if (!["https:", "http:"].includes(parsed.protocol)) {
+      throw new Error(`${chave}: somente HTTP/HTTPS é permitido.`);
+    }
+  }
+  if (chave === "USD_BRL_RATE") {
+    const rate = Number(valor.replace(",", "."));
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
+      throw new Error("USD_BRL_RATE: informe uma cotação positiva e plausível.");
+    }
+  }
+  if (chave === "WHATSAPP_API_VERSION" && !/^v\d+(?:\.\d+)?$/i.test(valor)) {
+    throw new Error("WHATSAPP_API_VERSION: formato esperado vNN.N.");
+  }
+  if (chave === "WHATSAPP_TO") {
+    const invalid = valor
+      .split(",")
+      .map((item) => item.replace(/\D/g, ""))
+      .some((item) => item.length < 10 || item.length > 15);
+    if (invalid) throw new Error("WHATSAPP_TO: informe números E.164 válidos separados por vírgula.");
+  }
+  return valor;
+}
 
 export async function getIntegrationView(): Promise<IntegrationView> {
   const db = await getDb().catch(() => null);
@@ -48,52 +94,46 @@ export async function getIntegrationView(): Promise<IntegrationView> {
         .from(integrationSettings)
         .where(inArray(integrationSettings.chave, Object.keys(INTEGRATION_KEYS)))
     : [];
-  const byKey = new Map(rows.map((r) => [r.chave, r] as const));
+  const byKey = new Map(rows.map((row) => [row.chave, row] as const));
 
-  return Object.entries(INTEGRATION_KEYS).map(([chave, meta]) => {
-    const row = byKey.get(chave);
-    const noBanco = Boolean(row?.valorEnc);
-    const noAmbiente = Boolean(process.env[chave]);
-    let valor: string | null = null;
-    if (!meta.secreta) {
-      if (noBanco) {
-        try {
-          valor = decryptPassword(row!.valorEnc!);
-        } catch {
-          valor = null;
+  return Promise.all(
+    Object.entries(INTEGRATION_KEYS).map(async ([chave, meta]) => {
+      const row = byKey.get(chave);
+      const resolved = await resolveCredentialWithOrigin(chave);
+      let valor: string | null = null;
+      if (!meta.secreta) {
+        if (row?.valorEnc) {
+          try {
+            valor = decryptPassword(row.valorEnc);
+          } catch {
+            valor = null;
+          }
+        } else {
+          valor = resolved.value ?? null;
         }
-      } else if (noAmbiente) {
-        valor = process.env[chave] ?? null;
       }
-    }
-    return {
-      chave,
-      label: meta.label,
-      grupo: meta.grupo,
-      secreta: meta.secreta,
-      valor,
-      temValor: noBanco || noAmbiente,
-      origem: noBanco ? "interface" : noAmbiente ? "ambiente" : "nao_configurado",
-    };
-  });
+      return {
+        chave,
+        label: meta.label,
+        grupo: meta.grupo,
+        secreta: meta.secreta,
+        valor,
+        temValor: Boolean(resolved.value),
+        origem: resolved.origin,
+      };
+    }),
+  );
 }
 
-/**
- * Salva um conjunto de chaves (upsert). Valor vazio/undefined mantém o atual;
- * a string especial "__limpar__" remove a chave do banco (volta ao ambiente).
- */
+/** Valor vazio mantém o atual. Remoção é feita pela operação explícita `remove`. */
 export async function saveIntegrationSettings(entries: Record<string, string>): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
 
-  for (const [chave, valor] of Object.entries(entries)) {
-    if (!(chave in INTEGRATION_KEYS)) continue; // ignora chave fora da lista-branca
-    if (valor === "" || valor == null) continue; // vazio = manter
-    if (valor === "__limpar__") {
-      await db.delete(integrationSettings).where(eq(integrationSettings.chave, chave));
-      delete process.env[chave as KeyName];
-      continue;
-    }
+  for (const [chave, rawValue] of Object.entries(entries)) {
+    if (!(chave in INTEGRATION_KEYS)) throw new Error(`Chave de integração não permitida: ${chave}.`);
+    if (rawValue == null || rawValue.trim() === "") continue;
+    const valor = validateValue(chave, rawValue);
     const valorEnc = encryptPassword(valor);
     const [existing] = await db
       .select({ id: integrationSettings.id })
@@ -106,30 +146,21 @@ export async function saveIntegrationSettings(entries: Record<string, string>): 
       await db.insert(integrationSettings).values({ chave, valorEnc });
     }
   }
-  await applyIntegrationSettingsFromDb();
+  invalidateCredentialCache();
 }
 
-/** Aplica as chaves do banco em process.env (boot + após salvar). */
+export async function removeIntegrationSetting(chave: string): Promise<void> {
+  if (!(chave in INTEGRATION_KEYS)) throw new Error(`Chave de integração não permitida: ${chave}.`);
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível.");
+  await db.delete(integrationSettings).where(eq(integrationSettings.chave, chave));
+  invalidateCredentialCache();
+}
+
+/**
+ * Compatibilidade com o boot antigo. Nada é injetado em process.env; apenas
+ * invalida o cache para que a próxima leitura use banco + ambiente original.
+ */
 export async function applyIntegrationSettingsFromDb(): Promise<void> {
-  try {
-    const db = await getDb().catch(() => null);
-    if (!db) return;
-    const rows = await db
-      .select()
-      .from(integrationSettings)
-      .where(inArray(integrationSettings.chave, Object.keys(INTEGRATION_KEYS)));
-    for (const row of rows) {
-      if (!row.valorEnc) continue;
-      try {
-        process.env[row.chave] = decryptPassword(row.valorEnc);
-      } catch (err) {
-        logger.error(`[Integrações] Falha ao decriptar ${row.chave}:`, err);
-      }
-    }
-    if (rows.length > 0) {
-      logger.info(`[Integrações] ${rows.length} chave(s) de integração aplicadas da interface.`);
-    }
-  } catch (err) {
-    logger.error("[Integrações] Falha ao aplicar configuração do banco:", err);
-  }
+  invalidateCredentialCache();
 }
