@@ -2,7 +2,8 @@ import { and, asc, desc, eq, lte } from "drizzle-orm";
 import { hostname } from "os";
 import { getDb } from "../db";
 import { captureJobs } from "../../drizzle/captureCoreSchema";
-import { processCaptureJob, recoverStaleCaptureJobs } from "../services/captureCoreService";
+import { recoverStaleCaptureJobs } from "../services/captureCoreService";
+import { processCaptureJobSafe } from "../services/captureSafeProcessor";
 import { logger } from "../_core/logger";
 
 const POLL_MS = Math.max(2000, Number(process.env.CAPTURE_JOB_POLL_MS || 5000));
@@ -64,7 +65,7 @@ async function runClaimed(jobId: number) {
   timer.unref();
   try {
     await heartbeat(jobId);
-    await processCaptureJob(jobId);
+    await processCaptureJobSafe(jobId);
   } catch (error) {
     logger.error(`[CaptureRunner] Falha não tratada no job #${jobId}:`, error);
   } finally {
@@ -104,7 +105,7 @@ async function recover() {
 
 /**
  * Worker autônomo: MySQL é a fonte de verdade para fila, lock, heartbeat e
- * recuperação. GitHub não participa da execução operacional.
+ * recuperação. O processador seguro é o único caminho de execução operacional.
  */
 export function startCaptureJobRunner(): void {
   if (started) return;
