@@ -1,6 +1,6 @@
 import type { HTTPResponse, Page } from "puppeteer";
 import { parsePrecoBR } from "../utils/number";
-import type { ScrapedProduct } from "./scraperEngine";
+import type { ScrapedProduct } from "./scraperContracts";
 
 export type ProbedProduct = ScrapedProduct & { sourceType: "api" };
 
@@ -103,7 +103,8 @@ const UNIT_KEYS = [
   "unit_of_measure",
 ];
 
-const SENSITIVE_QUERY_PARAM = /(?:^|_)(?:access|auth|bearer|credential|jwt|key|password|secret|session|signature|sig|token)(?:$|_)/i;
+const SENSITIVE_QUERY_PARAM =
+  /(?:^|_)(?:access|auth|bearer|credential|jwt|key|password|secret|session|signature|sig|token)(?:$|_)/i;
 
 function normalizedKey(value: string): string {
   return value
@@ -198,13 +199,13 @@ function objectToProduct(
   const productUrl = absoluteUrl(pick(index, URL_KEYS), baseUrl);
   const hasProductSignal = Boolean(
     code ||
-    ean ||
-    stock != null ||
-    imageUrl ||
-    productUrl ||
-    [...index.keys()].some(
-      (key) => key.includes("product") || key.includes("produto"),
-    ),
+      ean ||
+      stock != null ||
+      imageUrl ||
+      productUrl ||
+      [...index.keys()].some(
+        (key) => key.includes("product") || key.includes("produto"),
+      ),
   );
 
   if (!hasProductSignal) return null;
@@ -308,10 +309,9 @@ function mergeProduct(
     productUrl: preferred.productUrl ?? fallback.productUrl,
     priceNormal: preferred.priceNormal ?? fallback.priceNormal,
     pricePromo: preferred.pricePromo ?? fallback.pricePromo,
-    consultadoEm: Math.max(
-      preferred.consultadoEm ?? 0,
-      fallback.consultadoEm ?? 0,
-    ) || undefined,
+    consultadoEm:
+      Math.max(preferred.consultadoEm ?? 0, fallback.consultadoEm ?? 0) ||
+      undefined,
     fonteUrl: preferred.fonteUrl ?? fallback.fonteUrl,
     sourceType: "api",
   };
@@ -336,7 +336,10 @@ function dedupe(products: ProbedProduct[]): ProbedProduct[] {
   return [...output.values()];
 }
 
-function isAllowedResponse(response: HTTPResponse, allowedHosts: Set<string>): boolean {
+function isAllowedResponse(
+  response: HTTPResponse,
+  allowedHosts: Set<string>,
+): boolean {
   const status = response.status();
   if (status < 200 || status >= 300) return false;
 
@@ -356,9 +359,8 @@ function isAllowedResponse(response: HTTPResponse, allowedHosts: Set<string>): b
 
   const headers = response.headers();
   const contentType = String(headers["content-type"] || "").toLowerCase();
-  const pathLooksStructured = /\/api\/|graphql|catalog|product|produto|search|busca/i.test(
-    url.pathname,
-  );
+  const pathLooksStructured =
+    /\/api\/|graphql|catalog|product|produto|search|busca/i.test(url.pathname);
 
   if (!contentType.includes("json") && !pathLooksStructured) return false;
 
@@ -370,7 +372,9 @@ function isAllowedResponse(response: HTTPResponse, allowedHosts: Set<string>): b
   return true;
 }
 
-async function parseBoundedJsonResponse(response: HTTPResponse): Promise<unknown | null> {
+async function parseBoundedJsonResponse(
+  response: HTTPResponse,
+): Promise<unknown | null> {
   try {
     const textBody = await response.text();
     if (Buffer.byteLength(textBody, "utf8") > MAX_RESPONSE_BYTES) return null;
@@ -411,7 +415,8 @@ export function attachNetworkJsonProductProbe(
       if (payload == null) return;
 
       const found: ProbedProduct[] = [];
-      const sourceUrl = sanitizeUrl(response.url()) ?? response.url();
+      const sourceUrl = sanitizeUrl(response.url());
+      if (!sourceUrl) return;
       collectProducts(payload, sourceUrl, found, { nodes: 0 });
       if (found.length > 0) collected.push(...found);
     })();
