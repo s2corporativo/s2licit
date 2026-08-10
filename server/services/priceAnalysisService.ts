@@ -1,6 +1,11 @@
+import { and, eq, gte, lte } from "drizzle-orm";
+import {
+  priceHistory,
+  products,
+  productSupplierOffers,
+  suppliers,
+} from "../../drizzle/schema";
 import { getDb } from "../db";
-import { products, suppliers, priceHistory } from "../../drizzle/schema";
-import { eq, and, gte, lte } from "drizzle-orm";
 
 export interface PriceVariation {
   supplierId: number;
@@ -35,347 +40,320 @@ export interface SupplierComparison {
   competitiveness: "very_competitive" | "competitive" | "average" | "expensive";
 }
 
+function effectivePrice(regular: unknown, promo: unknown): number | null {
+  const regularPrice = regular == null ? null : Number(regular);
+  const promoPrice = promo == null ? null : Number(promo);
+  const validRegular = regularPrice != null && Number.isFinite(regularPrice) && regularPrice > 0
+    ? regularPrice
+    : null;
+  const validPromo = promoPrice != null && Number.isFinite(promoPrice) && promoPrice > 0
+    ? promoPrice
+    : null;
+  if (validPromo != null && (validRegular == null || validPromo < validRegular)) return validPromo;
+  return validRegular;
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function percentile(sorted: number[], ratio: number) {
+  if (!sorted.length) return 0;
+  return sorted[Math.min(Math.floor(sorted.length * ratio), sorted.length - 1)];
+}
+
 /**
- * Obtém variações de preço por fornecedor
+ * Estatística do preço atual por fornecedor.
+ * A fonte é a oferta canônica; `products.price` não participa do cálculo.
  */
 export async function getPriceVariationsBySupplier(
   startDate?: Date,
-  endDate?: Date
+  endDate?: Date,
 ): Promise<PriceVariation[]> {
   const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
 
-  if (!db) {
-    throw new Error("Database connection failed");
+  const dateCondition = startDate && endDate
+    ? and(
+        gte(productSupplierOffers.updatedAt, startDate),
+        lte(productSupplierOffers.updatedAt, endDate),
+      )
+    : undefined;
+
+  const rows = await db
+    .select({
+      supplierId: productSupplierOffers.supplierId,
+      supplierName: suppliers.name,
+      productId: productSupplierOffers.productId,
+      price: productSupplierOffers.price,
+      promoPrice: productSupplierOffers.promoPrice,
+    })
+    .from(productSupplierOffers)
+    .innerJoin(suppliers, eq(suppliers.id, productSupplierOffers.supplierId))
+    .where(dateCondition);
+
+  const grouped = new Map<number, { name: string; productIds: Set<number>; prices: number[] }>();
+  for (const row of rows) {
+    const price = effectivePrice(row.price, row.promoPrice);
+    if (price == null) continue;
+    const group = grouped.get(row.supplierId) ?? {
+      name: row.supplierName,
+      productIds: new Set<number>(),
+      prices: [],
+    };
+    group.productIds.add(row.productId);
+    group.prices.push(price);
+    grouped.set(row.supplierId, group);
   }
 
-  // Obter todos os fornecedores
-  const supplierList = await db.select().from(suppliers);
-
-  const variations: PriceVariation[] = [];
-
-  for (const supplier of supplierList) {
-    // Obter produtos do fornecedor
-    let whereCondition: any = eq(products.supplierId, supplier.id);
-
-    if (startDate && endDate) {
-      whereCondition = and(
-        eq(products.supplierId, supplier.id),
-        gte(products.updatedAt, startDate),
-        lte(products.updatedAt, endDate)
-      ) as any;
-    }
-
-    const supplierProducts = await db
-      .select()
-      .from(products)
-      .where(whereCondition);
-
-    if (!supplierProducts || supplierProducts.length === 0) {
-      continue;
-    }
-
-    // Calcular estatísticas
-    const prices = supplierProducts
-      .map((p) => parseFloat(String(p.price || 0)))
-      .filter((p) => p > 0);
-
-    if (prices.length === 0) {
-      continue;
-    }
-
-    const averagePrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const priceRange = maxPrice - minPrice;
-    const variationPercent = (priceRange / averagePrice) * 100;
-
-    // Determinar tendência (simplificado - em produção seria histórico)
-    const trend: "up" | "down" | "stable" = "stable";
-
-    variations.push({
-      supplierId: supplier.id,
-      supplierName: supplier.name,
-      productCount: supplierProducts.length,
-      averagePrice: Math.round(averagePrice * 100) / 100,
-      minPrice: Math.round(minPrice * 100) / 100,
-      maxPrice: Math.round(maxPrice * 100) / 100,
-      priceRange: Math.round(priceRange * 100) / 100,
-      variationPercent: Math.round(variationPercent * 100) / 100,
-      trend,
-    });
-  }
-
-  return variations.sort((a, b) => b.productCount - a.productCount);
+  return [...grouped.entries()]
+    .map(([supplierId, group]) => {
+      const averagePrice = group.prices.reduce((sum, value) => sum + value, 0) / group.prices.length;
+      const minPrice = Math.min(...group.prices);
+      const maxPrice = Math.max(...group.prices);
+      const priceRange = maxPrice - minPrice;
+      return {
+        supplierId,
+        supplierName: group.name,
+        productCount: group.productIds.size,
+        averagePrice: roundMoney(averagePrice),
+        minPrice: roundMoney(minPrice),
+        maxPrice: roundMoney(maxPrice),
+        priceRange: roundMoney(priceRange),
+        variationPercent: averagePrice > 0 ? roundMoney((priceRange / averagePrice) * 100) : 0,
+        trend: "stable" as const,
+      };
+    })
+    .sort((a, b) => b.productCount - a.productCount);
 }
 
 /**
- * Obtém histórico de preços para gráfico de série temporal
+ * Série histórica real a partir de `price_history`, sem inferir histórico por
+ * `products.updatedAt`.
  */
 export async function getPriceHistory(
   supplierId?: number,
-  daysBack: number = 30
+  daysBack = 30,
 ): Promise<PriceHistoryPoint[]> {
   const db = await getDb();
-
-  if (!db) {
-    throw new Error("Database connection failed");
-  }
+  if (!db) throw new Error("Database connection failed");
 
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+  const where = supplierId
+    ? and(gte(priceHistory.recordedAt, cutoffDate), eq(priceHistory.supplierId, supplierId))
+    : gte(priceHistory.recordedAt, cutoffDate);
 
-  let whereCondition: any = gte(products.updatedAt, cutoffDate);
+  const rows = await db
+    .select({
+      recordedAt: priceHistory.recordedAt,
+      supplierId: priceHistory.supplierId,
+      supplierName: suppliers.name,
+      productId: priceHistory.productId,
+      price: priceHistory.price,
+    })
+    .from(priceHistory)
+    .innerJoin(suppliers, eq(suppliers.id, priceHistory.supplierId))
+    .where(where);
 
-  if (supplierId) {
-    whereCondition = and(
-      gte(products.updatedAt, cutoffDate),
-      eq(products.supplierId, supplierId)
-    ) as any;
+  const grouped = new Map<string, { supplierId: number; supplierName: string; prices: number[]; productIds: Set<number> }>();
+  for (const row of rows) {
+    const price = row.price == null ? null : Number(row.price);
+    if (price == null || !Number.isFinite(price) || price <= 0) continue;
+    const date = new Date(row.recordedAt).toISOString().slice(0, 10);
+    const key = `${date}:${row.supplierId}`;
+    const group = grouped.get(key) ?? {
+      supplierId: row.supplierId,
+      supplierName: row.supplierName,
+      prices: [],
+      productIds: new Set<number>(),
+    };
+    group.prices.push(price);
+    group.productIds.add(row.productId);
+    grouped.set(key, group);
   }
 
-  const products_data = await db
-    .select()
-    .from(products)
-    .where(whereCondition);
-
-  if (!products_data || products_data.length === 0) {
-    return [];
-  }
-
-  // Agrupar por data e fornecedor
-  const grouped: Record<string, Record<number, number[]>> = {};
-
-  for (const product of products_data) {
-    const date = new Date(product.updatedAt || new Date())
-      .toISOString()
-      .split("T")[0];
-
-    if (!grouped[date]) {
-      grouped[date] = {};
-    }
-
-    if (!grouped[date][product.supplierId]) {
-      grouped[date][product.supplierId] = [];
-    }
-
-    const price = parseFloat(String(product.price || 0));
-    if (price > 0) {
-      grouped[date][product.supplierId].push(price);
-    }
-  }
-
-  // Converter para array de pontos
-  const history: PriceHistoryPoint[] = [];
-
-  for (const [date, suppliers_data] of Object.entries(grouped)) {
-    for (const [supplierId_str, prices] of Object.entries(suppliers_data)) {
-      const supplierId_num = parseInt(supplierId_str);
-      const supplier = await db
-        .select()
-        .from(suppliers)
-        .where(eq(suppliers.id, supplierId_num))
-        .limit(1);
-
-      const supplierName = supplier?.[0]?.name || "Unknown";
-      const averagePrice =
-        prices.reduce((a, b) => a + b, 0) / prices.length;
-
-      history.push({
-        date,
-        supplierId: supplierId_num,
-        supplierName,
-        averagePrice: Math.round(averagePrice * 100) / 100,
-        productCount: prices.length,
-      });
-    }
-  }
-
-  return history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return [...grouped.entries()]
+    .map(([key, group]) => ({
+      date: key.slice(0, 10),
+      supplierId: group.supplierId,
+      supplierName: group.supplierName,
+      averagePrice: roundMoney(group.prices.reduce((sum, value) => sum + value, 0) / group.prices.length),
+      productCount: group.productIds.size,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
- * Obtém comparação de preços entre fornecedores
+ * Compara fornecedores pelo posicionamento das ofertas dentro da categoria do
+ * produto, reduzindo o viés do mix comercial de cada fornecedor.
  */
 export async function getSupplierComparison(): Promise<SupplierComparison[]> {
   const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
 
-  if (!db) {
-    throw new Error("Database connection failed");
+  const rows = await db
+    .select({
+      supplierId: productSupplierOffers.supplierId,
+      supplierName: suppliers.name,
+      productId: productSupplierOffers.productId,
+      categoryId: products.categoryId,
+      price: productSupplierOffers.price,
+      promoPrice: productSupplierOffers.promoPrice,
+    })
+    .from(productSupplierOffers)
+    .innerJoin(suppliers, eq(suppliers.id, productSupplierOffers.supplierId))
+    .innerJoin(products, eq(products.id, productSupplierOffers.productId));
+
+  const categoryPrices = new Map<number, number[]>();
+  for (const row of rows) {
+    const price = effectivePrice(row.price, row.promoPrice);
+    if (price == null || row.categoryId == null) continue;
+    const list = categoryPrices.get(row.categoryId) ?? [];
+    list.push(price);
+    categoryPrices.set(row.categoryId, list);
+  }
+  const categoryMedian = new Map<number, number>();
+  for (const [categoryId, prices] of categoryPrices) {
+    prices.sort((a, b) => a - b);
+    categoryMedian.set(categoryId, percentile(prices, 0.5));
   }
 
-  const supplierList = await db.select().from(suppliers);
-  const comparisons: SupplierComparison[] = [];
-
-  // Mediana de preço POR CATEGORIA — comparar a média global de um fornecedor
-  // enviesava tudo pelo mix (fornecedor de seringas vs de antibióticos). Aqui
-  // cada produto é comparado com a mediana da sua própria categoria.
-  const allProducts = await db.select().from(products);
-  const precoPorCategoria = new Map<number, number[]>();
-  for (const p of allProducts) {
-    const preco = parseFloat(String(p.price || 0));
-    if (preco > 0 && p.categoryId != null) {
-      if (!precoPorCategoria.has(p.categoryId)) precoPorCategoria.set(p.categoryId, []);
-      precoPorCategoria.get(p.categoryId)!.push(preco);
+  const grouped = new Map<number, {
+    name: string;
+    productIds: Set<number>;
+    prices: number[];
+    comparable: number;
+    atOrBelowMedian: number;
+  }>();
+  for (const row of rows) {
+    const price = effectivePrice(row.price, row.promoPrice);
+    if (price == null) continue;
+    const group = grouped.get(row.supplierId) ?? {
+      name: row.supplierName,
+      productIds: new Set<number>(),
+      prices: [],
+      comparable: 0,
+      atOrBelowMedian: 0,
+    };
+    group.productIds.add(row.productId);
+    group.prices.push(price);
+    const median = row.categoryId == null ? undefined : categoryMedian.get(row.categoryId);
+    if (median != null) {
+      group.comparable += 1;
+      if (price <= median) group.atOrBelowMedian += 1;
     }
+    grouped.set(row.supplierId, group);
   }
-  const medianaCategoria = new Map<number, number>();
-  for (const [cat, precos] of precoPorCategoria) {
-    precos.sort((a, b) => a - b);
-    medianaCategoria.set(cat, precos[Math.floor(precos.length / 2)]);
-  }
 
-  for (const supplier of supplierList) {
-    const supplierProducts = await db
-      .select()
-      .from(products)
-      .where(eq(products.supplierId, supplier.id));
-
-    if (!supplierProducts || supplierProducts.length === 0) {
-      continue;
-    }
-
-    const prices = supplierProducts
-      .map((p) => parseFloat(String(p.price || 0)))
-      .filter((p) => p > 0)
-      .sort((a, b) => a - b);
-
-    if (prices.length === 0) {
-      continue;
-    }
-
-    const averagePrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-    const p25 = prices[Math.floor(prices.length * 0.25)];
-    const p50 = prices[Math.floor(prices.length * 0.5)];
-    const p75 = prices[Math.floor(prices.length * 0.75)];
-
-    // Competitividade = fração de produtos do fornecedor abaixo da mediana da
-    // sua categoria (comparação normalizada por categoria, não pela média do mix).
-    let comparaveis = 0;
-    let abaixoDaMediana = 0;
-    for (const prod of supplierProducts) {
-      const preco = parseFloat(String(prod.price || 0));
-      const med = prod.categoryId != null ? medianaCategoria.get(prod.categoryId) : undefined;
-      if (preco > 0 && med != null) {
-        comparaveis++;
-        if (preco <= med) abaixoDaMediana++;
-      }
-    }
-    const fracaoAbaixo = comparaveis > 0 ? abaixoDaMediana / comparaveis : 0.5;
-
-    let competitiveness: "very_competitive" | "competitive" | "average" | "expensive";
-    if (fracaoAbaixo >= 0.65) {
-      competitiveness = "very_competitive";
-    } else if (fracaoAbaixo >= 0.5) {
-      competitiveness = "competitive";
-    } else if (fracaoAbaixo >= 0.35) {
-      competitiveness = "average";
-    } else {
-      competitiveness = "expensive";
-    }
-
-    comparisons.push({
-      supplierId: supplier.id,
-      supplierName: supplier.name,
-      totalProducts: supplierProducts.length,
-      averagePrice: Math.round(averagePrice * 100) / 100,
+  const result: SupplierComparison[] = [...grouped.entries()].map(([supplierId, group]) => {
+    const prices = [...group.prices].sort((a, b) => a - b);
+    const fraction = group.comparable > 0 ? group.atOrBelowMedian / group.comparable : 0.5;
+    const competitiveness: SupplierComparison["competitiveness"] =
+      fraction >= 0.65 ? "very_competitive" :
+      fraction >= 0.5 ? "competitive" :
+      fraction >= 0.35 ? "average" : "expensive";
+    return {
+      supplierId,
+      supplierName: group.name,
+      totalProducts: group.productIds.size,
+      averagePrice: roundMoney(prices.reduce((sum, value) => sum + value, 0) / prices.length),
       pricePercentile: {
-        p25: Math.round(p25 * 100) / 100,
-        p50: Math.round(p50 * 100) / 100,
-        p75: Math.round(p75 * 100) / 100,
+        p25: roundMoney(percentile(prices, 0.25)),
+        p50: roundMoney(percentile(prices, 0.5)),
+        p75: roundMoney(percentile(prices, 0.75)),
       },
       competitiveness,
-    });
-  }
-
-  return comparisons.sort((a, b) => {
-    const competitivenessOrder = {
-      very_competitive: 0,
-      competitive: 1,
-      average: 2,
-      expensive: 3,
     };
-    return (
-      competitivenessOrder[a.competitiveness] -
-      competitivenessOrder[b.competitiveness]
-    );
   });
+
+  const order: Record<SupplierComparison["competitiveness"], number> = {
+    very_competitive: 0,
+    competitive: 1,
+    average: 2,
+    expensive: 3,
+  };
+  return result.sort((a, b) => order[a.competitiveness] - order[b.competitiveness]);
 }
 
 /**
- * Obtém produtos com maior variação de preço
+ * Maiores variações históricas por par produto/fornecedor.
  */
 export async function getTopPriceVariations(
-  limit: number = 10
-): Promise<
-  Array<{
+  limit = 10,
+): Promise<Array<{
+  productId: number;
+  productName: string;
+  supplierId: number;
+  supplierName: string;
+  price: number;
+  variation: number;
+}>> {
+  const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
+
+  const rows = await db
+    .select({
+      productId: priceHistory.productId,
+      productName: products.name,
+      supplierId: priceHistory.supplierId,
+      supplierName: suppliers.name,
+      historicalPrice: priceHistory.price,
+      currentPrice: productSupplierOffers.price,
+      currentPromoPrice: productSupplierOffers.promoPrice,
+    })
+    .from(priceHistory)
+    .innerJoin(products, eq(products.id, priceHistory.productId))
+    .innerJoin(suppliers, eq(suppliers.id, priceHistory.supplierId))
+    .leftJoin(
+      productSupplierOffers,
+      and(
+        eq(productSupplierOffers.productId, priceHistory.productId),
+        eq(productSupplierOffers.supplierId, priceHistory.supplierId),
+      ),
+    );
+
+  const ranges = new Map<string, {
     productId: number;
     productName: string;
     supplierId: number;
     supplierName: string;
-    price: number;
-    variation: number;
-  }>
-> {
-  const db = await getDb();
-
-  if (!db) {
-    throw new Error("Database connection failed");
+    min: number;
+    max: number;
+    count: number;
+    currentPrice: number | null;
+  }>();
+  for (const row of rows) {
+    const historical = row.historicalPrice == null ? null : Number(row.historicalPrice);
+    if (historical == null || !Number.isFinite(historical) || historical <= 0) continue;
+    const key = `${row.productId}:${row.supplierId}`;
+    const group = ranges.get(key) ?? {
+      productId: row.productId,
+      productName: row.productName,
+      supplierId: row.supplierId,
+      supplierName: row.supplierName,
+      min: historical,
+      max: historical,
+      count: 0,
+      currentPrice: effectivePrice(row.currentPrice, row.currentPromoPrice),
+    };
+    group.min = Math.min(group.min, historical);
+    group.max = Math.max(group.max, historical);
+    group.count += 1;
+    ranges.set(key, group);
   }
 
-  // Variação real calculada a partir do histórico de preços (price_history)
-  const history = await db
-    .select({ productId: priceHistory.productId, price: priceHistory.price })
-    .from(priceHistory);
-
-  // Agrupar min/max de preço por produto
-  const ranges = new Map<number, { min: number; max: number; count: number }>();
-  for (const entry of history) {
-    const price = parseFloat(String(entry.price ?? 0));
-    if (!price || isNaN(price)) continue;
-    const current = ranges.get(entry.productId);
-    if (!current) {
-      ranges.set(entry.productId, { min: price, max: price, count: 1 });
-    } else {
-      current.min = Math.min(current.min, price);
-      current.max = Math.max(current.max, price);
-      current.count += 1;
-    }
-  }
-
-  const allProducts = await db.select().from(products);
-
-  const variations = [];
-  for (const product of allProducts) {
-    const range = ranges.get(product.id);
-    // Sem histórico suficiente (menos de 2 registros), a variação é 0 — nunca dado aleatório
-    const variation =
-      range && range.count >= 2 && range.min > 0
-        ? ((range.max - range.min) / range.min) * 100
-        : 0;
-
-    variations.push({
-      productId: product.id,
-      productName: product.name,
-      supplierId: product.supplierId,
-      price: parseFloat(String(product.price || 0)),
-      variation: Math.round(variation * 100) / 100,
-    });
-  }
-
-  const top = variations
+  return [...ranges.values()]
+    .map((group) => ({
+      productId: group.productId,
+      productName: group.productName,
+      supplierId: group.supplierId,
+      supplierName: group.supplierName,
+      price: group.currentPrice ?? group.max,
+      variation: group.count >= 2 && group.min > 0
+        ? roundMoney(((group.max - group.min) / group.min) * 100)
+        : 0,
+    }))
     .sort((a, b) => b.variation - a.variation)
-    .slice(0, limit);
-
-  // Buscar nome do fornecedor apenas para os itens retornados
-  const result = [];
-  for (const item of top) {
-    const supplier = await db
-      .select()
-      .from(suppliers)
-      .where(eq(suppliers.id, item.supplierId))
-      .limit(1);
-    result.push({ ...item, supplierName: supplier?.[0]?.name || "Unknown" });
-  }
-
-  return result;
+    .slice(0, Math.max(1, limit));
 }
