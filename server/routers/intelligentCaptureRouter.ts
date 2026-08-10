@@ -13,7 +13,7 @@ import {
   buildCaptureDraftFromWebsite,
 } from "../services/intelligentCaptureIngestionService";
 
-const sourceTypeSchema = z.enum(["url", "html", "pdf", "spreadsheet", "xml", "docx", "text"]);
+const sourceTypeSchema = z.enum(["url", "html", "pdf", "spreadsheet", "xml", "docx", "text", "image"]);
 const actionSuggestionSchema = z.enum(["create", "update", "review", "ignore"]);
 const duplicateSignalSchema = z.enum(["none", "possible", "probable", "confirmed"]);
 const reviewStatusSchema = z.enum(["approved", "rejected", "applied"]);
@@ -70,14 +70,13 @@ export const intelligentCaptureRouter = router({
       sourceType: sourceTypeSchema,
       sourceLabel: z.string().nullable().optional(),
       sourceReference: z.string().nullable().optional(),
-      createdByUserId: z.number().nullable().optional(),
       meta: z.record(z.string(), z.unknown()).nullable().optional(),
       products: z.array(captureProductSchema).max(20000),
     }))
     .mutation(async ({ ctx, input }) =>
       createCaptureBatch({
         ...input,
-        createdByUserId: input.createdByUserId ?? ctx.user.id,
+        createdByUserId: ctx.user.id,
       }),
     ),
 
@@ -92,12 +91,7 @@ export const intelligentCaptureRouter = router({
       if (draft.products.length === 0) {
         return { success: false as const, error: "Nenhum produto foi extraído da URL informada." };
       }
-
-      const batch = await createCaptureBatch({
-        ...draft,
-        createdByUserId: ctx.user.id,
-      });
-
+      const batch = await createCaptureBatch({ ...draft, createdByUserId: ctx.user.id });
       return normalizeBatchResponse(batch);
     }),
 
@@ -113,12 +107,7 @@ export const intelligentCaptureRouter = router({
       if (draft.products.length === 0) {
         return { success: false as const, error: "Nenhum produto foi identificado no documento enviado." };
       }
-
-      const batch = await createCaptureBatch({
-        ...draft,
-        createdByUserId: ctx.user.id,
-      });
-
+      const batch = await createCaptureBatch({ ...draft, createdByUserId: ctx.user.id });
       return normalizeBatchResponse(batch);
     }),
 
@@ -133,12 +122,7 @@ export const intelligentCaptureRouter = router({
       if (draft.products.length === 0) {
         return { success: false as const, error: "Nenhum produto foi identificado na planilha enviada." };
       }
-
-      const batch = await createCaptureBatch({
-        ...draft,
-        createdByUserId: ctx.user.id,
-      });
-
+      const batch = await createCaptureBatch({ ...draft, createdByUserId: ctx.user.id });
       return normalizeBatchResponse(batch);
     }),
 
@@ -154,12 +138,7 @@ export const intelligentCaptureRouter = router({
       if (draft.products.length === 0) {
         return { success: false as const, error: "Nenhum produto estruturado foi identificado no conteúdo informado." };
       }
-
-      const batch = await createCaptureBatch({
-        ...draft,
-        createdByUserId: ctx.user.id,
-      });
-
+      const batch = await createCaptureBatch({ ...draft, createdByUserId: ctx.user.id });
       return normalizeBatchResponse(batch);
     }),
 
