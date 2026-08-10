@@ -2,15 +2,6 @@ import { calculateStringSimilarity } from "./productMatchingService";
 import { findProductByCatmas, findProductByCatmat, listProductsForMatching } from "../db";
 import type { ExtractedItem } from "./emailQuotationExtractor";
 
-/**
- * Cruzamento de itens de cotação com o catálogo de produtos.
- *
- * Estratégia, em ordem de prioridade:
- *   1. Código CATMAS exato (determinístico).
- *   2. Código CATMAT exato (determinístico).
- *   3. Similaridade de nome (Levenshtein normalizado), acima de um limiar.
- */
-
 export type MatchMethod = "catmas" | "catmat" | "nome" | "nenhum";
 
 export interface ItemMatch {
@@ -21,52 +12,122 @@ export interface ItemMatch {
 }
 
 const NAME_MATCH_THRESHOLD = 0.68;
+const MATCH_CONCURRENCY = 8;
 
-interface CatalogProduct {
+export interface CatalogProduct {
   id: number;
   name: string;
   price: string | null;
 }
 
+interface IndexedCatalogProduct extends CatalogProduct {
+  normalizedName: string;
+  nameLength: number;
+}
+
+export interface NameMatchIndex {
+  productsByLength: IndexedCatalogProduct[];
+}
+
+function normalizeComparableName(value: string): string {
+  return value.toLowerCase().trim();
+}
+
+function lowerBoundByLength(products: IndexedCatalogProduct[], target: number): number {
+  let low = 0;
+  let high = products.length;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (products[mid].nameLength < target) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+function upperBoundByLength(products: IndexedCatalogProduct[], target: number): number {
+  let low = 0;
+  let high = products.length;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (products[mid].nameLength <= target) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
 /**
- * Encontra o melhor produto do catálogo (já carregado) por similaridade de nome.
- * Exportada e pura para facilitar testes.
+ * Índice exato para pruning por limite superior da similaridade Levenshtein.
+ * Construção O(P log P), memória O(P). O mesmo índice é reutilizado por todos
+ * os itens de um lote.
  */
-export function bestNameMatch(
+export function buildNameMatchIndex(catalog: CatalogProduct[]): NameMatchIndex {
+  return {
+    productsByLength: catalog
+      .map((product) => {
+        const normalizedName = normalizeComparableName(product.name);
+        return { ...product, normalizedName, nameLength: normalizedName.length };
+      })
+      .filter((product) => product.nameLength > 0)
+      .sort((a, b) => a.nameLength - b.nameLength || a.id - b.id),
+  };
+}
+
+/**
+ * Busca exata dentro do índice. Se threshold=t, Levenshtein normalizado jamais
+ * alcança t quando min(lenA,lenB)/max(lenA,lenB) < t; candidatos fora desse
+ * intervalo são removidos sem risco de falso negativo.
+ */
+export function bestNameMatchFromIndex(
   descricao: string,
-  catalog: CatalogProduct[],
+  index: NameMatchIndex,
   threshold = NAME_MATCH_THRESHOLD,
 ): { product: CatalogProduct; score: number } | null {
+  const query = normalizeComparableName(descricao);
+  if (!query || !index.productsByLength.length) return null;
+  const safeThreshold = Math.min(1, Math.max(0.01, threshold));
+  const minLength = Math.ceil(query.length * safeThreshold);
+  const maxLength = Math.floor(query.length / safeThreshold);
+  const start = lowerBoundByLength(index.productsByLength, minLength);
+  const end = upperBoundByLength(index.productsByLength, maxLength);
+
   let best: { product: CatalogProduct; score: number } | null = null;
-  for (const product of catalog) {
-    const score = calculateStringSimilarity(descricao, product.name);
-    if (score >= threshold && (!best || score > best.score)) {
+  for (let i = start; i < end; i += 1) {
+    const product = index.productsByLength[i];
+    const score = calculateStringSimilarity(query, product.normalizedName);
+    if (score >= safeThreshold && (!best || score > best.score)) {
       best = { product, score };
+      if (score === 1) break;
     }
   }
   return best;
 }
 
+/** Compatibilidade para consumidores que ainda passam apenas o array. */
+export function bestNameMatch(
+  descricao: string,
+  catalog: CatalogProduct[],
+  threshold = NAME_MATCH_THRESHOLD,
+): { product: CatalogProduct; score: number } | null {
+  return bestNameMatchFromIndex(descricao, buildNameMatchIndex(catalog), threshold);
+}
+
 function isCatmasCode(code: string): boolean {
-  // CATMAS (MG) costuma ter 8+ dígitos; CATMAT (federal) ~6. Usamos o formato
-  // para escolher UM catálogo — nunca cruzamos CATMAS↔CATMAT (numerações
-  // independentes; um código pode existir por coincidência no outro catálogo e
-  // ligar o item ao produto errado com "score 1").
   return /^\d{8,}$/.test(code.trim());
 }
 
-/**
- * Cruza um único item com o catálogo. `catalog` é o conjunto de produtos ativos
- * já carregado (evita N queries). Códigos de catálogo são consultados no banco.
- */
 export async function matchQuotationItem(
   item: ExtractedItem,
   catalog: CatalogProduct[],
 ): Promise<ItemMatch> {
-  const code = item.codigoCatalogo?.trim();
+  return matchQuotationItemWithIndex(item, buildNameMatchIndex(catalog));
+}
 
+export async function matchQuotationItemWithIndex(
+  item: ExtractedItem,
+  index: NameMatchIndex,
+): Promise<ItemMatch> {
+  const code = item.codigoCatalogo?.trim();
   if (code) {
-    // Escolhe UM catálogo pelo formato do código e consulta só ele.
     const [method, lookup] = isCatmasCode(code)
       ? (["catmas", findProductByCatmas] as const)
       : (["catmat", findProductByCatmat] as const);
@@ -75,13 +136,13 @@ export async function matchQuotationItem(
       return {
         produtoMatchId: found.id,
         matchScore: 1,
-        matchMethod: method as MatchMethod,
+        matchMethod: method,
         precoSugerido: found.price ?? null,
       };
     }
   }
 
-  const nameHit = bestNameMatch(item.descricao, catalog);
+  const nameHit = bestNameMatchFromIndex(item.descricao, index);
   if (nameHit) {
     return {
       produtoMatchId: nameHit.product.id,
@@ -90,14 +151,36 @@ export async function matchQuotationItem(
       precoSugerido: nameHit.product.price ?? null,
     };
   }
-
   return { produtoMatchId: null, matchScore: null, matchMethod: "nenhum", precoSugerido: null };
 }
 
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (!items.length) return [];
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 /**
- * Cruza todos os itens de uma cotação, carregando o catálogo uma única vez.
+ * Catálogo é carregado/indexado uma vez. Consultas determinísticas CATMAS/CATMAT
+ * têm concorrência limitada a 8 para não saturar o pool MySQL.
  */
 export async function matchQuotationItems(items: ExtractedItem[]): Promise<ItemMatch[]> {
+  if (!items.length) return [];
   const catalog = await listProductsForMatching();
-  return Promise.all(items.map((item) => matchQuotationItem(item, catalog)));
+  const index = buildNameMatchIndex(catalog);
+  return mapWithConcurrency(items, MATCH_CONCURRENCY, (item) => matchQuotationItemWithIndex(item, index));
 }
