@@ -215,7 +215,7 @@ export function AiKeysForm() {
               id="anthropic-model"
               value={form.anthropicModel}
               onChange={(event) => set("anthropicModel", event.target.value)}
-              placeholder="claude-sonnet-4-20250514"
+              placeholder="claude-sonnet-5"
               className={`w-full border px-3 py-2 text-sm focus:outline-none ${
                 dirtyKeys.has("anthropicModel") ? "border-amber-300 focus:border-amber-500" : "border-gray-200 focus:border-gray-900"
               }`}
