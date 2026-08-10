@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { products, proposals, suppliers } from "../../drizzle/schema";
+import { products, proposalItems, proposals, suppliers } from "../../drizzle/schema";
 import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import {
   addProposalItem,
@@ -41,7 +41,6 @@ const proposalCreateSchema = z.object({
   processNumber: z.string().trim().max(128).optional().nullable(),
   orgId: z.number().int().positive().optional().nullable(),
   orgName: z.string().trim().max(256).optional().nullable(),
-  status: proposalStatusSchema.optional(),
   validityDays: z.number().int().min(1).max(365).optional(),
   paymentTerms: z.string().trim().max(256).optional().nullable(),
   deliveryTerms: z.string().trim().max(256).optional().nullable(),
@@ -49,6 +48,14 @@ const proposalCreateSchema = z.object({
   origem: z.string().trim().max(32).optional().nullable(),
   radarOpportunityId: z.number().int().positive().optional().nullable(),
 });
+
+const proposalUpdateSchema = proposalCreateSchema
+  .omit({ origem: true, radarOpportunityId: true })
+  .partial()
+  .extend({
+    id: z.number().int().positive(),
+    notesHtml: z.string().max(50_000).optional().nullable(),
+  });
 
 const itemCreateSchema = z.object({
   proposalId: z.number().int().positive(),
@@ -81,6 +88,96 @@ function numericDecimal(value: string | null | undefined, field: string): string
   return String(numeric);
 }
 
+async function assertDraftProposal(proposalId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
+  const [proposal] = await db
+    .select({ status: proposals.status })
+    .from(proposals)
+    .where(eq(proposals.id, proposalId))
+    .limit(1);
+  if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+  if (proposal.status !== "draft") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "A proposta já saiu do rascunho. Conteúdo e itens comerciais estão congelados.",
+    });
+  }
+}
+
+async function assertDraftProposalItem(itemId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
+  const [item] = await db
+    .select({ proposalId: proposalItems.proposalId, status: proposals.status })
+    .from(proposalItems)
+    .innerJoin(proposals, eq(proposals.id, proposalItems.proposalId))
+    .where(eq(proposalItems.id, itemId))
+    .limit(1);
+  if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Item de proposta não encontrado." });
+  if (item.status !== "draft") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "A proposta já saiu do rascunho. Os itens comerciais estão congelados.",
+    });
+  }
+  return item.proposalId;
+}
+
+function proposalPdfInput(proposal: NonNullable<Awaited<ReturnType<typeof getProposalWithItems>>>) {
+  return {
+    id: proposal.id,
+    title: proposal.title,
+    processNumber: proposal.processNumber,
+    orgName: proposal.orgName,
+    status: proposal.status,
+    validityDays: proposal.validityDays,
+    paymentTerms: proposal.paymentTerms,
+    deliveryTerms: proposal.deliveryTerms,
+    notes: proposal.notes,
+    createdAt: proposal.createdAt,
+    items: proposal.items.map((item) => ({
+      id: item.id,
+      sortOrder: item.sortOrder ?? item.itemNumber ?? 0,
+      productName: item.productName,
+      activeIngredient: item.activeIngredient,
+      manufacturer: item.manufacturer,
+      concentration: item.concentration,
+      presentation: item.presentation,
+      unit: item.unit,
+      supplierName: item.supplierName,
+      unitPrice: item.unitPrice,
+      suggestedPrice: item.suggestedPrice,
+      quantity: item.quantity,
+      notes: item.notes,
+      imageUrl: item.imageUrl,
+      registroMapa: item.registroMapa,
+      productUrl: item.productUrl,
+    })),
+  };
+}
+
+function companyPdfInput(company: Awaited<ReturnType<typeof getCompanySettings>>) {
+  if (!company) return null;
+  return {
+    name: company.name,
+    cnpj: company.cnpj,
+    address: company.address,
+    city: company.city,
+    state: company.state,
+    zipCode: company.zipCode,
+    phone: company.phone,
+    email: company.email,
+    website: company.website,
+    logoUrl: company.logoUrl,
+    bankName: null,
+    bankAgency: null,
+    bankAccount: null,
+    bankPixKey: null,
+    defaultNotes: company.notes,
+  };
+}
+
 export const proposalsRouter = router({
   list: protectedProcedure.query(() => listProposals()),
 
@@ -91,7 +188,7 @@ export const proposalsRouter = router({
   create: editorProcedure
     .input(proposalCreateSchema)
     .mutation(async ({ input, ctx }) => {
-      const id = await createProposal(input);
+      const id = await createProposal({ ...input, status: "draft" });
       await recordAudit({
         userId: ctx.user.id,
         action: "proposal_create",
@@ -104,21 +201,10 @@ export const proposalsRouter = router({
     }),
 
   update: editorProcedure
-    .input(
-      proposalCreateSchema.partial().extend({
-        id: z.number().int().positive(),
-        notesHtml: z.string().max(50_000).optional().nullable(),
-      }),
-    )
+    .input(proposalUpdateSchema)
     .mutation(async ({ input, ctx }) => {
       const { id, ...data } = input;
-      // Status usa exclusivamente advanceStatus para preservar histórico/efeitos.
-      if (data.status !== undefined) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Altere o status pelo fluxo de avanço da proposta.",
-        });
-      }
+      await assertDraftProposal(id);
       await updateProposal(id, data);
       await recordAudit({
         userId: ctx.user.id,
@@ -135,6 +221,7 @@ export const proposalsRouter = router({
   delete: editorProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
+      await assertDraftProposal(input.id);
       await deleteProposal(input.id);
       await recordAudit({
         userId: ctx.user.id,
@@ -142,7 +229,7 @@ export const proposalsRouter = router({
         entity: "proposals",
         entityId: input.id,
         origin: "proposals",
-        summary: `Proposta excluída (id ${input.id})`,
+        summary: `Proposta rascunho excluída (id ${input.id})`,
       });
       return { success: true as const };
     }),
@@ -150,6 +237,7 @@ export const proposalsRouter = router({
   addItem: editorProcedure
     .input(itemCreateSchema)
     .mutation(async ({ input, ctx }) => {
+      await assertDraftProposal(input.proposalId);
       const id = await addProposalItem({
         ...input,
         unitPrice: numericDecimal(input.unitPrice, "Preço de custo"),
@@ -180,6 +268,7 @@ export const proposalsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { id, ...data } = input;
+      await assertDraftProposalItem(id);
       await updateProposalItem(id, {
         ...data,
         unitPrice: numericDecimal(data.unitPrice, "Preço de custo"),
@@ -202,6 +291,7 @@ export const proposalsRouter = router({
   removeItem: editorProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
+      await assertDraftProposalItem(input.id);
       await removeProposalItem(input.id);
       await recordAudit({
         userId: ctx.user.id,
@@ -227,8 +317,9 @@ export const proposalsRouter = router({
     .query(({ input }) => listProposalsAdmin(input)),
 
   /**
-   * SMTP não é transacional com MySQL. Esta rota evita reenvio de propostas
-   * que já constem como sent, mas exactly-once exige Transactional Outbox.
+   * SMTP ainda é um efeito externo não transacional com MySQL. Até a migração
+   * para outbox, somente rascunhos podem entrar nesta rota e o lifecycle faz a
+   * validação autoritativa de preços antes de registrar o envio.
    */
   sendByEmail: editorProcedure
     .input(
@@ -241,10 +332,7 @@ export const proposalsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       if (!isSmtpConfigured()) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "SMTP não configurado.",
-        });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "SMTP não configurado." });
       }
 
       const proposal = await getProposalWithItems(input.id);
@@ -259,14 +347,14 @@ export const proposalsRouter = router({
       const org = proposal.orgId ? await getRequestingOrgById(proposal.orgId) : null;
       const recipient = input.to ?? org?.email ?? undefined;
       if (!recipient) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Informe o e-mail do destinatário.",
-        });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Informe o e-mail do destinatário." });
       }
 
       const company = await getCompanySettings();
-      const pdfBuffer = await generateProposalPdf(proposal as never, company as never);
+      const pdfBuffer = await generateProposalPdf(
+        proposalPdfInput(proposal),
+        companyPdfInput(company),
+      );
       await sendEmail({
         to: recipient,
         subject: input.subject ?? `Proposta comercial - ${proposal.title}`,
@@ -308,7 +396,7 @@ export const proposalsRouter = router({
         installments: z.number().int().min(1).max(60).optional(),
         firstDueDate: z.date().optional(),
         lossReason: z.string().trim().max(2000).optional(),
-        competitorValue: z.number().nonnegative().optional(),
+        competitorValue: z.number().nonnegative().max(9_999_999_999_999.99).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
