@@ -55,10 +55,17 @@ describe("Capture Core — normalização e segurança de identidade", () => {
 });
 
 describe("Capture Core — quality gates", () => {
-  it("quarentena captura vazia", () => {
+  it("quarentena captura integral vazia", () => {
     const result = evaluateCaptureQuality({ mode: "full", captured: 0, baseline: 20_000 });
     expect(result.quarantine).toBe(true);
     expect(result.score).toBe(0);
+  });
+
+  it("não transforma busca seletiva sem resultado em falha estrutural", () => {
+    const result = evaluateCaptureQuality({ mode: "search", captured: 0, baseline: 20_000 });
+    expect(result.quarantine).toBe(false);
+    expect(result.score).toBe(70);
+    expect(result.reasons.join(" ")).toMatch(/atenção|seletiva/i);
   });
 
   it("quarentena queda estrutural maior que 50% do baseline", () => {
