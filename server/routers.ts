@@ -57,14 +57,16 @@ import { operationalGovernanceRouter } from "./routers/operationalGovernance";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
+import { opportunitiesRouter } from "./routers/opportunities";
+import { licitacaoAgentRouter } from "./routers/licitacaoAgent";
 
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
 
-// ─── Imports ─────────────────────────────────────────────────────────────────
-
 export const appRouter = router({
   system: systemRouter,
+  opportunities: opportunitiesRouter,
+  licitacaoAgent: licitacaoAgentRouter,
   importSmart: importSmartRouter,
   nfeImport: nfeImportRouter,
   priceAnalysis: priceAnalysisRouter,
@@ -102,73 +104,27 @@ export const appRouter = router({
   buscaGlobal: buscaGlobalRouter,
   diagnostico: diagnosticoRouter,
   operationalGovernance: operationalGovernanceRouter,
-
   auth: authRouter,
-
-  // ─── Categories ───────────────────────────────────────────────────────────
   categories: categoriesRouter,
-
-  // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: suppliersRouter,
-
-  // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
-
-  // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: equivalencesRouter,
-
-  // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: importsRouter,
-  // ─── Dashboard ────────────────────────────────────────────────────────────
   dashboard: dashboardRouter,
-
-  // ─── Quotations ───────────────────────────────────────────────────────────
-
-  // ─── Company Settings ─────────────────────────────────────────────────────
   company: companyRouter,
-
-  // ─── Requesting Orgs ──────────────────────────────────────────────────────
   orgs: orgsRouter,
-
-  // ─── Proposals ────────────────────────────────────────────────────────────
   proposals: proposalsRouter,
-
-  // ─── Financial Entries ────────────────────────────────────────────────────
   financial: financialRouter,
-
   masterProducts: masterProductsRouter,
-
   priceIntelligence: priceIntelligenceRouter,
-
-  // ─── Catalog Enrichment ───────────────────────────────────────────────────
   enrichment: enrichmentInlineRouter,
-  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
-  // ─── Importação com Consolidação Automática ───────────────────────────────
-  // ─── Reconhecimento Inteligente de Produtos ───────────────────────────────
-  // ─── Importação com Matching Automático ───────────────────────────────────
-  // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────
-  // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────
   edital: editalRouter,
-
-  // ─── (E) Declarações fixas (templates) ────────────────────────────────────
   declarations: declarationsRouter,
-
-  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
   reclassificacao: reclassificacaoRouter,
-
-  // ─── Sinônimos para Matching ──────────────────────────────────────────────
   synonyms: synonymsRouter,
-
-  // ─── Templates de Proposta ────────────────────────────────────────────────
   proposalTemplates: proposalTemplatesRouter,
-
-  // ─── Metadados e apoio operacional ────────────────────────────────────────
-
-  // ─── Motor Universal de Equivalência e duplicidades ───────────────────────
   duplicates: duplicatesRouter,
   intelligentCapture: intelligentCaptureRouter,
-
-  // ─── Módulos complementares ───────────────────────────────────────────────
   images: imagesRouter,
 });
 export type AppRouter = typeof appRouter;
