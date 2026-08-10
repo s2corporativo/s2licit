@@ -81,12 +81,16 @@ CREATE TABLE `supplier_product_observations` (
 	`action` enum('no_change','update','create','review','blocked') NOT NULL DEFAULT 'review',
 	`reason` text,
 	`rawPayload` json,
+	`reviewStatus` enum('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+	`reviewedAt` timestamp,
+	`reviewedByUserId` int,
 	`capturedAt` timestamp NOT NULL DEFAULT (now()),
 	CONSTRAINT `supplier_product_observations_id` PRIMARY KEY(`id`),
 	CONSTRAINT `observations_job_fk` FOREIGN KEY (`captureJobId`) REFERENCES `capture_jobs`(`id`) ON DELETE cascade,
 	CONSTRAINT `observations_scraper_fk` FOREIGN KEY (`scraperConfigId`) REFERENCES `scraper_configs`(`id`) ON DELETE cascade,
 	CONSTRAINT `observations_supplier_fk` FOREIGN KEY (`supplierId`) REFERENCES `suppliers`(`id`) ON DELETE cascade,
-	CONSTRAINT `observations_product_fk` FOREIGN KEY (`productId`) REFERENCES `products`(`id`) ON DELETE set null
+	CONSTRAINT `observations_product_fk` FOREIGN KEY (`productId`) REFERENCES `products`(`id`) ON DELETE set null,
+	CONSTRAINT `observations_reviewer_fk` FOREIGN KEY (`reviewedByUserId`) REFERENCES `users`(`id`) ON DELETE set null
 );
 --> statement-breakpoint
 CREATE INDEX `idx_observations_job` ON `supplier_product_observations` (`captureJobId`);
@@ -98,6 +102,8 @@ CREATE INDEX `idx_observations_ean` ON `supplier_product_observations` (`ean`);
 CREATE INDEX `idx_observations_product` ON `supplier_product_observations` (`productId`,`capturedAt`);
 --> statement-breakpoint
 CREATE INDEX `idx_observations_hash` ON `supplier_product_observations` (`supplierId`,`contentHash`);
+--> statement-breakpoint
+CREATE INDEX `idx_observations_review_queue` ON `supplier_product_observations` (`reviewStatus`,`action`,`capturedAt`);
 --> statement-breakpoint
 CREATE TABLE `capture_job_events` (
 	`id` int AUTO_INCREMENT NOT NULL,
@@ -135,6 +141,8 @@ CREATE TABLE `capture_ai_feedback` (
 CREATE INDEX `idx_capture_ai_feedback_supplier` ON `capture_ai_feedback` (`supplierId`,`createdAt`);
 --> statement-breakpoint
 CREATE INDEX `idx_capture_ai_feedback_observation` ON `capture_ai_feedback` (`observationId`);
+--> statement-breakpoint
+CREATE INDEX `idx_capture_ai_feedback_lookup` ON `capture_ai_feedback` (`supplierId`,`observedName`,`reusable`);
 --> statement-breakpoint
 CREATE TABLE `capture_connector_health` (
 	`id` int AUTO_INCREMENT NOT NULL,
