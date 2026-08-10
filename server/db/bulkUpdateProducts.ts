@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { products } from "../../drizzle/schema";
 import { getDb } from "./_client";
 
@@ -24,42 +24,51 @@ export async function bulkUpdateProducts(
     productUrl: string;
     stock: string;
     isActive: "yes" | "no";
-    priceAdjustPercent: number; // positive = increase, negative = decrease
+    priceAdjustPercent: number;
+    fichaTecnica: string | null;
+    codigoFornecedor: string | null;
+    informacaoTecnica: string | null;
+    ean: string | null;
+    gtin: string | null;
+    subcategoria: string | null;
+    registroRegulatorio: "MAPA" | "ANVISA" | "FORN" | null;
+    laboratorio: string | null;
+    nomeProduto: string | null;
+    freightValue: string | null;
+    taxValue: string | null;
+    catmasCode: string | null;
+    catmatCode: string | null;
+    ncm: string | null;
+    especieAnimal: string | null;
+    viaAdministracao: string | null;
+    validadeMeses: number | null;
+    classeTerapeutica: string | null;
   }>
 ): Promise<number> {
   const db = await getDb();
   if (!db || ids.length === 0) return 0;
 
-  // If priceAdjustPercent is set, we need to update each product individually
-  if (data.priceAdjustPercent !== undefined && data.priceAdjustPercent !== 0) {
-    const factor = 1 + data.priceAdjustPercent / 100;
-    for (const id of ids) {
-      await db
-        .update(products)
-        .set({ price: sql`ROUND(${products.price} * ${factor}, 2)` })
-        .where(eq(products.id, id));
-    }
-    // Also apply any other non-price fields
-    const { priceAdjustPercent, ...rest } = data;
-    const otherFields = Object.fromEntries(
-      Object.entries(rest).filter(([, v]) => v !== undefined)
-    );
-    if (Object.keys(otherFields).length > 0) {
-      for (const id of ids) {
-        await db.update(products).set(otherFields as any).where(eq(products.id, id));
-      }
-    }
-    return ids.length;
-  }
+  const uniqueIds = Array.from(new Set(ids)).filter((id) => Number.isInteger(id) && id > 0);
+  if (uniqueIds.length === 0) return 0;
 
   const { priceAdjustPercent, ...fields } = data;
   const updateData = Object.fromEntries(
-    Object.entries(fields).filter(([, v]) => v !== undefined)
+    Object.entries(fields).filter(([, value]) => value !== undefined),
   );
-  if (Object.keys(updateData).length === 0) return 0;
 
-  // Batch update using inArray
-  const { inArray } = await import("drizzle-orm");
-  await db.update(products).set(updateData as any).where(inArray(products.id, ids));
-  return ids.length;
+  // Reajuste percentual legado permanece disponível, mas é executado em uma
+  // única instrução SQL. Novos fluxos de preço devem usar product_supplier_offers.
+  if (priceAdjustPercent !== undefined && priceAdjustPercent !== 0) {
+    const factor = 1 + priceAdjustPercent / 100;
+    await db
+      .update(products)
+      .set({ price: sql`ROUND(${products.price} * ${factor}, 2)` })
+      .where(inArray(products.id, uniqueIds));
+  }
+
+  if (Object.keys(updateData).length > 0) {
+    await db.update(products).set(updateData as any).where(inArray(products.id, uniqueIds));
+  }
+
+  return uniqueIds.length;
 }
