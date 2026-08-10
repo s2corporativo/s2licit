@@ -1,16 +1,17 @@
 # Auditoria Staff — Integration Platform — 2026-08-10
 
-## Status
+## Status executivo
 
 **Branch:** `refactor/integration-platform`  
 **PR:** #93  
-**Decisão atual:** **NÃO LIBERAR PARA PRODUÇÃO** até todos os gates P0 abaixo estarem verdes.
+**Estado:** draft  
+**Decisão atual:** **código P0 conhecido corrigido; release ainda bloqueado por ausência de evidência executável de check/test/build e homologação da migração**.
 
-Este documento registra o estado verificável da revisão. “Implementado” não significa “validado em produção”; validação exige typecheck, testes, build e smoke tests dos contratos externos.
+O runner hospedado do GitHub Actions está encerrando as execuções com `startup_failure` antes da criação do primeiro job. Isso não é evidência de falha do código, mas também não pode ser tratado como validação verde.
 
 ## Arquitetura alvo
 
-O S2 Licit permanece um **monólito modular**. Integrações externas devem passar por uma única plataforma interna:
+O S2 Licit permanece um **monólito modular**:
 
 ```text
 CredentialResolver
@@ -30,102 +31,111 @@ Radar / Funil / Produtos / Precificação / Propostas / Pós-venda
 api_logs + sync_runs + Diagnóstico
 ```
 
-Não adicionar Redis, Kafka, Vault ou microserviços sem necessidade mensurável. MySQL continua sendo a coordenação persistente para o volume atual; a arquitetura deixa pontos de extensão explícitos para evolução horizontal.
+A decisão continua sendo não introduzir Redis, Kafka, Vault ou microserviços sem necessidade operacional mensurável. MySQL coordena locks, jobs e persistência para o volume atual.
 
-## Gates P0 — obrigatórios antes de merge/release
+## Gates de release
 
-| Gate | Estado | Critério de aceite |
+| Gate | Estado atual | Critério de aceite |
 |---|---|---|
-| Browser de portais sem sandbox | **BLOQUEADO** | Nenhum `--no-sandbox`/`--disable-setuid-sandbox`; todo browser usa `SecureBrowserRenderer` e processo não-root |
-| FUNDEP/FUNARBE legado | **BLOQUEADO** | `portalOpportunitySyncService.ts` sem `axios`/`puppeteer` direto; HTTP via `ExternalHttpClient`; browser via `SecureBrowserRenderer`; cotação+itens transacionais |
-| Pré-condição SMTP em propostas | **BLOQUEADO** | Todo `isSmtpConfigured()` usado como condição deve ser `await`-ado |
-| TypeScript | **SEM EVIDÊNCIA VERDE** | `pnpm check` = exit code 0 |
-| Testes | **SEM EVIDÊNCIA VERDE** | `pnpm test` = exit code 0 |
-| Build | **SEM EVIDÊNCIA VERDE** | `pnpm build` = exit code 0 |
-| Migração integration_cache | **IMPLEMENTADA; validar** | `0016_integration_cache.sql` aplicada em clone/homologação sem perda de dados |
-| Smoke PNCP/Compras.gov | **PENDENTE DE EXECUÇÃO REAL** | contratos atuais retornam formato aceito ou erro tipado, nunca falso `NO_RESULTS` |
+| Browser sem sandbox | **FECHADO NO CÓDIGO** | Nenhum serviço de portal importa Puppeteer diretamente; browser passa por `SecureBrowserRenderer`; não há `--no-sandbox` em args |
+| FUNDEP/FUNARBE legado | **FECHADO NO CÓDIGO** | HTTP via `ExternalHttpClient`, browser via renderer seguro, matching indexado e cotação+itens transacionais |
+| Portais institucionais S2 | **FECHADO NO CÓDIGO** | FIEMG/CEMIG/COPASA/Compras MG usam renderer/HTTP centralizados; fontes concorrentes com limite; métricas de fundações não duplicam |
+| SMTP em propostas | **FECHADO NO CÓDIGO** | `isSmtpConfigured()` é aguardado antes do envio |
+| Privacidade de telemetria | **FECHADO NO CÓDIGO** | `api_logs` recebe origem sanitizada, status, classificação e hash+tamanho; não recebe corpo bruto nem pathname secreto |
+| TypeScript | **SEM EVIDÊNCIA EXECUTADA** | `pnpm check` = exit 0 |
+| Testes | **SEM EVIDÊNCIA EXECUTADA** | `pnpm test` = exit 0 |
+| Build | **SEM EVIDÊNCIA EXECUTADA** | `pnpm build` = exit 0 |
+| Migração `integration_cache` | **IMPLEMENTADA / HOMOLOGAÇÃO PENDENTE** | `0016_integration_cache.sql` aplicada em clone/homologação e journal confirmado |
+| Smoke PNCP/Compras.gov | **EXECUÇÃO REAL PENDENTE** | resposta atual aceita pelo contrato ou falha tipada, nunca falso `NO_RESULTS` |
 
-`server/integrations/productionReadiness.test.ts` materializa parte desses gates no test suite para impedir regressão/merge acidental.
+Os gates são parcialmente materializados em:
 
-## Correções estruturais implementadas
+- `server/integrations/productionReadiness.test.ts`
+- `server/integrations/telemetryPrivacy.test.ts`
+- `server/integrations/core/externalHttpClient.test.ts`
+- `server/services/emailQuotationMatchingService.test.ts`
+- `server/utils/urlGuard.test.ts`
+- `scripts/verify-integration-platform.mjs`
 
-### Transporte HTTP
+## Correções consolidadas
 
-- timeout por tentativa + deadline total;
-- retry somente em operação idempotente e corpo replayable;
-- `Retry-After`, exponential backoff + jitter;
-- circuit breaker bounded;
-- body size bounded;
-- redaction;
-- telemetry queue bounded, fora do hot path;
-- validação de contrato runtime antes de registrar sucesso;
+### Transporte externo
+
+- timeout por tentativa e deadline total;
+- retry somente quando idempotente e replayable;
+- `Retry-After`, backoff exponencial e jitter;
+- circuit breaker com limite e expiração;
+- limite de body;
 - redirects manuais e validados;
-- proteção SSRF para hosts/IPs locais, privados, link-local e reservados;
-- stripping de headers sensíveis em redirect cross-origin;
-- User-Agent S2 Licit.
+- headers sensíveis removidos em redirect cross-origin;
+- proteção SSRF por host, IP e DNS;
+- validação runtime de contrato antes de sucesso;
+- telemetria em lote fora do hot path;
+- URL de telemetria reduzida à origem;
+- body de telemetria representado apenas por SHA-256 + tamanho.
 
-**Memória:** O(min(payload, `maxBodyBytes`)) por request; circuitos/telemetria possuem limites globais fixos.
+Memória por request: `O(min(payload, maxBodyBytes))`; filas e circuitos possuem tetos globais.
 
-### Credenciais/configuração
+### Configuração e segredos
 
-- `process.env` é somente bootstrap imutável;
-- overrides são criptografados no banco;
-- último snapshot válido permanece durante falha transitória do DB;
-- segredo com erro de decriptação falha fechado;
-- IMAP/SMTP tratados como grupos coerentes;
-- UI envia somente chaves dirty;
-- URLs de FIEMG/Compras MG/CEMIG/COPASA possuem allowlist de domínio oficial;
-- schedules podem ser recarregados em runtime sem deploy.
-
-### PNCP / Compras.gov / FIEMG
-
-- `NO_RESULTS` separado de falha;
-- Zod na fronteira de transporte;
-- paginação com truncamento explícito `PARTIAL`;
-- modalidades PNCP concorrentes;
-- fontes independentes do Radar concorrentes;
-- Compras.gov atual-first + fallback legado explicitamente parcial;
-- FIEMG detecta provável contract drift quando a página continua contendo sinais de licitação mas o parser deixa de reconhecer oportunidades.
+- `process.env` somente como bootstrap imutável;
+- overrides criptografados no banco;
+- último snapshot válido preservado durante falha transitória de banco;
+- falha de decriptação não mistura segredo antigo com configuração nova;
+- IMAP/SMTP são grupos coerentes;
+- UI persiste somente campos realmente alterados;
+- URLs institucionais administráveis possuem allowlist de domínio;
+- agendas podem ser alteradas em runtime sem redeploy;
+- `PRODEMGE_API_KEY` removida do template de produção por não possuir consumidor;
+- default Anthropic alinhado a `claude-sonnet-5`; custo nominal reconhecido pela telemetria de IA.
 
 ### IA
 
-- Anthropic Messages API nativa;
-- Groq/Forge OpenAI-compatible;
-- schemas runtime de resposta;
-- provedor explicitamente selecionado não compartilha prompt com outro provedor por fallback implícito;
-- fallback cross-provider só em modo `auto` ou autorização explícita;
-- OCR força Anthropic sem fallback;
-- `file_url` genérico não é tratado como se o conteúdo do arquivo tivesse sido realmente lido.
+- Anthropic usa Messages API nativa;
+- Groq/Forge usam adapter OpenAI-compatible;
+- schemas runtime para respostas;
+- seleção explícita de provedor não compartilha prompt com outro provedor;
+- fallback cross-provider apenas em `auto` ou autorização explícita;
+- OCR usa Anthropic diretamente sem fallback oculto;
+- `file_url` genérico não é tratado como arquivo efetivamente lido;
+- `activeProvider()` retorna estado seguro quando a preferência aponta para provedor sem credencial;
+- Copiloto S2 Integration Engineer é especialização por contexto/evidência, não fine-tuning de pesos.
 
-### IMAP/SMTP/WhatsApp
+### PNCP / Compras.gov / Radar
 
-- IMAP at-least-once: fetch não marca `Seen`; ACK somente após persistência/deduplicação;
-- limites de mensagem/anexo/lote;
-- cotação + itens em transação;
-- lock distribuído impede scheduler/manual concorrentes;
-- SMTP pool bounded e rotação de configuração sem interromper envios em voo;
-- limites de anexos/body/subject;
-- WhatsApp fanout bounded, no máximo 20 destinos e concorrência 4;
-- telefone mascarado em logs;
-- POST de mensagem sem retry automático por ausência de chave idempotente padronizada.
+- `NO_RESULTS` separado de falha;
+- Zod na fronteira externa;
+- paginação truncada resulta em `PARTIAL`;
+- modalidades PNCP independentes em paralelo;
+- Compras.gov usa endpoint atual primeiro e fallback legado explicitamente parcial;
+- fontes do Radar são concorrentes;
+- frontend exibe cobertura degradada e estado por fonte;
+- RBAC de Radar alinhado no frontend/backend.
 
-### Scheduler
+### E-mail e comunicação
 
-- MySQL advisory locks entre réplicas;
-- execução `partial` registrada como parcial;
-- `lastSuccessfulSyncAt` só avança em sucesso completo;
-- refresh serializado;
-- novo plano cron validado antes de substituir o atual;
-- callback cron não gera unhandled rejection;
-- scan global de scrapers mantém lock apenas durante seleção; execução usa locks individuais e concorrência limitada.
+- IMAP at-least-once;
+- mensagem não recebe `Seen` antes de commit/deduplicação;
+- cotação + itens na mesma transação;
+- `messageId` é `UNIQUE` no banco, protegendo contra corrida entre réplicas;
+- limites de mensagem, lote e anexos;
+- lock distribuído entre sync manual/scheduler;
+- SMTP com pool bounded e rotação segura de credenciais;
+- WhatsApp com no máximo 20 destinos, concorrência 4, telefone mascarado e sem retry de POST não idempotente.
 
-### Diagnóstico
+### Browser e portais institucionais
 
-A agregação saiu do Node (antigo O(L×D) e limite global de 1.500 logs) para SQL por fonte. Memória do processo passa a O(D), onde D é a quantidade pequena de integrações registradas; o cálculo não perde eventos simplesmente porque o volume de 24h ultrapassou um limite arbitrário.
+- `SecureBrowserRenderer` é o único boundary de Puppeteer para esses fluxos;
+- execução como root é recusada em vez de desabilitar sandbox;
+- cada request HTTP(S) secundário é validado contra rede não pública;
+- imagens/mídia/fontes são bloqueadas;
+- requests, hosts e HTML possuem limites;
+- FUNDEP/FUNARBE migrados do caminho legado;
+- FIEMG/CEMIG/COPASA/Compras MG usam o mesmo boundary;
+- persistência de oportunidade + itens é transacional;
+- matching usa índice compartilhado por lote.
 
-### Matching de produtos
-
-O fuzzy matching deixa de comparar todo item contra todo produto sem pruning.
+### Matching
 
 Antes:
 
@@ -136,45 +146,47 @@ O(I × P × L²)
 Depois:
 
 ```text
-build index: O(P log P)
+build: O(P log P)
 queries: O(I × (log P + C × L²)), C ≤ P
 memory: O(P)
 ```
 
-O pruning por comprimento é matematicamente seguro para a similaridade baseada em Levenshtein: se `minLen/maxLen < threshold`, o candidato não pode atingir o threshold. `emailQuotationMatchingService.test.ts` compara o índice com brute force para provar equivalência.
+O pruning é exato para o threshold baseado em Levenshtein; o teste compara o índice com brute force.
 
-## P1 após fechamento dos P0
+### Scheduler e diagnóstico
 
-### Retenção e índices de telemetria
+- MySQL advisory locks entre réplicas;
+- `partial` permanece parcial;
+- `lastSuccessfulSyncAt` só avança em sucesso total;
+- refresh de cron serializado;
+- callbacks não geram rejeição não tratada;
+- diagnóstico agrega telemetria no SQL em vez de carregar limite global em memória.
 
-`api_logs` não deve crescer indefinidamente. Definir política de retenção (ex.: 30–90 dias conforme necessidade de auditoria), índices alinhados às consultas de saúde e exportação de métricas antes do volume tornar a própria observabilidade um gargalo.
+## P1 deliberadamente não expandido neste PR
 
-### Quarentena IMAP
+### Retenção e índices de `api_logs`
 
-Mensagens maiores que os limites ou persistentemente malformadas ficam não lidas para evitar perda silenciosa. Isso é correto para integridade, porém pode repetir alertas indefinidamente. Evolução recomendada: tabela de tentativa/quarentena com UIDVALIDITY+UID+Message-ID, contador de falhas, motivo e ação administrativa.
+A tabela deve receber política de retenção no próximo ciclo de operação. Não foi adicionado índice/migração isolado nesta rodada porque o schema Drizzle precisa permanecer fonte de verdade; otimizar o DELETE sem declarar o índice no schema criaria drift. Antes de volume elevado, definir retenção (ex.: 30–90 dias) e índices alinhados às consultas de saúde.
 
-### UIDVALIDITY
+### Quarentena IMAP / UIDVALIDITY
 
-A confirmação IMAP usa nova conexão após o commit. Antes de alto volume/alta criticidade, carregar e validar UIDVALIDITY junto com UID evita o caso raro de reset da mailbox fazer um UID antigo apontar para outra mensagem.
+Mensagens persistentemente inválidas permanecem não lidas para evitar perda silenciosa. Evolução recomendada: quarentena com `UIDVALIDITY + UID + Message-ID`, contador de tentativas e ação administrativa.
 
-### Telemetria distribuída
+### OpenTelemetry
 
-A fila local + `api_logs` é adequada para a arquitetura atual, mas não substitui tracing/metrics distribuídos em escala multi-host. Evoluir para OpenTelemetry quando houver collector/exportador e necessidade mensurável; não adicionar biblioteca sem backend operacional.
+A solução atual (`api_logs`, `sync_runs`, diagnóstico) atende ao monólito atual. OpenTelemetry só deve ser introduzido quando existir collector/exportador e necessidade operacional concreta.
 
-### IA — write amplification
+### Segredos de infraestrutura
 
-`ai_usage_daily` recebe upsert por chamada. Se throughput de IA crescer, usar agregação/buffer bounded semelhante à fila de telemetria, com flush periódico, para não transformar contabilização em write hotspot.
+Credenciais operacionais ficam no store criptografado do S2. `DATABASE_URL`, `JWT_SECRET`, `ENCRYPTION_KEY` e demais segredos raiz continuam responsabilidade da infraestrutura; não devem ser editáveis pela UI.
 
-### Paginação de fontes públicas
+## Requisitos de produção
 
-Caps atuais são fail-safe e expõem `PARTIAL`, portanto não mentem. Para captura automática em larga escala, substituir caps fixos por jobs retomáveis/checkpoints para consumir todo o universo sem manter uma requisição HTTP aberta indefinidamente.
-
-## Requisitos de ambiente de produção
-
-1. Processo/container deve executar como usuário **não-root** se browser automation estiver habilitada; o renderer seguro recusa Chromium root em vez de usar `--no-sandbox`.
-2. Egress de rede deve, idealmente, bloquear RFC1918/link-local/metadata no nível da infraestrutura também. A proteção em código é defesa em profundidade, não substituto para network policy/firewall.
-3. Segredos de infraestrutura (`DATABASE_URL`, chave de criptografia, JWT/bootstrap) não devem ser editáveis pela UI.
-4. Credenciais operacionais permanecem no store criptografado do S2, com fallback para bootstrap somente quando não existe override.
+1. Container/processo não-root quando browser automation estiver habilitada.
+2. Egress/firewall bloqueando RFC1918/link-local/metadata como defesa adicional ao guard de aplicação.
+3. Migração `0016` testada em clone/homologação.
+4. Preflight completo com exit code zero.
+5. Smoke dos contratos públicos sem falsa classificação de ausência de oportunidades.
 
 ## Comandos de aceite
 
@@ -186,4 +198,4 @@ pnpm build
 RUN_PUBLIC_SMOKE=1 bash scripts/preflight-integration-platform.sh
 ```
 
-Nenhum relatório ou status de PR substitui os exit codes desses comandos. O release só deve ser classificado como pronto após resultados verdes e teste em homologação com migração real.
+Enquanto esses comandos não tiverem evidência real de execução verde, o PR deve permanecer **draft**, mesmo com os P0 conhecidos corrigidos no código.
