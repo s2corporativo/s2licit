@@ -1,13 +1,9 @@
 import nodemailer from "nodemailer";
 
 /**
- * Envio de e-mail (SMTP) para responder cotações.
- *
- * Configuração por ambiente (opcional — sem ela, o envio é desabilitado):
- *   SMTP_HOST, SMTP_PORT (padrão 587), SMTP_USER, SMTP_PASSWORD,
- *   SMTP_SECURE ("true" força TLS na conexão), SMTP_FROM (remetente).
+ * Envio SMTP central. O caller pode fornecer Message-ID determinístico para
+ * correlação/auditoria de efeitos externos (especialmente proposta comercial).
  */
-
 export function isSmtpConfigured(): boolean {
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD);
 }
@@ -29,6 +25,7 @@ export interface SendEmailInput {
   to: string;
   subject: string;
   text: string;
+  messageId?: string;
   attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
 
@@ -45,11 +42,12 @@ export async function sendEmail(input: SendEmailInput): Promise<{ messageId: str
     to: input.to,
     subject: input.subject,
     text: input.text,
-    attachments: input.attachments?.map((a) => ({
-      filename: a.filename,
-      content: a.content,
-      contentType: a.contentType,
+    ...(input.messageId ? { messageId: input.messageId } : {}),
+    attachments: input.attachments?.map((attachment) => ({
+      filename: attachment.filename,
+      content: attachment.content,
+      contentType: attachment.contentType,
     })),
   });
-  return { messageId: info.messageId };
+  return { messageId: info.messageId || input.messageId || "" };
 }
