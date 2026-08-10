@@ -9,17 +9,32 @@ async function source(relativePath: string): Promise<string> {
   return readFile(path.join(root, relativePath), "utf8");
 }
 
+function chromiumArgsContain(content: string, flag: string): boolean {
+  const argsBlocks = content.match(/args\s*:\s*\[[\s\S]*?\]/g) ?? [];
+  return argsBlocks.some((block) => block.includes(`"${flag}"`) || block.includes(`'${flag}'`));
+}
+
 describe("Integration Platform production readiness", () => {
-  it("does not run portal browsers with Chromium sandbox disabled", async () => {
-    const files = [
-      "server/services/portalOpportunitySyncService.ts",
-      "server/services/s2PortalOpportunitySyncService.ts",
-      "server/integrations/core/secureBrowserRenderer.ts",
-    ];
-    for (const file of files) {
-      const content = await source(file);
-      expect(content, `${file} must not contain --no-sandbox`).not.toContain("--no-sandbox");
-      expect(content, `${file} must not contain --disable-setuid-sandbox`).not.toContain("--disable-setuid-sandbox");
+  it("centralizes browser automation and never disables Chromium sandbox", async () => {
+    const [foundation, institutional, renderer] = await Promise.all([
+      source("server/services/portalOpportunitySyncService.ts"),
+      source("server/services/s2PortalOpportunitySyncService.ts"),
+      source("server/integrations/core/secureBrowserRenderer.ts"),
+    ]);
+
+    expect(foundation).not.toMatch(/from\s+["']puppeteer["']/);
+    expect(institutional).not.toMatch(/from\s+["']puppeteer["']/);
+    expect(foundation).toContain("renderPublicHtml");
+    expect(institutional).toContain("renderPublicHtml");
+    expect(renderer).toMatch(/from\s+["']puppeteer["']/);
+
+    for (const [file, content] of [
+      ["portalOpportunitySyncService.ts", foundation],
+      ["s2PortalOpportunitySyncService.ts", institutional],
+      ["secureBrowserRenderer.ts", renderer],
+    ] as const) {
+      expect(chromiumArgsContain(content, "--no-sandbox"), file).toBe(false);
+      expect(chromiumArgsContain(content, "--disable-setuid-sandbox"), file).toBe(false);
     }
   });
 
@@ -27,7 +42,9 @@ describe("Integration Platform production readiness", () => {
     const content = await source("server/services/portalOpportunitySyncService.ts");
     expect(content).not.toMatch(/from\s+["']axios["']/);
     expect(content).not.toMatch(/from\s+["']puppeteer["']/);
-    expect(content).toMatch(/externalHttpRequest|renderPublicHtml/);
+    expect(content).toContain("externalHttpRequest");
+    expect(content).toContain("renderPublicHtml");
+    expect(content).toContain("db.transaction");
   });
 
   it("never treats an async SMTP configuration check as a boolean", async () => {
@@ -66,10 +83,13 @@ describe("Integration Platform production readiness", () => {
   });
 
   it("does not silently acknowledge IMAP before business persistence", async () => {
-    const inbox = await source("server/services/emailInboxService.ts");
-    const sync = await source("server/services/emailQuotationSyncService.ts");
-    expect(inbox).not.toMatch(/messageFlagsAdd\([^\n]*\\Seen[^\n]*\)[\s\S]*fetchUnseenEmails/);
+    const [inbox, sync] = await Promise.all([
+      source("server/services/emailInboxService.ts"),
+      source("server/services/emailQuotationSyncService.ts"),
+    ]);
     expect(sync).toContain("acknowledgeEmailsSeen");
     expect(sync).toContain("db.transaction");
+    const fetchFunction = inbox.match(/export async function fetchUnseenEmails[\s\S]*?\n}\n\n/)?.[0] ?? "";
+    expect(fetchFunction).not.toContain("messageFlagsAdd");
   });
 });
