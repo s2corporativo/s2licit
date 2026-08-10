@@ -39,6 +39,18 @@ describe("puppeteerCookiesToRecord", () => {
     });
   });
 
+  it("aceita SameSite Default retornado por versões atuais do Puppeteer", () => {
+    const rec = puppeteerCookiesToRecord([
+      {
+        name: "session",
+        value: "abc",
+        domain: ".forn.com",
+        sameSite: "Default",
+      },
+    ]);
+    expect(JSON.parse(rec[COOKIE_JAR_V2_KEY])[0].sameSite).toBe("Default");
+  });
+
   it("ignora entradas inválidas e entrada não-array", () => {
     expect(puppeteerCookiesToRecord(null)).toEqual({});
     expect(puppeteerCookiesToRecord(undefined)).toEqual({});
@@ -52,7 +64,10 @@ describe("puppeteerCookiesToRecord", () => {
 
 describe("recordToPuppeteerCookies", () => {
   it("mantém compatibilidade com registro legado", () => {
-    const cookies = recordToPuppeteerCookies({ session: "abc", csrf: "xyz" }, "https://forn.com");
+    const cookies = recordToPuppeteerCookies(
+      { session: "abc", csrf: "xyz" },
+      "https://forn.com",
+    );
     expect(cookies).toEqual([
       { name: "session", value: "abc", url: "https://forn.com" },
       { name: "csrf", value: "xyz", url: "https://forn.com" },
@@ -84,11 +99,35 @@ describe("recordToPuppeteerCookies", () => {
     ]);
   });
 
+  it("não reenvia metadados depreciados/não suportados pelo CookieParam", () => {
+    const record = puppeteerCookiesToRecord([
+      {
+        name: "session",
+        value: "abc",
+        domain: ".forn.com",
+        sameParty: true,
+        sourcePort: 443,
+        sourceScheme: "Secure",
+      },
+    ]);
+    const [cookie] = recordToPuppeteerCookies(record, "https://forn.com/login");
+    expect(cookie).toMatchObject({
+      name: "session",
+      value: "abc",
+      domain: ".forn.com",
+      sourceScheme: "Secure",
+    });
+    expect(cookie).not.toHaveProperty("sameParty");
+    expect(cookie).not.toHaveProperty("sourcePort");
+  });
+
   it("usa URL apenas para cookie host-only sem domínio", () => {
     const record = puppeteerCookiesToRecord([
       { name: "session", value: "abc", path: "/", secure: true },
     ]);
-    expect(recordToPuppeteerCookies(record, "https://forn.com/login")[0]).toMatchObject({
+    expect(
+      recordToPuppeteerCookies(record, "https://forn.com/login")[0],
+    ).toMatchObject({
       name: "session",
       value: "abc",
       path: "/",
