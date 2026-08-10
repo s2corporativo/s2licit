@@ -28,10 +28,10 @@ function isPrivateIpv4(address: string): boolean {
 function isNonPublicIpv6(address: string): boolean {
   const value = address.toLowerCase();
   if (value === "::" || value === "::1") return true;
-  if (value.startsWith("fc") || value.startsWith("fd")) return true; // ULA fc00::/7
-  if (/^fe[89ab]/.test(value)) return true; // link-local fe80::/10
-  if (value.startsWith("ff")) return true; // multicast
-  if (value.startsWith("2001:db8:")) return true; // documentação
+  if (value.startsWith("fc") || value.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(value)) return true;
+  if (value.startsWith("ff")) return true;
+  if (value.startsWith("2001:db8:")) return true;
   if (value.startsWith("::ffff:")) {
     const mapped = value.slice("::ffff:".length);
     if (isIP(mapped) === 4) return isPrivateIpv4(mapped);
@@ -48,20 +48,21 @@ export function isPublicIp(address: string): boolean {
 
 async function resolvePublicAddress(hostname: string): Promise<{ address: string; family: 4 | 6 }> {
   const literalFamily = isIP(hostname);
-  if (literalFamily) {
+  if (literalFamily === 4 || literalFamily === 6) {
     if (!isPublicIp(hostname)) throw new Error("Destino de imagem não público.");
-    return { address: hostname, family: literalFamily as 4 | 6 };
+    return { address: hostname, family: literalFamily };
   }
 
   const records = await lookup(hostname, { all: true, verbatim: true });
   if (records.length === 0) throw new Error("Hostname de imagem sem resolução DNS.");
   if (records.some((record) => !isPublicIp(record.address))) {
-    // Política conservadora: se QUALQUER resposta DNS apontar para rede não
-    // pública, a origem inteira é bloqueada. Evita alternância/rebinding.
     throw new Error("Hostname de imagem resolve para endereço não público.");
   }
   const selected = records[0];
-  return { address: selected.address, family: selected.family as 4 | 6 };
+  if (selected.family !== 4 && selected.family !== 6) {
+    throw new Error("Família de endereço DNS não suportada.");
+  }
+  return { address: selected.address, family: selected.family };
 }
 
 function validateUrl(rawUrl: string): URL {
@@ -76,67 +77,77 @@ function validateUrl(rawUrl: string): URL {
   return parsed;
 }
 
+function collectImageResponse(
+  response: http.IncomingMessage,
+  request: http.ClientRequest,
+  resolve: (buffer: Buffer) => void,
+  reject: (error: Error) => void,
+): void {
+  const status = response.statusCode ?? 0;
+  if (status < 200 || status >= 300) {
+    response.resume();
+    reject(new Error(`Imagem remota respondeu HTTP ${status}.`));
+    return;
+  }
+
+  const contentType = String(response.headers["content-type"] ?? "").toLowerCase();
+  if (!contentType.startsWith("image/")) {
+    response.resume();
+    reject(new Error("Resposta remota não é uma imagem."));
+    return;
+  }
+
+  const declaredLength = Number(response.headers["content-length"] ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_IMAGE_BYTES) {
+    response.resume();
+    reject(new Error("Imagem excede o limite de 5 MB."));
+    return;
+  }
+
+  let total = 0;
+  const chunks: Buffer[] = [];
+  response.on("data", (chunk: Buffer) => {
+    total += chunk.length;
+    if (total > MAX_IMAGE_BYTES) {
+      request.destroy(new Error("Imagem excede o limite de 5 MB."));
+      return;
+    }
+    chunks.push(chunk);
+  });
+  response.on("end", () => resolve(Buffer.concat(chunks)));
+  response.on("error", reject);
+}
+
 /**
- * Busca imagem remota com DNS pinning. A conexão é feita ao IP público já
- * validado, enquanto Host/SNI preservam o hostname original. Não segue
- * redirects automaticamente: cada novo destino precisaria ser revalidado.
+ * DNS pinning: valida todas as respostas DNS e conecta diretamente ao IP
+ * público escolhido. Host e SNI continuam sendo o hostname original. Redirects
+ * não são seguidos automaticamente e, portanto, não escapam da validação.
  */
 export async function fetchRemoteImageBuffer(rawUrl: string): Promise<Buffer> {
   const parsed = validateUrl(rawUrl);
   const resolved = await resolvePublicAddress(parsed.hostname);
-  const client = parsed.protocol === "https:" ? https : http;
+  const baseOptions: http.RequestOptions = {
+    hostname: resolved.address,
+    family: resolved.family,
+    port: parsed.port || undefined,
+    path: `${parsed.pathname}${parsed.search}`,
+    headers: {
+      Host: parsed.host,
+      Accept: "image/*",
+      "User-Agent": "S2Licit/1.0",
+    },
+    timeout: REQUEST_TIMEOUT_MS,
+  };
 
   return new Promise<Buffer>((resolve, reject) => {
-    const request = client.get(
-      {
-        protocol: parsed.protocol,
-        hostname: resolved.address,
-        family: resolved.family,
-        port: parsed.port || undefined,
-        path: `${parsed.pathname}${parsed.search}`,
-        headers: {
-          Host: parsed.host,
-          Accept: "image/*",
-          "User-Agent": "S2Licit/1.0",
-        },
-        ...(parsed.protocol === "https:" ? { servername: parsed.hostname } : {}),
-        timeout: REQUEST_TIMEOUT_MS,
-      },
-      (response) => {
-        const status = response.statusCode ?? 0;
-        if (status < 200 || status >= 300) {
-          response.resume();
-          reject(new Error(`Imagem remota respondeu HTTP ${status}.`));
-          return;
-        }
-        const contentType = String(response.headers["content-type"] ?? "").toLowerCase();
-        if (!contentType.startsWith("image/")) {
-          response.resume();
-          reject(new Error("Resposta remota não é uma imagem."));
-          return;
-        }
+    let request: http.ClientRequest;
+    const onResponse = (response: http.IncomingMessage) =>
+      collectImageResponse(response, request, resolve, reject);
 
-        const declaredLength = Number(response.headers["content-length"] ?? 0);
-        if (Number.isFinite(declaredLength) && declaredLength > MAX_IMAGE_BYTES) {
-          response.resume();
-          reject(new Error("Imagem excede o limite de 5 MB."));
-          return;
-        }
+    request = parsed.protocol === "https:"
+      ? https.get({ ...baseOptions, servername: parsed.hostname }, onResponse)
+      : http.get(baseOptions, onResponse);
 
-        let total = 0;
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => {
-          total += chunk.length;
-          if (total > MAX_IMAGE_BYTES) {
-            request.destroy(new Error("Imagem excede o limite de 5 MB."));
-            return;
-          }
-          chunks.push(chunk);
-        });
-        response.on("end", () => resolve(Buffer.concat(chunks)));
-        response.on("error", reject);
-      },
-    );
     request.on("timeout", () => request.destroy(new Error("Timeout ao buscar imagem.")));
     request.on("error", reject);
   });
