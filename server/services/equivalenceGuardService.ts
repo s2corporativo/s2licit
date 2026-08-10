@@ -74,23 +74,23 @@ export async function applyPersistedEquivalenceMemory(input: {
     .filter((id) => Number.isInteger(id) && id > 0);
   if (!ids.length) return input.candidates;
 
-  const idList = ids.join(",");
+  const idCondition = sql.raw(`candidateProductId IN (${ids.join(",")})`);
   const referenceProductId = input.reference.productId && Number.isInteger(input.reference.productId)
     ? Number(input.reference.productId)
     : null;
   const description = input.description?.trim() || null;
+  const contextCondition = referenceProductId
+    ? sql`referenceProductId = ${referenceProductId}`
+    : description
+      ? sql`LOWER(TRIM(queryText)) = LOWER(TRIM(${description}))`
+      : sql`1 = 0`;
 
-  const [rows] = await db.execute(sql.raw(`
+  const [rows] = await db.execute(sql`
     SELECT candidateProductId, decision, reason, createdAt
     FROM equivalence_compendium_feedback
-    WHERE candidateProductId IN (${idList})
-      AND (
-        ${referenceProductId ? `referenceProductId = ${referenceProductId}` : "1=0"}
-        OR
-        ${description ? "LOWER(TRIM(queryText)) = LOWER(TRIM(?))" : "1=0"}
-      )
+    WHERE ${idCondition} AND ${contextCondition}
     ORDER BY createdAt DESC
-  `), ...(description ? [description] : []) as any);
+  `);
 
   const latest = new Map<number, MemoryRow>();
   for (const row of (Array.isArray(rows) ? rows : []) as MemoryRow[]) {
