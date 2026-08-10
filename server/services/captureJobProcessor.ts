@@ -15,10 +15,11 @@ import {
 } from "../../drizzle/captureCoreSchema";
 import { normalizeText } from "../matching/productMatcher";
 import { logger } from "../_core/logger";
+import { CaptureHumanInterventionRequiredError } from "./browserCaptureEngine";
 import {
-  CaptureHumanInterventionRequiredError,
-} from "./browserCaptureEngine";
-import { captureSupplierProducts, type CapturedSupplierProduct } from "./scraperCaptureAdapter";
+  captureSupplierProducts,
+  type CapturedSupplierProduct,
+} from "./scraperCaptureAdapter";
 import {
   evaluateCapturePriceChange,
   evaluateCaptureQuality,
@@ -137,9 +138,7 @@ function observationHash(input: {
     availability: input.availability,
   };
 
-  return createHash("sha256")
-    .update(JSON.stringify(canonical))
-    .digest("hex");
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 async function addEvent(
@@ -185,8 +184,13 @@ async function loadPendingHashes(supplierId: number): Promise<Set<string>> {
   return new Set(rows.map((row) => row.contentHash));
 }
 
-function offerIsEquivalent(
-  item: CapturedSupplierProduct,
+/**
+ * Compara o estado temporal atual da oferta. Ausência na captura é informação:
+ * significa que estoque/promoção/disponibilidade não foram confirmados agora.
+ * Portanto só é equivalente quando o banco também está vazio/desconhecido.
+ */
+export function captureOfferIsEquivalent(
+  item: Pick<CapturedSupplierProduct, "price" | "pricePromo" | "stock">,
   availability: NormalizedAvailability,
   existing: CaptureMatchDecision["existingOffer"],
 ): boolean {
@@ -194,14 +198,13 @@ function offerIsEquivalent(
 
   const priceEqual = Number(existing.price || 0) === Number(item.price);
   const promoEqual = item.pricePromo == null
-    ? true
+    ? existing.promoPrice == null
     : Number(existing.promoPrice || 0) === Number(item.pricePromo);
   const stockEqual = item.stock == null
-    ? true
+    ? existing.stock == null
     : Number(existing.stock ?? -1) === Number(item.stock);
-  const availabilityEqual = availability === "unknown"
-    ? true
-    : String(existing.availability || "") === toLegacyAvailability(availability);
+  const availabilityEqual =
+    String(existing.availability || "") === toLegacyAvailability(availability);
 
   return priceEqual && promoEqual && stockEqual && availabilityEqual;
 }
@@ -236,10 +239,7 @@ async function evaluateItems(
           (match.product.supplierId === job.supplierId
             ? match.product.price
             : null);
-        const anomaly = evaluateCapturePriceChange(
-          scraped.price,
-          previousPrice,
-        );
+        const anomaly = evaluateCapturePriceChange(scraped.price, previousPrice);
 
         if (anomaly.level === "block") {
           action = "blocked";
@@ -250,7 +250,7 @@ async function evaluateItems(
           action = "review";
           reason = `Variação de preço ${(anomaly.change! * 100).toFixed(1)}% requer revisão.`;
         } else if (match.deterministic) {
-          action = offerIsEquivalent(
+          action = captureOfferIsEquivalent(
             scraped,
             availability,
             match.existingOffer,
@@ -399,13 +399,9 @@ async function persistObservations(input: {
       rawPrice: String(item.scraped.price),
       price: String(item.scraped.price),
       normalPrice:
-        item.scraped.priceNormal != null
-          ? String(item.scraped.priceNormal)
-          : null,
+        item.scraped.priceNormal != null ? String(item.scraped.priceNormal) : null,
       promoPrice:
-        item.scraped.pricePromo != null
-          ? String(item.scraped.pricePromo)
-          : null,
+        item.scraped.pricePromo != null ? String(item.scraped.pricePromo) : null,
       stock: item.scraped.stock ?? null,
       availability: item.availability,
       productUrl: item.scraped.productUrl ?? null,
@@ -413,9 +409,7 @@ async function persistObservations(input: {
       sourceType: item.scraped.sourceType,
       sourceUrl: item.scraped.fonteUrl ?? item.scraped.productUrl ?? null,
       contentHash: item.contentHash,
-      confidence: String(
-        Math.round(item.match.confidence * 10_000) / 100,
-      ),
+      confidence: String(Math.round(item.match.confidence * 10_000) / 100),
       action: item.action,
       reason: item.reason,
       reviewStatus: needsHuman ? "pending" : "approved",
@@ -820,8 +814,6 @@ export async function processCaptureJob(jobId: number): Promise<void> {
     ]);
 
     await addEvent(job.id, "done", `Captura concluída: ${summary}`);
-    // addEvent atualiza heartbeat por compatibilidade; estado terminal não deve
-    // manter lease ativo.
     await db
       .update(captureJobs)
       .set({ heartbeatAt: null })
@@ -829,10 +821,7 @@ export async function processCaptureJob(jobId: number): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const kind = classifyFailure(error);
-    logger.error(
-      `[CaptureProcessor] Job #${job.id} falhou (${kind}):`,
-      error,
-    );
+    logger.error(`[CaptureProcessor] Job #${job.id} falhou (${kind}):`, error);
 
     await addEvent(
       job.id,
@@ -842,10 +831,7 @@ export async function processCaptureJob(jobId: number): Promise<void> {
     );
 
     if (kind === "transient" && job.attempts < job.maxAttempts) {
-      const delayMinutes = Math.min(
-        15,
-        2 ** Math.max(job.attempts - 1, 0),
-      );
+      const delayMinutes = Math.min(15, 2 ** Math.max(job.attempts - 1, 0));
 
       await db
         .update(captureJobs)
