@@ -4,12 +4,23 @@ import {
   getCaptureJobStatus,
   getConnectorHealthList,
 } from "../services/captureCoreService";
-import {
-  decideSafeCaptureObservation,
-  listSafeCaptureReviewQueue,
-} from "../services/captureSafeProcessor";
+import { listSafeCaptureReviewQueue } from "../services/captureSafeProcessor";
+import { decideCaptureObservationTransactional } from "../services/captureReviewService";
 import { enqueuePriorityRefreshForTerms } from "../services/capturePriorityRefreshService";
 import { captureRunnerStatus } from "../jobs/captureJobRunner";
+
+const reviewQueueInput = z.object({
+  scraperConfigId: z.number().int().positive().optional(),
+  supplierId: z.number().int().positive().optional(),
+  limit: z.number().int().min(1).max(500).default(100),
+}).default({ limit: 100 });
+
+const decisionInput = z.object({
+  observationId: z.number().int().positive(),
+  decision: z.enum(["approve", "reject"]),
+  expectedProductId: z.number().int().positive().nullable().optional(),
+  notes: z.string().trim().max(2_000).nullable().optional(),
+});
 
 export const captureCoreRouter = router({
   health: protectedProcedure.query(() => getConnectorHealthList()),
@@ -19,37 +30,32 @@ export const captureCoreRouter = router({
     .query(({ input }) => getCaptureJobStatus(input.scraperConfigId)),
 
   reviewQueue: adminProcedure
-    .input(z.object({
-      scraperConfigId: z.number().int().positive().optional(),
-      supplierId: z.number().int().positive().optional(),
-      limit: z.number().int().min(1).max(500).default(100),
-    }).default({ limit: 100 }))
+    .input(reviewQueueInput)
     .query(({ input }) => listSafeCaptureReviewQueue(input)),
 
   decideObservation: adminProcedure
-    .input(z.object({
-      observationId: z.number().int().positive(),
-      decision: z.enum(["approve", "reject"]),
-      expectedProductId: z.number().int().positive().nullable().optional(),
-      notes: z.string().max(2000).nullable().optional(),
-    }))
-    .mutation(({ input, ctx }) => decideSafeCaptureObservation({
-      ...input,
-      userId: ctx.user.id,
-    })),
+    .input(decisionInput)
+    .mutation(({ input, ctx }) =>
+      decideCaptureObservationTransactional({
+        ...input,
+        userId: ctx.user.id,
+      }),
+    ),
 
   /** Atualização prioritária para itens de edital/proposta/cotação. */
   refreshTerms: adminProcedure
     .input(z.object({
-      terms: z.array(z.string().min(1).max(512)).min(1).max(500),
+      terms: z.array(z.string().trim().min(1).max(512)).min(1).max(500),
       trigger: z.enum(["proposal", "api", "manual"]).default("proposal"),
     }))
-    .mutation(({ input, ctx }) => enqueuePriorityRefreshForTerms({
-      terms: input.terms,
-      trigger: input.trigger,
-      createdByUserId: ctx.user.id,
-      priority: 100,
-    })),
+    .mutation(({ input, ctx }) =>
+      enqueuePriorityRefreshForTerms({
+        terms: input.terms,
+        trigger: input.trigger,
+        createdByUserId: ctx.user.id,
+        priority: 100,
+      }),
+    ),
 
   runnerStatus: adminProcedure.query(() => captureRunnerStatus()),
 });
