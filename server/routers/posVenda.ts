@@ -1,33 +1,141 @@
 import { TRPCError } from "@trpc/server";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { desc, eq, isNull } from "drizzle-orm";
-import { protectedProcedure, router } from "../_core/trpc";
-import { getDb, getProposalWithItems } from "../db";
 import {
   deliveries,
+  funilOportunidades,
   payables,
+  proposalItems,
+  proposals,
   purchaseOrderItems,
   purchaseOrders,
   salesInvoices,
 } from "../../drizzle/schema";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
+import { getDb } from "../db";
+import { recordAudit } from "../services/auditService";
+import {
+  canEvidenceAdvance,
+  transitionOpportunityAtomic,
+} from "../services/opportunityStateService";
 
-/**
- * Pós-venda (spec §20-23): pedidos de compra a fornecedores, entregas,
- * notas fiscais de venda (contas a receber), contas a pagar e fluxo de
- * caixa projetado. Fluxo real: vencer a disputa → comprar → entregar →
- * faturar → receber → medir o lucro de verdade.
- */
+const dataStr = z.string().date();
+const parseDia = (value?: string | null) =>
+  value ? new Date(`${value}T12:00:00`) : undefined;
 
-const dataStr = z.string(); // yyyy-mm-dd
-const parseDia = (s?: string | null) => (s ? new Date(`${s}T12:00:00`) : undefined);
+function actorLabel(user: { name?: string | null; email?: string | null }): string {
+  return user.name?.trim() || user.email?.trim() || "sistema";
+}
+
+function insertId(result: unknown): number {
+  if (Array.isArray(result)) {
+    const first = result[0];
+    if (first && typeof first === "object" && "insertId" in first) {
+      return Number((first as { insertId?: number }).insertId ?? 0);
+    }
+  }
+  return 0;
+}
+
+function affectedRows(result: unknown): number {
+  if (Array.isArray(result)) {
+    const first = result[0];
+    if (first && typeof first === "object" && "affectedRows" in first) {
+      return Number((first as { affectedRows?: number }).affectedRows ?? 0);
+    }
+  }
+  return 0;
+}
+
+async function resolveProposalOpportunity(proposalId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [proposal] = await db
+    .select({
+      radarOpportunityId: proposals.radarOpportunityId,
+      processNumber: proposals.processNumber,
+      orgName: proposals.orgName,
+    })
+    .from(proposals)
+    .where(eq(proposals.id, proposalId))
+    .limit(1);
+  if (!proposal) return null;
+
+  if (proposal.radarOpportunityId != null) {
+    const rows = await db
+      .select({ id: funilOportunidades.id })
+      .from(funilOportunidades)
+      .where(
+        and(
+          eq(funilOportunidades.origemTipo, "pncp"),
+          eq(funilOportunidades.origemId, proposal.radarOpportunityId),
+        ),
+      )
+      .limit(2);
+    if (rows.length === 1) return rows[0].id;
+    if (rows.length > 1) return null;
+  }
+
+  if (proposal.processNumber?.trim() && proposal.orgName?.trim()) {
+    const rows = await db
+      .select({ id: funilOportunidades.id })
+      .from(funilOportunidades)
+      .where(
+        and(
+          eq(funilOportunidades.numeroProcesso, proposal.processNumber.trim()),
+          eq(funilOportunidades.orgao, proposal.orgName.trim()),
+        ),
+      )
+      .limit(2);
+    if (rows.length === 1) return rows[0].id;
+  }
+  return null;
+}
+
+async function advanceOpportunityFromEvidence(
+  opportunityId: number | null | undefined,
+  target: "entrega" | "faturamento" | "recebimento",
+  reason: string,
+  actor: string,
+): Promise<void> {
+  if (!opportunityId) return;
+  const db = await getDb();
+  if (!db) return;
+  const [opportunity] = await db
+    .select({ etapa: funilOportunidades.etapa })
+    .from(funilOportunidades)
+    .where(eq(funilOportunidades.id, opportunityId))
+    .limit(1);
+  if (!opportunity || !canEvidenceAdvance(opportunity.etapa, target)) return;
+  await transitionOpportunityAtomic({
+    opportunityId,
+    from: opportunity.etapa,
+    to: target,
+    reason,
+    actor,
+  });
+}
+
+const orderItemsSchema = z
+  .array(
+    z.object({
+      descricao: z.string().trim().min(1).max(512),
+      quantidade: z.number().positive(),
+      precoUnit: z.number().nonnegative(),
+    }),
+  )
+  .max(1000)
+  .optional();
 
 export const posVendaRouter = router({
-  // ── Pedidos de compra ──────────────────────────────────────────────────
   pedidos: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
-    const rows = await db.select().from(purchaseOrders).orderBy(desc(purchaseOrders.createdAt)).limit(200);
-    return rows;
+    return db
+      .select()
+      .from(purchaseOrders)
+      .orderBy(desc(purchaseOrders.createdAt))
+      .limit(200);
   }),
 
   pedidoItens: protectedProcedure
@@ -35,174 +143,280 @@ export const posVendaRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
-      return db.select().from(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, input.orderId));
+      return db
+        .select()
+        .from(purchaseOrderItems)
+        .where(eq(purchaseOrderItems.orderId, input.orderId))
+        .orderBy(asc(purchaseOrderItems.id));
     }),
 
-  salvarPedido: protectedProcedure
+  salvarPedido: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive().optional(),
-        fornecedorNome: z.string().min(2).max(256),
-        descricao: z.string().min(3).max(512),
+        fornecedorNome: z.string().trim().min(2).max(256),
+        descricao: z.string().trim().min(3).max(512),
         valorTotal: z.number().nonnegative(),
         prazoEntrega: dataStr.optional(),
-        vinculo: z.string().max(256).optional(),
+        vinculo: z.string().trim().max(256).optional(),
         funilId: z.number().int().positive().optional(),
-        observacoes: z.string().max(4000).optional(),
-        itens: z
-          .array(
-            z.object({
-              descricao: z.string().min(1).max(512),
-              quantidade: z.number().positive(),
-              precoUnit: z.number().nonnegative(),
-            }),
-          )
-          .optional(),
+        observacoes: z.string().trim().max(4000).optional(),
+        itens: orderItemsSchema,
       }),
     )
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      const valores = {
-        fornecedorNome: input.fornecedorNome,
-        descricao: input.descricao,
-        valorTotal: String(input.valorTotal),
-        prazoEntrega: parseDia(input.prazoEntrega),
-        vinculo: input.vinculo,
-        funilId: input.funilId,
-        observacoes: input.observacoes,
-        criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
-      };
-      let orderId: number;
-      if (input.id) {
-        await db.update(purchaseOrders).set(valores).where(eq(purchaseOrders.id, input.id));
-        orderId = input.id;
-        if (input.itens) {
-          await db.delete(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, orderId));
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+
+      const orderId = await db.transaction(async (tx) => {
+        const values = {
+          fornecedorNome: input.fornecedorNome,
+          descricao: input.descricao,
+          valorTotal: String(input.valorTotal),
+          prazoEntrega: parseDia(input.prazoEntrega),
+          vinculo: input.vinculo,
+          funilId: input.funilId,
+          observacoes: input.observacoes,
+          criadoPor: actorLabel(ctx.user),
+        };
+
+        let id = input.id;
+        if (id) {
+          const result = await tx
+            .update(purchaseOrders)
+            .set(values)
+            .where(eq(purchaseOrders.id, id));
+          if (affectedRows(result) !== 1) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Pedido não encontrado." });
+          }
+          if (input.itens) {
+            await tx.delete(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, id));
+          }
+        } else {
+          const result = await tx.insert(purchaseOrders).values(values);
+          id = insertId(result);
+          if (!id) throw new Error("Falha ao criar pedido.");
         }
-      } else {
-        const [res] = await db.insert(purchaseOrders).values(valores);
-        orderId = Number((res as any).insertId);
-      }
-      if (input.itens && input.itens.length > 0) {
-        await db.insert(purchaseOrderItems).values(
-          input.itens.map((i) => ({
-            orderId,
-            descricao: i.descricao,
-            quantidade: String(i.quantidade),
-            precoUnit: String(i.precoUnit),
-          })),
-        );
-      }
+
+        if (input.itens?.length) {
+          await tx.insert(purchaseOrderItems).values(
+            input.itens.map((item) => ({
+              orderId: id!,
+              descricao: item.descricao,
+              quantidade: String(item.quantidade),
+              precoUnit: String(item.precoUnit),
+            })),
+          );
+        }
+        return id;
+      });
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: input.id ? "purchase_order_update" : "purchase_order_create",
+        entity: "purchase_orders",
+        entityId: orderId,
+        origin: "pos_venda",
+        summary: `${input.id ? "Pedido atualizado" : "Pedido criado"}: ${input.descricao}`,
+        changes: { valorTotal: input.valorTotal, funilId: input.funilId ?? null },
+      });
+      await advanceOpportunityFromEvidence(
+        input.funilId,
+        "entrega",
+        `[PEDIDO #${orderId}] pedido de compra registrado`,
+        actorLabel(ctx.user),
+      );
       return { id: orderId };
     }),
 
-  mudarStatusPedido: protectedProcedure
+  mudarStatusPedido: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive(),
         status: z.enum(["solicitado", "confirmado", "faturado", "enviado", "recebido", "divergente", "cancelado"]),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      await db.update(purchaseOrders).set({ status: input.status }).where(eq(purchaseOrders.id, input.id));
-      return { ok: true };
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const [current] = await db
+        .select({ status: purchaseOrders.status, funilId: purchaseOrders.funilId })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, input.id))
+        .limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Pedido não encontrado." });
+      if (current.status === input.status) return { ok: true, semMudanca: true };
+
+      const result = await db
+        .update(purchaseOrders)
+        .set({ status: input.status })
+        .where(and(eq(purchaseOrders.id, input.id), eq(purchaseOrders.status, current.status)));
+      if (affectedRows(result) !== 1) {
+        throw new TRPCError({ code: "CONFLICT", message: "O pedido foi alterado por outro processo." });
+      }
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "purchase_order_status_change",
+        entity: "purchase_orders",
+        entityId: input.id,
+        origin: "pos_venda",
+        summary: `Status do pedido: ${current.status} → ${input.status}`,
+        changes: { before: current.status, after: input.status },
+      });
+      if (input.status !== "cancelado") {
+        await advanceOpportunityFromEvidence(
+          current.funilId,
+          input.status === "recebido" ? "faturamento" : "entrega",
+          `[PEDIDO #${input.id}] status ${input.status}`,
+          actorLabel(ctx.user),
+        );
+      }
+      return { ok: true, semMudanca: false };
     }),
 
-  /**
-   * Cria o pedido de compra a partir da proposta vencedora — fecha o ciclo
-   * proposta → pedido em 1 clique, herdando itens/fornecedor/valor em vez
-   * de o operador digitar tudo de novo (achado do inventário: purchase_orders
-   * não tinha nenhum vínculo com a proposta que o originou).
-   */
-  criarPedidoDeProposta: protectedProcedure
+  criarPedidoDeProposta: editorProcedure
     .input(z.object({ proposalId: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const funilId = await resolveProposalOpportunity(input.proposalId);
 
-      const proposal = await getProposalWithItems(input.proposalId);
-      if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
-      if (proposal.items.length === 0) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Proposta sem itens." });
-      }
+      const orderId = await db.transaction(async (tx) => {
+        // Lock da proposta serializa duas tentativas concorrentes de gerar o mesmo pedido.
+        await tx.execute(sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${input.proposalId} FOR UPDATE`);
 
-      const [existing] = await db
-        .select({ id: purchaseOrders.id })
-        .from(purchaseOrders)
-        .where(eq(purchaseOrders.proposalId, input.proposalId))
-        .limit(1);
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: `Já existe um pedido de compra para esta proposta (#${existing.id}).`,
+        const [proposal] = await tx
+          .select({
+            id: proposals.id,
+            title: proposals.title,
+            orgName: proposals.orgName,
+            processNumber: proposals.processNumber,
+          })
+          .from(proposals)
+          .where(eq(proposals.id, input.proposalId))
+          .limit(1);
+        if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+
+        const [existing] = await tx
+          .select({ id: purchaseOrders.id })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.proposalId, input.proposalId))
+          .limit(1);
+        if (existing) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `Já existe um pedido de compra para esta proposta (#${existing.id}).`,
+          });
+        }
+
+        const items = await tx
+          .select({
+            productName: proposalItems.productName,
+            supplierName: proposalItems.supplierName,
+            quantity: proposalItems.quantity,
+            costPrice: proposalItems.costPrice,
+            unitPrice: proposalItems.unitPrice,
+          })
+          .from(proposalItems)
+          .where(eq(proposalItems.proposalId, input.proposalId))
+          .orderBy(asc(proposalItems.sortOrder), asc(proposalItems.itemNumber));
+        if (items.length === 0) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Proposta sem itens." });
+        }
+
+        const normalized = items.map((item, index) => {
+          const cost = Number(item.costPrice ?? item.unitPrice ?? 0);
+          const quantity = Number(item.quantity ?? 0);
+          if (!Number.isFinite(cost) || cost <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Item ${index + 1} da proposta está sem custo/quantidade válida.`,
+            });
+          }
+          return { ...item, cost, quantity };
         });
-      }
 
-      // Custo ao fornecedor (não o preço de venda ao comprador): costPrice
-      // explícito, ou unitPrice (custo do sistema) como fallback.
-      const fornecedoresUnicos = [
-        ...new Set(proposal.items.map((i) => i.supplierName).filter((s): s is string => Boolean(s?.trim()))),
-      ];
-      const fornecedorNome = fornecedoresUnicos.length > 0 ? fornecedoresUnicos.join(" / ") : "A definir";
-      const custoTotal = proposal.items.reduce((sum, i) => {
-        const custo = Number(i.costPrice ?? i.unitPrice ?? 0);
-        const qtd = Number(i.quantity ?? 0);
-        return sum + (Number.isFinite(custo) && Number.isFinite(qtd) ? custo * qtd : 0);
-      }, 0);
+        const suppliers = [...new Set(normalized.map((item) => item.supplierName?.trim()).filter((value): value is string => Boolean(value)))];
+        const totalCost = normalized.reduce((sum, item) => sum + item.cost * item.quantity, 0);
+        const result = await tx.insert(purchaseOrders).values({
+          proposalId: input.proposalId,
+          funilId: funilId ?? undefined,
+          fornecedorNome: suppliers.length ? suppliers.join(" / ").slice(0, 256) : "A definir",
+          descricao: `Compra p/ atender proposta: ${proposal.title}${proposal.orgName ? ` (${proposal.orgName})` : ""}`.slice(0, 512),
+          valorTotal: totalCost.toFixed(2),
+          vinculo: proposal.processNumber ?? undefined,
+          observacoes: `Gerado automaticamente a partir da proposta #${proposal.id}.`,
+          criadoPor: actorLabel(ctx.user),
+        });
+        const id = insertId(result);
+        if (!id) throw new Error("Falha ao criar pedido de compra.");
 
-      const [res] = await db.insert(purchaseOrders).values({
-        proposalId: input.proposalId,
-        fornecedorNome,
-        descricao: `Compra p/ atender proposta: ${proposal.title}${proposal.orgName ? ` (${proposal.orgName})` : ""}`,
-        valorTotal: String(custoTotal.toFixed(2)),
-        vinculo: proposal.processNumber ?? undefined,
-        observacoes: `Gerado automaticamente a partir da proposta #${proposal.id}.`,
-        criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
+        await tx.insert(purchaseOrderItems).values(
+          normalized.map((item) => ({
+            orderId: id,
+            descricao: item.productName,
+            quantidade: String(item.quantity),
+            precoUnit: item.cost.toFixed(4),
+          })),
+        );
+        return id;
       });
-      const orderId = Number((res as any).insertId);
 
-      await db.insert(purchaseOrderItems).values(
-        proposal.items.map((i) => ({
-          orderId,
-          descricao: i.productName,
-          quantidade: String(i.quantity ?? 1),
-          precoUnit: String(Number(i.costPrice ?? i.unitPrice ?? 0).toFixed(4)),
-        })),
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "purchase_order_from_proposal",
+        entity: "purchase_orders",
+        entityId: orderId,
+        origin: "proposal",
+        summary: `Pedido #${orderId} criado a partir da proposta #${input.proposalId}`,
+        changes: { proposalId: input.proposalId, funilId },
+      });
+      await advanceOpportunityFromEvidence(
+        funilId,
+        "entrega",
+        `[PEDIDO #${orderId}] criado a partir da proposta #${input.proposalId}`,
+        actorLabel(ctx.user),
       );
-
       return { id: orderId };
     }),
 
-  // ── Entregas ───────────────────────────────────────────────────────────
   entregas: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
     return db.select().from(deliveries).orderBy(desc(deliveries.createdAt)).limit(200);
   }),
 
-  salvarEntrega: protectedProcedure
+  salvarEntrega: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive().optional(),
-        descricao: z.string().min(3).max(512),
-        transportadora: z.string().max(128).optional(),
-        rastreio: z.string().max(128).optional(),
+        descricao: z.string().trim().min(3).max(512),
+        transportadora: z.string().trim().max(128).optional(),
+        rastreio: z.string().trim().max(128).optional(),
         previsao: dataStr.optional(),
         entregueEm: dataStr.optional(),
-        recebedor: z.string().max(128).optional(),
+        recebedor: z.string().trim().max(128).optional(),
         status: z.enum(["preparando", "transito", "entregue", "atrasada", "devolvida"]).optional(),
         orderId: z.number().int().positive().optional(),
         funilId: z.number().int().positive().optional(),
-        observacoes: z.string().max(4000).optional(),
+        observacoes: z.string().trim().max(4000).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      const valores = {
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      let funilId = input.funilId;
+      if (!funilId && input.orderId) {
+        const [order] = await db
+          .select({ funilId: purchaseOrders.funilId })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, input.orderId))
+          .limit(1);
+        funilId = order?.funilId ?? undefined;
+      }
+
+      const values = {
         descricao: input.descricao,
         transportadora: input.transportadora,
         rastreio: input.rastreio,
@@ -211,30 +425,50 @@ export const posVendaRouter = router({
         recebedor: input.recebedor,
         status: input.status ?? ("preparando" as const),
         orderId: input.orderId,
-        funilId: input.funilId,
+        funilId,
         observacoes: input.observacoes,
       };
-      if (input.id) {
-        await db.update(deliveries).set(valores).where(eq(deliveries.id, input.id));
-        return { id: input.id };
+
+      let id = input.id;
+      if (id) {
+        const result = await db.update(deliveries).set(values).where(eq(deliveries.id, id));
+        if (affectedRows(result) !== 1) throw new TRPCError({ code: "NOT_FOUND", message: "Entrega não encontrada." });
+      } else {
+        const result = await db.insert(deliveries).values(values);
+        id = insertId(result);
+        if (!id) throw new Error("Falha ao criar entrega.");
       }
-      const [res] = await db.insert(deliveries).values(valores);
-      return { id: Number((res as any).insertId) };
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: input.id ? "delivery_update" : "delivery_create",
+        entity: "deliveries",
+        entityId: id,
+        origin: "pos_venda",
+        summary: `${input.id ? "Entrega atualizada" : "Entrega criada"}: ${input.descricao}`,
+        changes: { orderId: input.orderId ?? null, funilId: funilId ?? null, status: values.status },
+      });
+      await advanceOpportunityFromEvidence(
+        funilId,
+        values.status === "entregue" ? "faturamento" : "entrega",
+        `[ENTREGA #${id}] status ${values.status}`,
+        actorLabel(ctx.user),
+      );
+      return { id };
     }),
 
-  // ── Notas fiscais de venda (contas a receber) ──────────────────────────
   notas: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
     return db.select().from(salesInvoices).orderBy(desc(salesInvoices.createdAt)).limit(300);
   }),
 
-  salvarNota: protectedProcedure
+  salvarNota: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive().optional(),
-        numero: z.string().min(1).max(64),
-        orgao: z.string().min(2).max(256),
+        numero: z.string().trim().min(1).max(64),
+        orgao: z.string().trim().min(2).max(256),
         valorBruto: z.number().positive(),
         retencoes: z.number().nonnegative().optional(),
         dataEmissao: dataStr,
@@ -242,13 +476,13 @@ export const posVendaRouter = router({
         recebidoEm: dataStr.optional(),
         status: z.enum(["emitida", "atestada", "liquidada", "paga", "cancelada"]).optional(),
         funilId: z.number().int().positive().optional(),
-        observacoes: z.string().max(4000).optional(),
+        observacoes: z.string().trim().max(4000).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      const valores = {
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const values = {
         numero: input.numero,
         orgao: input.orgao,
         valorBruto: String(input.valorBruto),
@@ -260,50 +494,101 @@ export const posVendaRouter = router({
         funilId: input.funilId,
         observacoes: input.observacoes,
       };
-      if (input.id) {
-        await db.update(salesInvoices).set(valores).where(eq(salesInvoices.id, input.id));
-        return { id: input.id };
+
+      let id = input.id;
+      if (id) {
+        const result = await db.update(salesInvoices).set(values).where(eq(salesInvoices.id, id));
+        if (affectedRows(result) !== 1) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+      } else {
+        const result = await db.insert(salesInvoices).values(values);
+        id = insertId(result);
+        if (!id) throw new Error("Falha ao registrar nota fiscal.");
       }
-      const [res] = await db.insert(salesInvoices).values(valores);
-      return { id: Number((res as any).insertId) };
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: input.id ? "sales_invoice_update" : "sales_invoice_create",
+        entity: "sales_invoices",
+        entityId: id,
+        origin: "financeiro",
+        summary: `NF ${input.numero} — ${input.orgao}`,
+        changes: { valorBruto: input.valorBruto, retencoes: input.retencoes ?? 0, funilId: input.funilId ?? null },
+      });
+      await advanceOpportunityFromEvidence(
+        input.funilId,
+        values.status === "paga" ? "recebimento" : "faturamento",
+        `[NF #${id}] status ${values.status}`,
+        actorLabel(ctx.user),
+      );
+      return { id };
     }),
 
-  marcarNotaPaga: protectedProcedure
+  marcarNotaPaga: editorProcedure
     .input(z.object({ id: z.number().int().positive(), recebidoEm: dataStr.optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      await db
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const [current] = await db
+        .select({ status: salesInvoices.status, recebidoEm: salesInvoices.recebidoEm, funilId: salesInvoices.funilId })
+        .from(salesInvoices)
+        .where(eq(salesInvoices.id, input.id))
+        .limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+      if (current.status === "cancelada") {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "NF cancelada não pode ser baixada como recebida." });
+      }
+      if (current.recebidoEm) return { ok: true, jaRecebida: true };
+
+      const receivedAt = parseDia(input.recebidoEm) ?? new Date();
+      const result = await db
         .update(salesInvoices)
-        .set({ status: "paga", recebidoEm: parseDia(input.recebidoEm) ?? new Date() })
-        .where(eq(salesInvoices.id, input.id));
-      return { ok: true };
+        .set({ status: "paga", recebidoEm: receivedAt })
+        .where(and(eq(salesInvoices.id, input.id), isNull(salesInvoices.recebidoEm), ne(salesInvoices.status, "cancelada")));
+      if (affectedRows(result) !== 1) {
+        throw new TRPCError({ code: "CONFLICT", message: "A NF foi alterada por outro processo." });
+      }
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "sales_invoice_paid",
+        entity: "sales_invoices",
+        entityId: input.id,
+        origin: "financeiro",
+        summary: "Recebimento de NF confirmado",
+        changes: { receivedAt: receivedAt.toISOString() },
+      });
+      await advanceOpportunityFromEvidence(
+        current.funilId,
+        "recebimento",
+        `[NF #${input.id}] recebimento confirmado`,
+        actorLabel(ctx.user),
+      );
+      return { ok: true, jaRecebida: false };
     }),
 
-  // ── Contas a pagar ─────────────────────────────────────────────────────
   contasPagar: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
     return db.select().from(payables).orderBy(desc(payables.vencimento)).limit(300);
   }),
 
-  salvarContaPagar: protectedProcedure
+  salvarContaPagar: editorProcedure
     .input(
       z.object({
         id: z.number().int().positive().optional(),
-        descricao: z.string().min(3).max(512),
-        credor: z.string().max(256).optional(),
+        descricao: z.string().trim().min(3).max(512),
+        credor: z.string().trim().max(256).optional(),
         categoria: z.enum(["fornecedor", "frete", "imposto", "taxa", "despesa"]).optional(),
         valor: z.number().positive(),
         vencimento: dataStr,
         orderId: z.number().int().positive().optional(),
-        observacoes: z.string().max(4000).optional(),
+        observacoes: z.string().trim().max(4000).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      const valores = {
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const values = {
         descricao: input.descricao,
         credor: input.credor,
         categoria: input.categoria ?? ("fornecedor" as const),
@@ -312,68 +597,139 @@ export const posVendaRouter = router({
         orderId: input.orderId,
         observacoes: input.observacoes,
       };
-      if (input.id) {
-        await db.update(payables).set(valores).where(eq(payables.id, input.id));
-        return { id: input.id };
+
+      let id = input.id;
+      if (id) {
+        const result = await db.update(payables).set(values).where(eq(payables.id, id));
+        if (affectedRows(result) !== 1) throw new TRPCError({ code: "NOT_FOUND", message: "Conta a pagar não encontrada." });
+      } else {
+        const result = await db.insert(payables).values(values);
+        id = insertId(result);
+        if (!id) throw new Error("Falha ao registrar conta a pagar.");
       }
-      const [res] = await db.insert(payables).values(valores);
-      return { id: Number((res as any).insertId) };
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: input.id ? "payable_update" : "payable_create",
+        entity: "payables",
+        entityId: id,
+        origin: "financeiro",
+        summary: input.descricao,
+        changes: { valor: input.valor, vencimento: input.vencimento, orderId: input.orderId ?? null },
+      });
+      return { id };
     }),
 
-  marcarContaPaga: protectedProcedure
+  marcarContaPaga: editorProcedure
     .input(z.object({ id: z.number().int().positive(), pagoEm: dataStr.optional() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      await db
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const [current] = await db
+        .select({ pagoEm: payables.pagoEm })
+        .from(payables)
+        .where(eq(payables.id, input.id))
+        .limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Conta a pagar não encontrada." });
+      if (current.pagoEm) return { ok: true, jaPaga: true };
+
+      const paidAt = parseDia(input.pagoEm) ?? new Date();
+      const result = await db
         .update(payables)
-        .set({ pagoEm: parseDia(input.pagoEm) ?? new Date() })
-        .where(eq(payables.id, input.id));
-      return { ok: true };
+        .set({ pagoEm: paidAt })
+        .where(and(eq(payables.id, input.id), isNull(payables.pagoEm)));
+      if (affectedRows(result) !== 1) {
+        throw new TRPCError({ code: "CONFLICT", message: "A conta foi alterada por outro processo." });
+      }
+
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "payable_paid",
+        entity: "payables",
+        entityId: input.id,
+        origin: "financeiro",
+        summary: "Pagamento confirmado",
+        changes: { paidAt: paidAt.toISOString() },
+      });
+      return { ok: true, jaPaga: false };
     }),
 
-  // ── Fluxo de caixa projetado ───────────────────────────────────────────
   fluxoCaixa: protectedProcedure.query(async () => {
     const db = await getDb();
-    if (!db) return { aReceber: 0, aPagar: 0, saldoProjetado: 0, atrasadosReceber: 0, atrasadosPagar: 0, porMes: [] as FluxoMes[] };
-    const notas = await db.select().from(salesInvoices).where(isNull(salesInvoices.recebidoEm));
-    const contas = await db.select().from(payables).where(isNull(payables.pagoEm));
-    const hoje = new Date();
-    let aReceber = 0, aPagar = 0, atrasadosReceber = 0, atrasadosPagar = 0;
-    const meses = new Map<string, { receber: number; pagar: number }>();
-    const mesDe = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!db) {
+      return {
+        aReceber: 0,
+        aPagar: 0,
+        saldoProjetado: 0,
+        atrasadosReceber: 0,
+        atrasadosPagar: 0,
+        porMes: [] as FluxoMes[],
+      };
+    }
 
-    for (const n of notas) {
-      if (n.status === "cancelada") continue;
-      const liquido = Number(n.valorBruto) - Number(n.retencoes);
-      aReceber += liquido;
-      const venc = n.vencimento ? new Date(n.vencimento) : null;
-      if (venc && venc < hoje) atrasadosReceber += liquido;
-      const chave = mesDe(venc ?? hoje);
-      const m = meses.get(chave) ?? { receber: 0, pagar: 0 };
-      m.receber += liquido;
-      meses.set(chave, m);
+    const invoiceMonth = sql<string>`DATE_FORMAT(COALESCE(${salesInvoices.vencimento}, CURRENT_DATE), '%Y-%m')`;
+    const payableMonth = sql<string>`DATE_FORMAT(${payables.vencimento}, '%Y-%m')`;
+
+    const [invoiceTotals, payableTotals, invoiceMonths, payableMonths] = await Promise.all([
+      db
+        .select({
+          total: sql<number>`COALESCE(SUM(CAST(${salesInvoices.valorBruto} AS DECIMAL(18,2)) - CAST(COALESCE(${salesInvoices.retencoes}, 0) AS DECIMAL(18,2))), 0)`,
+          overdue: sql<number>`COALESCE(SUM(CASE WHEN ${salesInvoices.vencimento} < CURRENT_DATE THEN CAST(${salesInvoices.valorBruto} AS DECIMAL(18,2)) - CAST(COALESCE(${salesInvoices.retencoes}, 0) AS DECIMAL(18,2)) ELSE 0 END), 0)`,
+        })
+        .from(salesInvoices)
+        .where(and(isNull(salesInvoices.recebidoEm), ne(salesInvoices.status, "cancelada"))),
+      db
+        .select({
+          total: sql<number>`COALESCE(SUM(CAST(${payables.valor} AS DECIMAL(18,2))), 0)`,
+          overdue: sql<number>`COALESCE(SUM(CASE WHEN ${payables.vencimento} < CURRENT_DATE THEN CAST(${payables.valor} AS DECIMAL(18,2)) ELSE 0 END), 0)`,
+        })
+        .from(payables)
+        .where(isNull(payables.pagoEm)),
+      db
+        .select({
+          mes: invoiceMonth,
+          receber: sql<number>`SUM(CAST(${salesInvoices.valorBruto} AS DECIMAL(18,2)) - CAST(COALESCE(${salesInvoices.retencoes}, 0) AS DECIMAL(18,2)))`,
+        })
+        .from(salesInvoices)
+        .where(and(isNull(salesInvoices.recebidoEm), ne(salesInvoices.status, "cancelada")))
+        .groupBy(invoiceMonth),
+      db
+        .select({
+          mes: payableMonth,
+          pagar: sql<number>`SUM(CAST(${payables.valor} AS DECIMAL(18,2)))`,
+        })
+        .from(payables)
+        .where(isNull(payables.pagoEm))
+        .groupBy(payableMonth),
+    ]);
+
+    const aReceber = Number(invoiceTotals[0]?.total ?? 0);
+    const aPagar = Number(payableTotals[0]?.total ?? 0);
+    const meses = new Map<string, { receber: number; pagar: number }>();
+    for (const row of invoiceMonths) {
+      meses.set(row.mes, { receber: Number(row.receber ?? 0), pagar: 0 });
     }
-    for (const c of contas) {
-      const valor = Number(c.valor);
-      aPagar += valor;
-      const venc = new Date(c.vencimento);
-      if (venc < hoje) atrasadosPagar += valor;
-      const chave = mesDe(venc);
-      const m = meses.get(chave) ?? { receber: 0, pagar: 0 };
-      m.pagar += valor;
-      meses.set(chave, m);
+    for (const row of payableMonths) {
+      const current = meses.get(row.mes) ?? { receber: 0, pagar: 0 };
+      current.pagar = Number(row.pagar ?? 0);
+      meses.set(row.mes, current);
     }
+
     const porMes: FluxoMes[] = [...meses.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([mes, v]) => ({ mes, receber: Math.round(v.receber * 100) / 100, pagar: Math.round(v.pagar * 100) / 100, saldo: Math.round((v.receber - v.pagar) * 100) / 100 }));
+      .map(([mes, values]) => ({
+        mes,
+        receber: Math.round(values.receber * 100) / 100,
+        pagar: Math.round(values.pagar * 100) / 100,
+        saldo: Math.round((values.receber - values.pagar) * 100) / 100,
+      }));
 
     return {
       aReceber: Math.round(aReceber * 100) / 100,
       aPagar: Math.round(aPagar * 100) / 100,
       saldoProjetado: Math.round((aReceber - aPagar) * 100) / 100,
-      atrasadosReceber: Math.round(atrasadosReceber * 100) / 100,
-      atrasadosPagar: Math.round(atrasadosPagar * 100) / 100,
+      atrasadosReceber: Math.round(Number(invoiceTotals[0]?.overdue ?? 0) * 100) / 100,
+      atrasadosPagar: Math.round(Number(payableTotals[0]?.overdue ?? 0) * 100) / 100,
       porMes,
     };
   }),
