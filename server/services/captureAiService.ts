@@ -22,6 +22,29 @@ export interface CaptureAiDecision {
   reason: string;
 }
 
+const AI_MAX_CALLS_PER_MINUTE = Math.max(
+  1,
+  Math.min(Number(process.env.CAPTURE_AI_MAX_CALLS_PER_MINUTE || 20), 120),
+);
+let aiWindowStartedAt = Date.now();
+let aiCallsInWindow = 0;
+
+/**
+ * Orçamento global simples para impedir que um catálogo grande transforme
+ * centenas de casos ambíguos em centenas de chamadas de LLM. Quando o limite
+ * acaba, o item segue para revisão humana; nenhuma captura é bloqueada.
+ */
+function takeAiBudget(): boolean {
+  const now = Date.now();
+  if (now - aiWindowStartedAt >= 60_000) {
+    aiWindowStartedAt = now;
+    aiCallsInWindow = 0;
+  }
+  if (aiCallsInWindow >= AI_MAX_CALLS_PER_MINUTE) return false;
+  aiCallsInWindow++;
+  return true;
+}
+
 function extractText(result: Awaited<ReturnType<typeof invokeLLM>>): string {
   const content = result.choices?.[0]?.message?.content;
   if (typeof content === "string") return content;
@@ -81,7 +104,7 @@ export async function resolveAmbiguousProductMatch(input: {
   };
   candidates: CaptureMatchCandidate[];
 }): Promise<CaptureAiDecision | null> {
-  if (!activeProvider() || input.candidates.length === 0) return null;
+  if (!activeProvider() || input.candidates.length === 0 || !takeAiBudget()) return null;
 
   const examples = await loadExamples(input.supplierId);
   const prompt = {
@@ -142,7 +165,7 @@ export async function explainCaptureAnomaly(input: {
   errorItems: number;
   warnings: string[];
 }): Promise<string | null> {
-  if (!activeProvider()) return null;
+  if (!activeProvider() || !takeAiBudget()) return null;
   try {
     const result = await invokeLLM({
       messages: [
@@ -191,4 +214,9 @@ export async function recordCaptureAiFeedback(input: {
     createdByUserId: input.createdByUserId ?? null,
     reusable: true,
   });
+}
+
+export function captureAiBudgetStatus() {
+  if (Date.now() - aiWindowStartedAt >= 60_000) return { used: 0, limit: AI_MAX_CALLS_PER_MINUTE };
+  return { used: aiCallsInWindow, limit: AI_MAX_CALLS_PER_MINUTE };
 }
