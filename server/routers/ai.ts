@@ -2,30 +2,44 @@ import { z } from "zod";
 import { desc, sql } from "drizzle-orm";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import {
-  activeProvider,
   getUsageTotals,
   invokeLLM,
   listConfiguredProviders,
   usdBrlRate,
+  type LlmProviderKind,
 } from "../_core/llm";
 import { getDb } from "../db";
 import { aiUsageDaily } from "../../drizzle/schema";
 import { getAiConfigView, resetAiConfig, saveAiConfig } from "../services/aiConfigService";
 import { recordAudit } from "../services/auditService";
 
+function selectedConfiguredProvider(
+  preference: string,
+  configured: Array<{ kind: LlmProviderKind; model: string }>,
+): { kind: LlmProviderKind; model: string } | null {
+  if (preference === "anthropic" || preference === "groq" || preference === "forge") {
+    return configured.find((provider) => provider.kind === preference) ?? null;
+  }
+  return configured[0] ?? null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export const aiRouter = router({
   status: protectedProcedure.query(async () => {
-    const [active, configured, rate, config] = await Promise.all([
-      activeProvider(),
+    const [configured, rate, config] = await Promise.all([
       listConfiguredProviders(),
       usdBrlRate(),
       getAiConfigView(),
     ]);
+    const active = selectedConfiguredProvider(config.aiProvider, configured);
     return {
       preferido: config.aiProvider,
-      ativo: active ? { kind: active.kind, model: active.model } : null,
+      ativo: active,
       configurados: configured,
-      algumConfigurado: active != null,
+      algumConfigurado: configured.length > 0,
       consumo: getUsageTotals(),
       cotacaoUsdBrl: rate,
     };
@@ -39,9 +53,9 @@ export const aiRouter = router({
     }
     const [totais] = await db
       .select({
-        chamadas: sql<number>`COALESCE(SUM(${aiUsageDaily.chamadas}), 0)`,
-        promptTokens: sql<number>`COALESCE(SUM(${aiUsageDaily.promptTokens}), 0)`,
-        completionTokens: sql<number>`COALESCE(SUM(${aiUsageDaily.completionTokens}), 0)`,
+        chamadas: sql<number>`COALESCE(SUM(${aiUsageDaily.chamadas}), 0)`.mapWith(Number),
+        promptTokens: sql<number>`COALESCE(SUM(${aiUsageDaily.promptTokens}), 0)`.mapWith(Number),
+        completionTokens: sql<number>`COALESCE(SUM(${aiUsageDaily.completionTokens}), 0)`.mapWith(Number),
         custoUsd: sql<string>`COALESCE(SUM(${aiUsageDaily.custoUsd}), 0)`,
       })
       .from(aiUsageDaily);
@@ -49,9 +63,9 @@ export const aiRouter = router({
       .select({
         provider: aiUsageDaily.provider,
         model: aiUsageDaily.model,
-        chamadas: sql<number>`SUM(${aiUsageDaily.chamadas})`,
-        promptTokens: sql<number>`SUM(${aiUsageDaily.promptTokens})`,
-        completionTokens: sql<number>`SUM(${aiUsageDaily.completionTokens})`,
+        chamadas: sql<number>`SUM(${aiUsageDaily.chamadas})`.mapWith(Number),
+        promptTokens: sql<number>`SUM(${aiUsageDaily.promptTokens})`.mapWith(Number),
+        completionTokens: sql<number>`SUM(${aiUsageDaily.completionTokens})`.mapWith(Number),
         custoUsd: sql<string>`SUM(${aiUsageDaily.custoUsd})`,
       })
       .from(aiUsageDaily)
@@ -59,9 +73,9 @@ export const aiRouter = router({
     const ultimosDias = await db
       .select({
         dia: aiUsageDaily.dia,
-        chamadas: sql<number>`SUM(${aiUsageDaily.chamadas})`,
-        promptTokens: sql<number>`SUM(${aiUsageDaily.promptTokens})`,
-        completionTokens: sql<number>`SUM(${aiUsageDaily.completionTokens})`,
+        chamadas: sql<number>`SUM(${aiUsageDaily.chamadas})`.mapWith(Number),
+        promptTokens: sql<number>`SUM(${aiUsageDaily.promptTokens})`.mapWith(Number),
+        completionTokens: sql<number>`SUM(${aiUsageDaily.completionTokens})`.mapWith(Number),
         custoUsd: sql<string>`SUM(${aiUsageDaily.custoUsd})`,
       })
       .from(aiUsageDaily)
@@ -72,26 +86,20 @@ export const aiRouter = router({
     return {
       totais: totais
         ? {
-            chamadas: Number(totais.chamadas),
-            promptTokens: Number(totais.promptTokens),
-            completionTokens: Number(totais.completionTokens),
+            chamadas: totais.chamadas,
+            promptTokens: totais.promptTokens,
+            completionTokens: totais.completionTokens,
             custoUsd: custoUsdTotal,
             custoBrl: custoUsdTotal * rate,
           }
         : null,
       porProvedor: porProvedor.map((provider) => ({
         ...provider,
-        chamadas: Number(provider.chamadas),
-        promptTokens: Number(provider.promptTokens),
-        completionTokens: Number(provider.completionTokens),
         custoUsd: Number(provider.custoUsd),
         custoBrl: Number(provider.custoUsd) * rate,
       })),
       ultimosDias: ultimosDias.map((day) => ({
         ...day,
-        chamadas: Number(day.chamadas),
-        promptTokens: Number(day.promptTokens),
-        completionTokens: Number(day.completionTokens),
         custoUsd: Number(day.custoUsd),
         custoBrl: Number(day.custoUsd) * rate,
       })),
@@ -138,23 +146,36 @@ export const aiRouter = router({
   testar: adminProcedure
     .input(z.object({ prompt: z.string().max(500).optional() }).optional())
     .mutation(async ({ input }) => {
-      const active = await activeProvider();
-      if (!active) return { ok: false as const, erro: "Nenhum provedor de IA configurado." };
+      const [configured, config] = await Promise.all([
+        listConfiguredProviders(),
+        getAiConfigView(),
+      ]);
+      const active = selectedConfiguredProvider(config.aiProvider, configured);
+      if (!active) {
+        return {
+          ok: false as const,
+          erro: config.aiProvider === "auto"
+            ? "Nenhum provedor de IA configurado."
+            : `O provedor preferido (${config.aiProvider}) não possui credencial efetiva.`,
+        };
+      }
       try {
         const result = await invokeLLM({
+          provider: active.kind,
+          allowProviderFallback: false,
           messages: [{ role: "user", content: input?.prompt || "Responda apenas: OK" }],
           maxTokens: 64,
         });
-        const content = result.choices?.[0]?.message?.content;
-        const texto = typeof content === "string" ? content : JSON.stringify(content);
+        const content = result.choices[0]?.message.content;
+        const texto = typeof content === "string" ? content : JSON.stringify(content ?? "");
         return {
           ok: true as const,
           provedor: active.kind,
           model: result.model || active.model,
           resposta: texto.slice(0, 500),
         };
-      } catch (err) {
-        return { ok: false as const, provedor: active.kind, erro: (err as Error).message };
+      } catch (error) {
+        return { ok: false as const, provedor: active.kind, erro: errorMessage(error) };
       }
     }),
 });
