@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FORNECEDOR_CONFIGS } from "./scraperEngine";
+import { FORNECEDOR_CONFIGS } from "./scraperPresets";
 import { chooseCaptureMode, getConnectorCapabilities } from "./captureConnectorCapabilities";
 import {
   capturePresentationCompatible,
@@ -8,6 +8,11 @@ import {
   normalizeCaptureAvailability,
   normalizeCaptureEan,
 } from "./captureCoreService";
+import {
+  matchCapturedProduct,
+  type CaptureMatchingContext,
+  type CaptureProductMatchRecord,
+} from "./captureMatchingService";
 
 describe("Capture Core — capacidades", () => {
   it("não oferece full scan para Bartofil e Basso Pancotte", () => {
@@ -51,6 +56,47 @@ describe("Capture Core — normalização e segurança de identidade", () => {
       "Amoxicilina 500 mg caixa 10 comprimidos",
       "Amoxicilina 500mg 10 comprimidos",
     )).toBe(true);
+  });
+
+  it("bloqueia SKU duplicado no mesmo fornecedor em vez de adotar last-write-wins", async () => {
+    const product: CaptureProductMatchRecord = {
+      id: 10,
+      supplierId: 1,
+      name: "Produto teste",
+      normalizedName: "produto teste",
+      primaryEan: null,
+      code: null,
+      supplierCode: null,
+      manufacturer: null,
+      presentation: null,
+      unit: null,
+      price: "10.00",
+      imageUrl: null,
+    };
+
+    const context: CaptureMatchingContext = {
+      supplierId: 1,
+      productsById: new Map([[product.id, product]]),
+      productByEan: new Map(),
+      productsByToken: new Map(),
+      offerBySupplierCode: new Map([["SKU-DUP", null]]),
+      offerByProductId: new Map(),
+      ai: {
+        supplierId: 1,
+        loadedAt: new Date(),
+        learnedByNormalizedName: new Map(),
+        examples: [],
+      },
+    };
+
+    const result = await matchCapturedProduct(
+      { name: "Produto teste", price: 10, code: "sku-dup" },
+      context,
+    );
+
+    expect(result.actionHint).toBe("blocked");
+    expect(result.deterministic).toBe(false);
+    expect(result.reason).toMatch(/SKU duplicado/i);
   });
 });
 
