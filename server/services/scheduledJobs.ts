@@ -8,42 +8,34 @@ import { syncS2PortalOpportunitiesSafely } from "./s2PortalOpportunityOrchestrat
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
-import { executarScraper } from "./scraperEngine";
-import { expandAndSyncTambasaCatalog } from "./tambasaCatalogService";
+import { enqueueCaptureJob } from "./captureCoreService";
 import { runDatabaseBackup, cleanupOldBackups } from "./backupService";
 import { logger } from "../_core/logger";
 
 /**
  * Agendador central de jobs recorrentes.
  *
- * - Sincronização de cotações por e-mail (se IMAP configurado).
- * - Radar COPASA, CEMIG, Fundep, Funarbe, Compras MG e FIEMG/SESI/SENAI.
- * - Notificações proativas diárias (certidões vencendo, prazos de cotação).
- *
- * Tudo desligável por ambiente. As expressões cron podem ser sobrescritas.
+ * Scrapers não são mais executados diretamente pelo cron. O scheduler apenas
+ * enfileira `capture_jobs`; workers persistentes cuidam de execução, retry,
+ * heartbeat e recuperação após restart.
  */
 
-const DEFAULT_EMAIL_SYNC_CRON = "*/15 * * * *"; // a cada 15 min
-const DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON = "0 7,12,17 * * *"; // 3x/dia
-const DEFAULT_ALERTS_CRON = "0 8 * * *"; // todo dia às 8h
-const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
-const DEFAULT_BACKUP_CRON = "0 3 * * *"; // backup diário às 3h
+const DEFAULT_EMAIL_SYNC_CRON = "*/15 * * * *";
+const DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON = "0 7,12,17 * * *";
+const DEFAULT_ALERTS_CRON = "0 8 * * *";
+const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *";
+const DEFAULT_BACKUP_CRON = "0 3 * * *";
 const DEFAULT_BACKUP_KEEP_DAYS = 14;
 const SCRAPER_TIMEZONE = "America/Sao_Paulo";
-const TAMBASA_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // catálogo completo: semanal
-const ALERT_DAYS = 30; // certidões
-const DEADLINE_DAYS = 3; // prazos de cotação
+const TAMBASA_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const ALERT_DAYS = 30;
+const DEADLINE_DAYS = 3;
 
 function enabled(flag: string | undefined, defaultOn: boolean): boolean {
   if (flag == null || flag === "") return defaultOn;
   return flag !== "false" && flag !== "0";
 }
 
-/**
- * Notifica falhas de jobs (notificação interna + WhatsApp quando configurado).
- * Cada canal é isolado em try/catch — um alerta nunca derruba o scheduler.
- * Desligável com FAILURE_ALERTS_ENABLED=false.
- */
 async function notifyJobFailure(title: string, detail: string): Promise<void> {
   if (!enabled(process.env.FAILURE_ALERTS_ENABLED, true)) return;
   try {
@@ -63,7 +55,6 @@ async function notifyJobFailure(title: string, detail: string): Promise<void> {
 let emailSyncRunning = false;
 let portalOpportunitySyncRunning = false;
 
-/** Roda a sincronização de e-mail uma vez, com log resumido e guarda de sobreposição. */
 async function runEmailSync(): Promise<void> {
   if (emailSyncRunning) {
     logger.warn("[Scheduler] Sincronização de e-mail anterior ainda em andamento — pulando este ciclo.");
@@ -84,11 +75,6 @@ async function runEmailSync(): Promise<void> {
   }
 }
 
-/**
- * Executa o radar dos seis portais definidos pela operação S2, cruza os itens
- * com a Tambasa e encaminha os resultados à fila de revisão. O envio final
- * permanece sujeito à aprovação humana.
- */
 export async function runPortalOpportunitySync(): Promise<void> {
   if (portalOpportunitySyncRunning) {
     logger.warn("[Scheduler] Radar dos seis portais ainda em andamento — pulando este ciclo.");
@@ -118,14 +104,12 @@ export async function runPortalOpportunitySync(): Promise<void> {
   }
 }
 
-/** Verifica certidões e prazos e notifica o dono se houver pendências. */
 export async function runDailyAlerts(): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const hoje = new Date();
   const linhas: string[] = [];
 
-  // Certidões vencidas / vencendo
   try {
     const certs = await db.select().from(certidoes).where(eq(certidoes.ativa, true));
     const vencidas: string[] = [];
@@ -143,7 +127,6 @@ export async function runDailyAlerts(): Promise<void> {
     logger.error("[Scheduler] Falha ao verificar certidões:", (err as Error).message);
   }
 
-  // Prazos de cotação — filtra no SQL: só pendentes com prazo definido
   try {
     const cotacoes = await db
       .select()
@@ -184,20 +167,18 @@ export async function runDailyAlerts(): Promise<void> {
 }
 
 /**
- * Dispara os scrapers de fornecedores cujo `scheduleTime` (HH:mm, horário de
- * Brasília) já passou hoje e que ainda não rodaram no período aplicável. A
- * Tambasa executa a descoberta e sincronização completa no máximo uma vez a
- * cada sete dias; os demais fornecedores mantêm o ciclo diário já existente.
+ * Enfileira as capturas cujo horário já passou hoje.
+ *
+ * - Tambasa: full scan semanal.
+ * - Conectores fullCatalog: full diário.
+ * - Conectores search-only (Bartofil/Basso): o próprio enqueue converte full
+ *   para refresh seletivo de ofertas conhecidas, evitando o antigo job de 0 itens.
  */
-const scraperFiredOn = new Map<number, string>(); // configId → data (tz) do último disparo local
-
 async function runScheduledScrapers(): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
-  const agora = new Date(
-    new Date().toLocaleString("en-US", { timeZone: SCRAPER_TIMEZONE }),
-  );
+  const agora = new Date(new Date().toLocaleString("en-US", { timeZone: SCRAPER_TIMEZONE }));
   const hhmm = `${String(agora.getHours()).padStart(2, "0")}:${String(agora.getMinutes()).padStart(2, "0")}`;
   const hoje = new Date().toLocaleDateString("en-CA", { timeZone: SCRAPER_TIMEZONE });
 
@@ -209,58 +190,42 @@ async function runScheduledScrapers(): Promise<void> {
       lastRunAt: scraperConfigs.lastRunAt,
     })
       .from(scraperConfigs)
-      // Governança: agendamento só considera fornecedores com termos de uso aprovados
       .where(and(eq(scraperConfigs.enabled, "yes"), eq(scraperConfigs.tosAprovado, true)));
 
     for (const cfg of ativos) {
       if (!cfg.scheduleTime || cfg.scheduleTime > hhmm) continue;
-
-      const isTambasa = cfg.scraperType.toLowerCase() === "tambasa";
-      const lastRunAtMs = cfg.lastRunAt ? new Date(cfg.lastRunAt).getTime() : null;
-      if (isTambasa && lastRunAtMs != null && Date.now() - lastRunAtMs < TAMBASA_MIN_INTERVAL_MS) {
-        continue;
-      }
-
-      // Já rodou hoje (pelo banco ou por disparo local ainda em andamento)?
       const lastRunDay = cfg.lastRunAt
         ? new Date(cfg.lastRunAt).toLocaleDateString("en-CA", { timeZone: SCRAPER_TIMEZONE })
         : null;
-      if (lastRunDay === hoje || scraperFiredOn.get(cfg.id) === hoje) continue;
-      scraperFiredOn.set(cfg.id, hoje);
+      if (lastRunDay === hoje) continue;
 
-      const runPromise = isTambasa
-        ? expandAndSyncTambasaCatalog(cfg.id).then((result) => result.scraper)
-        : executarScraper(cfg.id);
+      const isTambasa = cfg.scraperType.toLowerCase() === "tambasa";
+      const lastRunAtMs = cfg.lastRunAt ? new Date(cfg.lastRunAt).getTime() : null;
+      if (isTambasa && lastRunAtMs != null && Date.now() - lastRunAtMs < TAMBASA_MIN_INTERVAL_MS) continue;
 
-      runPromise
-        .then((r) => {
-          logger.info(`[Scheduler] Scraper #${cfg.id}: ${r.success ? "sucesso" : "falhou"} (${r.productsScraped} produtos capturados).`);
-          if (!r.success) {
-            const detalhe = r.errors?.length ? `\nErros: ${r.errors.slice(0, 3).join("; ")}` : "";
-            void notifyJobFailure(
-              "Falha na captura agendada — Sistema S2",
-              `A captura do fornecedor ${r.supplierName || `(config #${cfg.id})`} falhou.${detalhe}`,
-            );
-          }
-        })
-        .catch((err) => {
-          logger.error(`[Scheduler] Scraper #${cfg.id} falhou:`, (err as Error).message);
-          void notifyJobFailure(
-            "Falha na captura agendada — Sistema S2",
-            `A captura do fornecedor (config #${cfg.id}) lançou erro: ${(err as Error).message}`,
-          );
+      try {
+        const queued = await enqueueCaptureJob({
+          scraperConfigId: cfg.id,
+          mode: "full",
+          trigger: "scheduled",
+          priority: 30,
+          meta: { scheduledFor: cfg.scheduleTime, timezone: SCRAPER_TIMEZONE },
         });
-
-      // Pequeno intervalo entre disparos para não sobrecarregar caso vários
-      // fornecedores compartilhem o mesmo horário configurado.
-      await new Promise((r) => setTimeout(r, 3000));
+        logger.info(`[Scheduler] Capture job #${queued.id} enfileirado para config #${cfg.id} (${queued.mode}).`);
+      } catch (error) {
+        const detail = (error as Error).message;
+        logger.error(`[Scheduler] Não foi possível enfileirar scraper #${cfg.id}:`, detail);
+        await notifyJobFailure(
+          "Falha ao agendar captura — Sistema S2",
+          `A captura do fornecedor (config #${cfg.id}) não pôde ser enfileirada: ${detail}`,
+        );
+      }
     }
   } catch (err) {
     logger.error("[Scheduler] Falha ao verificar agendamentos de scraper:", (err as Error).message);
   }
 }
 
-/** Executa o backup do banco e aplica a retenção. */
 export async function runBackupJob(): Promise<void> {
   const destDir = process.env.BACKUP_DIR || "backups";
   const keepDays = Number(process.env.BACKUP_KEEP_DAYS) || DEFAULT_BACKUP_KEEP_DAYS;
@@ -281,26 +246,19 @@ export async function runBackupJob(): Promise<void> {
   }
 }
 
-/** Registra os jobs recorrentes. Chamado uma vez no boot. */
 export function initScheduledJobs(): void {
-  // 0a. Config de e-mail salva pela interface tem precedência sobre o .env —
-  //     aplicada antes de decidir se a sincronização IMAP liga.
   void import("./emailConfigService")
     .then(({ applyEmailConfigFromDb }) => applyEmailConfigFromDb())
     .catch(() => undefined);
 
-  // 0b. Config de IA (chaves/provedor) salva pela interface → process.env.
   void import("./aiConfigService")
     .then(({ applyAiConfigFromDb }) => applyAiConfigFromDb())
     .catch(() => undefined);
 
-  // 0c. Demais credenciais de integração (WhatsApp etc.) → process.env.
   void import("./integrationSettingsService")
     .then(({ applyIntegrationSettingsFromDb }) => applyIntegrationSettingsFromDb())
     .catch(() => undefined);
 
-  // 0. Jobs de IA que ficaram "executando" de um boot anterior → marcados como
-  //    interrompidos (o runner morre junto com o processo).
   void import("../jobs/aiJobRunner")
     .then(({ recoverStaleAiJobs }) => recoverStaleAiJobs())
     .then((n) => {
@@ -308,10 +266,12 @@ export function initScheduledJobs(): void {
     })
     .catch(() => undefined);
 
-  // 1. Sincronização de cotações por e-mail. O agendamento é feito sempre que
-  //    habilitado; a checagem "IMAP configurado?" acontece a CADA disparo —
-  //    assim a configuração salva pela interface (aplicada async no passo 0a,
-  //    ou a qualquer momento depois) passa a valer sem reiniciar o servidor.
+  // Capture Core: worker persistente e auto-recuperável. GitHub não participa
+  // da execução operacional do módulo.
+  void import("../jobs/captureJobRunner")
+    .then(({ startCaptureJobRunner }) => startCaptureJobRunner())
+    .catch((error) => logger.error("[Scheduler] Falha ao iniciar CaptureRunner:", error));
+
   if (enabled(process.env.EMAIL_SYNC_ENABLED, true)) {
     const expr = process.env.EMAIL_SYNC_CRON || DEFAULT_EMAIL_SYNC_CRON;
     if (cron.validate(expr)) {
@@ -325,22 +285,16 @@ export function initScheduledJobs(): void {
     }
   }
 
-  // 2. Seis portais S2 → matching Tambasa → fila de revisão.
   if (enabled(process.env.PORTAL_OPPORTUNITY_SYNC_ENABLED, true)) {
     const expr = process.env.PORTAL_OPPORTUNITY_SYNC_CRON || DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, () => { void runPortalOpportunitySync(); }, { timezone: SCRAPER_TIMEZONE });
-      logger.info(
-        `[Scheduler] Radar COPASA/CEMIG/Fundep/Funarbe/ComprasMG/FIEMG agendado (${expr}, horário de Brasília; envio sujeito à aprovação).`,
-      );
+      logger.info(`[Scheduler] Radar dos seis portais S2 agendado (${expr}, horário de Brasília).`);
     } else {
-      logger.warn(
-        `[Scheduler] PORTAL_OPPORTUNITY_SYNC_CRON inválido: "${expr}" — radar dos seis portais desativado.`,
-      );
+      logger.warn(`[Scheduler] PORTAL_OPPORTUNITY_SYNC_CRON inválido: "${expr}" — radar desativado.`);
     }
   }
 
-  // 3. Alertas proativos diários
   if (enabled(process.env.ALERTS_ENABLED, true)) {
     const expr = process.env.ALERTS_CRON || DEFAULT_ALERTS_CRON;
     if (cron.validate(expr)) {
@@ -351,18 +305,16 @@ export function initScheduledJobs(): void {
     }
   }
 
-  // 4. Execução automática dos scrapers de fornecedores no horário configurado
   if (enabled(process.env.SCRAPER_SCHEDULE_ENABLED, true)) {
     const expr = process.env.SCRAPER_SCHEDULE_CRON || DEFAULT_SCRAPER_SCHEDULE_CRON;
     if (cron.validate(expr)) {
       cron.schedule(expr, runScheduledScrapers, { timezone: SCRAPER_TIMEZONE });
-      logger.info(`[Scheduler] Execução automática de fornecedores agendada (verificação ${expr}, horário de Brasília).`);
+      logger.info(`[Scheduler] Capturas automáticas enfileiradas por ${expr} (${SCRAPER_TIMEZONE}).`);
     } else {
-      logger.warn(`[Scheduler] SCRAPER_SCHEDULE_CRON inválido: "${expr}" — agendamento automático de fornecedores desativado.`);
+      logger.warn(`[Scheduler] SCRAPER_SCHEDULE_CRON inválido: "${expr}" — capturas automáticas desativadas.`);
     }
   }
 
-  // 5. Backup automático do banco (§16)
   if (enabled(process.env.BACKUP_ENABLED, true)) {
     const expr = process.env.BACKUP_CRON || DEFAULT_BACKUP_CRON;
     if (cron.validate(expr)) {
