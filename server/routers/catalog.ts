@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { recordAudit } from "../services/auditService";
+import { getCatalogIntegrityHealth, repairCatalogConsistency } from "../services/catalogHealthService";
 import { ensureCatalogKnowledgeSchema } from "../services/catalogKnowledgeSchema";
 import {
   catalogQualitySummary,
@@ -84,100 +85,47 @@ async function initialized<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export const catalogRouter = router({
-  create: editorProcedure
-    .input(createInput)
-    .mutation(async ({ input, ctx }) => initialized(async () => {
-      const result = await createCanonicalProduct(input, ctx.user.id);
-      await recordAudit({
-        userId: ctx.user.id,
-        action: "canonical_product_create",
-        entity: "products",
-        entityId: result.productId,
-        summary: `Produto canônico criado: ${input.name}`,
-        changes: { categoryId: input.categoryId, supplierId: input.supplierId },
-      });
-      return result;
-    })),
+  create: editorProcedure.input(createInput).mutation(async ({ input, ctx }) => initialized(async () => {
+    const result = await createCanonicalProduct(input, ctx.user.id);
+    await recordAudit({ userId: ctx.user.id, action: "canonical_product_create", entity: "products", entityId: result.productId, summary: `Produto canônico criado: ${input.name}`, changes: { categoryId: input.categoryId, supplierId: input.supplierId } });
+    return result;
+  })),
 
   list: protectedProcedure.input(z.object({
-    search: z.string().max(256).optional(),
-    categoryId: z.number().int().positive().optional(),
-    isActive: z.enum(["yes", "no", "all"]).optional(),
-    quality: z.enum(["all", "incomplete", "without_offer", "stale_price", "without_image"]).optional(),
-    limit: z.number().int().min(1).max(200).optional(),
-    offset: z.number().int().min(0).optional(),
-    sort: z.enum(["name", "updatedAt"]).optional(),
-    sortDir: z.enum(["asc", "desc"]).optional(),
+    search: z.string().max(256).optional(), categoryId: z.number().int().positive().optional(), isActive: z.enum(["yes", "no", "all"]).optional(), quality: z.enum(["all", "incomplete", "without_offer", "stale_price", "without_image"]).optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional(), sort: z.enum(["name", "updatedAt"]).optional(), sortDir: z.enum(["asc", "desc"]).optional(),
   }).optional()).query(({ input }) => initialized(() => listCanonicalCatalog(input ?? {}))),
 
-  detail: protectedProcedure
-    .input(z.object({ productId: z.number().int().positive() }))
-    .query(({ input }) => initialized(() => getCanonicalProductDetail(input.productId))),
-
+  detail: protectedProcedure.input(z.object({ productId: z.number().int().positive() })).query(({ input }) => initialized(() => getCanonicalProductDetail(input.productId))),
   qualitySummary: protectedProcedure.query(() => initialized(() => catalogQualitySummary())),
+  health: protectedProcedure.query(() => initialized(() => getCatalogIntegrityHealth())),
 
-  update: editorProcedure
-    .input(z.object({ productId: z.number().int().positive(), patch: masterPatch }))
-    .mutation(async ({ input, ctx }) => initialized(async () => {
-      const result = await updateCanonicalProduct(input.productId, input.patch, ctx.user.id);
-      await recordAudit({
-        userId: ctx.user.id,
-        action: "canonical_product_update",
-        entity: "products",
-        entityId: input.productId,
-        summary: `Produto canônico atualizado: ${Object.keys(input.patch).join(", ")}`,
-        changes: input.patch,
-      });
-      return result;
-    })),
+  repair: editorProcedure.mutation(async ({ ctx }) => initialized(async () => {
+    const result = await repairCatalogConsistency();
+    await recordAudit({ userId: ctx.user.id, action: "canonical_catalog_repair", entity: "products", summary: `Reconciliação: ${result.offersBackfilled} ofertas, ${result.pricesMirrored} preços` });
+    return result;
+  })),
 
-  softDelete: editorProcedure
-    .input(z.object({ productId: z.number().int().positive() }))
-    .mutation(async ({ input, ctx }) => initialized(async () => {
-      const result = await softDeleteCanonicalProduct(input.productId);
-      await recordAudit({
-        userId: ctx.user.id,
-        action: "canonical_product_soft_delete",
-        entity: "products",
-        entityId: input.productId,
-        summary: "Produto desativado por soft-delete",
-      });
-      return result;
-    })),
+  update: editorProcedure.input(z.object({ productId: z.number().int().positive(), patch: masterPatch })).mutation(async ({ input, ctx }) => initialized(async () => {
+    const result = await updateCanonicalProduct(input.productId, input.patch, ctx.user.id);
+    await recordAudit({ userId: ctx.user.id, action: "canonical_product_update", entity: "products", entityId: input.productId, summary: `Produto canônico atualizado: ${Object.keys(input.patch).join(", ")}`, changes: input.patch });
+    return result;
+  })),
 
-  restore: editorProcedure
-    .input(z.object({ productId: z.number().int().positive() }))
-    .mutation(async ({ input, ctx }) => initialized(async () => {
-      const result = await restoreCanonicalProduct(input.productId);
-      await recordAudit({
-        userId: ctx.user.id,
-        action: "canonical_product_restore",
-        entity: "products",
-        entityId: input.productId,
-        summary: "Produto restaurado ao catálogo",
-      });
-      return result;
-    })),
+  softDelete: editorProcedure.input(z.object({ productId: z.number().int().positive() })).mutation(async ({ input, ctx }) => initialized(async () => {
+    const result = await softDeleteCanonicalProduct(input.productId);
+    await recordAudit({ userId: ctx.user.id, action: "canonical_product_soft_delete", entity: "products", entityId: input.productId, summary: "Produto desativado por soft-delete" });
+    return result;
+  })),
 
-  saveOffer: editorProcedure
-    .input(z.object({
-      productId: z.number().int().positive(),
-      supplierId: z.number().int().positive(),
-      price: z.string().nullable(),
-      supplierCode: z.string().max(128).optional(),
-      link: z.string().optional(),
-      origin: z.string().max(64).optional(),
-    }))
-    .mutation(async ({ input, ctx }) => initialized(async () => {
-      const result = await saveCanonicalOffer(input);
-      await recordAudit({
-        userId: ctx.user.id,
-        action: "canonical_offer_upsert",
-        entity: "product_supplier_offers",
-        entityId: input.productId,
-        summary: `Oferta atualizada para fornecedor #${input.supplierId}`,
-        changes: { supplierId: input.supplierId, price: input.price, origin: input.origin ?? "catalog_central" },
-      });
-      return result;
-    })),
+  restore: editorProcedure.input(z.object({ productId: z.number().int().positive() })).mutation(async ({ input, ctx }) => initialized(async () => {
+    const result = await restoreCanonicalProduct(input.productId);
+    await recordAudit({ userId: ctx.user.id, action: "canonical_product_restore", entity: "products", entityId: input.productId, summary: "Produto restaurado ao catálogo" });
+    return result;
+  })),
+
+  saveOffer: editorProcedure.input(z.object({ productId: z.number().int().positive(), supplierId: z.number().int().positive(), price: z.string().nullable(), supplierCode: z.string().max(128).optional(), link: z.string().optional(), origin: z.string().max(64).optional() })).mutation(async ({ input, ctx }) => initialized(async () => {
+    const result = await saveCanonicalOffer(input);
+    await recordAudit({ userId: ctx.user.id, action: "canonical_offer_upsert", entity: "product_supplier_offers", entityId: input.productId, summary: `Oferta atualizada para fornecedor #${input.supplierId}`, changes: { supplierId: input.supplierId, price: input.price, origin: input.origin ?? "catalog_central" } });
+    return result;
+  })),
 });
