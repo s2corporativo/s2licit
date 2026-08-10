@@ -91,6 +91,13 @@ export interface IntegrationHealthSnapshot {
   stability: IntegrationStability;
 }
 
+/**
+ * `public-only` é o padrão seguro: cada hop HTTP/redirect é validado e hosts
+ * locais/privados são bloqueados. `allow-private` deve ser explícito e restrito
+ * a integrações administradas que realmente precisem alcançar uma rede interna.
+ */
+export type ExternalNetworkPolicy = "public-only" | "allow-private";
+
 export interface ExternalHttpRequest {
   source: string;
   operation: string;
@@ -98,14 +105,21 @@ export interface ExternalHttpRequest {
   method?: string;
   headers?: Record<string, string>;
   body?: BodyInit | null;
+  /** Timeout máximo de uma tentativa individual. */
   timeoutMs?: number;
+  /** Orçamento total da operação, incluindo retries e backoff. */
+  deadlineMs?: number;
   maxRetries?: number;
+  /** Redirecionamentos GET/HEAD seguidos manualmente e validados. */
+  maxRedirects?: number;
   accept?: string;
   expected?: "json" | "text" | "any";
   /** Operações com efeito colateral só recebem retry quando explicitamente idempotentes. */
   idempotent?: boolean;
   /** Limite de leitura do corpo. Evita carregar respostas acidentalmente gigantes. */
   maxBodyBytes?: number;
+  /** Política de acesso de rede; por padrão somente destinos públicos. */
+  networkPolicy?: ExternalNetworkPolicy;
 }
 
 export interface ExternalHttpResponse<T = unknown> {
@@ -120,5 +134,6 @@ export interface ExternalHttpResponse<T = unknown> {
   fetchedAt: Date;
   durationMs: number;
   attempts: number;
+  finalUrl?: string;
   error?: IntegrationErrorPayload;
 }
