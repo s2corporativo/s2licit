@@ -1,6 +1,17 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
-import { categories, duplicateExceptions, products, suppliers } from "../../drizzle/schema";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import {
+  categories,
+  duplicateExceptions,
+  equivalenceMembers,
+  priceHistory,
+  productSupplierOffers,
+  products,
+  proposalItems,
+  suppliers,
+} from "../../drizzle/schema";
 import { combinedStringSimilarity, normalizeText } from "../matching/productMatcher";
+import { ensureCatalogKnowledgeSchema } from "../services/catalogKnowledgeSchema";
+import { syncCanonicalPriceMirrors } from "../services/catalogReconciliationService";
 import { getDb } from "./_client";
 
 export type DuplicateGroup = {
@@ -52,8 +63,18 @@ function addPairs(bucket: number[], output: Set<string>, maxBucket = 120) {
   }
 }
 
+function asRows<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value === "object") return value as T;
+  try { return JSON.parse(String(value)) as T; } catch { return fallback; }
+}
+
 /**
- * Detecção canônica de duplicatas com blocking. Não limita mais o catálogo aos
+ * Detecção canônica de duplicatas com blocking. Não limita o catálogo aos
  * primeiros 5.000 registros e evita comparar todos contra todos.
  */
 export async function findDuplicateGroups(opts?: {
@@ -135,8 +156,8 @@ export async function findDuplicateGroups(opts?: {
     .from(duplicateExceptions);
   const exceptions = new Set(exceptionRows.map((row) => pairKey(row.productId1, row.productId2)));
 
-  // Union-find agrupa relações transitivas sem depender da ordem da lista.
   const parent = new Map<number, number>();
+  const involvedIds = new Set<number>();
   const find = (id: number): number => {
     const current = parent.get(id) ?? id;
     if (current === id) return id;
@@ -147,6 +168,8 @@ export async function findDuplicateGroups(opts?: {
   const union = (a: number, b: number) => {
     const ra = find(a), rb = find(b);
     if (ra !== rb) parent.set(rb, ra);
+    involvedIds.add(a);
+    involvedIds.add(b);
   };
 
   const acceptedPairs = new Map<string, { similarity: number; reason: DuplicateGroup["reason"] }>();
@@ -181,11 +204,10 @@ export async function findDuplicateGroups(opts?: {
   }
 
   const groupIds = new Map<number, number[]>();
-  for (const row of rows) {
-    if (!parent.has(row.id) && ![...acceptedPairs.keys()].some((key) => key.startsWith(`${row.id}:`) || key.endsWith(`:${row.id}`))) continue;
-    const root = find(row.id);
+  for (const id of involvedIds) {
+    const root = find(id);
     const bucket = groupIds.get(root) ?? [];
-    bucket.push(row.id);
+    bucket.push(id);
     groupIds.set(root, bucket);
   }
 
@@ -235,25 +257,96 @@ export async function findDuplicateGroups(opts?: {
   return groups.sort((a, b) => b.similarity - a.similarity || b.products.length - a.products.length);
 }
 
+type MergeSnapshot = {
+  products: Array<{ id: number; isActive: "yes" | "no"; deletedAt: Date | string | null; mergedIntoId: number | null }>;
+  proposalItems: Array<{ id: number; productId: number | null }>;
+  priceHistory: Array<{ id: number; productId: number }>;
+  equivalenceMembers: Array<{ groupId: number; productId: number }>;
+  offers: Array<{
+    productId: number;
+    supplierId: number;
+    price: string | null;
+    supplierCode: string | null;
+    supplierName: string | null;
+    link: string | null;
+    image: string | null;
+    availability: string | null;
+    promoPrice: string | null;
+    stock: number | null;
+  }>;
+  compendiumMembers: Array<{ entryId: number; productId: number; relationType: string; technicalScore: string | null; commercialScore: string | null; notes: string | null }>;
+  compendiumFeedback: Array<{ id: number; referenceProductId: number | null; candidateProductId: number }>;
+};
+
+async function buildMergeSnapshot(masterId: number, duplicateIds: number[]): Promise<MergeSnapshot> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await ensureCatalogKnowledgeSchema();
+  const involved = [masterId, ...duplicateIds];
+  const idsCsv = involved.join(",");
+
+  const [productRows, proposalRows, historyRows, memberRows, offerRows] = await Promise.all([
+    db.select({ id: products.id, isActive: products.isActive, deletedAt: products.deletedAt, mergedIntoId: products.mergedIntoId }).from(products).where(inArray(products.id, involved)),
+    db.select({ id: proposalItems.id, productId: proposalItems.productId }).from(proposalItems).where(inArray(proposalItems.productId, duplicateIds)),
+    db.select({ id: priceHistory.id, productId: priceHistory.productId }).from(priceHistory).where(inArray(priceHistory.productId, duplicateIds)),
+    db.select({ groupId: equivalenceMembers.groupId, productId: equivalenceMembers.productId }).from(equivalenceMembers).where(inArray(equivalenceMembers.productId, involved)),
+    db.select({
+      productId: productSupplierOffers.productId,
+      supplierId: productSupplierOffers.supplierId,
+      price: productSupplierOffers.price,
+      supplierCode: productSupplierOffers.supplierCode,
+      supplierName: productSupplierOffers.supplierName,
+      link: productSupplierOffers.link,
+      image: productSupplierOffers.image,
+      availability: productSupplierOffers.availability,
+      promoPrice: productSupplierOffers.promoPrice,
+      stock: productSupplierOffers.stock,
+    }).from(productSupplierOffers).where(inArray(productSupplierOffers.productId, involved)),
+  ]);
+
+  const [compendiumMembersRaw] = await db.execute(sql.raw(`
+    SELECT entryId, productId, relationType, technicalScore, commercialScore, notes
+    FROM equivalence_compendium_members
+    WHERE productId IN (${idsCsv})
+  `));
+  const [feedbackRaw] = await db.execute(sql.raw(`
+    SELECT id, referenceProductId, candidateProductId
+    FROM equivalence_compendium_feedback
+    WHERE referenceProductId IN (${idsCsv}) OR candidateProductId IN (${idsCsv})
+  `));
+
+  return {
+    products: productRows,
+    proposalItems: proposalRows.map((row) => ({ id: row.id, productId: row.productId })),
+    priceHistory: historyRows,
+    equivalenceMembers: memberRows,
+    offers: offerRows,
+    compendiumMembers: asRows<MergeSnapshot["compendiumMembers"][number]>(compendiumMembersRaw),
+    compendiumFeedback: asRows<MergeSnapshot["compendiumFeedback"][number]>(feedbackRaw),
+  };
+}
+
 /**
- * Funde um grupo de duplicatas: mantém o produto mestre (masterId),
- * redireciona TODAS as referências principais para o mestre em transação e
- * desativa (soft delete) os demais.
+ * Funde duplicatas em transação e registra snapshot reversível no mesmo commit.
  */
 export async function mergeProductGroup(
   masterId: number,
   duplicateIds: number[],
-): Promise<{ merged: number; redirected: number }> {
+  userId?: number,
+): Promise<{ merged: number; redirected: number; mergeEventId: number | null }> {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
-  const cleanDuplicateIds = Array.from(new Set(duplicateIds.filter((id) => id !== masterId)));
-  if (cleanDuplicateIds.length === 0) return { merged: 0, redirected: 0 };
+  await ensureCatalogKnowledgeSchema();
+
+  const cleanDuplicateIds = Array.from(new Set(duplicateIds.filter((id) => Number.isInteger(id) && id > 0 && id !== masterId)));
+  if (cleanDuplicateIds.length === 0) return { merged: 0, redirected: 0, mergeEventId: null };
 
   const [master] = await db.select().from(products).where(eq(products.id, masterId)).limit(1);
   if (!master) throw new Error("Produto mestre não encontrado");
   const dupes = await db.select().from(products).where(inArray(products.id, cleanDuplicateIds));
   if (dupes.length !== cleanDuplicateIds.length) throw new Error("Um ou mais produtos duplicados não foram encontrados");
 
+  const snapshot = await buildMergeSnapshot(masterId, cleanDuplicateIds);
   const enriched: Partial<typeof master> = {};
   const fillFields = [
     "activeIngredient", "concentration", "presentation", "pharmaceuticalForm",
@@ -268,20 +361,22 @@ export async function mergeProductGroup(
     }
   }
 
-  const {
-    proposalItems,
-    equivalenceMembers,
-    productSupplierPrices,
-    productSupplierOffers,
-    priceHistory,
-  } = await import("../../drizzle/schema");
-
   let redirected = 0;
+  let mergeEventId: number | null = null;
+  const idsCsv = cleanDuplicateIds.join(",");
   await db.transaction(async (tx) => {
+    const [eventInsert] = await tx.execute(sql`
+      INSERT INTO product_merge_events
+        (masterProductId, duplicateProductIds, snapshot, status, createdByUserId)
+      VALUES
+        (${masterId}, ${JSON.stringify(cleanDuplicateIds)}, ${JSON.stringify(snapshot)}, 'applied', ${userId ?? null})
+    `);
+    mergeEventId = Number((eventInsert as any)?.insertId ?? 0) || null;
+
     if (Object.keys(enriched).length > 0) await tx.update(products).set(enriched as any).where(eq(products.id, masterId));
 
     const redirectResult = await tx.update(proposalItems).set({ productId: masterId }).where(inArray(proposalItems.productId, cleanDuplicateIds));
-    redirected = (redirectResult as any)[0]?.affectedRows ?? (redirectResult as any)?.affectedRows ?? 0;
+    redirected = Number((redirectResult as any)?.affectedRows ?? (redirectResult as any)?.[0]?.affectedRows ?? 0);
     await tx.update(priceHistory).set({ productId: masterId }).where(inArray(priceHistory.productId, cleanDuplicateIds));
 
     const masterGroups = await tx.select({ groupId: equivalenceMembers.groupId }).from(equivalenceMembers).where(eq(equivalenceMembers.productId, masterId));
@@ -291,36 +386,156 @@ export async function mergeProductGroup(
     }
     await tx.update(equivalenceMembers).set({ productId: masterId }).where(inArray(equivalenceMembers.productId, cleanDuplicateIds));
 
-    for (const table of [productSupplierPrices, productSupplierOffers] as const) {
-      const masterOffers = await tx.select({ supplierId: table.supplierId }).from(table).where(eq(table.productId, masterId));
-      const masterSupplierIds = masterOffers.map((offer) => offer.supplierId);
-      if (masterSupplierIds.length > 0) {
-        await tx.delete(table).where(and(inArray(table.productId, cleanDuplicateIds), inArray(table.supplierId, masterSupplierIds)));
-      }
-      await tx.update(table).set({ productId: masterId }).where(inArray(table.productId, cleanDuplicateIds));
+    const masterSupplierRows = await tx.select({ supplierId: productSupplierOffers.supplierId }).from(productSupplierOffers).where(eq(productSupplierOffers.productId, masterId));
+    const masterSupplierIds = masterSupplierRows.map((row) => row.supplierId);
+    if (masterSupplierIds.length > 0) {
+      await tx.delete(productSupplierOffers).where(and(inArray(productSupplierOffers.productId, cleanDuplicateIds), inArray(productSupplierOffers.supplierId, masterSupplierIds)));
     }
+    await tx.update(productSupplierOffers).set({ productId: masterId }).where(inArray(productSupplierOffers.productId, cleanDuplicateIds));
 
-    // Compêndio novo usa tabelas autônomas para não depender do schema Drizzle.
-    // Remove colisões antes de reapontar vínculos e feedback.
-    await tx.execute({ sql: `DELETE m FROM equivalence_compendium_members m JOIN equivalence_compendium_members mm ON mm.entryId = m.entryId AND mm.productId = ? WHERE m.productId IN (${cleanDuplicateIds.map(() => "?").join(",")})`, params: [masterId, ...cleanDuplicateIds] } as any).catch(() => undefined);
-    await tx.execute({ sql: `UPDATE equivalence_compendium_members SET productId = ? WHERE productId IN (${cleanDuplicateIds.map(() => "?").join(",")})`, params: [masterId, ...cleanDuplicateIds] } as any).catch(() => undefined);
-    await tx.execute({ sql: `UPDATE equivalence_compendium_feedback SET candidateProductId = ? WHERE candidateProductId IN (${cleanDuplicateIds.map(() => "?").join(",")})`, params: [masterId, ...cleanDuplicateIds] } as any).catch(() => undefined);
-    await tx.execute({ sql: `UPDATE equivalence_compendium_feedback SET referenceProductId = ? WHERE referenceProductId IN (${cleanDuplicateIds.map(() => "?").join(",")})`, params: [masterId, ...cleanDuplicateIds] } as any).catch(() => undefined);
+    // Tabela de compatibilidade de preço é reconciliada pela fachada canônica;
+    // durante o merge removemos as linhas antigas para não manter identidades órfãs.
+    const { productSupplierPrices } = await import("../../drizzle/schema");
+    await tx.delete(productSupplierPrices).where(inArray(productSupplierPrices.productId, cleanDuplicateIds));
+
+    await tx.execute(sql.raw(`
+      DELETE m FROM equivalence_compendium_members m
+      JOIN equivalence_compendium_members master
+        ON master.entryId = m.entryId AND master.productId = ${masterId}
+      WHERE m.productId IN (${idsCsv})
+    `));
+    await tx.execute(sql.raw(`UPDATE equivalence_compendium_members SET productId = ${masterId} WHERE productId IN (${idsCsv})`));
+    await tx.execute(sql.raw(`UPDATE equivalence_compendium_feedback SET candidateProductId = ${masterId} WHERE candidateProductId IN (${idsCsv})`));
+    await tx.execute(sql.raw(`UPDATE equivalence_compendium_feedback SET referenceProductId = ${masterId} WHERE referenceProductId IN (${idsCsv})`));
 
     await tx.update(products).set({ isActive: "no", deletedAt: new Date(), mergedIntoId: masterId }).where(inArray(products.id, cleanDuplicateIds));
   });
 
-  try {
-    const { getProductSupplierPrices } = await import("./supplierPrices");
-    const offers = await getProductSupplierPrices(masterId);
-    const best = offers
-      .map((offer: any) => Number(offer.promoPrice && Number(offer.promoPrice) > 0 && (!offer.price || Number(offer.promoPrice) < Number(offer.price)) ? offer.promoPrice : offer.price))
-      .filter((value: number) => Number.isFinite(value) && value > 0)
-      .sort((a: number, b: number) => a - b)[0];
-    if (best !== undefined) await db.update(products).set({ price: String(best) }).where(eq(products.id, masterId));
-  } catch {
-    // Merge principal já foi concluído; a reconciliação de catálogo corrige o espelho posteriormente.
-  }
+  await syncCanonicalPriceMirrors();
+  return { merged: cleanDuplicateIds.length, redirected, mergeEventId };
+}
 
-  return { merged: cleanDuplicateIds.length, redirected };
+export async function listProductMergeEvents(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  await ensureCatalogKnowledgeSchema();
+  const safeLimit = Math.min(Math.max(limit, 1), 200);
+  const [rows] = await db.execute(sql.raw(`
+    SELECT id, masterProductId, duplicateProductIds, status, createdByUserId, createdAt, revertedAt, revertedByUserId
+    FROM product_merge_events
+    ORDER BY id DESC
+    LIMIT ${safeLimit}
+  `));
+  return asRows<any>(rows);
+}
+
+/**
+ * Desfaz um merge de forma conservadora: restaura produtos, referências e
+ * ofertas do snapshot. Dados novos adicionados ao produto mestre depois do
+ * merge não são apagados, evitando perda de edições posteriores.
+ */
+export async function undoProductMerge(eventId: number, userId?: number): Promise<{ restoredProducts: number }> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await ensureCatalogKnowledgeSchema();
+
+  const [eventRows] = await db.execute(sql`SELECT * FROM product_merge_events WHERE id = ${eventId} LIMIT 1`);
+  const event = asRows<any>(eventRows)[0];
+  if (!event) throw new Error("Evento de merge não encontrado");
+  if (event.status !== "applied") throw new Error("Este merge já foi desfeito");
+
+  const duplicateIds = parseJson<number[]>(event.duplicateProductIds, []).filter((id) => Number.isInteger(id) && id > 0);
+  const snapshot = parseJson<MergeSnapshot>(event.snapshot, {
+    products: [], proposalItems: [], priceHistory: [], equivalenceMembers: [], offers: [], compendiumMembers: [], compendiumFeedback: [],
+  });
+  if (!duplicateIds.length) throw new Error("Snapshot do merge não contém produtos restauráveis");
+
+  const groupByProduct = <T extends { productId: number | null }>(rows: T[]) => {
+    const map = new Map<number, number[]>();
+    for (const row of rows) {
+      if (row.productId == null || !("id" in row)) continue;
+      const bucket = map.get(row.productId) ?? [];
+      bucket.push(Number((row as any).id));
+      map.set(row.productId, bucket);
+    }
+    return map;
+  };
+
+  await db.transaction(async (tx) => {
+    for (const original of snapshot.products.filter((row) => duplicateIds.includes(row.id))) {
+      await tx.update(products).set({
+        isActive: original.isActive,
+        deletedAt: original.deletedAt ? new Date(original.deletedAt) : null,
+        mergedIntoId: original.mergedIntoId,
+      }).where(eq(products.id, original.id));
+    }
+
+    for (const [productId, itemIds] of groupByProduct(snapshot.proposalItems).entries()) {
+      if (itemIds.length) await tx.update(proposalItems).set({ productId }).where(inArray(proposalItems.id, itemIds));
+    }
+    for (const [productId, historyIds] of groupByProduct(snapshot.priceHistory).entries()) {
+      if (historyIds.length) await tx.update(priceHistory).set({ productId }).where(inArray(priceHistory.id, historyIds));
+    }
+
+    const originalMasterGroups = new Set(
+      snapshot.equivalenceMembers.filter((row) => row.productId === Number(event.masterProductId)).map((row) => row.groupId),
+    );
+    for (const member of snapshot.equivalenceMembers.filter((row) => duplicateIds.includes(row.productId))) {
+      const existing = await tx.select({ groupId: equivalenceMembers.groupId }).from(equivalenceMembers)
+        .where(and(eq(equivalenceMembers.groupId, member.groupId), eq(equivalenceMembers.productId, member.productId))).limit(1);
+      if (!existing.length) await tx.insert(equivalenceMembers).values({ groupId: member.groupId, productId: member.productId });
+      if (!originalMasterGroups.has(member.groupId)) {
+        await tx.delete(equivalenceMembers).where(and(eq(equivalenceMembers.groupId, member.groupId), eq(equivalenceMembers.productId, Number(event.masterProductId))));
+      }
+    }
+
+    for (const offer of snapshot.offers.filter((row) => duplicateIds.includes(row.productId))) {
+      const existing = await tx.select({ id: productSupplierOffers.id }).from(productSupplierOffers)
+        .where(and(eq(productSupplierOffers.productId, offer.productId), eq(productSupplierOffers.supplierId, offer.supplierId))).limit(1);
+      const offerData = {
+        price: offer.price,
+        supplierCode: offer.supplierCode,
+        supplierName: offer.supplierName,
+        link: offer.link,
+        image: offer.image,
+        availability: offer.availability,
+        promoPrice: offer.promoPrice,
+        stock: offer.stock,
+        updatedAt: new Date(),
+      };
+      if (existing.length) await tx.update(productSupplierOffers).set(offerData).where(eq(productSupplierOffers.id, existing[0].id));
+      else await tx.insert(productSupplierOffers).values({ productId: offer.productId, supplierId: offer.supplierId, ...offerData, createdAt: new Date() });
+    }
+
+    for (const member of snapshot.compendiumMembers.filter((row) => duplicateIds.includes(Number(row.productId)))) {
+      await tx.execute(sql`
+        INSERT INTO equivalence_compendium_members
+          (entryId, productId, relationType, technicalScore, commercialScore, notes)
+        VALUES
+          (${Number(member.entryId)}, ${Number(member.productId)}, ${member.relationType}, ${member.technicalScore}, ${member.commercialScore}, ${member.notes})
+        ON DUPLICATE KEY UPDATE
+          relationType = VALUES(relationType), technicalScore = VALUES(technicalScore), commercialScore = VALUES(commercialScore), notes = VALUES(notes)
+      `);
+    }
+
+    for (const feedback of snapshot.compendiumFeedback) {
+      await tx.execute(sql`
+        UPDATE equivalence_compendium_feedback
+        SET referenceProductId = ${feedback.referenceProductId}, candidateProductId = ${feedback.candidateProductId}
+        WHERE id = ${feedback.id}
+      `);
+    }
+
+    await tx.execute(sql`
+      UPDATE product_merge_events
+      SET status = 'reverted', revertedAt = NOW(), revertedByUserId = ${userId ?? null}
+      WHERE id = ${eventId} AND status = 'applied'
+    `);
+  });
+
+  // Recria a tabela de compatibilidade de ofertas e recalcula preços legados.
+  const { backfillMissingCanonicalOffers } = await import("../services/catalogReconciliationService");
+  await backfillMissingCanonicalOffers();
+  await syncCanonicalPriceMirrors();
+  return { restoredProducts: duplicateIds.length };
 }
