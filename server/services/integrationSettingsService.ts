@@ -26,14 +26,18 @@ export const INTEGRATION_KEYS: Record<
   WHATSAPP_TO: { label: "Número(s) de destino", secreta: false, grupo: "whatsapp" },
   USD_BRL_RATE: { label: "Cotação USD→BRL (custo de IA)", secreta: false, grupo: "geral" },
   FIEMG_LICITACOES_URL: { label: "URL pública de licitações FIEMG", secreta: false, grupo: "geral" },
-  EMAIL_SYNC_ENABLED: { label: "Sincronização de e-mail ativa (true/false)", secreta: false, grupo: "geral" },
-  EMAIL_SYNC_CRON: { label: "Agenda de e-mail (cron)", secreta: false, grupo: "geral" },
-  ALERTS_ENABLED: { label: "Alertas automáticos ativos (true/false)", secreta: false, grupo: "geral" },
-  ALERTS_CRON: { label: "Agenda de alertas (cron)", secreta: false, grupo: "geral" },
-  SCRAPER_SCHEDULE_ENABLED: { label: "Captura programada ativa (true/false)", secreta: false, grupo: "geral" },
-  SCRAPER_SCHEDULE_CRON: { label: "Agenda de captura (cron)", secreta: false, grupo: "geral" },
-  PORTAL_OPPORTUNITY_SYNC_ENABLED: { label: "Radar automático ativo (true/false)", secreta: false, grupo: "geral" },
-  PORTAL_OPPORTUNITY_SYNC_CRON: { label: "Agenda do radar automático (cron)", secreta: false, grupo: "geral" },
+  EMAIL_SYNC_ENABLED: { label: "Sincronização de e-mail ativa (true/false)", secreta: false, grupo: "automacao" },
+  EMAIL_SYNC_CRON: { label: "Agenda de e-mail (cron)", secreta: false, grupo: "automacao" },
+  ALERTS_ENABLED: { label: "Alertas automáticos ativos (true/false)", secreta: false, grupo: "automacao" },
+  ALERTS_CRON: { label: "Agenda de alertas (cron)", secreta: false, grupo: "automacao" },
+  SCRAPER_SCHEDULE_ENABLED: { label: "Captura programada ativa (true/false)", secreta: false, grupo: "automacao" },
+  SCRAPER_SCHEDULE_CRON: { label: "Agenda de captura (cron)", secreta: false, grupo: "automacao" },
+  PORTAL_OPPORTUNITY_SYNC_ENABLED: { label: "Radar automático ativo (true/false)", secreta: false, grupo: "automacao" },
+  PORTAL_OPPORTUNITY_SYNC_CRON: { label: "Agenda do radar automático (cron)", secreta: false, grupo: "automacao" },
+  BACKUP_ENABLED: { label: "Backup automático ativo (true/false)", secreta: false, grupo: "automacao" },
+  BACKUP_CRON: { label: "Agenda do backup (cron)", secreta: false, grupo: "automacao" },
+  BACKUP_KEEP_DAYS: { label: "Retenção de backups (dias)", secreta: false, grupo: "automacao" },
+  FAILURE_ALERTS_ENABLED: { label: "Alertas de falha ativos (true/false)", secreta: false, grupo: "automacao" },
 };
 
 export type IntegrationView = Array<{
@@ -55,6 +59,12 @@ function validateValue(chave: string, value: string): string {
   }
   if (chave.endsWith("_CRON") && !cron.validate(valor)) {
     throw new Error(`${chave}: expressão cron inválida.`);
+  }
+  if (chave === "BACKUP_KEEP_DAYS") {
+    const days = Number(valor);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      throw new Error("BACKUP_KEEP_DAYS: informe um número inteiro entre 1 e 365.");
+    }
   }
   if (chave === "FIEMG_LICITACOES_URL" || chave === "WHATSAPP_WEBHOOK_URL") {
     let parsed: URL;
