@@ -7,17 +7,34 @@
  *
  * A assinatura é compatível com console.* (varargs): strings são concatenadas
  * na mensagem e objetos/Erros viram campos estruturados — nada é descartado.
- *
- * Uso: import { logger } from "../_core/logger";
- *      logger.info("[Scraper] Execução concluída", { total: 42 });
- *      const log = logger.child("Scheduler"); log.warn("tick atrasado");
  */
 
 type Level = "debug" | "info" | "warn" | "error";
 
 const LEVEL_RANK: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
-
 const isProd = process.env.NODE_ENV === "production";
+const REDACTED = "[REDACTED]";
+
+const sensitiveQueryParam =
+  /([?&](?:access_token|refresh_token|id_token|token|api[_-]?key|key|secret|signature|sig|session(?:id)?|auth|authorization|password|passwd|pwd|code)=)([^&#\s]+)/gi;
+const bearerCredential = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi;
+const inlineCredential =
+  /\b(password|passwd|pwd|token|secret|api[_-]?key|authorization)\b(\s*[:=]\s*)([^\s,;}&]+)/gi;
+
+/**
+ * Redaction defensiva aplicada somente à saída de log; nunca altera valores de
+ * negócio. Evita que URLs de fornecedores, erros HTTP ou headers acidentalmente
+ * persistam credenciais em stdout/stderr.
+ */
+export function redactLogText(value: string): string {
+  return value
+    .replace(sensitiveQueryParam, (_match, prefix: string) => `${prefix}${REDACTED}`)
+    .replace(bearerCredential, (_match, scheme: string) => `${scheme} ${REDACTED}`)
+    .replace(
+      inlineCredential,
+      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`,
+    );
+}
 
 function minLevel(): number {
   const conf = (process.env.LOG_LEVEL ?? "").toLowerCase() as Level;
@@ -26,12 +43,20 @@ function minLevel(): number {
 
 function serializeArg(arg: unknown): { text?: string; fields?: Record<string, unknown> } {
   if (arg instanceof Error) {
-    return { fields: { err: { message: arg.message, stack: arg.stack, name: arg.name } } };
+    return {
+      fields: {
+        err: {
+          message: redactLogText(arg.message),
+          stack: arg.stack ? redactLogText(arg.stack) : undefined,
+          name: arg.name,
+        },
+      },
+    };
   }
   if (typeof arg === "object" && arg !== null) {
     return { fields: { data: arg } };
   }
-  return { text: String(arg) };
+  return { text: redactLogText(String(arg)) };
 }
 
 function emit(level: Level, scope: string | null, args: unknown[]) {
@@ -52,7 +77,6 @@ function emit(level: Level, scope: string | null, args: unknown[]) {
       msg,
       ...fields,
     });
-    // stdout para info/debug, stderr para warn/error — padrão de coleta docker
     if (level === "warn" || level === "error") process.stderr.write(line + "\n");
     else process.stdout.write(line + "\n");
   } else {
@@ -88,12 +112,13 @@ export const logger = makeLogger(null);
  */
 export function installProcessErrorHandlers(): void {
   process.on("unhandledRejection", (reason) => {
-    logger.error("[Process] Promise rejeitada sem tratamento", reason instanceof Error ? reason : new Error(String(reason)));
+    logger.error(
+      "[Process] Promise rejeitada sem tratamento",
+      reason instanceof Error ? reason : new Error(String(reason)),
+    );
   });
   process.on("uncaughtException", (err) => {
     logger.error("[Process] Exceção não capturada — encerrando", err);
-    // Estado do processo é indefinido após uncaughtException: sair e deixar o
-    // orquestrador (docker restart:always) subir de novo é o caminho seguro.
     process.exit(1);
   });
 }
