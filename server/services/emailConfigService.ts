@@ -142,7 +142,10 @@ export async function saveEmailConfig(input: EmailConfigInput): Promise<void> {
   if (touchesImap) {
     const host = normalizeText(input.imapHost, existing?.imapHost ?? runtime.imap.host);
     const user = normalizeText(input.imapUser, existing?.imapUser ?? runtime.imap.user);
-    const mailbox = normalizeText(input.imapMailbox, existing?.imapMailbox ?? runtime.imap.mailbox || "INBOX");
+    const mailbox = normalizeText(
+      input.imapMailbox,
+      existing?.imapMailbox ?? (runtime.imap.mailbox || "INBOX"),
+    );
     const port = input.imapPort ?? existing?.imapPort ?? runtime.imap.port;
     const tls = input.imapTls ?? existing?.imapTls ?? runtime.imap.tls;
     const explicitPassword = input.imapPassword?.trim();
@@ -167,7 +170,10 @@ export async function saveEmailConfig(input: EmailConfigInput): Promise<void> {
   if (touchesSmtp) {
     const host = normalizeText(input.smtpHost, existing?.smtpHost ?? runtime.smtp.host);
     const user = normalizeText(input.smtpUser, existing?.smtpUser ?? runtime.smtp.user);
-    const from = normalizeText(input.smtpFrom, existing?.smtpFrom ?? runtime.smtp.from || user);
+    const from = normalizeText(
+      input.smtpFrom,
+      existing?.smtpFrom ?? (runtime.smtp.from || user),
+    );
     const port = input.smtpPort ?? existing?.smtpPort ?? runtime.smtp.port;
     const secure = input.smtpSecure ?? existing?.smtpSecure ?? runtime.smtp.secure;
     const explicitPassword = input.smtpPassword?.trim();
