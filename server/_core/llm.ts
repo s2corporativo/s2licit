@@ -1,9 +1,12 @@
+import { z } from "zod";
 import { logger } from "./logger";
 import {
   getAiRuntimeConfig,
   resolveCredential,
 } from "../integrations/core/credentialResolver";
 import { externalHttpRequest } from "../integrations/core/externalHttpClient";
+import { IntegrationError } from "../integrations/core/integrationError";
+import type { IntegrationErrorType } from "../integrations/core/types";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -45,6 +48,7 @@ export type ToolChoiceExplicit = {
   function: { name: string };
 };
 export type ToolChoice = ToolChoicePrimitive | ToolChoiceByName | ToolChoiceExplicit;
+export type LlmProviderKind = "anthropic" | "groq" | "forge";
 
 export type InvokeParams = {
   messages: Message[];
@@ -57,6 +61,14 @@ export type InvokeParams = {
   output_schema?: OutputSchema;
   responseFormat?: ResponseFormat;
   response_format?: ResponseFormat;
+  /** Força um provedor específico para esta chamada. */
+  provider?: LlmProviderKind;
+  /**
+   * Autoriza enviar o mesmo conteúdo a outro provedor em caso de falha.
+   * Padrão: false para provedor explícito; true somente quando a preferência
+   * global é `auto`.
+   */
+  allowProviderFallback?: boolean;
 };
 
 export type ToolCall = {
@@ -96,8 +108,6 @@ export type ResponseFormat =
   | { type: "json_object" }
   | { type: "json_schema"; json_schema: JsonSchema };
 
-export type LlmProviderKind = "anthropic" | "groq" | "forge";
-
 interface LlmProvider {
   kind: LlmProviderKind;
   url: string;
@@ -106,6 +116,94 @@ interface LlmProvider {
   protocol: "anthropic-messages" | "openai-chat";
   jsonObjectOnly: boolean;
 }
+
+interface ConfiguredProviderSet {
+  providers: LlmProvider[];
+  preference: "auto" | LlmProviderKind;
+  timeoutMs: number;
+}
+
+const RoleSchema = z.enum(["system", "user", "assistant", "tool", "function"]);
+const ToolCallSchema = z.object({
+  id: z.string().min(1),
+  type: z.literal("function"),
+  function: z.object({
+    name: z.string().min(1),
+    arguments: z.string(),
+  }),
+}).passthrough();
+
+const OpenAiContentPartSchema = z.union([
+  z.object({ type: z.literal("text"), text: z.string() }).passthrough(),
+  z.object({
+    type: z.literal("image_url"),
+    image_url: z.object({ url: z.string(), detail: z.enum(["auto", "low", "high"]).optional() }).passthrough(),
+  }).passthrough(),
+  z.object({
+    type: z.literal("file_url"),
+    file_url: z.object({ url: z.string(), mime_type: z.string().optional() }).passthrough(),
+  }).passthrough(),
+]);
+
+const OpenAiResponseSchema = z.object({
+  id: z.string().min(1),
+  created: z.number().int().nonnegative().optional().default(() => Math.floor(Date.now() / 1000)),
+  model: z.string().min(1),
+  choices: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    message: z.object({
+      role: RoleSchema.optional().default("assistant"),
+      content: z.union([z.string(), z.array(OpenAiContentPartSchema), z.null()]).optional().default(""),
+      tool_calls: z.array(ToolCallSchema).optional(),
+    }).passthrough(),
+    finish_reason: z.string().nullable().optional().default(null),
+  }).passthrough()).min(1),
+  usage: z.object({
+    prompt_tokens: z.number().int().nonnegative().optional().default(0),
+    completion_tokens: z.number().int().nonnegative().optional().default(0),
+    total_tokens: z.number().int().nonnegative().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+type OpenAiResponse = z.infer<typeof OpenAiResponseSchema>;
+
+const AnthropicTextBlockSchema = z.object({
+  type: z.literal("text"),
+  text: z.string(),
+}).passthrough();
+const AnthropicToolUseBlockSchema = z.object({
+  type: z.literal("tool_use"),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  input: z.unknown(),
+}).passthrough();
+const AnthropicOtherBlockSchema = z.object({ type: z.string().min(1) }).passthrough();
+const AnthropicResponseSchema = z.object({
+  id: z.string().min(1),
+  model: z.string().min(1),
+  content: z.array(z.union([
+    AnthropicTextBlockSchema,
+    AnthropicToolUseBlockSchema,
+    AnthropicOtherBlockSchema,
+  ])).default([]),
+  stop_reason: z.enum([
+    "end_turn",
+    "max_tokens",
+    "stop_sequence",
+    "tool_use",
+    "pause_turn",
+    "refusal",
+    "model_context_window_exceeded",
+  ]).nullable(),
+  usage: z.object({
+    input_tokens: z.number().int().nonnegative().optional().default(0),
+    output_tokens: z.number().int().nonnegative().optional().default(0),
+    cache_creation_input_tokens: z.number().int().nonnegative().optional(),
+    cache_read_input_tokens: z.number().int().nonnegative().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+type AnthropicResponse = z.infer<typeof AnthropicResponseSchema>;
 
 const ensureArray = (value: MessageContent | MessageContent[]): MessageContent[] =>
   Array.isArray(value) ? value : [value];
@@ -157,13 +255,17 @@ function normalizeToolChoice(
     }
     return { type: "function", function: { name: tools[0].function.name } };
   }
-  if ("name" in toolChoice) {
-    return { type: "function", function: { name: toolChoice.name } };
-  }
+  if ("name" in toolChoice) return { type: "function", function: { name: toolChoice.name } };
   return toolChoice;
 }
 
-async function configuredProviders(): Promise<{ providers: LlmProvider[]; preference: string; timeoutMs: number }> {
+function normalizeProviderPreference(value: string): "auto" | LlmProviderKind {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "anthropic" || normalized === "groq" || normalized === "forge") return normalized;
+  return "auto";
+}
+
+async function configuredProviders(): Promise<ConfiguredProviderSet> {
   const config = await getAiRuntimeConfig();
   const providers: LlmProvider[] = [];
   if (config.anthropicApiKey) {
@@ -196,17 +298,37 @@ async function configuredProviders(): Promise<{ providers: LlmProvider[]; prefer
       jsonObjectOnly: false,
     });
   }
-  return { providers, preference: config.provider, timeoutMs: config.timeoutMs };
+  return {
+    providers,
+    preference: normalizeProviderPreference(config.provider),
+    timeoutMs: config.timeoutMs,
+  };
 }
 
-function orderProviders(providers: LlmProvider[], preference: string): LlmProvider[] {
-  const rank = (provider: LlmProvider) => {
-    if (provider.kind === preference) return 0;
-    if (provider.kind === "anthropic") return 1;
-    if (provider.kind === "groq") return 2;
-    return 3;
-  };
-  return [...providers].sort((a, b) => rank(a) - rank(b));
+function defaultProviderOrder(providers: LlmProvider[]): LlmProvider[] {
+  const rank: Record<LlmProviderKind, number> = { anthropic: 0, groq: 1, forge: 2 };
+  return [...providers].sort((a, b) => rank[a.kind] - rank[b.kind]);
+}
+
+function selectProviders(
+  providers: LlmProvider[],
+  preference: "auto" | LlmProviderKind,
+  params: InvokeParams,
+): LlmProvider[] {
+  const target = params.provider ?? (preference === "auto" ? undefined : preference);
+  if (!target) return defaultProviderOrder(providers);
+
+  const selected = providers.find((provider) => provider.kind === target);
+  if (!selected) {
+    throw new IntegrationError(`Provedor de IA ${target} não está configurado.`, {
+      type: "CONFIGURATION",
+      code: "LLM_PROVIDER_NOT_CONFIGURED",
+    });
+  }
+
+  const allowFallback = params.allowProviderFallback ?? (params.provider == null && preference === "auto");
+  if (!allowFallback) return [selected];
+  return [selected, ...defaultProviderOrder(providers).filter((provider) => provider.kind !== selected.kind)];
 }
 
 export async function listConfiguredProviders(): Promise<Array<{ kind: LlmProviderKind; model: string }>> {
@@ -214,9 +336,10 @@ export async function listConfiguredProviders(): Promise<Array<{ kind: LlmProvid
   return providers.map(({ kind, model }) => ({ kind, model }));
 }
 
-export async function activeProvider(): Promise<LlmProvider | null> {
+export async function activeProvider(): Promise<{ kind: LlmProviderKind; model: string } | null> {
   const { providers, preference } = await configuredProviders();
-  return orderProviders(providers, preference)[0] ?? null;
+  const selected = selectProviders(providers, preference, { messages: [] })[0];
+  return selected ? { kind: selected.kind, model: selected.model } : null;
 }
 
 function normalizeResponseFormat({
@@ -268,7 +391,10 @@ function anthropicContentBlocks(message: Message): Array<Record<string, unknown>
     else if (part.type === "text") blocks.push({ type: "text", text: part.text });
     else if (part.type === "image_url") blocks.push(anthropicImageBlock(part.image_url.url));
     else if (part.type === "file_url") {
-      blocks.push({ type: "text", text: `[Arquivo fornecido: ${part.file_url.url}]` });
+      throw new IntegrationError(
+        "O adapter Anthropic não aceita file_url genérico. Converta o arquivo para texto/imagem ou use o pipeline documental antes do LLM.",
+        { type: "CONFIGURATION", code: "ANTHROPIC_FILE_URL_UNSUPPORTED" },
+      );
     }
   }
   if (message.role === "assistant" && message.tool_calls?.length) {
@@ -305,7 +431,11 @@ function buildAnthropicConversation(messages: Message[]) {
         .join("\n");
       converted.push({
         role: "user",
-        content: [{ type: "tool_result", tool_use_id: message.tool_call_id ?? message.name ?? "tool", content: resultText }],
+        content: [{
+          type: "tool_result",
+          tool_use_id: message.tool_call_id ?? message.name ?? "tool",
+          content: resultText,
+        }],
       });
       continue;
     }
@@ -319,7 +449,10 @@ function buildAnthropicConversation(messages: Message[]) {
   return { system: systemParts.join("\n\n"), messages: converted };
 }
 
-function anthropicToolChoice(choice: ToolChoice | undefined, tools: Tool[] | undefined): Record<string, unknown> | undefined {
+function anthropicToolChoice(
+  choice: ToolChoice | undefined,
+  tools: Tool[] | undefined,
+): Record<string, unknown> | undefined {
   if (!choice) return undefined;
   if (choice === "auto") return { type: "auto" };
   if (choice === "none") return { type: "none" };
@@ -342,61 +475,93 @@ function anthropicJsonInstruction(format: ResponseFormat | undefined): string {
   );
 }
 
-interface AnthropicResponse {
-  id: string;
-  model: string;
-  content?: Array<
-    | { type: "text"; text: string }
-    | { type: "tool_use"; id: string; name: string; input: unknown }
-    | Record<string, unknown>
-  >;
-  stop_reason?: string | null;
-  usage?: { input_tokens?: number; output_tokens?: number };
-}
-
 function adaptAnthropicResponse(raw: AnthropicResponse, provider: LlmProvider): InvokeResult {
-  const text = (raw.content ?? [])
-    .filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof (block as any).text === "string")
-    .map((block) => block.text)
-    .join("\n");
-  const toolCalls: ToolCall[] = (raw.content ?? [])
-    .filter((block): block is { type: "tool_use"; id: string; name: string; input: unknown } => block.type === "tool_use")
-    .map((block) => ({
-      id: block.id,
-      type: "function" as const,
-      function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
-    }));
-  const input = raw.usage?.input_tokens ?? 0;
-  const output = raw.usage?.output_tokens ?? 0;
+  const textBlocks = raw.content.filter((block): block is z.infer<typeof AnthropicTextBlockSchema> =>
+    block.type === "text" && "text" in block && typeof block.text === "string",
+  );
+  const toolBlocks = raw.content.filter((block): block is z.infer<typeof AnthropicToolUseBlockSchema> =>
+    block.type === "tool_use" && "id" in block && "name" in block,
+  );
+  const toolCalls: ToolCall[] = toolBlocks.map((block) => ({
+    id: block.id,
+    type: "function",
+    function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+  }));
+  const inputTokens = raw.usage?.input_tokens ?? 0;
+  const outputTokens = raw.usage?.output_tokens ?? 0;
   const finishReason =
     raw.stop_reason === "tool_use"
       ? "tool_calls"
-      : raw.stop_reason === "max_tokens"
+      : raw.stop_reason === "max_tokens" || raw.stop_reason === "model_context_window_exceeded"
         ? "length"
         : raw.stop_reason === "end_turn" || raw.stop_reason === "stop_sequence"
           ? "stop"
-          : raw.stop_reason ?? null;
+          : raw.stop_reason === "refusal"
+            ? "content_filter"
+            : raw.stop_reason;
   return {
-    id: raw.id || `anthropic-${Date.now()}`,
+    id: raw.id,
     created: Math.floor(Date.now() / 1000),
     model: raw.model || provider.model,
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: text,
-          ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
-        },
-        finish_reason: finishReason,
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        content: textBlocks.map((block) => block.text).join("\n"),
+        ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
       },
-    ],
+      finish_reason: finishReason,
+    }],
     usage: {
-      prompt_tokens: input,
-      completion_tokens: output,
-      total_tokens: input + output,
+      prompt_tokens: inputTokens,
+      completion_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
     },
   };
+}
+
+function adaptOpenAiResponse(raw: OpenAiResponse): InvokeResult {
+  return {
+    id: raw.id,
+    created: raw.created,
+    model: raw.model,
+    choices: raw.choices.map((choice) => ({
+      index: choice.index,
+      message: {
+        role: choice.message.role,
+        content: choice.message.content == null ? "" : choice.message.content as InvokeResult["choices"][number]["message"]["content"],
+        ...(choice.message.tool_calls?.length ? { tool_calls: choice.message.tool_calls } : {}),
+      },
+      finish_reason: choice.finish_reason,
+    })),
+    ...(raw.usage
+      ? {
+          usage: {
+            prompt_tokens: raw.usage.prompt_tokens,
+            completion_tokens: raw.usage.completion_tokens,
+            total_tokens: raw.usage.total_tokens ?? raw.usage.prompt_tokens + raw.usage.completion_tokens,
+          },
+        }
+      : {}),
+  };
+}
+
+function responseIntegrationError(
+  provider: LlmProvider,
+  response: {
+    statusCode: number;
+    error?: { type: IntegrationErrorType; message: string; retryable: boolean; code?: string };
+  },
+): IntegrationError {
+  return new IntegrationError(
+    `${provider.kind} LLM falhou${response.statusCode ? ` (${response.statusCode})` : ""}: ${response.error?.message ?? "resposta inválida"}`,
+    {
+      type: response.error?.type ?? "UPSTREAM",
+      retryable: response.error?.retryable ?? false,
+      upstreamStatus: response.statusCode || undefined,
+      code: response.error?.code,
+    },
+  );
 }
 
 async function invokeAnthropicProvider(
@@ -437,15 +602,13 @@ async function invokeAnthropicProvider(
     body: JSON.stringify(payload),
     expected: "json",
     timeoutMs,
+    deadlineMs: timeoutMs,
     maxRetries: 0,
     idempotent: false,
     maxBodyBytes: 10 * 1024 * 1024,
+    validator: (data) => AnthropicResponseSchema.parse(data),
   });
-  if (!response.ok || !response.data) {
-    throw new Error(
-      `Anthropic Messages API falhou${response.statusCode ? ` (${response.statusCode})` : ""}: ${response.error?.message ?? "resposta inválida"}`,
-    );
-  }
+  if (!response.ok || !response.data) throw responseIntegrationError(provider, response);
   return adaptAnthropicResponse(response.data, provider);
 }
 
@@ -468,7 +631,7 @@ async function invokeOpenAiProvider(
   if (format?.type === "json_schema" && provider.jsonObjectOnly) format = { type: "json_object" };
   if (format) payload.response_format = format;
 
-  const response = await externalHttpRequest<InvokeResult>({
+  const response = await externalHttpRequest<OpenAiResponse>({
     source: provider.kind,
     operation: "chat.completions.create",
     url: provider.url,
@@ -480,27 +643,32 @@ async function invokeOpenAiProvider(
     body: JSON.stringify(payload),
     expected: "json",
     timeoutMs,
+    deadlineMs: timeoutMs,
     maxRetries: 0,
     idempotent: false,
     maxBodyBytes: 10 * 1024 * 1024,
+    validator: (data) => OpenAiResponseSchema.parse(data),
   });
-  if (!response.ok || !response.data) {
-    throw new Error(
-      `${provider.kind} LLM falhou${response.statusCode ? ` (${response.statusCode})` : ""}: ${response.error?.message ?? "resposta inválida"}`,
-    );
-  }
-  return response.data;
+  if (!response.ok || !response.data) throw responseIntegrationError(provider, response);
+  return adaptOpenAiResponse(response.data);
 }
 
-async function invokeProvider(provider: LlmProvider, params: InvokeParams, timeoutMs: number): Promise<InvokeResult> {
+async function invokeProvider(
+  provider: LlmProvider,
+  params: InvokeParams,
+  timeoutMs: number,
+): Promise<InvokeResult> {
   return provider.protocol === "anthropic-messages"
     ? invokeAnthropicProvider(provider, params, timeoutMs)
     : invokeOpenAiProvider(provider, params, timeoutMs);
 }
 
-function isTransientLlmError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /\b(408|429|500|502|503|504|529)\b|timeout|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|circuit breaker/i.test(msg);
+function isTransientLlmError(error: unknown): boolean {
+  if (error instanceof IntegrationError) {
+    return error.retryable || ["TIMEOUT", "NETWORK", "UPSTREAM", "RATE_LIMIT"].includes(error.type);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /timeout|ECONNRESET|ETIMEDOUT|EAI_AGAIN|fetch failed/i.test(message);
 }
 
 const MODEL_PRICES_USD_PER_MTOK: Array<{ match: RegExp; input: number; output: number }> = [
@@ -543,7 +711,7 @@ async function persistUsage(
   promptTokens: number,
   completionTokens: number,
   custoUsd: number,
-) {
+): Promise<void> {
   try {
     const [{ getDb }, { aiUsageDaily }, { sql }] = await Promise.all([
       import("../db"),
@@ -577,7 +745,7 @@ async function persistUsage(
   }
 }
 
-function recordUsage(provider: LlmProvider, result: InvokeResult) {
+function recordUsage(provider: LlmProvider, result: InvokeResult): void {
   usageTotals.chamadas += 1;
   const usage = result.usage;
   const promptTokens = usage?.prompt_tokens ?? 0;
@@ -601,35 +769,45 @@ function recordUsage(provider: LlmProvider, result: InvokeResult) {
 }
 
 export function getUsageTotals() {
-  return usageTotals;
+  return {
+    ...usageTotals,
+    porProvedor: Object.fromEntries(
+      Object.entries(usageTotals.porProvedor).map(([key, value]) => [key, { ...value }]),
+    ),
+  };
 }
 
 /**
- * Gateway único de IA. Faz retry controlado apenas para erros transitórios e,
- * depois, fallback para outro provedor configurado. Cada protocolo fica isolado
- * no adapter correspondente.
+ * Gateway único de IA.
+ *
+ * Um provedor explicitamente selecionado NÃO compartilha o prompt com outro
+ * provedor por padrão. Fallback entre fornecedores só ocorre em modo global
+ * `auto` ou quando `allowProviderFallback` é explicitamente verdadeiro.
  */
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const { providers, preference, timeoutMs } = await configuredProviders();
-  const ordered = orderProviders(providers, preference);
-  if (!ordered.length) {
-    throw new Error(
+  const selectedProviders = selectProviders(providers, preference, params);
+  if (!selectedProviders.length) {
+    throw new IntegrationError(
       "Nenhum provedor de IA configurado. Cadastre Anthropic ou Groq na Central de Integrações.",
+      { type: "CONFIGURATION", code: "NO_LLM_PROVIDER" },
     );
   }
 
   let lastError: unknown;
-  for (const provider of ordered) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+  for (const provider of selectedProviders) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
         const result = await invokeProvider(provider, params, timeoutMs);
         recordUsage(provider, result);
         return result;
-      } catch (err) {
-        lastError = err;
-        if (!isTransientLlmError(err)) throw err;
+      } catch (error) {
+        lastError = error;
+        if (!isTransientLlmError(error)) throw error;
         logger.warn(
-          `[LLM] ${provider.kind} falhou (tentativa ${attempt}/2): ${(err as Error).message.slice(0, 200)}`,
+          `[LLM] ${provider.kind} falhou (tentativa ${attempt}/2): ${
+            (error instanceof Error ? error.message : String(error)).slice(0, 200)
+          }`,
         );
         if (attempt < 2) {
           const delay = 1_000 * attempt + Math.floor(Math.random() * 500);
@@ -640,7 +818,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
   throw lastError instanceof Error
     ? lastError
-    : new Error("Falha de IA em todos os provedores configurados.");
+    : new Error("Falha de IA em todos os provedores autorizados para esta chamada.");
 }
 
 export function parseLlmJson<T = unknown>(raw: string): T {
