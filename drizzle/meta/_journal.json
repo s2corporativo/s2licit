@@ -120,6 +120,13 @@
       "when": 1786325400000,
       "tag": "0016_product_catalog_compendium",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786360500000,
+      "tag": "0017_product_catalog_hardening",
+      "breakpoints": true
     }
   ]
 }
