@@ -10,6 +10,7 @@ import {
   recordEquivalenceFeedback,
   validateCompendiumEntry,
 } from "../services/equivalenceCompendiumService";
+import { applyPersistedEquivalenceMemory, enforceCriticalTechnicalGuards } from "../services/equivalenceGuardService";
 
 export const equivalenceCompendiumRouter = router({
   stats: protectedProcedure.query(() => compendiumStats()),
@@ -34,7 +35,27 @@ export const equivalenceCompendiumRouter = router({
     }).refine((value) => Boolean(value.productId || value.description?.trim()), {
       message: "Informe productId ou description",
     }))
-    .mutation(({ input }) => analyzeEquivalences(input)),
+    .mutation(async ({ input }) => {
+      const result = await analyzeEquivalences(input);
+      const guarded = enforceCriticalTechnicalGuards(result.reference, result.candidates);
+      const learned = await applyPersistedEquivalenceMemory({
+        reference: result.reference,
+        description: input.description,
+        candidates: guarded,
+      });
+      const rank = (candidate: (typeof learned)[number]) =>
+        candidate.aiAssessment?.decision === "approved" ? 0 :
+        candidate.aiAssessment?.decision === "needs_review" ? 1 : 2;
+      learned.sort((a, b) => {
+        const decision = rank(a) - rank(b);
+        if (decision) return decision;
+        if (b.technicalScore !== a.technicalScore) return b.technicalScore - a.technicalScore;
+        const aPrice = Number(a.bestOffer?.effectivePrice ?? Number.POSITIVE_INFINITY);
+        const bPrice = Number(b.bestOffer?.effectivePrice ?? Number.POSITIVE_INFINITY);
+        return aPrice - bPrice;
+      });
+      return { ...result, candidates: learned };
+    }),
 
   bootstrap: editorProcedure
     .input(z.object({ limit: z.number().int().min(1).max(2000).default(500) }).optional())
