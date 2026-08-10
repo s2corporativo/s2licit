@@ -17,6 +17,7 @@ import {
 import { buscarLicitacoesComprasGovResult } from "../connectors/comprasGovConnector";
 import { buscarLicitacoesFiemgResult } from "../connectors/fiemgConnector";
 import type { NormalizedLicitacao } from "../connectors/baseConnector";
+import { classifyThrownError, statusFromError } from "../integrations/core/integrationError";
 import type { IntegrationResultStatus } from "../integrations/core/types";
 
 function toDateStr(date: Date): string {
@@ -38,15 +39,15 @@ const BuscarSchema = z.object({
   diasAtras: z.number().int().min(1).max(90).default(7),
   uf: z.string().length(2).optional(),
   pagina: z.number().int().positive().default(1),
-  modalidades: z.array(z.number().int()).max(6).default([8, 6]),
+  modalidades: z.array(z.number().int()).min(1).max(6).default([8, 6]),
   fontes: z.array(FonteEnum).min(1).default(["pncp", "comprasgov", "fiemg"]),
 });
 
-const FONTE_LABEL: Record<string, string> = {
+const FONTE_LABEL = {
   pncp: "PNCP",
   comprasgov: "Compras.gov.br",
   fiemg: "Sistema S / FIEMG",
-};
+} as const;
 
 function dedupe(licitacoes: NormalizedLicitacao[]): NormalizedLicitacao[] {
   const seen = new Set<string>();
@@ -67,7 +68,7 @@ const ItensSchema = z.object({
 });
 
 type SourceStatus = {
-  fonte: string;
+  fonte: keyof typeof FONTE_LABEL;
   label: string;
   status: IntegrationResultStatus;
   encontradas: number;
@@ -77,12 +78,145 @@ type SourceStatus = {
   requestId: string | null;
 };
 
+interface RadarSourceResult {
+  status: SourceStatus;
+  data: NormalizedLicitacao[];
+  totalRegistros?: number;
+  totalPaginas?: number;
+}
+
 function detailForStatus(status: IntegrationResultStatus, error?: string): string | null {
   if (error) return error;
   if (status === "NO_RESULTS") return "Consulta concluída normalmente, sem oportunidades no período/filtro.";
   if (status === "PARTIAL") return "Fonte respondeu parcialmente; parte da cobertura pode estar indisponível.";
   if (status === "SUCCESS") return null;
   return "A fonte não pôde ser consultada com confiabilidade.";
+}
+
+async function loadPncpSource(input: {
+  inicio: Date;
+  fim: Date;
+  pagina: number;
+  modalidades: number[];
+}): Promise<RadarSourceResult> {
+  const startedAt = Date.now();
+  const modalityResults = await Promise.allSettled(
+    input.modalidades.map((modalidade) =>
+      buscarLicitacoesPNCP(
+        toDateStr(input.inicio),
+        toDateStr(input.fim),
+        input.pagina,
+        50,
+        modalidade,
+      ),
+    ),
+  );
+  const fulfilled = modalityResults
+    .filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof buscarLicitacoesPNCP>>> =>
+        result.status === "fulfilled",
+    )
+    .map((result) => result.value);
+  const failures = modalityResults
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => classifyThrownError(result.reason));
+
+  const data = dedupe(fulfilled.flatMap((result) => result.data).map(normalizePncpLicitacao));
+  const totalRegistros = fulfilled.reduce((sum, result) => sum + result.totalRegistros, 0);
+  const totalPaginas = Math.max(1, ...fulfilled.map((result) => result.totalPaginas));
+  let status: IntegrationResultStatus;
+  if (!fulfilled.length) status = statusFromError(failures[0] ?? classifyThrownError(new Error("PNCP indisponível.")));
+  else if (failures.length) status = "PARTIAL";
+  else status = data.length ? "SUCCESS" : "NO_RESULTS";
+
+  return {
+    status: {
+      fonte: "pncp",
+      label: FONTE_LABEL.pncp,
+      status,
+      encontradas: data.length,
+      durationMs: Date.now() - startedAt,
+      detail: detailForStatus(
+        status,
+        failures.length ? failures.map((error) => error.message).join(" | ").slice(0, 500) : undefined,
+      ),
+      partial: status === "PARTIAL",
+      requestId: fulfilled[0]?.requestId ?? null,
+    },
+    data,
+    totalRegistros,
+    totalPaginas,
+  };
+}
+
+async function loadComprasGovSource(inicio: Date, fim: Date, uf?: string): Promise<RadarSourceResult> {
+  try {
+    const result = await buscarLicitacoesComprasGovResult(inicio, fim, uf);
+    return {
+      status: {
+        fonte: "comprasgov",
+        label: FONTE_LABEL.comprasgov,
+        status: result.status,
+        encontradas: result.data.length,
+        durationMs: result.durationMs,
+        detail: detailForStatus(result.status, result.error?.message),
+        partial: result.status === "PARTIAL" || Boolean(result.metadata?.partial),
+        requestId: result.requestId,
+      },
+      data: result.data,
+    };
+  } catch (error) {
+    const classified = classifyThrownError(error);
+    const status = statusFromError(classified);
+    return {
+      status: {
+        fonte: "comprasgov",
+        label: FONTE_LABEL.comprasgov,
+        status,
+        encontradas: 0,
+        durationMs: 0,
+        detail: classified.message,
+        partial: false,
+        requestId: null,
+      },
+      data: [],
+    };
+  }
+}
+
+async function loadFiemgSource(inicio: Date, fim: Date): Promise<RadarSourceResult> {
+  try {
+    const result = await buscarLicitacoesFiemgResult(inicio, fim);
+    return {
+      status: {
+        fonte: "fiemg",
+        label: FONTE_LABEL.fiemg,
+        status: result.status,
+        encontradas: result.data.length,
+        durationMs: result.durationMs,
+        detail: detailForStatus(result.status, result.error?.message),
+        partial: result.status === "PARTIAL" || Boolean(result.metadata?.partial),
+        requestId: result.requestId,
+      },
+      data: result.data,
+    };
+  } catch (error) {
+    const classified = classifyThrownError(error);
+    const status = statusFromError(classified);
+    return {
+      status: {
+        fonte: "fiemg",
+        label: FONTE_LABEL.fiemg,
+        status,
+        encontradas: 0,
+        durationMs: 0,
+        detail: classified.message,
+        partial: false,
+        requestId: null,
+      },
+      data: [],
+    };
+  }
 }
 
 export const pncpRadarRouter = router({
@@ -95,115 +229,24 @@ export const pncpRadarRouter = router({
       const uf = input.uf?.toUpperCase();
       const fontes = new Set(input.fontes);
       const primeiraPagina = input.pagina === 1;
-      const statuses: SourceStatus[] = [];
-      const all: NormalizedLicitacao[] = [];
-      let totalRegistros = 0;
-      let totalPaginas = 1;
 
+      const tasks: Array<Promise<RadarSourceResult>> = [];
       if (fontes.has("pncp")) {
-        const startedAt = Date.now();
-        const modalityResults = await Promise.allSettled(
-          input.modalidades.map((modalidade) =>
-            buscarLicitacoesPNCP(
-              toDateStr(inicio),
-              toDateStr(now),
-              input.pagina,
-              50,
-              modalidade,
-            ),
-          ),
+        tasks.push(
+          loadPncpSource({ inicio, fim: now, pagina: input.pagina, modalidades: input.modalidades }),
         );
-        const failures = modalityResults.filter((result) => result.status === "rejected");
-        const fulfilled = modalityResults.filter(
-          (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof buscarLicitacoesPNCP>>> =>
-            result.status === "fulfilled",
-        );
-        const pncpRaw = fulfilled.flatMap((result) => result.value.data);
-        const pncpNormalized = dedupe(pncpRaw.map(normalizePncpLicitacao));
-        all.push(...pncpNormalized);
-        totalRegistros = fulfilled.reduce((sum, result) => sum + result.value.totalRegistros, 0);
-        totalPaginas = Math.max(1, ...fulfilled.map((result) => result.value.totalPaginas));
-
-        const status: IntegrationResultStatus =
-          fulfilled.length === 0
-            ? "UNAVAILABLE"
-            : failures.length > 0
-              ? "PARTIAL"
-              : pncpNormalized.length === 0
-                ? "NO_RESULTS"
-                : "SUCCESS";
-        const failureDetail = failures
-          .map((result) => (result.status === "rejected" ? String(result.reason) : ""))
-          .filter(Boolean)
-          .join(" | ")
-          .slice(0, 500);
-        statuses.push({
-          fonte: "pncp",
-          label: FONTE_LABEL.pncp,
-          status,
-          encontradas: pncpNormalized.length,
-          durationMs: Date.now() - startedAt,
-          detail: detailForStatus(status, failureDetail || undefined),
-          partial: status === "PARTIAL",
-          requestId: null,
-        });
       }
+      if (fontes.has("comprasgov") && primeiraPagina) tasks.push(loadComprasGovSource(inicio, now, uf));
+      if (fontes.has("fiemg") && primeiraPagina) tasks.push(loadFiemgSource(inicio, now));
 
-      if (fontes.has("comprasgov") && primeiraPagina) {
-        try {
-          const result = await buscarLicitacoesComprasGovResult(inicio, now, uf);
-          all.push(...result.data);
-          statuses.push({
-            fonte: "comprasgov",
-            label: FONTE_LABEL.comprasgov,
-            status: result.status,
-            encontradas: result.data.length,
-            durationMs: result.durationMs,
-            detail: detailForStatus(result.status, result.error?.message),
-            partial: result.status === "PARTIAL" || Boolean(result.metadata?.partial),
-            requestId: result.requestId,
-          });
-        } catch (error) {
-          statuses.push({
-            fonte: "comprasgov",
-            label: FONTE_LABEL.comprasgov,
-            status: "UNAVAILABLE",
-            encontradas: 0,
-            durationMs: 0,
-            detail: (error as Error).message,
-            partial: false,
-            requestId: null,
-          });
-        }
-      }
-
-      if (fontes.has("fiemg") && primeiraPagina) {
-        try {
-          const result = await buscarLicitacoesFiemgResult(inicio, now);
-          all.push(...result.data);
-          statuses.push({
-            fonte: "fiemg",
-            label: FONTE_LABEL.fiemg,
-            status: result.status,
-            encontradas: result.data.length,
-            durationMs: result.durationMs,
-            detail: detailForStatus(result.status, result.error?.message),
-            partial: result.status === "PARTIAL" || Boolean(result.metadata?.partial),
-            requestId: result.requestId,
-          });
-        } catch (error) {
-          statuses.push({
-            fonte: "fiemg",
-            label: FONTE_LABEL.fiemg,
-            status: "UNAVAILABLE",
-            encontradas: 0,
-            durationMs: 0,
-            detail: (error as Error).message,
-            partial: false,
-            requestId: null,
-          });
-        }
-      }
+      // Fontes independentes são executadas concorrentemente. A latência do
+      // Radar tende ao máximo das fontes, em vez da soma das latências.
+      const sourceResults = await Promise.all(tasks);
+      const statuses = sourceResults.map((result) => result.status);
+      const all = sourceResults.flatMap((result) => result.data);
+      const pncpResult = sourceResults.find((result) => result.status.fonte === "pncp");
+      const totalRegistros = pncpResult?.totalRegistros ?? 0;
+      const totalPaginas = pncpResult?.totalPaginas ?? 1;
 
       const oportunidades = dedupe(all)
         .filter((licitacao) => matchesKeywords(licitacao, input.keywords))
