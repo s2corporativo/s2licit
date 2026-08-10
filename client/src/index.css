@@ -1,5 +1,4 @@
-/* Fontes self-hosted (pacotes @fontsource): sem chamada externa ao Google
-   Fonts bloqueando o primeiro render num sistema auto-hospedado. */
+/* Fontes self-hosted: o sistema não depende de fontes externas no primeiro render. */
 @import "@fontsource-variable/inter/index.css";
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
@@ -7,10 +6,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-
 @theme inline {
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
+  --radius-sm: 0.55rem;
+  --radius-md: 0.8rem;
   --radius-lg: 1rem;
   --radius-xl: 1.25rem;
   --color-background: var(--background);
@@ -48,59 +46,91 @@
 }
 
 :root {
-  /* S2 SaaS — Indigo profundo + Verde esmeralda, superfícies suaves */
-  --primary: oklch(0.51 0.23 277);              /* indigo-600 */
-  --primary-foreground: oklch(1 0 0);
-  --sidebar-primary: oklch(0.51 0.23 277);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --chart-1: oklch(0.51 0.23 277);
-  --chart-2: oklch(0.65 0.17 155);
-  --chart-3: oklch(0.62 0.19 250);
-  --chart-4: oklch(0.75 0.14 85);
-  --chart-5: oklch(0.55 0.20 300);
-  --radius: 0.75rem;
-  --background: oklch(0.962 0.002 265);         /* #f3f4f6 — fundo Verdelimp */
-  --foreground: oklch(0.18 0.02 265);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 265);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 265);
-  --secondary: oklch(0.96 0.005 265);
-  --secondary-foreground: oklch(0.25 0.02 265);
-  --muted: oklch(0.955 0.005 265);
-  --muted-foreground: oklch(0.50 0.02 265);
-  --accent: oklch(0.94 0.03 277);
-  --accent-foreground: oklch(0.35 0.15 277);
-  --destructive: oklch(0.58 0.22 27);
-  --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.91 0.005 265);
-  --input: oklch(0.91 0.005 265);
-  --ring: oklch(0.51 0.23 277);
-  --sidebar: oklch(0.17 0.03 275);              /* sidebar escura */
-  --sidebar-foreground: oklch(0.85 0.01 265);
-  --sidebar-accent: oklch(0.25 0.05 275);
-  --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: oklch(0.28 0.03 275);
-  --sidebar-ring: oklch(0.51 0.23 277);
-}
+  color-scheme: light;
+  --radius: 0.8rem;
 
+  /* Identidade S2: azul institucional, marinho operacional e acento esmeralda. */
+  --primary: oklch(0.49 0.21 257);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.96 0.008 255);
+  --secondary-foreground: oklch(0.25 0.035 260);
+  --accent: oklch(0.95 0.025 252);
+  --accent-foreground: oklch(0.34 0.14 257);
+
+  --background: oklch(0.97 0.006 255);
+  --foreground: oklch(0.18 0.024 260);
+  --card: oklch(0.995 0.002 255);
+  --card-foreground: oklch(0.18 0.024 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.024 260);
+  --muted: oklch(0.955 0.008 255);
+  --muted-foreground: oklch(0.48 0.025 260);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.905 0.01 255);
+  --input: oklch(0.905 0.01 255);
+  --ring: oklch(0.49 0.21 257);
+
+  --chart-1: oklch(0.49 0.21 257);
+  --chart-2: oklch(0.61 0.16 155);
+  --chart-3: oklch(0.61 0.18 285);
+  --chart-4: oklch(0.72 0.16 78);
+  --chart-5: oklch(0.59 0.2 24);
+
+  --sidebar: oklch(0.145 0.035 263);
+  --sidebar-foreground: oklch(0.88 0.012 255);
+  --sidebar-primary: oklch(0.62 0.18 255);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.235 0.05 262);
+  --sidebar-accent-foreground: oklch(0.98 0.005 255);
+  --sidebar-border: oklch(0.27 0.035 262);
+  --sidebar-ring: oklch(0.62 0.18 255);
+}
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
     box-sizing: border-box;
   }
+
+  html {
+    background: var(--background);
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-background text-foreground;
+    margin: 0;
+    min-width: 320px;
     font-family: "Inter Variable", "Inter", system-ui, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  h1, h2, h3, h4, h5, h6 {
-    font-weight: 700;
-    letter-spacing: -0.02em;
+
+  ::selection {
+    background: oklch(0.82 0.08 255);
+    color: oklch(0.18 0.05 260);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 750;
+    letter-spacing: -0.025em;
     line-height: 1.15;
   }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   [type="button"]:not(:disabled),
@@ -112,21 +142,61 @@
   input[type="radio"]:not(:disabled) {
     @apply cursor-pointer;
   }
+
+  :focus-visible {
+    outline: 2px solid oklch(0.58 0.18 255 / 65%);
+    outline-offset: 2px;
+  }
 }
 
-/* ─── Componentes do design system S2 ───────────────────────────────────── */
+/* Superfície principal comum a todas as páginas dentro do shell. */
+.s2-main {
+  background:
+    radial-gradient(circle at 100% 0%, oklch(0.91 0.035 250 / 42%), transparent 30rem),
+    linear-gradient(180deg, oklch(0.978 0.004 255) 0%, oklch(0.96 0.008 255) 100%);
+}
 
+.s2-panel {
+  border: 1px solid oklch(0.91 0.01 255);
+  border-radius: 1rem;
+  background: oklch(1 0 0 / 92%);
+  box-shadow:
+    0 1px 2px oklch(0.18 0.03 260 / 4%),
+    0 12px 30px oklch(0.18 0.03 260 / 4%);
+}
+
+.s2-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: oklch(0.48 0.16 257);
+}
+
+.s2-kicker::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: oklch(0.62 0.18 255);
+  box-shadow: 0 0 0 4px oklch(0.62 0.18 255 / 12%);
+}
+
+/* Componentes legados preservados e alinhados ao novo design system. */
 .its-bar {
   display: block;
-  width: 2.5rem;
+  width: 2.75rem;
   height: 0.25rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, oklch(0.51 0.23 277), oklch(0.65 0.17 155));
+  background: linear-gradient(90deg, oklch(0.49 0.21 257), oklch(0.61 0.16 155));
   margin-bottom: 0.75rem;
 }
 
 .its-rule {
-  border-top: 1px solid oklch(0.935 0.004 265);
+  border-top: 1px solid oklch(0.925 0.008 255);
 }
 
 .category-badge {
@@ -134,96 +204,116 @@
   align-items: center;
   gap: 0.375rem;
   font-size: 0.625rem;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 0.25rem 0.625rem;
+  padding: 0.28rem 0.65rem;
   border-radius: 999px;
-  background: oklch(0.94 0.03 277);
-  color: oklch(0.40 0.15 277);
-  border: none;
+  background: oklch(0.945 0.03 255);
+  color: oklch(0.39 0.15 257);
+  border: 1px solid oklch(0.89 0.035 255);
 }
 
 .price-display {
   font-family: "IBM Plex Mono", monospace;
   font-size: 1.125rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 .price-best {
-  color: oklch(0.55 0.17 155);
+  color: oklch(0.52 0.16 155);
 }
 
 .its-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.8125rem;
 }
 
 .its-table th {
   font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 800;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
-  color: oklch(0.50 0.02 265);
-  padding: 0.625rem 0.75rem;
+  color: oklch(0.48 0.025 260);
+  padding: 0.7rem 0.8rem;
   text-align: left;
-  border-bottom: 1px solid oklch(0.90 0.005 265);
+  border-bottom: 1px solid oklch(0.90 0.01 255);
   white-space: nowrap;
-  background: oklch(0.975 0.003 265);
+  background: oklch(0.973 0.005 255);
 }
 
 .its-table td {
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid oklch(0.955 0.004 265);
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid oklch(0.945 0.006 255);
   vertical-align: middle;
+  background: oklch(1 0 0 / 82%);
+  transition: background-color 0.15s ease;
 }
 
 .its-table tr:hover td {
-  background: oklch(0.97 0.01 277);
+  background: oklch(0.965 0.015 255);
 }
 
 .its-search {
   width: 100%;
-  border: 1px solid oklch(0.91 0.005 265);
-  border-radius: 0.875rem;
-  padding: 0.75rem 1rem;
-  font-size: 1.125rem;
-  font-weight: 400;
+  border: 1px solid oklch(0.89 0.012 255);
+  border-radius: 0.9rem;
+  padding: 0.78rem 1rem;
+  font-size: 1rem;
+  font-weight: 450;
   letter-spacing: -0.01em;
   outline: none;
-  background: white;
+  background: oklch(1 0 0 / 94%);
   font-family: "Inter Variable", "Inter", sans-serif;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px oklch(0.18 0.03 260 / 3%);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 
 .its-search::placeholder {
-  color: oklch(0.72 0.01 265);
+  color: oklch(0.66 0.018 255);
 }
 
 .its-search:focus {
-  border-color: oklch(0.51 0.23 277);
-  box-shadow: 0 0 0 3px oklch(0.51 0.23 277 / 12%);
+  border-color: oklch(0.58 0.18 255);
+  background: white;
+  box-shadow: 0 0 0 4px oklch(0.58 0.18 255 / 10%);
 }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2563eb; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #1A3F8F; }
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
 
-/* Acento azul nos controles nativos (padrão Verdelimp, verde→azul) */
-input[type="checkbox"], input[type="radio"] { accent-color: #2563eb; }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 
-/* Scrollbar da sidebar escura */
-.saas-sidebar::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 15%); }
-.saas-sidebar::-webkit-scrollbar-thumb:hover { background: oklch(1 0 0 / 30%); }
+::-webkit-scrollbar-thumb {
+  background: oklch(0.67 0.05 255);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.52 0.12 255);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #2563eb;
+}
+
+.saas-sidebar::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 14%);
+}
+
+.saas-sidebar::-webkit-scrollbar-thumb:hover {
+  background: oklch(1 0 0 / 28%);
+}
 
 @layer components {
-  /**
-   * Container central com padding responsivo (sobrescreve o default do
-   * Tailwind). Para larguras específicas use max-w-* + mx-auto direto.
-   */
   .container {
     width: 100%;
     margin-left: auto;
@@ -246,9 +336,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: #2563eb; }
 
   @media (min-width: 1024px) {
     .container {
+      max-width: 1320px;
       padding-left: 2rem;
       padding-right: 2rem;
-      max-width: 1280px;
     }
   }
 }
