@@ -112,9 +112,23 @@ export async function ensureCatalogKnowledgeSchema(): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `));
 
-    // Só marca o schema como garantido depois da criação das estruturas; a
-    // reconciliação é idempotente e não impede o módulo de funcionar caso uma
-    // migração estrutural opcional (como a FK) não seja possível no ambiente.
+    await db.execute(sql.raw(`
+      CREATE TABLE IF NOT EXISTS product_merge_events (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        masterProductId INT NOT NULL,
+        duplicateProductIds JSON NOT NULL,
+        snapshot JSON NOT NULL,
+        status ENUM('applied','reverted') NOT NULL DEFAULT 'applied',
+        createdByUserId INT NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        revertedAt TIMESTAMP NULL,
+        revertedByUserId INT NULL,
+        INDEX idx_pme_master (masterProductId),
+        INDEX idx_pme_status (status),
+        INDEX idx_pme_created (createdAt)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `));
+
     ensured = true;
     await reconcileLegacyCatalog();
     logger.info("[CatalogKnowledge] Estruturas do compêndio verificadas e catálogo reconciliado.");
