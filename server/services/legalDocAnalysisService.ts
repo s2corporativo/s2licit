@@ -324,20 +324,37 @@ export function splitLegalDocument(text: string): DocumentChunks {
     return { chunks: [text], totalChunks: 1, truncated: false };
   }
 
-  const step = ANALYSIS_CHUNK_CHARS - ANALYSIS_CHUNK_OVERLAP;
-  const totalChunks = Math.ceil(Math.max(1, text.length - ANALYSIS_CHUNK_OVERLAP) / step);
   const chunks: string[] = [];
-  for (let start = 0; start < text.length && chunks.length < ANALYSIS_MAX_CHUNKS; start += step) {
+  let totalChunks = 0;
+  let start = 0;
+
+  while (start < text.length) {
     let end = Math.min(text.length, start + ANALYSIS_CHUNK_CHARS);
     if (end < text.length) {
       const boundary = text.lastIndexOf("\n", end);
-      if (boundary > start + Math.floor(ANALYSIS_CHUNK_CHARS * 0.75)) end = boundary;
+      if (boundary > start + Math.floor(ANALYSIS_CHUNK_CHARS * 0.75)) {
+        end = boundary;
+      }
     }
-    chunks.push(text.slice(start, end));
+
+    totalChunks += 1;
+    if (chunks.length < ANALYSIS_MAX_CHUNKS) {
+      chunks.push(text.slice(start, end));
+    }
     if (end >= text.length) break;
-    start = Math.max(start, end - step);
+
+    // Próximo trecho reaproveita explicitamente a cauda do trecho anterior.
+    // O antigo `for` somava `step` depois de ajustar `start`, anulando a
+    // sobreposição pretendida.
+    const nextStart = Math.max(start + 1, end - ANALYSIS_CHUNK_OVERLAP);
+    start = nextStart;
   }
-  return { chunks, totalChunks, truncated: chunks.length < totalChunks };
+
+  return {
+    chunks,
+    totalChunks,
+    truncated: chunks.length < totalChunks,
+  };
 }
 
 function mapPromptFor(tipo: TipoDocumento): string {
@@ -364,7 +381,9 @@ async function analyzeChunk(chunk: string, tipo: TipoDocumento): Promise<ChunkFi
     maxTokens: MAP_MAX_TOKENS,
   });
   const content = result.choices?.[0]?.message?.content;
-  if (!content || typeof content !== "string") throw new Error("IA não retornou a extração jurídica do trecho.");
+  if (!content || typeof content !== "string") {
+    throw new Error("IA não retornou a extração jurídica do trecho.");
+  }
   return parseLlmJson<ChunkFinding>(content);
 }
 
