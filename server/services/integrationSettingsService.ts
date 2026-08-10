@@ -25,7 +25,12 @@ export const INTEGRATION_KEYS: Record<
   WHATSAPP_WEBHOOK_URL: { label: "Webhook próprio (Z-API/Twilio/n8n)", secreta: true, grupo: "whatsapp" },
   WHATSAPP_TO: { label: "Número(s) de destino", secreta: false, grupo: "whatsapp" },
   USD_BRL_RATE: { label: "Cotação USD→BRL (custo de IA)", secreta: false, grupo: "geral" },
-  FIEMG_LICITACOES_URL: { label: "URL pública de licitações FIEMG", secreta: false, grupo: "geral" },
+  FIEMG_OPPORTUNITIES_URL: { label: "URL pública FIEMG / SESI / SENAI", secreta: false, grupo: "fontes" },
+  COMPRASMG_OPPORTUNITIES_URL: { label: "URL pública Compras MG", secreta: false, grupo: "fontes" },
+  CEMIG_OPPORTUNITIES_URL: { label: "URL pública CEMIG", secreta: false, grupo: "fontes" },
+  COPASA_OPPORTUNITIES_URL: { label: "URL pública COPASA", secreta: false, grupo: "fontes" },
+  // Alias legado: oculto da UI nova, mas ainda aceito durante a migração.
+  FIEMG_LICITACOES_URL: { label: "URL FIEMG (legado)", secreta: false, grupo: "legado" },
   EMAIL_SYNC_ENABLED: { label: "Sincronização de e-mail ativa (true/false)", secreta: false, grupo: "automacao" },
   EMAIL_SYNC_CRON: { label: "Agenda de e-mail (cron)", secreta: false, grupo: "automacao" },
   ALERTS_ENABLED: { label: "Alertas automáticos ativos (true/false)", secreta: false, grupo: "automacao" },
@@ -66,7 +71,11 @@ function validateValue(chave: string, value: string): string {
       throw new Error("BACKUP_KEEP_DAYS: informe um número inteiro entre 1 e 365.");
     }
   }
-  if (chave === "FIEMG_LICITACOES_URL" || chave === "WHATSAPP_WEBHOOK_URL") {
+  if (
+    chave === "FIEMG_LICITACOES_URL" ||
+    chave.endsWith("_OPPORTUNITIES_URL") ||
+    chave === "WHATSAPP_WEBHOOK_URL"
+  ) {
     let parsed: URL;
     try {
       parsed = new URL(valor);
@@ -106,8 +115,9 @@ export async function getIntegrationView(): Promise<IntegrationView> {
     : [];
   const byKey = new Map(rows.map((row) => [row.chave, row] as const));
 
+  const visibleEntries = Object.entries(INTEGRATION_KEYS).filter(([, meta]) => meta.grupo !== "legado");
   return Promise.all(
-    Object.entries(INTEGRATION_KEYS).map(async ([chave, meta]) => {
+    visibleEntries.map(async ([chave, meta]) => {
       const row = byKey.get(chave);
       const resolved = await resolveCredentialWithOrigin(chave);
       let valor: string | null = null;
