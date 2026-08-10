@@ -4,7 +4,6 @@
 -- processo web.
 
 -- O nome da FK histórica pode variar conforme a versão que criou o banco.
--- Descobre a constraint real para não acoplar o deploy a um nome específico.
 SET @products_supplier_fk = NULL;
 --> statement-breakpoint
 
@@ -41,8 +40,8 @@ ALTER TABLE `products`
   FOREIGN KEY (`supplierId`) REFERENCES `suppliers`(`id`) ON DELETE SET NULL;
 --> statement-breakpoint
 
--- Converte custos ainda existentes apenas no registro legado em ofertas
--- canônicas, sem duplicar pares já migrados.
+-- Preserva TODA relação histórica Produto × Fornecedor antes de transformar
+-- supplierId em mero cache de compatibilidade. Preço pode ser NULL.
 INSERT INTO `product_supplier_offers`
   (`productId`, `supplierId`, `price`, `supplierCode`, `link`, `updatedAt`)
 SELECT
@@ -57,8 +56,6 @@ LEFT JOIN `product_supplier_offers` o
   ON o.`productId` = p.`id`
  AND o.`supplierId` = p.`supplierId`
 WHERE p.`supplierId` IS NOT NULL
-  AND p.`price` IS NOT NULL
-  AND p.`price` > 0
   AND o.`id` IS NULL;
 --> statement-breakpoint
 
@@ -80,24 +77,52 @@ WHERE
   `manufacturer` IS NULL OR TRIM(`manufacturer`) = '';
 --> statement-breakpoint
 
--- products.price permanece apenas como cache de compatibilidade do menor custo.
+-- Cache de compatibilidade para consumidores antigos:
+-- products.price = melhor custo; products.supplierId = fornecedor da MESMA oferta.
+-- Sem oferta com preço válido, ambos ficam NULL. A relação histórica continua
+-- preservada em product_supplier_offers.
 UPDATE `products` p
 LEFT JOIN (
-  SELECT
-    `productId`,
-    MIN(
+  SELECT ranked.`productId`, ranked.`supplierId`, ranked.`bestPrice`
+  FROM (
+    SELECT
+      o.`id`,
+      o.`productId`,
+      o.`supplierId`,
       CASE
-        WHEN `promoPrice` IS NOT NULL
-          AND `promoPrice` > 0
-          AND (`price` IS NULL OR `promoPrice` < `price`)
-          THEN `promoPrice`
-        WHEN `price` IS NOT NULL AND `price` > 0
-          THEN `price`
+        WHEN o.`promoPrice` IS NOT NULL
+          AND o.`promoPrice` > 0
+          AND (o.`price` IS NULL OR o.`promoPrice` < o.`price`)
+          THEN o.`promoPrice`
+        WHEN o.`price` IS NOT NULL AND o.`price` > 0
+          THEN o.`price`
         ELSE NULL
-      END
-    ) AS `bestPrice`
-  FROM `product_supplier_offers`
-  GROUP BY `productId`
+      END AS `bestPrice`,
+      ROW_NUMBER() OVER (
+        PARTITION BY o.`productId`
+        ORDER BY
+          CASE
+            WHEN o.`promoPrice` IS NOT NULL
+              AND o.`promoPrice` > 0
+              AND (o.`price` IS NULL OR o.`promoPrice` < o.`price`)
+              THEN o.`promoPrice`
+            WHEN o.`price` IS NOT NULL AND o.`price` > 0
+              THEN o.`price`
+            ELSE NULL
+          END ASC,
+          o.`updatedAt` DESC,
+          o.`id` ASC
+      ) AS `rn`
+    FROM `product_supplier_offers` o
+    WHERE
+      (o.`promoPrice` IS NOT NULL AND o.`promoPrice` > 0)
+      OR (o.`price` IS NOT NULL AND o.`price` > 0)
+  ) ranked
+  WHERE ranked.`rn` = 1 AND ranked.`bestPrice` IS NOT NULL
 ) best ON best.`productId` = p.`id`
-SET p.`price` = best.`bestPrice`
-WHERE NOT (p.`price` <=> best.`bestPrice`);
+SET
+  p.`price` = best.`bestPrice`,
+  p.`supplierId` = best.`supplierId`
+WHERE
+  NOT (p.`price` <=> best.`bestPrice`)
+  OR NOT (p.`supplierId` <=> best.`supplierId`);
