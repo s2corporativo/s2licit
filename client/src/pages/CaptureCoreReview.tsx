@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, HeartPulse, Loader2, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HeartPulse, Loader2, PlusCircle, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import CaptureConnectorWizard from "@/components/CaptureConnectorWizard";
 
 function money(value: unknown) {
@@ -19,6 +19,28 @@ function healthLabel(status: string) {
   return "Sem baseline";
 }
 
+function actionPresentation(action: string) {
+  if (action === "create") {
+    return {
+      label: "Novo produto",
+      className: "bg-blue-50 text-blue-700",
+      icon: <PlusCircle className="h-3 w-3" />,
+    };
+  }
+  if (action === "blocked") {
+    return {
+      label: "Bloqueada",
+      className: "bg-red-50 text-red-700",
+      icon: <AlertTriangle className="h-3 w-3" />,
+    };
+  }
+  return {
+    label: "Revisão",
+    className: "bg-amber-50 text-amber-700",
+    icon: <ShieldCheck className="h-3 w-3" />,
+  };
+}
+
 export default function CaptureCoreReview() {
   const utils = trpc.useUtils();
   const { data: queue = [], isLoading } = trpc.captureCore.reviewQueue.useQuery({ limit: 200 });
@@ -33,7 +55,13 @@ export default function CaptureCoreReview() {
         utils.captureCore.reviewQueue.invalidate(),
         utils.captureCore.health.invalidate(),
       ]);
-      toast.success(result.applied ? "Observação aplicada e registrada para aprendizado." : "Observação rejeitada e registrada para aprendizado.");
+      if (result.applied && result.created) {
+        toast.success("Novo produto criado após revisão e registrado para aprendizado.");
+      } else {
+        toast.success(result.applied
+          ? "Observação aplicada e registrada para aprendizado."
+          : "Observação rejeitada e registrada para aprendizado.");
+      }
     },
     onError: (error) => toast.error(error.message),
   });
@@ -47,6 +75,7 @@ export default function CaptureCoreReview() {
   });
 
   const pendingCount = queue.length;
+  const newCount = useMemo(() => queue.filter((item: any) => item.action === "create").length, [queue]);
   const blockedCount = useMemo(() => queue.filter((item: any) => item.action === "blocked").length, [queue]);
   const healthyCount = useMemo(() => health.filter((item: any) => item.status === "healthy").length, [health]);
 
@@ -66,7 +95,7 @@ export default function CaptureCoreReview() {
           <p className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">Capture Core</p>
           <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">Revisão, saúde e atualização prioritária</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Alterações determinísticas e seguras são aplicadas automaticamente. Conflitos de identidade, variações anormais e itens sem evidência suficiente ficam aqui para decisão humana e passam a alimentar a memória supervisionada da IA.
+            Alterações determinísticas e seguras são aplicadas automaticamente. Conflitos de identidade, variações anormais e produtos novos ficam aqui para decisão humana e alimentam a memória supervisionada da IA.
           </p>
         </div>
         <button
@@ -88,10 +117,10 @@ export default function CaptureCoreReview() {
       )}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Pendentes de revisão" value={pendingCount} helper="Observações não aplicadas" />
+        <Metric label="Pendentes de revisão" value={pendingCount} helper="Observações ainda não decididas" />
+        <Metric label="Novos produtos" value={newCount} helper="Criação depende de aprovação" />
         <Metric label="Bloqueadas" value={blockedCount} helper="Anomalia ou conflito forte" />
         <Metric label="Conectores saudáveis" value={healthyCount} helper={`de ${health.length} monitorados`} />
-        <Metric label="Memória da IA" value="Ativa" helper="Feedback humano reutilizável" />
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
@@ -148,7 +177,7 @@ export default function CaptureCoreReview() {
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 className="font-bold text-slate-900">Fila de revisão</h2>
-            <p className="mt-1 text-xs text-slate-500">Nada desta fila altera oferta/preço até aprovação explícita.</p>
+            <p className="mt-1 text-xs text-slate-500">Itens novos e casos incertos só alteram o catálogo após aprovação explícita.</p>
           </div>
           <ShieldCheck className="h-5 w-5 text-blue-800" />
         </div>
@@ -164,14 +193,17 @@ export default function CaptureCoreReview() {
           <div className="divide-y divide-slate-100">
             {queue.map((item: any) => {
               const selectedProductId = productIds[item.id] ?? (item.productId ? String(item.productId) : "");
+              const presentation = actionPresentation(item.action);
+              const canCreateFromObservation = item.action === "create" && Boolean(item.ean);
+              const approveDisabled = decide.isPending || (!selectedProductId && !canCreateFromObservation);
               return (
                 <article key={item.id} className="p-4 sm:p-5">
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${item.action === "blocked" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
-                          {item.action === "blocked" ? <AlertTriangle className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
-                          {item.action === "blocked" ? "Bloqueada" : "Revisão"}
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${presentation.className}`}>
+                          {presentation.icon}
+                          {presentation.label}
                         </span>
                         <span className="text-[11px] text-slate-400">Fornecedor #{item.supplierId}</span>
                         <span className="text-[11px] text-slate-400">Confiança {Number(item.confidence || 0).toFixed(0)}%</span>
@@ -186,23 +218,30 @@ export default function CaptureCoreReview() {
                       <p className="mt-2 text-xs leading-5 text-slate-500">{item.reason || "Sem justificativa registrada."}</p>
                     </div>
 
-                    <div className="w-full shrink-0 space-y-2 xl:w-[290px]">
-                      <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Produto mestre ID</label>
+                    <div className="w-full shrink-0 space-y-2 xl:w-[310px]">
+                      <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                        Produto mestre ID {item.action === "create" ? "(opcional)" : ""}
+                      </label>
                       <input
                         inputMode="numeric"
                         value={selectedProductId}
                         onChange={(event) => setProductIds((current) => ({ ...current, [item.id]: event.target.value.replace(/\D/g, "") }))}
-                        placeholder="Obrigatório se não houver match"
+                        placeholder={item.action === "create"
+                          ? "Vazio = criar após validar o EAN"
+                          : "Informe o produto mestre correspondente"}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
                       />
+                      {item.action === "create" && !item.ean && !selectedProductId && (
+                        <p className="text-[11px] leading-4 text-amber-700">Sem EAN confiável: selecione um produto mestre existente para aprovar.</p>
+                      )}
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          disabled={decide.isPending || !selectedProductId}
+                          disabled={approveDisabled}
                           onClick={() => decide.mutate({
                             observationId: item.id,
                             decision: "approve",
-                            expectedProductId: Number(selectedProductId),
+                            expectedProductId: selectedProductId ? Number(selectedProductId) : undefined,
                           })}
                           className="inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800 disabled:opacity-40"
                         >
