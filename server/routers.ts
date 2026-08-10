@@ -30,6 +30,7 @@ import { captureReviewRouter } from "./routers/captureReview";
 import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
 import { enrichmentHistoryRouter } from "./routers/enrichmentHistoryRouter";
 import { documentGovernanceRouter } from "./routers/documentGovernanceRouter";
+import { documentComposerRouter } from "./routers/documentComposer";
 import { workflowRouter } from "./routers/workflowRouter";
 import { auditRouter } from "./routers/auditRouter";
 import { mfaRouter } from "./routers/mfaRouter";
@@ -71,6 +72,7 @@ export const appRouter = router({
   opportunities: opportunitiesRouter,
   licitacaoAgent: licitacaoAgentRouter,
   pricingEngine: precificacaoRouter,
+  documentComposer: documentComposerRouter,
   importSmart: importSmartRouter,
   nfeImport: nfeImportRouter,
   priceAnalysis: priceAnalysisRouter,
