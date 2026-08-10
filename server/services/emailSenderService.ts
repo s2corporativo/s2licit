@@ -1,28 +1,9 @@
 import nodemailer from "nodemailer";
+import { getEmailRuntimeConfig } from "../integrations/core/credentialResolver";
 
-/**
- * Envio de e-mail (SMTP) para responder cotações.
- *
- * Configuração por ambiente (opcional — sem ela, o envio é desabilitado):
- *   SMTP_HOST, SMTP_PORT (padrão 587), SMTP_USER, SMTP_PASSWORD,
- *   SMTP_SECURE ("true" força TLS na conexão), SMTP_FROM (remetente).
- */
-
-export function isSmtpConfigured(): boolean {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD);
-}
-
-function buildTransport() {
-  const port = Number(process.env.SMTP_PORT ?? 587);
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST!,
-    port,
-    secure: (process.env.SMTP_SECURE ?? (port === 465 ? "true" : "false")) === "true",
-    auth: {
-      user: process.env.SMTP_USER!,
-      pass: process.env.SMTP_PASSWORD!,
-    },
-  });
+export async function isSmtpConfigured(): Promise<boolean> {
+  const config = (await getEmailRuntimeConfig()).smtp;
+  return Boolean(config.host && config.user && config.password);
 }
 
 export interface SendEmailInput {
@@ -33,22 +14,29 @@ export interface SendEmailInput {
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<{ messageId: string }> {
-  if (!isSmtpConfigured()) {
+  const config = (await getEmailRuntimeConfig()).smtp;
+  if (!config.host || !config.user || !config.password) {
     throw new Error(
-      "SMTP não configurado. Defina SMTP_HOST, SMTP_USER e SMTP_PASSWORD no ambiente.",
+      "SMTP não configurado. Cadastre servidor, usuário e senha na Central de Integrações.",
     );
   }
-  const transport = buildTransport();
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
+
+  const transport = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: { user: config.user, pass: config.password },
+    connectionTimeout: 20_000,
+  });
   const info = await transport.sendMail({
-    from,
+    from: config.from || config.user,
     to: input.to,
     subject: input.subject,
     text: input.text,
-    attachments: input.attachments?.map((a) => ({
-      filename: a.filename,
-      content: a.content,
-      contentType: a.contentType,
+    attachments: input.attachments?.map((attachment) => ({
+      filename: attachment.filename,
+      content: attachment.content,
+      contentType: attachment.contentType,
     })),
   });
   return { messageId: info.messageId };
