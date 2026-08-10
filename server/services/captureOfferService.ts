@@ -9,6 +9,9 @@ import type {
   CaptureProductMatchRecord,
 } from "./captureMatchingService";
 
+type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+export type CaptureDbExecutor = Pick<Database, "insert" | "update">;
+
 export interface ApplyCapturedOfferInput {
   product: Pick<CaptureProductMatchRecord, "id" | "supplierId" | "imageUrl">;
   supplierId: number;
@@ -67,25 +70,24 @@ function resolvePromoPrice(
   return existing?.promoPrice ?? null;
 }
 
-/**
- * Persiste a oferta do fornecedor como fonte operacional de preço.
- *
- * - upsert é protegido pela UNIQUE(productId, supplierId);
- * - campos ausentes na captura não apagam informações conhecidas;
- * - o preço legado de `products` só é mantido para o fornecedor proprietário;
- * - histórico só é criado quando o preço efetivamente muda.
- */
-export async function applyCapturedOffer(
-  input: ApplyCapturedOfferInput,
-): Promise<ApplyCapturedOfferResult> {
-  const db = await getDb();
-  if (!db) throw new Error("Banco indisponível");
-
-  const nextPrice = Number(input.scraped.price);
-  if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+function validatePrice(scraped: ScrapedProduct): number {
+  const price = Number(scraped.price);
+  if (!Number.isFinite(price) || price <= 0) {
     throw new Error("Preço inválido para persistência da oferta.");
   }
+  return price;
+}
 
+/**
+ * Persistência reutilizável dentro de uma transação já aberta.
+ * Não registra histórico aqui: histórico é um efeito derivado e deve acontecer
+ * apenas depois do commit da alteração operacional.
+ */
+export async function persistCapturedOffer(
+  executor: CaptureDbExecutor,
+  input: ApplyCapturedOfferInput,
+): Promise<ApplyCapturedOfferResult> {
+  const nextPrice = validatePrice(input.scraped);
   const previousPrice = toFiniteNumber(input.existingOffer?.price);
   const now = new Date();
   const offerValues = {
@@ -100,47 +102,28 @@ export async function applyCapturedOffer(
     updatedAt: now,
   };
 
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(productSupplierOffers)
-      .values({
-        productId: input.product.id,
-        supplierId: input.supplierId,
-        ...offerValues,
-        createdAt: now,
-      })
-      .onDuplicateKeyUpdate({ set: offerValues });
+  await executor
+    .insert(productSupplierOffers)
+    .values({
+      productId: input.product.id,
+      supplierId: input.supplierId,
+      ...offerValues,
+      createdAt: now,
+    })
+    .onDuplicateKeyUpdate({ set: offerValues });
 
-    if (input.product.supplierId === input.supplierId) {
-      const productUpdates: Record<string, unknown> = {
-        price: String(nextPrice),
-        updatedAt: now,
-      };
-      if (input.scraped.imageUrl && !input.product.imageUrl) {
-        productUpdates.imageUrl = input.scraped.imageUrl;
-      }
-      if (input.scraped.productUrl) {
-        productUpdates.productUrl = input.scraped.productUrl;
-      }
-      await tx.update(products).set(productUpdates).where(eq(products.id, input.product.id));
+  if (input.product.supplierId === input.supplierId) {
+    const productUpdates: Record<string, unknown> = {
+      price: String(nextPrice),
+      updatedAt: now,
+    };
+    if (input.scraped.imageUrl && !input.product.imageUrl) {
+      productUpdates.imageUrl = input.scraped.imageUrl;
     }
-  });
-
-  const priceChanged = previousPrice === null || previousPrice !== nextPrice;
-  if (priceChanged) {
-    try {
-      await recordPriceHistory({
-        productId: input.product.id,
-        supplierId: input.supplierId,
-        price: String(nextPrice),
-        origem: input.origin ?? "capture_core",
-      });
-    } catch (error) {
-      logger.warn(
-        `[CaptureOffer] Oferta aplicada, mas histórico falhou para produto #${input.product.id}/fornecedor #${input.supplierId}:`,
-        (error as Error).message,
-      );
+    if (input.scraped.productUrl) {
+      productUpdates.productUrl = input.scraped.productUrl;
     }
+    await executor.update(products).set(productUpdates).where(eq(products.id, input.product.id));
   }
 
   return {
@@ -148,8 +131,47 @@ export async function applyCapturedOffer(
     supplierId: input.supplierId,
     previousPrice,
     nextPrice,
-    priceChanged,
+    priceChanged: previousPrice === null || previousPrice !== nextPrice,
   };
+}
+
+export async function recordCapturedOfferHistory(
+  result: ApplyCapturedOfferResult,
+  origin = "capture_core",
+): Promise<void> {
+  if (!result.priceChanged) return;
+  try {
+    await recordPriceHistory({
+      productId: result.productId,
+      supplierId: result.supplierId,
+      price: String(result.nextPrice),
+      origem: origin,
+    });
+  } catch (error) {
+    logger.warn(
+      `[CaptureOffer] Oferta aplicada, mas histórico falhou para produto #${result.productId}/fornecedor #${result.supplierId}:`,
+      (error as Error).message,
+    );
+  }
+}
+
+/**
+ * Persiste oferta em transação própria e registra histórico apenas após commit.
+ */
+export async function applyCapturedOffer(
+  input: ApplyCapturedOfferInput,
+): Promise<ApplyCapturedOfferResult> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+
+  let result: ApplyCapturedOfferResult | null = null;
+  await db.transaction(async (tx) => {
+    result = await persistCapturedOffer(tx, input);
+  });
+
+  if (!result) throw new Error("A persistência da oferta não produziu resultado.");
+  await recordCapturedOfferHistory(result, input.origin ?? "capture_core");
+  return result;
 }
 
 /** Leitura pontual usada pela revisão humana para evitar decisões sobre snapshot antigo. */
