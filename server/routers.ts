@@ -24,7 +24,7 @@ import { categoryPricingRouter } from "./routers/categoryPricing";
 import { bulkPricingRouter } from "./routers/bulkPricing";
 import { agenteRouter } from "./routers/agente";
 import { scraperAgentRouter } from "./routers/scraperAgent";
-import { tambasaCatalogRouter } from "./routers/tambasaCatalog";
+import { captureCoreRouter } from "./routers/captureCore";
 import { propostaAgentRouter } from "./routers/propostaAgentRouter";
 import { captureReviewRouter } from "./routers/captureReview";
 import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
@@ -61,8 +61,6 @@ import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichment
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
 
-// ─── Imports ─────────────────────────────────────────────────────────────────
-
 export const appRouter = router({
   system: systemRouter,
   importSmart: importSmartRouter,
@@ -73,7 +71,7 @@ export const appRouter = router({
   bulkPricing: bulkPricingRouter,
   agente: agenteRouter,
   scraperAgent: scraperAgentRouter,
-  tambasaCatalog: tambasaCatalogRouter,
+  captureCore: captureCoreRouter,
   propostaAgent: propostaAgentRouter,
   audit: auditRouter,
   mfa: mfaRouter,
@@ -104,71 +102,26 @@ export const appRouter = router({
   operationalGovernance: operationalGovernanceRouter,
 
   auth: authRouter,
-
-  // ─── Categories ───────────────────────────────────────────────────────────
   categories: categoriesRouter,
-
-  // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: suppliersRouter,
-
-  // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
-
-  // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: equivalencesRouter,
-
-  // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: importsRouter,
-  // ─── Dashboard ────────────────────────────────────────────────────────────
   dashboard: dashboardRouter,
-
-  // ─── Quotations ───────────────────────────────────────────────────────────
-
-  // ─── Company Settings ─────────────────────────────────────────────────────
   company: companyRouter,
-
-  // ─── Requesting Orgs ──────────────────────────────────────────────────────
   orgs: orgsRouter,
-
-  // ─── Proposals ────────────────────────────────────────────────────────────
   proposals: proposalsRouter,
-
-  // ─── Financial Entries ────────────────────────────────────────────────────
   financial: financialRouter,
-
   masterProducts: masterProductsRouter,
-
   priceIntelligence: priceIntelligenceRouter,
-
-  // ─── Catalog Enrichment ───────────────────────────────────────────────────
   enrichment: enrichmentInlineRouter,
-  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
-  // ─── Importação com Consolidação Automática ───────────────────────────────
-  // ─── Reconhecimento Inteligente de Produtos ───────────────────────────────
-  // ─── Importação com Matching Automático ───────────────────────────────────
-  // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────
-  // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────
   edital: editalRouter,
-
-  // ─── (E) Declarações fixas (templates) ────────────────────────────────────
   declarations: declarationsRouter,
-
-  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
   reclassificacao: reclassificacaoRouter,
-
-  // ─── Sinônimos para Matching ──────────────────────────────────────────────
   synonyms: synonymsRouter,
-
-  // ─── Templates de Proposta ────────────────────────────────────────────────
   proposalTemplates: proposalTemplatesRouter,
-
-  // ─── Metadados e apoio operacional ────────────────────────────────────────
-
-  // ─── Motor Universal de Equivalência e duplicidades ───────────────────────
   duplicates: duplicatesRouter,
   intelligentCapture: intelligentCaptureRouter,
-
-  // ─── Módulos complementares ───────────────────────────────────────────────
   images: imagesRouter,
 });
 export type AppRouter = typeof appRouter;
