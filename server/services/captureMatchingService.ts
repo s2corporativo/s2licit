@@ -9,7 +9,7 @@ import {
   type CaptureAiContext,
 } from "./captureAiService";
 import { capturePresentationCompatible, normalizeCaptureEan } from "./captureCoreService";
-import type { ScrapedProduct } from "./scraperEngine";
+import type { ScrapedProduct } from "./scraperContracts";
 
 export type CaptureAction = "no_change" | "update" | "create" | "review" | "blocked";
 
@@ -54,7 +54,8 @@ export interface CaptureMatchingContext {
   productsById: ReadonlyMap<number, CaptureProductMatchRecord>;
   productByEan: ReadonlyMap<string, CaptureProductMatchRecord | null>;
   productsByToken: ReadonlyMap<string, readonly CaptureProductMatchRecord[]>;
-  offerBySupplierCode: ReadonlyMap<string, CaptureOfferMatchRecord>;
+  /** null significa que o mesmo SKU está vinculado a mais de um produto. */
+  offerBySupplierCode: ReadonlyMap<string, CaptureOfferMatchRecord | null>;
   offerByProductId: ReadonlyMap<number, CaptureOfferMatchRecord>;
   ai: CaptureAiContext;
 }
@@ -160,8 +161,9 @@ function hasEanConflict(observedEan: string | null, candidate: CaptureProductMat
  * Constrói todos os índices usados pelo matching uma única vez por job.
  *
  * Construção: O(N + O), onde N é o catálogo ativo e O são as ofertas do
- * fornecedor. Consultas posteriores por EAN/SKU/memória são O(1). Buckets são
- * montados com push amortizado O(1), evitando cópias cumulativas de arrays.
+ * fornecedor. Consultas posteriores por EAN/SKU/memória são O(1). Tanto EAN
+ * quanto SKU são índices fail-closed: duplicidade vira `null` e bloqueia o
+ * match determinístico, em vez de adotar comportamento last-write-wins.
  */
 export async function loadCaptureMatchingContext(supplierId: number): Promise<CaptureMatchingContext> {
   const db = await getDb();
@@ -234,12 +236,18 @@ export async function loadCaptureMatchingContext(supplierId: number): Promise<Ca
     }
   }
 
-  const offerBySupplierCode = new Map<string, CaptureOfferMatchRecord>();
+  const offerBySupplierCode = new Map<string, CaptureOfferMatchRecord | null>();
   const offerByProductId = new Map<number, CaptureOfferMatchRecord>();
   for (const row of offerRows) {
     const offer: CaptureOfferMatchRecord = { ...row };
     const supplierCode = normalizeSupplierCode(row.supplierCode);
-    if (supplierCode) offerBySupplierCode.set(supplierCode, offer);
+    if (supplierCode) {
+      if (!offerBySupplierCode.has(supplierCode)) {
+        offerBySupplierCode.set(supplierCode, offer);
+      } else if (offerBySupplierCode.get(supplierCode)?.productId !== offer.productId) {
+        offerBySupplierCode.set(supplierCode, null);
+      }
+    }
     offerByProductId.set(row.productId, offer);
   }
 
@@ -282,9 +290,19 @@ export async function matchCapturedProduct(
   }
 
   const supplierCode = normalizeSupplierCode(scraped.code);
-  if (supplierCode) {
+  if (supplierCode && context.offerBySupplierCode.has(supplierCode)) {
     const offer = context.offerBySupplierCode.get(supplierCode);
-    const candidate = offer ? context.productsById.get(offer.productId) : undefined;
+    if (!offer) {
+      return {
+        product: null,
+        deterministic: false,
+        confidence: 0,
+        actionHint: "blocked",
+        reason: "SKU duplicado neste fornecedor; vínculo precisa ser saneado antes da atualização.",
+      };
+    }
+
+    const candidate = context.productsById.get(offer.productId);
     if (candidate) {
       if (hasEanConflict(observedEan, candidate)) {
         return {
@@ -301,7 +319,7 @@ export async function matchCapturedProduct(
         existingOffer: offer,
         deterministic: true,
         confidence: 0.99,
-        reason: "SKU já vinculado a este fornecedor.",
+        reason: "SKU único já vinculado a este fornecedor.",
       };
     }
   }
