@@ -40,6 +40,10 @@ const GENERAL_KEYS = [
   "SCRAPER_SCHEDULE_CRON",
   "PORTAL_OPPORTUNITY_SYNC_ENABLED",
   "PORTAL_OPPORTUNITY_SYNC_CRON",
+  "BACKUP_ENABLED",
+  "BACKUP_CRON",
+  "BACKUP_KEEP_DAYS",
+  "FAILURE_ALERTS_ENABLED",
 ] as const;
 
 const KNOWN_ENV_KEYS = [
@@ -98,7 +102,6 @@ async function loadSnapshot(): Promise<RuntimeSnapshot> {
   const values = new Map<string, string>();
   const origins = new Map<string, CredentialOrigin>();
 
-  // Primeiro, a configuração imutável do processo vira fallback.
   for (const key of KNOWN_ENV_KEYS) {
     const value = BOOTSTRAP_ENV[key];
     if (value?.trim()) setValue(values, origins, key, value, "ambiente");
@@ -153,7 +156,6 @@ async function loadSnapshot(): Promise<RuntimeSnapshot> {
       decryptInto(values, origins, row.chave, row.valorEnc);
     }
   } catch (error) {
-    // Uma falha no banco nunca apaga o fallback seguro de boot.
     logger.error("[CredentialResolver] Falha ao carregar overrides do banco:", error);
   }
 
