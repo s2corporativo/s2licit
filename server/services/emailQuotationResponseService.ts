@@ -8,12 +8,6 @@ import {
 } from "./quotationPdfGeneratorService";
 import { calculateSalePrice } from "./pricingSafety";
 
-/**
- * Monta e gera o PDF de orçamento-resposta a partir de uma cotação recebida
- * por e-mail. Somente itens com match confirmado e custo positivo podem
- * participar. A margem é calculada sobre a receita, nunca como markup.
- */
-
 export interface BuildResponseResult {
   pdfBase64: string;
   total: number;
@@ -22,34 +16,48 @@ export interface BuildResponseResult {
   marginPercent: number;
 }
 
-/**
- * Aplica margem SOBRE O PREÇO DE VENDA (mesma fórmula do PricingService):
- *   precoVenda = custo / (1 - margem%/100)
- * Ex.: custo 100, margem 30% → 142,86 (margem real 30%), e não 130 (markup,
- * que daria só 23,1% de margem real). Margem ≥ 100% é inválida.
- */
 export function applyMargin(basePrice: number, marginPercent: number): number {
   return calculateSalePrice({ cost: basePrice, marginPercent });
+}
+
+function resolveMarginPercent(requested: number | undefined, configured: number): number {
+  const value = requested ?? configured;
+  if (!Number.isFinite(value) || value < 0 || value >= 100) {
+    throw new Error("Margem inválida. Use valor entre 0 e 99,99%.");
+  }
+  return value;
+}
+
+function resolveValidDays(requested: number | undefined): number {
+  const value = requested ?? 30;
+  if (!Number.isInteger(value) || value < 1 || value > 365) {
+    throw new Error("Validade inválida. Use de 1 a 365 dias.");
+  }
+  return value;
 }
 
 export async function buildQuotationResponse(
   quotationId: number,
   options?: { marginPercent?: number; validDays?: number },
 ): Promise<BuildResponseResult> {
+  if (!Number.isInteger(quotationId) || quotationId <= 0) {
+    throw new Error("Identificador de cotação inválido.");
+  }
+
   const data = await getEmailQuotationWithItems(quotationId);
   if (!data) throw new Error("Cotação não encontrada.");
 
   const company = await getCompanySettings();
   const configuredMargin = Number(company?.minMarginPercent ?? "15");
-  const marginPercent =
-    options?.marginPercent != null
-      ? options.marginPercent
-      : Number.isFinite(configuredMargin)
-        ? configuredMargin
-        : 15;
+  const safeConfiguredMargin = Number.isFinite(configuredMargin) ? configuredMargin : 15;
+  const marginPercent = resolveMarginPercent(options?.marginPercent, safeConfiguredMargin);
+  const validDays = resolveValidDays(options?.validDays);
 
   if (data.items.length === 0) {
     throw new Error("A cotação não possui itens para responder.");
+  }
+  if (data.items.length > 1000) {
+    throw new Error("A cotação excede o limite operacional de 1.000 itens por documento.");
   }
 
   const unconfirmedItems = data.items.filter(
@@ -71,22 +79,29 @@ export async function buildQuotationResponse(
     );
   }
 
-  const pdfItems: QuotationItem[] = data.items.map((item) => {
+  const pdfItems: QuotationItem[] = data.items.map((item, index) => {
     const base = Number(item.precoSugerido);
     const quantity = item.quantidade != null ? Number(item.quantidade) : 1;
-    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`Cotação bloqueada: quantidade inválida no item ${index + 1}.`);
+    }
     const unitPrice = Number(applyMargin(base, marginPercent).toFixed(2));
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      throw new Error(`Cotação bloqueada: preço de venda inválido no item ${index + 1}.`);
+    }
 
     return {
       productName: item.descricao,
-      quantity: safeQuantity,
+      quantity,
       unitPrice,
-      totalPrice: unitPrice * safeQuantity,
+      totalPrice: Number((unitPrice * quantity).toFixed(2)),
     };
   });
 
   const { subtotal } = calculateQuotationTotals(pdfItems);
-  const validDays = options?.validDays ?? 30;
+  if (!Number.isFinite(subtotal) || subtotal <= 0) {
+    throw new Error("Cotação bloqueada: total comercial inválido.");
+  }
 
   const pdfData: QuotationPdfData = {
     number: `COT-${quotationId}`,
