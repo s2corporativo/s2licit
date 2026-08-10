@@ -9,6 +9,7 @@ import {
   type EtapaFunil,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { proposalEmailDispatches } from "../db/proposalEmailDispatches";
 import {
   canEvidenceAdvance,
   transitionOpportunityInTransaction,
@@ -111,7 +112,10 @@ function addMonthsClamped(base: Date, months: number): Date {
   return result;
 }
 
-function installmentAmounts(totalCents: number, count: number): number[] {
+export function installmentAmounts(totalCents: number, count: number): number[] {
+  if (!Number.isInteger(totalCents) || totalCents <= 0 || !Number.isInteger(count) || count <= 0) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Total/parcelas inválidos." });
+  }
   if (count > totalCents) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -149,6 +153,30 @@ async function assertProposalPricingCompleteInTransaction(
       message: `A proposta possui ${missing} item(ns) sem preço de venda explícito.`,
     });
   }
+}
+
+async function assertDispatchAllowsTransition(
+  tx: Transaction,
+  proposalId: number,
+  target: ProposalLifecycleStatus,
+): Promise<void> {
+  const [dispatch] = await tx
+    .select({ state: proposalEmailDispatches.state })
+    .from(proposalEmailDispatches)
+    .where(eq(proposalEmailDispatches.proposalId, proposalId))
+    .limit(1);
+  if (!dispatch) return;
+
+  if (dispatch.state === "sent_pending_state" && target === "sent") return;
+  if (dispatch.state === "sent" && target !== "draft") return;
+
+  throw new TRPCError({
+    code: "CONFLICT",
+    message:
+      dispatch.state === "ambiguous"
+        ? "O envio por e-mail está em estado ambíguo. Verifique o despacho antes de avançar a proposta."
+        : "Existe um despacho de e-mail em andamento. O status da proposta está temporariamente bloqueado.",
+  });
 }
 
 async function resolveOpportunityInTransaction(
@@ -308,6 +336,7 @@ export async function advanceProposalLifecycle(
       };
     }
 
+    await assertDispatchAllowsTransition(tx, input.id, input.newStatus);
     assertLifecycleTransition(current.status, input.newStatus);
     if (input.newStatus !== "delivered" && (input.installments || input.firstDueDate)) {
       throw new TRPCError({
