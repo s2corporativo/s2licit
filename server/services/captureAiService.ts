@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { activeProvider, invokeLLM } from "../_core/llm";
 import { getDb } from "../db";
 import { captureAiFeedback } from "../../drizzle/captureCoreSchema";
+import { normalizeText } from "../matching/productMatcher";
 
 export interface CaptureMatchCandidate {
   id: number;
@@ -29,11 +30,6 @@ const AI_MAX_CALLS_PER_MINUTE = Math.max(
 let aiWindowStartedAt = Date.now();
 let aiCallsInWindow = 0;
 
-/**
- * Orçamento global simples para impedir que um catálogo grande transforme
- * centenas de casos ambíguos em centenas de chamadas de LLM. Quando o limite
- * acaba, o item segue para revisão humana; nenhuma captura é bloqueada.
- */
 function takeAiBudget(): boolean {
   const now = Date.now();
   if (now - aiWindowStartedAt >= 60_000) {
@@ -87,11 +83,46 @@ async function loadExamples(supplierId: number, limit = 12) {
 }
 
 /**
+ * Memória determinística aprendida com revisão humana.
+ * A decisão mais recente para o mesmo nome normalizado prevalece. Decisões
+ * negativas anulam associações antigas, evitando perpetuar um match corrigido.
+ */
+export async function resolveLearnedCaptureMatch(
+  supplierId: number,
+  observedName: string,
+): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const target = normalizeText(observedName);
+  if (!target) return null;
+
+  const rows = await db.select({
+    decision: captureAiFeedback.decision,
+    observedName: captureAiFeedback.observedName,
+    expectedProductId: captureAiFeedback.expectedProductId,
+  }).from(captureAiFeedback)
+    .where(and(
+      eq(captureAiFeedback.supplierId, supplierId),
+      eq(captureAiFeedback.reusable, true),
+    ))
+    .orderBy(desc(captureAiFeedback.createdAt))
+    .limit(250);
+
+  for (const row of rows) {
+    if (!row.observedName || normalizeText(row.observedName) !== target) continue;
+    if (row.decision === "correct_match" || row.decision === "approve_update") {
+      return row.expectedProductId ?? null;
+    }
+    // A decisão humana mais recente para esse nome é negativa ou não constitui
+    // vínculo de identidade; não ressuscitar exemplos positivos mais antigos.
+    return null;
+  }
+  return null;
+}
+
+/**
  * Especialista de matching para casos realmente ambíguos.
- *
- * A IA nunca cria identidade de produto sozinha e nunca pode superar conflito
- * explícito de EAN/apresentação. A memória vem de feedback humano salvo no
- * próprio banco, funcionando como treinamento few-shot incremental local.
+ * A IA só sugere. Identidade nunca é alterada exclusivamente por LLM.
  */
 export async function resolveAmbiguousProductMatch(input: {
   supplierId: number;
@@ -217,6 +248,8 @@ export async function recordCaptureAiFeedback(input: {
 }
 
 export function captureAiBudgetStatus() {
-  if (Date.now() - aiWindowStartedAt >= 60_000) return { used: 0, limit: AI_MAX_CALLS_PER_MINUTE };
+  if (Date.now() - aiWindowStartedAt >= 60_000) {
+    return { used: 0, limit: AI_MAX_CALLS_PER_MINUTE };
+  }
   return { used: aiCallsInWindow, limit: AI_MAX_CALLS_PER_MINUTE };
 }
