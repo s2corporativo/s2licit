@@ -62,16 +62,6 @@ function assertValidObservedPrice(observation: ObservationRow): number {
   return price;
 }
 
-function resolveOfferAvailability(
-  observation: ObservationRow,
-  existingAvailability: string | null | undefined,
-): string {
-  if (observation.availability === "unknown" && existingAvailability) {
-    return existingAvailability;
-  }
-  return toLegacyAvailability(observation.availability);
-}
-
 function feedbackDecisionForApproval(input: {
   created: boolean;
   originalProductId: number | null;
@@ -83,32 +73,13 @@ function feedbackDecisionForApproval(input: {
   return "approve_update";
 }
 
-async function getLockedObservation(
-  tx: Parameters<Parameters<NonNullable<Awaited<ReturnType<typeof getDb>>>["transaction"]>[0]>[0],
-  observationId: number,
-): Promise<ObservationRow> {
-  const [observation] = await tx
-    .select()
-    .from(supplierProductObservations)
-    .where(eq(supplierProductObservations.id, observationId))
-    .for("update")
-    .limit(1);
-
-  if (!observation) throw new Error("Observação não encontrada.");
-  if (observation.reviewStatus !== "pending") {
-    throw new Error(
-      `Esta observação já foi revisada (${observation.reviewStatus}).`,
-    );
-  }
-  return observation;
-}
-
 /**
  * Aprovação/rejeição humana é uma unidade transacional única.
  *
- * `FOR UPDATE` serializa decisões sobre a mesma observação. Na criação por EAN,
- * a leitura indexada por ean/gtin/barcode também ocorre sob lock antes do insert,
- * reduzindo corrida entre observações concorrentes da mesma identidade.
+ * `FOR UPDATE` serializa decisões sobre a mesma observação e sobre o produto/
+ * oferta alvo. Campos temporais de oferta obedecem a mesma regra do fluxo
+ * automático: se estoque/disponibilidade/promoção não foram observados agora,
+ * ficam desconhecidos/nulos em vez de herdar um estado antigo.
  */
 export async function decideCaptureObservationTransactional(
   input: CaptureReviewDecisionInput,
@@ -122,7 +93,18 @@ export async function decideCaptureObservationTransactional(
     | null = null;
 
   const result = await db.transaction(async (tx) => {
-    const observation = await getLockedObservation(tx, input.observationId);
+    const [observation] = await tx
+      .select()
+      .from(supplierProductObservations)
+      .where(eq(supplierProductObservations.id, input.observationId))
+      .for("update")
+      .limit(1);
+
+    if (!observation) throw new Error("Observação não encontrada.");
+    if (observation.reviewStatus !== "pending") {
+      throw new Error(`Esta observação já foi revisada (${observation.reviewStatus}).`);
+    }
+
     const reviewedAt = new Date();
 
     if (input.decision === "reject") {
@@ -153,10 +135,7 @@ export async function decideCaptureObservationTransactional(
         reusable: true,
       });
 
-      return {
-        applied: false,
-        status: "rejected" as const,
-      };
+      return { applied: false, status: "rejected" as const };
     }
 
     const observedPrice = assertValidObservedPrice(observation);
@@ -177,7 +156,7 @@ export async function decideCaptureObservationTransactional(
     if (observation.action === "create" && !input.expectedProductId) {
       if (!observedEan) {
         throw new Error(
-          "Criação automática após revisão exige EAN/GTIN válido. Vincule manualmente a um produto mestre existente ou corrija a observação.",
+          "Criação após revisão exige EAN/GTIN válido. Vincule manualmente a um produto mestre existente ou corrija a observação.",
         );
       }
 
@@ -245,9 +224,7 @@ export async function decideCaptureObservationTransactional(
       throw new Error("Produto mestre selecionado está inativo.");
     }
 
-    const productEan = normalizeCaptureEan(
-      product.ean || product.gtin || product.barcode,
-    );
+    const productEan = normalizeCaptureEan(product.ean || product.gtin || product.barcode);
     if (observedEan && productEan && observedEan !== productEan) {
       throw new Error(
         "Aprovação bloqueada: o EAN observado conflita com o produto selecionado.",
@@ -264,9 +241,6 @@ export async function decideCaptureObservationTransactional(
         id: productSupplierOffers.id,
         price: productSupplierOffers.price,
         supplierCode: productSupplierOffers.supplierCode,
-        promoPrice: productSupplierOffers.promoPrice,
-        stock: productSupplierOffers.stock,
-        availability: productSupplierOffers.availability,
         link: productSupplierOffers.link,
         image: productSupplierOffers.image,
       })
@@ -287,15 +261,9 @@ export async function decideCaptureObservationTransactional(
       supplierName: supplier.name,
       link: observation.productUrl ?? existingOffer?.link ?? null,
       image: observation.imageUrl ?? existingOffer?.image ?? null,
-      availability: resolveOfferAvailability(
-        observation,
-        existingOffer?.availability,
-      ),
-      promoPrice:
-        observation.promoPrice != null
-          ? String(observation.promoPrice)
-          : existingOffer?.promoPrice ?? null,
-      stock: observation.stock ?? existingOffer?.stock ?? null,
+      availability: toLegacyAvailability(observation.availability),
+      promoPrice: observation.promoPrice != null ? String(observation.promoPrice) : null,
+      stock: observation.stock ?? null,
       updatedAt: reviewedAt,
     };
 
@@ -320,10 +288,7 @@ export async function decideCaptureObservationTransactional(
       if (observation.productUrl) {
         productUpdates.productUrl = observation.productUrl;
       }
-      await tx
-        .update(products)
-        .set(productUpdates)
-        .where(eq(products.id, productId));
+      await tx.update(products).set(productUpdates).where(eq(products.id, productId));
     }
 
     const reason = notes ?? (
