@@ -1,110 +1,169 @@
 # Central de Produtos + Compêndio de Equivalências
 
-## Estado arquitetural
+## Arquitetura-alvo
 
-A arquitetura possui duas fronteiras funcionais independentes:
+O domínio foi reduzido a duas fronteiras:
 
-1. **Central de Produtos (`/produtos`)**
-   - identidade canônica;
-   - ficha técnica e proveniência;
-   - ofertas por fornecedor;
-   - melhor custo atual;
-   - qualidade, saúde e reconciliação;
-   - deduplicação com merge reversível;
-   - importadores históricos preservados apenas por compatibilidade.
+### Central de Produtos (`/produtos`)
 
-2. **Compêndio de Equivalências (`/equivalencias`)**
-   - base multiproduto persistente;
-   - critérios técnicos estruturados;
-   - produtos equivalentes, alternativos e incompatíveis;
-   - decisões humanas persistentes;
-   - conhecimento validado reutilizado pela IA;
-   - motor determinístico obrigatório antes da IA;
-   - fallback sem IA.
+Responsável por:
 
-A navegação de Produtos foi reduzida a três superfícies operacionais:
+- identidade canônica do produto;
+- ficha técnica e proveniência;
+- ofertas por fornecedor;
+- melhor custo vigente;
+- qualidade e saúde do catálogo;
+- importação;
+- deduplicação com merge reversível.
 
-- **Catálogo**;
-- **Qualidade**;
-- **Importação**.
+A interface possui somente três superfícies operacionais:
 
-Preço não é um submódulo separado: é uma oferta vinculada à ficha do produto. Ferramentas especializadas de imagem, reclassificação e enriquecimento são acessadas a partir de Qualidade.
+1. **Catálogo**;
+2. **Qualidade**;
+3. **Importação**.
 
-As rotas antigas permanecem temporariamente em `/produtos/legado` e `/equivalencias/legado` somente como fallback de rollback. Elas não devem receber novas funcionalidades.
+Preço não é módulo separado. É atributo de uma oferta `Produto × Fornecedor`.
 
-## Fonte de verdade de preço
+### Compêndio de Equivalências (`/equivalencias`)
 
-`product_supplier_offers` é a fonte operacional canônica.
+Responsável por:
 
-`products.price` permanece apenas como cache de compatibilidade do menor custo efetivo para consumidores antigos.
+- equivalência técnica multiproduto;
+- entradas e membros persistentes;
+- bloqueios determinísticos de incompatibilidade;
+- decisões humanas persistentes;
+- conhecimento validado reutilizado pela IA;
+- fallback sem IA.
 
-`product_supplier_prices` permanece temporariamente como ponte de compatibilidade e não deve receber novos consumidores.
+Produtos não contém mais um segundo motor independente de equivalência.
 
-As escritas de oferta são transacionais:
+## Modelo canônico
 
-1. upsert canônico;
-2. atualização da ponte legada;
-3. registro de histórico quando o preço efetivamente mudou;
-4. recálculo do menor preço dos produtos afetados.
+```text
+Produto
+  ├─ identidade
+  ├─ ficha técnica
+  ├─ categoria
+  ├─ proveniência
+  └─ Ofertas
+       ├─ Fornecedor A → preço / código / link
+       ├─ Fornecedor B → preço / código / link
+       └─ Fornecedor C → preço / código / link
+```
 
-A operação em lote é vetorizada em chunks limitados, evitando executar um fluxo completo de múltiplas queries por item.
+A identidade do produto é **global**. Fornecedor não participa da resolução de identidade.
 
-## Performance e complexidade
+Isso significa que a importação do mesmo item por fornecedores diferentes deve localizar o mesmo produto mestre e criar/atualizar ofertas distintas, em vez de criar produtos duplicados.
 
-### Listagem do catálogo
+## Fonte de verdade comercial
 
-A Central não executa mais uma consulta de ofertas por produto.
+`product_supplier_offers` é a fonte canônica.
 
-Fluxo atual:
+`products.price` e `products.supplierId` são somente um **cache de compatibilidade** para consumidores históricos:
 
-- consulta paginada de produtos + categoria;
+- `products.price` = menor custo efetivo atual;
+- `products.supplierId` = fornecedor daquela mesma melhor oferta.
+
+Os dois campos devem sempre representar a mesma oferta. Se não existir oferta com preço válido, ambos ficam `NULL`.
+
+Relações Produto × Fornecedor sem preço continuam preservadas em `product_supplier_offers`.
+
+`product_supplier_prices` permanece temporariamente como ponte de escrita/leitura para consumidores antigos. Não deve receber novos consumidores.
+
+## Escrita de ofertas
+
+A escrita canônica é transacional:
+
+1. upsert em `product_supplier_offers`;
+2. atualização da ponte `product_supplier_prices`;
+3. histórico quando o preço realmente mudou;
+4. recálculo do cache de compatibilidade do produto.
+
+Escritas em lote são deduplicadas por `(productId, supplierId)` e executadas em chunks limitados.
+
+## Importação simplificada
+
+`/importar` é o fluxo principal e possui quatro passos:
+
+1. arquivo;
+2. mapeamento;
+3. revisão;
+4. resultado.
+
+Fornecedor é opcional. Um produto mestre pode ser importado sem fornecedor.
+
+Se uma coluna de preço for mapeada sem fornecedor, o preço é ignorado porque preço pertence à oferta e não ao produto mestre.
+
+A importação canônica faz somente:
+
+1. resolução global da identidade;
+2. criação do produto quando não há identidade compatível;
+3. preenchimento apenas de campos técnicos vazios do produto existente;
+4. criação/atualização da oferta quando existe fornecedor;
+5. encaminhamento de casos ambíguos para revisão, sem merge automático.
+
+Ela **não** executa classificação por IA, geração de equivalências ou enriquecimento oculto. Esses processos pertencem aos respectivos módulos especializados.
+
+`/importar/legado` preserva temporariamente o fluxo histórico para rollback durante homologação.
+
+## Performance
+
+### Central
+
+A listagem canônica utiliza:
+
+- consulta paginada de produtos;
 - count em paralelo;
-- uma consulta de ofertas para todos os IDs da página;
-- agrupamento por `Map` em memória;
+- uma consulta de ofertas para todos os produtos da página;
+- agrupamento O(M) em memória;
 - seleção linear da melhor oferta.
 
-Para `N` produtos na página e `M` ofertas correspondentes:
+A página é limitada a 200 produtos, evitando N+1 e crescimento de memória sem limite.
 
-- round-trips de ofertas: **O(1)** por página;
-- agrupamento: **O(M)**;
-- montagem: **O(N + M)**;
-- memória temporária: **O(N + M)**, limitada pela paginação máxima de 200 produtos.
+### Ofertas em lote
 
-A seleção da melhor oferta é **O(M)** e não depende de sort **O(M log M)**.
+`batchUpsertSupplierPrices`:
 
-### Atualização em massa
+- normaliza e deduplica pares em memória;
+- consulta preços anteriores em lote;
+- executa upsert canônico em chunks;
+- registra histórico em lote;
+- recalcula os caches dos produtos afetados de forma set-based.
 
-Campos de produto são atualizados por operação set-based. Preços/reajustes são agregados e enviados ao provider canônico por lote.
+### Análise e busca
 
-A quantidade de round-trips passa a ser proporcional ao número de chunks, e não ao número de produtos.
+Os fluxos de análise de preço, busca inteligente, autocomplete, sugestões para propostas e similares históricos foram migrados para a melhor oferta canônica em vez de depender do antigo “fornecedor do produto”.
 
-## Schema e operação em produção
+## Qualidade e health-check
 
-DDL não é executado dentro de request, boot da aplicação ou timer local.
+`catalog.health` verifica:
 
-O processo web apenas verifica se as estruturas obrigatórias existem. Se o schema estiver incompleto, a aplicação retorna erro explícito solicitando a execução das migrações.
+- disponibilidade do banco;
+- quantidade de produtos ativos;
+- quantidade de ofertas canônicas;
+- fornecedor legado sem oferta correspondente;
+- divergência entre `products.price` e a melhor oferta;
+- divergência entre `products.supplierId` e o fornecedor da melhor oferta;
+- existência da FK de fornecedor;
+- `ON DELETE SET NULL`;
+- nullabilidade de `products.supplierId`;
+- estado do Compêndio;
+- merges ativos.
 
-Isso evita:
+`catalog.repair` é explícito e data-only. Ele:
 
-- metadata locks em requests;
-- necessidade de privilégios `CREATE`/`ALTER` para o usuário da aplicação;
-- corrida entre réplicas horizontais;
-- alterações estruturais silenciosas fora do histórico de migrações.
+- cria ofertas faltantes a partir da ponte legada ainda visível;
+- sincroniza preço e fornecedor da melhor oferta;
+- normaliza aliases vazios;
+- executa health-check novamente.
 
-A reconciliação operacional é explícita e data-only por `catalog.repair`:
-
-- cria ofertas canônicas faltantes a partir do legado;
-- sincroniza o cache `products.price`;
-- normaliza aliases vazios sem sobrescrever informação existente;
-- executa health-check depois da correção.
-
-Não existe loop/timer por processo para essa manutenção.
+Não existe DDL em request, boot ou timer por processo.
 
 ## Migrações
 
-### 0016 — Compêndio e governança do catálogo
+### 0016 — Compêndio e governança
 
-`drizzle/0016_product_catalog_compendium.sql` cria:
+Cria:
 
 - `equivalence_compendium_entries`;
 - `equivalence_compendium_members`;
@@ -112,130 +171,147 @@ Não existe loop/timer por processo para essa manutenção.
 - `product_field_provenance`;
 - `product_merge_events`.
 
-### 0017 — Hardening do catálogo canônico
+### 0017 — Hardening do catálogo
 
-`drizzle/0017_product_catalog_hardening.sql`:
+A migration:
 
-- torna `products.supplierId` nullable no banco;
-- troca a FK para `ON DELETE SET NULL`;
-- migra custos legados ainda sem oferta;
+- descobre dinamicamente o nome da FK histórica de `products.supplierId`;
+- remove a FK antiga sem depender de nome fixo;
+- torna `supplierId` nullable;
+- cria FK `ON DELETE SET NULL`;
+- preserva toda relação histórica Produto × Fornecedor em `product_supplier_offers`, inclusive sem preço;
 - normaliza aliases vazios;
-- sincroniza o cache de preço.
+- sincroniza `products.price` e `products.supplierId` com a mesma melhor oferta.
 
-Produto passa a existir independentemente de fornecedor. Fornecedor é uma relação comercial representada por oferta.
+## Contrato de schema
 
-## Segurança e autorização
+O banco definido pela `0017` exige:
 
-As operações canônicas de escrita usam `editorProcedure`:
+```ts
+supplierId: int("supplierId")
+  .references(() => suppliers.id, { onDelete: "set null" })
+```
 
-- criação/edição/desativação/restauração de produto;
-- criação/remoção de oferta;
-- merge/undo de duplicidade;
-- reparo do catálogo.
+O arquivo monolítico `drizzle/schema.ts` ainda precisa receber essa alteração no checkout real.
 
-O router legado `products` é uma fachada de compatibilidade. Suas mutações também foram restringidas a editor.
+Para impedir que uma futura geração de migration use silenciosamente o contrato antigo, foi adicionado:
 
-Exclusão de produto é lógica. Merge não é restauração comum: registros consolidados só podem ser recuperados pelo undo auditado do merge.
+```bash
+node scripts/check-product-schema-contract.mjs
+```
+
+O comando falha se o schema continuar `.notNull()` + `CASCADE`.
+
+A correção segura no checkout é:
+
+```bash
+node scripts/check-product-schema-contract.mjs --fix
+git diff -- drizzle/schema.ts
+```
+
+O modo `--fix` só altera o arquivo quando encontra **exatamente um** bloco legado conhecido. Se o padrão estiver ausente, duplicado ou diferente, ele aborta sem alteração.
+
+`Dockerfile.validate` executa a verificação antes de TypeScript, lint, testes e build.
+
+## Segurança
+
+Escritas canônicas e mutações da fachada legada usam `editorProcedure`.
+
+Produto usa soft-delete.
+
+Produto consolidado por merge não pode ser restaurado por edição comum; somente pelo undo auditado do evento de merge.
+
+Importação não sobrescreve dados técnicos já preenchidos e não promove correspondência ambígua automaticamente.
 
 ## IA do Compêndio
 
-A IA não é apresentada como fine-tuning externo. É um agente especializado com conhecimento persistente e auditável.
+A IA é um agente especializado e grounded no conhecimento persistente do sistema, não um fine-tuning externo alegado sem evidência.
 
-Ordem da análise:
+Ordem de decisão:
 
 1. estruturação da referência;
-2. seleção determinística de candidatos;
-3. bloqueios críticos de composição/princípio ativo, concentração/unidade, forma e via;
-4. consulta às entradas validadas do Compêndio;
-5. consulta a precedentes humanos aplicáveis;
-6. avaliação da IA;
-7. reaplicação da memória humana persistida;
-8. ordenação comercial somente entre candidatos tecnicamente admissíveis.
+2. seleção determinística;
+3. hard guards técnicos;
+4. conhecimento humano validado;
+5. precedentes aplicáveis;
+6. IA;
+7. reaplicação de memória humana;
+8. ordenação comercial somente entre candidatos admissíveis.
 
-Se a IA estiver indisponível, o fluxo continua pelo motor determinístico + memória humana.
-
-O contrato legado usado pelo editor de propostas não possui mais um segundo algoritmo independente de equivalência: ele delega ao Compêndio e apenas adapta o DTO.
+Divergência crítica de composição/princípio ativo, concentração/unidade, forma ou via não pode ser promovida pela IA.
 
 ## Deduplicação
 
-O motor usa blocking em vez de comparação quadrática integral:
+A identidade e a deduplicação priorizam:
 
 - EAN/GTIN/barcode;
 - registro regulatório;
 - CATMAT/CATMAS;
-- princípio ativo + concentração;
-- blocos de nome somente quando necessário.
+- score técnico multi-campo.
 
-A Central usa uma única `reviewQueue` para grupos e métricas, evitando rodar a detecção novamente apenas para compor os cards da tela.
+A busca de identidade não é filtrada por fornecedor.
 
-O merge canônico redireciona referências e grava snapshot em `product_merge_events`.
+A Central usa uma fila de grupos e métricas derivada da mesma execução do detector.
 
-O undo restaura de forma conservadora:
+Merge é transacional e registra snapshot em `product_merge_events`. Undo restaura de forma conservadora produtos, referências, histórico, ofertas e memória do Compêndio.
 
-- produtos duplicados;
-- referências de propostas;
-- histórico de preço;
-- grupos de equivalência;
-- ofertas;
-- memória do Compêndio.
+## Validação obrigatória
 
-Edições novas realizadas no produto mestre depois do merge não são apagadas pelo undo.
-
-## Validação obrigatória antes do merge
-
-No checkout real do projeto, executar:
+No checkout real:
 
 ```bash
+node scripts/check-product-schema-contract.mjs --fix
+git diff -- drizzle/schema.ts
 bash scripts/validate-free.sh
 pnpm check
 pnpm test
 pnpm vitest run server/services/equivalenceGuardService.test.ts
 ```
 
-Com banco de teste/staging:
+Em staging:
 
-1. aplicar as migrações até `0017`;
-2. abrir `/produtos` e consultar `catalog.health`;
-3. exigir `healthy=true` antes de homologação;
-4. criar produto sem fornecedor;
-5. vincular duas ofertas e confirmar menor custo;
-6. editar um único campo e confirmar ausência de perda dos demais;
-7. testar busca, paginação e todos os filtros de qualidade;
-8. criar, atualizar e remover uma oferta, validando histórico e cache de preço;
-9. testar importação com centenas/milhares de ofertas e validar atomicidade;
-10. detectar um grupo de duplicatas com dados fictícios;
-11. fazer merge e undo;
-12. abrir `/equivalencias?productId=<id>`;
-13. executar análise com IA ligada e desligada;
-14. rejeitar um candidato e confirmar persistência da decisão;
-15. validar uma entrada do Compêndio e confirmar reutilização do conhecimento.
+1. aplicar migrations até `0017`;
+2. abrir `/produtos` e exigir `catalog.health.healthy=true`;
+3. criar produto sem fornecedor;
+4. criar produto com fornecedor sem preço e confirmar relação em ofertas;
+5. adicionar duas ofertas com preços diferentes e confirmar que cache de preço e fornecedor apontam para a mesma melhor oferta;
+6. remover a melhor oferta e confirmar promoção automática da segunda;
+7. importar planilha sem fornecedor;
+8. importar a mesma identidade com dois fornecedores diferentes e confirmar um produto mestre com duas ofertas;
+9. importar linha sem preço sobre oferta existente e confirmar preservação do preço anterior;
+10. importar dados técnicos adicionais e confirmar preenchimento somente de campos vazios;
+11. testar filtros de qualidade;
+12. executar `catalog.repair` e exigir health saudável;
+13. fazer merge/undo de duplicidade com dados fictícios;
+14. executar Compêndio com IA ligada e desligada;
+15. validar persistência de rejeição/aprovação humana.
 
-## Bloqueador conhecido antes de produção
+## Estado para merge
 
-A migração `0017` define corretamente `products.supplierId` como nullable + `ON DELETE SET NULL`, porém o arquivo gerador `drizzle/schema.ts` ainda declara esse campo como `.notNull()` e `onDelete: "cascade"`.
+O PR deve permanecer draft enquanto:
 
-Esse drift **não deve ser aceito como estado final de produção**, porque uma futura geração de migração pode tentar reverter a regra do banco. Antes do merge/homologação é obrigatório alinhar `drizzle/schema.ts` e executar `pnpm check`, corrigindo consumidores que ainda assumem `supplierId` não nulo.
+- `drizzle/schema.ts` não estiver alinhado pelo patch seguro;
+- a validação executável acima não tiver sido concluída;
+- o smoke test de staging não estiver aprovado.
 
-Enquanto esse item não for resolvido e a suíte não rodar em checkout real, o PR deve permanecer draft.
+Não é necessário remover tabelas históricas nesta onda.
 
 ## Rollback
 
-A implementação preserva rotas e tabelas históricas.
+Durante homologação:
 
-Em regressão de interface:
+- Produtos legado: `/produtos/legado`;
+- Importador legado: `/importar/legado`;
+- Equivalências legado: `/equivalencias/legado`.
 
-- Produtos: `/produtos/legado`;
-- Equivalências: `/equivalencias/legado`.
+A reversão de schema deve ocorrer somente por migration explícita e testada, nunca por DDL ad hoc no processo web.
 
-A reversão da aplicação não exige apagar as estruturas aditivas do Compêndio. Alterações de schema da migração `0017` devem ser revertidas somente por migração explícita e testada; nunca por DDL ad hoc no processo web.
+## Limpeza futura
 
-## Pendências deliberadamente preservadas
+Após homologação e confirmação de zero consumidores:
 
-Não remover sem validação de dados reais e confirmação de zero consumidores:
-
-- `product_supplier_prices` — ponte temporária;
-- `master_products` — ainda participa de reconhecimento/importação históricos;
-- rotas e ferramentas históricas de enriquecimento/reclassificação;
-- `/produtos/legado` e `/equivalencias/legado` — apenas até a homologação da nova Central.
-
-Depois da homologação, a próxima onda de limpeza deve remover os consumidores remanescentes e então eliminar as estruturas de compatibilidade, em vez de mantê-las indefinidamente.
+- remover `product_supplier_prices`;
+- retirar caches comerciais de `products` ou mantê-los apenas se houver benefício mensurável;
+- consolidar/remover `master_products` após migrar todos os importadores antigos;
+- remover rotas legadas;
+- remover ferramentas históricas que tenham substituto canônico e nenhum consumidor.
