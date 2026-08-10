@@ -72,7 +72,6 @@ function dedupeWrites(entries: SupplierPriceWrite[]): SupplierPriceWrite[] {
   const byPair = new Map<string, SupplierPriceWrite>();
   for (const raw of entries) {
     const entry = normalizeWrite(raw);
-    // Em um lote, a última ocorrência do par representa o estado final desejado.
     byPair.set(pairKey(entry.productId, entry.supplierId), entry);
   }
   return [...byPair.values()];
@@ -86,6 +85,15 @@ function chunks<T>(items: T[], size: number): T[][] {
   return result;
 }
 
+/**
+ * Mantém somente o cache de compatibilidade para consumidores antigos:
+ * - products.price = menor custo efetivo vigente;
+ * - products.supplierId = fornecedor dessa mesma oferta.
+ *
+ * Nenhum dos dois campos é fonte de verdade; a origem é sempre
+ * product_supplier_offers. Se não houver oferta com preço válido, ambos ficam
+ * NULL para não expor um par comercial incoerente.
+ */
 function mirrorSyncQuery(productIds: number[]) {
   const uniqueIds = [...new Set(productIds)].filter((id) => Number.isInteger(id) && id > 0);
   if (uniqueIds.length === 0) return null;
@@ -93,26 +101,53 @@ function mirrorSyncQuery(productIds: number[]) {
   return sql`
     UPDATE products p
     LEFT JOIN (
-      SELECT
-        productId,
-        MIN(
+      SELECT ranked.productId, ranked.supplierId, ranked.bestPrice
+      FROM (
+        SELECT
+          o.id,
+          o.productId,
+          o.supplierId,
           CASE
-            WHEN promoPrice IS NOT NULL
-              AND promoPrice > 0
-              AND (price IS NULL OR promoPrice < price)
-              THEN promoPrice
-            WHEN price IS NOT NULL AND price > 0
-              THEN price
+            WHEN o.promoPrice IS NOT NULL
+              AND o.promoPrice > 0
+              AND (o.price IS NULL OR o.promoPrice < o.price)
+              THEN o.promoPrice
+            WHEN o.price IS NOT NULL AND o.price > 0
+              THEN o.price
             ELSE NULL
-          END
-        ) AS bestPrice
-      FROM product_supplier_offers
-      WHERE productId IN (${idList})
-      GROUP BY productId
+          END AS bestPrice,
+          ROW_NUMBER() OVER (
+            PARTITION BY o.productId
+            ORDER BY
+              CASE
+                WHEN o.promoPrice IS NOT NULL
+                  AND o.promoPrice > 0
+                  AND (o.price IS NULL OR o.promoPrice < o.price)
+                  THEN o.promoPrice
+                WHEN o.price IS NOT NULL AND o.price > 0
+                  THEN o.price
+                ELSE NULL
+              END ASC,
+              o.updatedAt DESC,
+              o.id ASC
+          ) AS rn
+        FROM product_supplier_offers o
+        WHERE o.productId IN (${idList})
+          AND (
+            (o.promoPrice IS NOT NULL AND o.promoPrice > 0)
+            OR (o.price IS NOT NULL AND o.price > 0)
+          )
+      ) ranked
+      WHERE ranked.rn = 1 AND ranked.bestPrice IS NOT NULL
     ) best ON best.productId = p.id
-    SET p.price = best.bestPrice
+    SET
+      p.price = best.bestPrice,
+      p.supplierId = best.supplierId
     WHERE p.id IN (${idList})
-      AND NOT (p.price <=> best.bestPrice)
+      AND (
+        NOT (p.price <=> best.bestPrice)
+        OR NOT (p.supplierId <=> best.supplierId)
+      )
   `;
 }
 
@@ -121,10 +156,6 @@ export async function getProductSupplierPrices(productId: number): Promise<Canon
   return grouped.get(productId) ?? [];
 }
 
-/**
- * Leitura vetorizada para telas/listas e motores de equivalência.
- * Complexidade: 1 round-trip e O(M) para agrupar M ofertas em memória.
- */
 export async function getProductSupplierPricesForProducts(
   productIds: number[],
 ): Promise<Map<number, CanonicalOfferRow[]>> {
@@ -163,11 +194,9 @@ export async function getProductSupplierPricesForProducts(
 }
 
 /**
- * Upsert vetorizado da fonte canônica e do espelho legado.
- *
- * Uma leitura prévia permite registrar histórico somente quando o preço mudou.
- * As escritas, o histórico e o recálculo do espelho ficam na mesma transação,
- * evitando sucesso parcial. Memória O(N), limitada ao lote recebido.
+ * Upsert vetorizado da fonte canônica e da ponte histórica.
+ * Oferta, histórico e atualização dos caches de compatibilidade acontecem na
+ * mesma transação para evitar sucesso parcial.
  */
 export async function batchUpsertSupplierPrices(entries: SupplierPriceWrite[]): Promise<{
   received: number;
@@ -204,16 +233,14 @@ export async function batchUpsertSupplierPrices(entries: SupplierPriceWrite[]): 
   const historyRows = writes.flatMap((entry) => {
     const previous = previousPriceByPair.get(pairKey(entry.productId, entry.supplierId)) ?? null;
     if (entry.price == null || entry.price === previous) return [];
-    return [
-      {
-        productId: entry.productId,
-        supplierId: entry.supplierId,
-        price: entry.price,
-        precoAnterior: previous,
-        precoNovo: entry.price,
-        origem: entry.origem ?? "canonical_offer",
-      },
-    ];
+    return [{
+      productId: entry.productId,
+      supplierId: entry.supplierId,
+      price: entry.price,
+      precoAnterior: previous,
+      precoNovo: entry.price,
+      origem: entry.origem ?? "canonical_offer",
+    }];
   });
 
   const mirrorQuery = mirrorSyncQuery(productIds);
@@ -283,16 +310,14 @@ export async function upsertProductSupplierPrice(
   price: string | null,
   extra?: { codigoFornecedor?: string; linkProduto?: string; origem?: string },
 ) {
-  return batchUpsertSupplierPrices([
-    {
-      productId,
-      supplierId,
-      price,
-      codigoFornecedor: extra?.codigoFornecedor,
-      linkProduto: extra?.linkProduto,
-      origem: extra?.origem,
-    },
-  ]);
+  return batchUpsertSupplierPrices([{
+    productId,
+    supplierId,
+    price,
+    codigoFornecedor: extra?.codigoFornecedor,
+    linkProduto: extra?.linkProduto,
+    origem: extra?.origem,
+  }]);
 }
 
 export async function getPriceHistory(productId: number, supplierId?: number, limit = 20) {
@@ -318,13 +343,11 @@ export async function findProductByEan(ean: string) {
   const rows = await db
     .select()
     .from(products)
-    .where(
-      or(
-        eq(products.ean, normalized),
-        eq(products.gtin, normalized),
-        eq(products.barcode, normalized),
-      ),
-    )
+    .where(or(
+      eq(products.ean, normalized),
+      eq(products.gtin, normalized),
+      eq(products.barcode, normalized),
+    ))
     .limit(1);
   return rows[0] ?? null;
 }
@@ -340,28 +363,20 @@ export async function deleteProductSupplierPrice(productId: number, supplierId: 
   await db.transaction(async (tx) => {
     await tx
       .delete(productSupplierOffers)
-      .where(
-        and(
-          eq(productSupplierOffers.productId, productId),
-          eq(productSupplierOffers.supplierId, supplierId),
-        ),
-      );
+      .where(and(
+        eq(productSupplierOffers.productId, productId),
+        eq(productSupplierOffers.supplierId, supplierId),
+      ));
     await tx
       .delete(productSupplierPrices)
-      .where(
-        and(
-          eq(productSupplierPrices.productId, productId),
-          eq(productSupplierPrices.supplierId, supplierId),
-        ),
-      );
+      .where(and(
+        eq(productSupplierPrices.productId, productId),
+        eq(productSupplierPrices.supplierId, supplierId),
+      ));
     if (mirrorQuery) await tx.execute(mirrorQuery);
   });
 }
 
-/**
- * Compatibilidade para consumidores de leitura que não devem derrubar a tela
- * quando a infraestrutura de preços estiver temporariamente indisponível.
- */
 export async function safeGetProductSupplierPrices(productId: number): Promise<CanonicalOfferRow[]> {
   try {
     return await getProductSupplierPrices(productId);
