@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -93,60 +93,90 @@ function RuntimeIntegrationsSection() {
   const configQuery = trpc.integrations.get.useQuery();
   const utils = trpc.useUtils();
   const [form, setForm] = useState<Record<string, string>>({});
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const data = configQuery.data;
     if (!data) return;
-    const next: Record<string, string> = {};
-    for (const item of data) {
-      if (!item.secreta && item.valor != null) next[item.chave] = item.valor;
-    }
-    setForm((prev) => ({ ...next, ...prev }));
-  }, [configQuery.data]);
+    setForm((previous) => {
+      const next = { ...previous };
+      for (const item of data) {
+        if (dirtyKeys.has(item.chave)) continue;
+        if (item.secreta) {
+          delete next[item.chave];
+          continue;
+        }
+        if (item.valor == null) delete next[item.chave];
+        else next[item.chave] = item.valor;
+      }
+      return next;
+    });
+  }, [configQuery.data, dirtyKeys]);
+
+  const showWarnings = (warnings: string[]) => {
+    for (const warning of warnings) toast.warning("Configuração aplicada com aviso.", { description: warning });
+  };
 
   const salvar = trpc.integrations.save.useMutation({
-    onSuccess: () => {
-      toast.success("Integrações atualizadas e agendamentos recarregados.");
-      setForm((prev) => {
-        const next = { ...prev };
+    onSuccess: (result, variables) => {
+      const persistedKeys = Object.keys(variables);
+      toast.success(
+        result.applied === 1
+          ? "1 configuração atualizada."
+          : `${result.applied} configurações atualizadas.`,
+      );
+      showWarnings(result.warnings);
+      setDirtyKeys((previous) => {
+        const next = new Set(previous);
+        for (const key of persistedKeys) next.delete(key);
+        return next;
+      });
+      setForm((previous) => {
+        const next = { ...previous };
         for (const item of configQuery.data ?? []) {
-          if (item.secreta) delete next[item.chave];
+          if (item.secreta && persistedKeys.includes(item.chave)) delete next[item.chave];
         }
         return next;
       });
-      utils.integrations.get.invalidate();
-      utils.diagnostico.verificar.invalidate();
+      void utils.integrations.get.invalidate();
+      void utils.diagnostico.verificar.invalidate();
     },
     onError: (error) => toast.error("Não foi possível salvar.", { description: error.message }),
   });
 
   const remover = trpc.integrations.remove.useMutation({
-    onSuccess: (_, variables) => {
+    onSuccess: (result, variables) => {
       toast.success("Override removido; configuração padrão restaurada.");
-      setForm((prev) => {
-        const next = { ...prev };
+      showWarnings(result.warnings);
+      setDirtyKeys((previous) => {
+        const next = new Set(previous);
+        next.delete(variables.chave);
+        return next;
+      });
+      setForm((previous) => {
+        const next = { ...previous };
         delete next[variables.chave];
         return next;
       });
-      utils.integrations.get.invalidate();
-      utils.diagnostico.verificar.invalidate();
+      void utils.integrations.get.invalidate();
+      void utils.diagnostico.verificar.invalidate();
     },
     onError: (error) => toast.error("Não foi possível restaurar o padrão.", { description: error.message }),
   });
 
   const testar = trpc.integrations.testarWhatsapp.useMutation({
-    onSuccess: (res) => {
-      if (res.ok) toast.success("WhatsApp funcionando.", { description: res.detalhe });
-      else toast.error("Teste do WhatsApp falhou.", { description: res.detalhe });
+    onSuccess: (result) => {
+      if (result.ok) toast.success("WhatsApp funcionando.", { description: result.detalhe });
+      else toast.error("Teste do WhatsApp falhou.", { description: result.detalhe });
     },
     onError: (error) => toast.error("Falha ao testar.", { description: error.message }),
   });
 
   const data = configQuery.data;
-  const grupoWhatsapp = (data ?? []).filter((item) => item.grupo === "whatsapp");
-  const grupoGeral = (data ?? []).filter((item) => item.grupo === "geral");
-  const grupoFontes = (data ?? []).filter((item) => item.grupo === "fontes");
-  const grupoAutomacao = (data ?? []).filter((item) => item.grupo === "automacao");
+  const grupoWhatsapp = useMemo(() => (data ?? []).filter((item) => item.grupo === "whatsapp"), [data]);
+  const grupoGeral = useMemo(() => (data ?? []).filter((item) => item.grupo === "geral"), [data]);
+  const grupoFontes = useMemo(() => (data ?? []).filter((item) => item.grupo === "fontes"), [data]);
+  const grupoAutomacao = useMemo(() => (data ?? []).filter((item) => item.grupo === "automacao"), [data]);
 
   const origemLabel = (origem: string) =>
     origem === "interface"
@@ -154,6 +184,33 @@ function RuntimeIntegrationsSection() {
       : origem === "ambiente"
         ? "padrão da instalação"
         : "padrão interno";
+
+  const updateField = (key: string, value: string) => {
+    setForm((previous) => ({ ...previous, [key]: value }));
+    setDirtyKeys((previous) => {
+      const next = new Set(previous);
+      next.add(key);
+      return next;
+    });
+  };
+
+  const groupKeys = (items: NonNullable<typeof data>) => items.map((item) => item.chave);
+  const hasDirty = (keys: string[]) => keys.some((key) => dirtyKeys.has(key));
+
+  const saveKeys = (keys: string[]) => {
+    if (salvar.isPending) return;
+    const payload: Record<string, string> = {};
+    for (const key of keys) {
+      if (!dirtyKeys.has(key)) continue;
+      const value = form[key]?.trim() ?? "";
+      if (value) payload[key] = value;
+    }
+    if (!Object.keys(payload).length) {
+      toast.info("Nenhuma alteração preenchida para salvar.");
+      return;
+    }
+    salvar.mutate(payload);
+  };
 
   const campo = (item: NonNullable<typeof data>[number]) => (
     <div key={item.chave} className="rounded-lg border border-gray-100 p-3 bg-white">
@@ -164,12 +221,15 @@ function RuntimeIntegrationsSection() {
         >
           {item.label}
           <span className="ml-2 font-normal normal-case text-gray-400">{origemLabel(item.origem)}</span>
+          {dirtyKeys.has(item.chave) && (
+            <span className="ml-2 font-semibold normal-case text-amber-600">não salvo</span>
+          )}
         </label>
         {item.origem === "interface" && (
           <button
             type="button"
             onClick={() => remover.mutate({ chave: item.chave })}
-            disabled={remover.isPending}
+            disabled={remover.isPending || salvar.isPending}
             className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500 hover:text-blue-700 disabled:opacity-50"
             title="Remove o valor salvo no S2 e volta ao padrão da instalação"
           >
@@ -182,9 +242,11 @@ function RuntimeIntegrationsSection() {
         id={`int-${item.chave}`}
         type={item.secreta ? "password" : "text"}
         value={form[item.chave] ?? ""}
-        onChange={(event) => setForm((prev) => ({ ...prev, [item.chave]: event.target.value }))}
+        onChange={(event) => updateField(item.chave, event.target.value)}
         placeholder={item.secreta && item.temValor ? "•••••••• (deixe vazio para manter)" : ""}
-        className={`w-full border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 ${item.secreta ? "font-mono" : ""}`}
+        className={`w-full border px-3 py-2 text-sm focus:outline-none ${
+          dirtyKeys.has(item.chave) ? "border-amber-300 focus:border-amber-500" : "border-gray-200 focus:border-gray-900"
+        } ${item.secreta ? "font-mono" : ""}`}
       />
       <div className="mt-1 text-[10px] font-mono text-gray-300">{item.chave}</div>
     </div>
@@ -198,6 +260,18 @@ function RuntimeIntegrationsSection() {
     );
   }
 
+  if (configQuery.isError) {
+    return (
+      <div className="border border-red-200 bg-red-50 p-4 mb-4 rounded-xl text-sm text-red-700">
+        Não foi possível carregar a configuração de integrações: {configQuery.error.message}
+      </div>
+    );
+  }
+
+  const communicationKeys = groupKeys([...grupoWhatsapp, ...grupoGeral]);
+  const sourceKeys = groupKeys(grupoFontes);
+  const automationKeys = groupKeys(grupoAutomacao);
+
   return (
     <>
       <div className="border border-gray-200 p-4 mb-4 rounded-xl">
@@ -208,8 +282,7 @@ function RuntimeIntegrationsSection() {
           </div>
         </div>
         <p className="text-[11px] text-gray-400 mb-4">
-          WhatsApp pode operar por Meta Cloud API ou webhook próprio. Parâmetros gerais são usados
-          por custos e fontes auxiliares.
+          WhatsApp pode operar por Meta Cloud API ou webhook próprio. Somente campos efetivamente alterados são gravados como override.
         </p>
         <div className="grid md:grid-cols-2 gap-3">{grupoWhatsapp.map(campo)}</div>
         {grupoGeral.length > 0 && (
@@ -233,12 +306,12 @@ function RuntimeIntegrationsSection() {
           </button>
           <button
             type="button"
-            onClick={() => salvar.mutate(form)}
-            disabled={salvar.isPending}
+            onClick={() => saveKeys(communicationKeys)}
+            disabled={salvar.isPending || !hasDirty(communicationKeys)}
             className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50 rounded-lg"
           >
             {salvar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Salvar
+            Salvar alterações
           </button>
         </div>
       </div>
@@ -258,8 +331,8 @@ function RuntimeIntegrationsSection() {
           <div className="flex justify-end mt-5">
             <button
               type="button"
-              onClick={() => salvar.mutate(form)}
-              disabled={salvar.isPending}
+              onClick={() => saveKeys(sourceKeys)}
+              disabled={salvar.isPending || !hasDirty(sourceKeys)}
               className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50 rounded-lg"
             >
               {salvar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -278,14 +351,14 @@ function RuntimeIntegrationsSection() {
         </div>
         <p className="text-[11px] text-gray-400 mb-4">
           Controle e reagende sincronizações, radar, scrapers, alertas e backup diretamente no S2.
-          Ao salvar, o scheduler é recarregado em runtime; não é necessário redeploy.
+          O novo plano é validado antes de substituir os agendamentos ativos.
         </p>
         <div className="grid md:grid-cols-2 gap-3">{grupoAutomacao.map(campo)}</div>
         <div className="flex justify-end mt-5">
           <button
             type="button"
-            onClick={() => salvar.mutate(form)}
-            disabled={salvar.isPending}
+            onClick={() => saveKeys(automationKeys)}
+            disabled={salvar.isPending || !hasDirty(automationKeys)}
             className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50 rounded-lg"
           >
             {salvar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
