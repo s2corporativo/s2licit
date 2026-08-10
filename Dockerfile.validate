@@ -21,6 +21,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
 COPY . .
 
 FROM base AS quality
+RUN node scripts/check-product-schema-contract.mjs
 RUN pnpm check
 RUN pnpm lint
 RUN pnpm test -- --reporter=verbose
