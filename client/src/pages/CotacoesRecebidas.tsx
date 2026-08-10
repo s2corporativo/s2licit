@@ -236,6 +236,7 @@ export default function CotacoesRecebidas() {
 type DetailData = {
   quotation: {
     id: number;
+    messageId: string | null;
     subject: string | null;
     orgao: string | null;
     fromName: string | null;
@@ -310,16 +311,23 @@ function QuotationDetail({
     },
     onError: (error) => toast.error(error.message),
   });
+  const utils = trpc.useUtils();
   const prepararPortalMutation = trpc.emailQuotations.prepararParaPortal.useMutation({
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       toast.success(res.created ? "Proposta criada a partir da cotação." : "Proposta já existia — abrindo.");
+      // O Agente de Propostas lista as propostas via trpc.proposals.list — sem
+      // invalidar, a proposta recém-criada não aparece no select ao chegar lá.
+      await utils.proposals.list.invalidate();
       navigate(`/agente-proposta?propostaId=${res.proposalId}`);
     },
     onError: (e) => toast.error(e.message),
   });
 
   const { quotation, items } = data;
-  const isPortalSourced = (quotation.fromName ?? "").startsWith("Portal ");
+  // messageId (não o rótulo de exibição fromName) identifica a origem: o
+  // rótulo é texto livre para humano e pode mudar sem quebrar nada — o botão
+  // "Preencher no portal" não pode depender dele.
+  const isPortalSourced = (quotation.messageId ?? "").startsWith("portal:");
 
   return (
     <div className="max-h-[70vh] overflow-y-auto">

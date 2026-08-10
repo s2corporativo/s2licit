@@ -54,10 +54,10 @@ demanda via tRPC (`emailQuotations.autoPipeline`). Idempotente (cotação com
 ### 3.2 Radar autenticado dos portais (`portalAuthenticatedDiscoveryService`)
 
 Quando o mural público não expõe as cotações, o robô agora **entra no portal
-com a credencial do cofre** (Funarbe, Compras MG, FIEMG, Fundep, COPASA),
-coleta o HTML da área do fornecedor e o entrega aos mesmos parsers e ao mesmo
-matching do radar público. Ordem de tentativa por portal: HTML público →
-navegador (páginas dinâmicas) → **área autenticada**.
+com a credencial do cofre** (Funarbe, Compras MG, FIEMG, Fundep, COPASA,
+CEMIG), coleta o HTML da área do fornecedor e o entrega aos mesmos parsers e
+ao mesmo matching do radar público. Ordem de tentativa por portal: HTML
+público → navegador (páginas dinâmicas) → **área autenticada**.
 
 - FIEMG e CEMIG entraram no cofre de credenciais (`PORTAL_CONFIGS.fiemg`/
   `.cemig`), com seletores a confirmar na primeira execução real.
@@ -69,7 +69,14 @@ navegador (páginas dinâmicas) → **área autenticada**.
   válida, o robô reaproveita a sessão em vez de logar de novo — menos
   exposição a CAPTCHA e menor risco de bloqueio de conta por tentativas
   repetidas. Login completo é o fallback automático quando a sessão expira
-  ou não confirma.
+  ou não confirma. Os cookies são persistidos com domínio/path/flags
+  completos (não apenas nome=valor), para portais que separam host de login
+  do host de aplicação.
+- **Contador de falhas de login** (v2): depois de 3 falhas consecutivas, a
+  credencial fica bloqueada para novas tentativas (a sessão salva, se ainda
+  válida, continua funcionando) — protege contra o próprio bloqueio de conta
+  do portal. Reseta ao logar com sucesso ou ao recadastrar a credencial no
+  cofre.
 - **Teste de fumaça semanal** (v2, `runPortalLoginSmokeTest`, segunda-feira às
   6h): para cada portal com credencial cadastrada, tenta *só* logar — sem
   coletar nem preencher nada — e avisa (notificação/WhatsApp) se algum login
@@ -129,20 +136,24 @@ o próximo resumo diário.
 
 ### 3.9 Banco de dados
 
-Migrações `0016` e `0017` (+ `ensure*Columns()` idempotentes no boot para
+Migrações `0016`–`0018` (+ `ensure*Columns()` idempotentes no boot para
 bancos legados):
 
 - `email_quotations.propostaPdfUrl` — PDF gerado automaticamente
 - `email_quotations.propostaGeradaEm` — carimbo de geração (idempotência)
 - `email_quotations.propostaMargemPercent` — margem efetiva aplicada
 - `email_quotations.sourceType` — enum estendido com `'image'`
+- `email_quotations.status` — usa `'processando'` como claim atômico durante
+  o pipeline (evita duas execuções concorrentes gerarem a mesma proposta)
 - `email_quotation_items.matchAuto` — auditoria da confirmação automática
 - `portal_credentials.sessaoCookies` / `sessaoExpiraEm` — reuso de sessão
+- `portal_credentials.loginFailCount` — contador de falhas consecutivas
 - `proposals.emailQuotationId` — vínculo idempotente proposta↔cotação
+  (índice único: uma corrida entre duas requisições nunca cria duplicata)
 
 ## 4. Fluxo completo (visão do operador)
 
-```
+```text
 E-mail (IMAP, 15 em 15 min) ─┐
                              ├─► Extração de itens ─► Matching catálogo
 Portais (3×/dia; público  ───┘        │
@@ -159,7 +170,7 @@ e agora também autenticado)           ▼
 
 ## 5. Configuração
 
-```
+```dotenv
 QUOTATION_AUTO_PIPELINE_ENABLED=true      # pipeline ligado (padrão)
 QUOTATION_AUTO_CONFIRM_THRESHOLD=0.92     # limiar de auto-confirmação
 QUOTATION_AUTO_SEND_ENABLED=false         # envio sem revisão: opt-in explícito

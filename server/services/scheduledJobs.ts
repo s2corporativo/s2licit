@@ -177,8 +177,11 @@ async function runEmailSync(): Promise<void> {
         `[Scheduler] Cotações e-mail: ${result.imported} importadas, ${result.skipped} já existentes, ${result.errors.length} avisos.`,
       );
     }
-    // Cotação nova na fila → tenta gerar a proposta automaticamente.
-    if (result.imported > 0) await runQuotationAutoPipeline();
+    // Cada ciclo reavalia a fila: cotações bloqueadas por preço vencido ou
+    // item pendente de revisão voltam a ser tentadas depois da correção
+    // (não só quando um novo e-mail chega). O pipeline já retorna rápido
+    // quando não há nada pendente.
+    await runQuotationAutoPipeline();
   } catch (err) {
     logger.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
   } finally {
@@ -208,8 +211,8 @@ export async function runPortalOpportunitySync(): Promise<void> {
       const detail = result.errors.slice(0, 8).join("; ");
       logger.warn(`[Scheduler] Radar dos seis portais com ${result.errors.length} aviso(s): ${detail}`);
     }
-    // Oportunidade nova na fila → tenta gerar a proposta automaticamente.
-    if (result.imported > 0) await runQuotationAutoPipeline();
+    // Reavalia a fila neste ciclo também (mesmo motivo do sync de e-mail).
+    await runQuotationAutoPipeline();
   } catch (err) {
     const detail = (err as Error).message;
     logger.error("[Scheduler] Falha no radar dos seis portais:", detail);

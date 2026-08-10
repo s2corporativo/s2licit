@@ -24,35 +24,80 @@ export interface PrepareProposalResult {
 export async function prepareProposalFromQuotation(
   quotationId: number,
 ): Promise<PrepareProposalResult> {
+  const existing = await findExistingProposal(quotationId);
+  if (existing) return existing;
+
+  const priced = await priceQuotationItems(quotationId);
+
+  try {
+    return await insertProposalFromPriced(quotationId, priced);
+  } catch (err) {
+    // Corrida: duas requisições viram "não existe" ao mesmo tempo e as duas
+    // tentam criar. O índice único em emailQuotationId rejeita a segunda —
+    // ela não falha, apenas devolve a proposta que a primeira acabou de criar.
+    if (isDuplicateKeyError(err)) {
+      const created = await findExistingProposal(quotationId);
+      if (created) return created;
+    }
+    throw err;
+  }
+}
+
+function isDuplicateKeyError(err: unknown): boolean {
+  const code = (err as { code?: string; errno?: number })?.code;
+  return code === "ER_DUP_ENTRY" || code === "ER_DUP_KEY";
+}
+
+/**
+ * Busca a proposta já existente para a cotação (usada tanto no caminho
+ * normal quanto na recuperação de uma corrida entre requisições simultâneas).
+ */
+async function findExistingProposal(quotationId: number): Promise<PrepareProposalResult | null> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
-
   const [existing] = await db
     .select({ id: proposals.id, totalValue: proposals.totalValue })
     .from(proposals)
     .where(eq(proposals.emailQuotationId, quotationId))
     .limit(1);
-  if (existing) {
-    const items = await db
-      .select({ id: proposalItems.id })
-      .from(proposalItems)
-      .where(eq(proposalItems.proposalId, existing.id));
-    return {
-      proposalId: existing.id,
-      created: false,
-      itemCount: items.length,
-      total: Number(existing.totalValue ?? 0),
-    };
-  }
+  if (!existing) return null;
+  const items = await db
+    .select({ id: proposalItems.id })
+    .from(proposalItems)
+    .where(eq(proposalItems.proposalId, existing.id));
+  return {
+    proposalId: existing.id,
+    created: false,
+    itemCount: items.length,
+    total: Number(existing.totalValue ?? 0),
+  };
+}
 
-  const priced = await priceQuotationItems(quotationId);
+async function insertProposalFromPriced(
+  quotationId: number,
+  priced: Awaited<ReturnType<typeof priceQuotationItems>>,
+): Promise<PrepareProposalResult> {
+  const db = await getDb();
+  if (!db) throw new Error("Banco de dados indisponível.");
+
+  // proposal_items.quantity é inteiro (o portal preenche unidades inteiras);
+  // a quantidade é normalizada AQUI, uma única vez, e usada consistentemente
+  // no total do item e no total da proposta — nunca a fracionária de um lado
+  // e a arredondada do outro (o robô de portal e o PDF de proposta usam
+  // suggestedPrice × quantity, então os dois precisam bater).
+  const normalizedItems = priced.items.map((item) => {
+    const quantity = Math.max(1, Math.round(item.quantidade));
+    const totalPrice = Number((item.unitPrice * quantity).toFixed(2));
+    return { ...item, quantity, totalPrice };
+  });
+  const total = Number(normalizedItems.reduce((sum, item) => sum + item.totalPrice, 0).toFixed(2));
 
   const [inserted] = await db.insert(proposals).values({
     title: priced.quotation.subject?.slice(0, 256) || `Cotação ${quotationId}`,
     orgName: priced.quotation.orgao ?? undefined,
     origem: "cotacao",
     emailQuotationId: quotationId,
-    totalValue: String(priced.subtotal.toFixed(2)),
+    totalValue: String(total.toFixed(2)),
     notes: priced.quotation.subject
       ? `Gerada a partir da cotação recebida: ${priced.quotation.subject}`
       : `Gerada a partir da cotação #${quotationId}`,
@@ -61,7 +106,7 @@ export async function prepareProposalFromQuotation(
   if (!proposalId) throw new Error("Não foi possível criar a proposta a partir da cotação.");
 
   await db.insert(proposalItems).values(
-    priced.items.map((item, index) => ({
+    normalizedItems.map((item, index) => ({
       proposalId,
       productId: item.produtoMatchId,
       itemNumber: index + 1,
@@ -70,7 +115,7 @@ export async function prepareProposalFromQuotation(
       unitPrice: String(item.custoUnitario.toFixed(2)),
       costPrice: String(item.custoUnitario.toFixed(2)),
       suggestedPrice: String(item.unitPrice.toFixed(2)),
-      quantity: Math.max(1, Math.round(item.quantidade)),
+      quantity: item.quantity,
       totalPrice: String(item.totalPrice.toFixed(2)),
       sortOrder: index + 1,
     })),
@@ -79,7 +124,7 @@ export async function prepareProposalFromQuotation(
   return {
     proposalId,
     created: true,
-    itemCount: priced.items.length,
-    total: priced.subtotal,
+    itemCount: normalizedItems.length,
+    total,
   };
 }

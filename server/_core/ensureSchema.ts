@@ -147,9 +147,39 @@ export async function ensurePortalSessionColumns(): Promise<void> {
   try {
     await ensureColumn("portal_credentials", "sessaoCookies", "TEXT NULL");
     await ensureColumn("portal_credentials", "sessaoExpiraEm", "TIMESTAMP NULL");
+    await ensureColumn("portal_credentials", "loginFailCount", "INT NOT NULL DEFAULT 0");
     await ensureColumn("proposals", "emailQuotationId", "INT NULL");
+    await ensureUniqueIndex("proposals", "emailQuotationId", "uq_proposals_email_quotation");
   } catch (err) {
     logger.error("[Schema] Falha ao garantir colunas de sessão de portal:", err);
+  }
+}
+
+/**
+ * Garante um índice único de coluna única, idempotente. Não fatal: se já
+ * existirem propostas duplicadas para o mesmo valor (corrida antes desta
+ * correção), a criação falha e fica só registrada — não trava o boot.
+ */
+async function ensureUniqueIndex(table: string, column: string, indexName: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const [rows] = await db.execute(
+    sql`SELECT COUNT(*) as total FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table} AND INDEX_NAME = ${indexName}`,
+  );
+  const total = Number((rows as any)[0]?.total ?? 0);
+  if (total > 0) return;
+  try {
+    await db.execute(
+      sql.raw(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${indexName}\` (\`${column}\`)`),
+    );
+    logger.info(`[Schema] Índice único ${indexName} criado em ${table}.${column}.`);
+  } catch (err) {
+    logger.error(
+      `[Schema] Não foi possível criar índice único ${indexName} em ${table}.${column} ` +
+        `(provável duplicata pré-existente — revisar manualmente):`,
+      err,
+    );
   }
 }
 

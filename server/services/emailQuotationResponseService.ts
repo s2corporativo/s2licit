@@ -170,7 +170,10 @@ export async function priceQuotationItems(
     const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
     const categoryId = item.produtoMatchId != null ? categoryByProductId.get(item.produtoMatchId) : null;
     const itemMargin = resolveItemMarginPercent(categoryId, marginRulesByCategory, marginPercent);
-    if (itemMargin !== marginPercent) categoryOverrides++;
+    // Conta a regra de categoria APLICADA, não a mudança de número: uma
+    // regra ativa cuja margem coincide com a padrão ainda é um override
+    // (decisão explícita da categoria), só não muda o preço final.
+    if (categoryId != null && marginRulesByCategory.has(categoryId)) categoryOverrides++;
     const unitPrice = Number(applyMargin(base, itemMargin).toFixed(2));
     totalCusto += base * safeQuantity;
 

@@ -482,18 +482,32 @@ export async function syncS2PortalOpportunities(options?: {
   const foundationSources = sources.filter(
     (source): source is FoundationPortalSource => source === "fundep" || source === "funarbe",
   );
+  const institutionalSources = sources.filter(
+    (source): source is InstitutionalSource =>
+      (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
+  );
+
+  // Carregado uma única vez para todo o sync (era carregado de novo a cada
+  // fallback autenticado da fundação E de novo para os institucionais).
+  const tambasaCatalog =
+    foundationSources.length > 0 || institutionalSources.length > 0 ? await loadTambasaCatalog() : [];
+
   if (foundationSources.length > 0) {
     const result = await syncFoundationOpportunities({
       sources: foundationSources,
       maxFundepGroups: options?.maxFundepGroups,
     });
+    // Contagem POR FONTE (não o agregado de Fundep+Funarbe combinados) —
+    // senão Funarbe herda o resultado de Fundep (e vice-versa) e o fallback
+    // autenticado abaixo nunca roda quando só uma das duas tem resultado.
     for (const source of foundationSources) {
       const target = stats.get(source)!;
-      target.found = result.found;
-      target.imported = result.imported;
-      target.skipped = result.skipped;
-      target.matchedItems = result.matchedItems;
-      target.unmatchedItems = result.unmatchedItems;
+      const perSource = result.sourceStats.find((s) => s.source === source);
+      target.found = perSource?.found ?? 0;
+      target.imported = perSource?.imported ?? 0;
+      target.skipped = perSource?.skipped ?? 0;
+      target.matchedItems = perSource?.matchedItems ?? 0;
+      target.unmatchedItems = perSource?.unmatchedItems ?? 0;
       target.errors.push(...result.errors);
     }
 
@@ -504,11 +518,10 @@ export async function syncS2PortalOpportunities(options?: {
       if (target.found > 0) continue;
       const authenticated = await fetchAuthenticatedOpportunities(source, target.errors);
       if (authenticated.length === 0) continue;
-      const catalog = await loadTambasaCatalog();
       target.found += authenticated.length;
       for (const opportunity of authenticated) {
         try {
-          const persisted = await persistOpportunity(opportunity, catalog);
+          const persisted = await persistOpportunity(opportunity, tambasaCatalog);
           if (persisted.imported) target.imported++;
           else target.skipped++;
           target.matchedItems += persisted.matched;
@@ -520,13 +533,7 @@ export async function syncS2PortalOpportunities(options?: {
     }
   }
 
-  const institutionalSources = sources.filter(
-    (source): source is InstitutionalSource =>
-      (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
-  );
-
   if (institutionalSources.length > 0) {
-    const tambasaCatalog = await loadTambasaCatalog();
     if (tambasaCatalog.length === 0) {
       for (const source of institutionalSources) {
         stats.get(source)!.errors.push(

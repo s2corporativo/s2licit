@@ -149,123 +149,151 @@ export async function runAutoPipelineForQuotation(
     return result;
   }
 
-  const items = await db
-    .select()
-    .from(emailQuotationItems)
-    .where(eq(emailQuotationItems.quotationId, quotationId));
-  if (items.length === 0) {
-    result.blockedReason = "Cotação sem itens extraídos.";
-    return result;
-  }
-
-  // 1. Auto-confirmação dos matches de alta confiança
-  const threshold = autoConfirmThreshold();
-  for (const item of items) {
-    if (!shouldAutoConfirm(item, threshold)) continue;
-    await db
-      .update(emailQuotationItems)
-      .set({ matchConfirmado: true, matchAuto: true })
-      .where(eq(emailQuotationItems.id, item.id));
-    item.matchConfirmado = true;
-    result.autoConfirmedItems++;
-    // Trilha de auditoria: base para calibrar o limiar (quantas confirmações
-    // automáticas depois são corrigidas manualmente pelo operador).
-    await recordAudit({
-      action: "AUTO_MATCH_CONFIRMED",
-      entity: "email_quotation_items",
-      entityId: item.id,
-      summary: `Match auto-confirmado (${item.matchMethod}, score ${item.matchScore ?? "—"})`,
-      changes: { produtoMatchId: item.produtoMatchId, matchMethod: item.matchMethod, matchScore: item.matchScore },
-    });
-  }
-
-  // 2. Todos confirmados e com preço? Senão, a cotação fica para revisão humana.
-  const pendentes = items.filter(
-    (item) => item.produtoMatchId == null || item.matchConfirmado !== true,
-  );
-  if (pendentes.length > 0) {
-    result.blockedReason = `${pendentes.length} item(ns) aguardando revisão humana (match ausente ou abaixo do limiar).`;
-    return result;
-  }
-  const semPreco = items.filter((item) => {
-    const preco = Number(item.precoSugerido);
-    return !Number.isFinite(preco) || preco <= 0;
-  });
-  if (semPreco.length > 0) {
-    result.blockedReason = `${semPreco.length} item(ns) sem preço de custo positivo.`;
-    return result;
-  }
-
-  // 3. Frescor do preço de custo — item cujo produto tem preço vencido
-  //    (histórico de consulta mais velho que a validade configurada) segura a
-  //    cotação na revisão humana. Produto sem histórico de consulta não é
-  //    considerado vencido aqui: nesse caso o preço vem de cadastro estático
-  //    (NF-e, planilha), não de uma consulta datada a revalidar.
-  const matchedProductIds = items
-    .map((item) => item.produtoMatchId)
-    .filter((id): id is number => id != null);
-  const frescor = await avaliarFrescorPrecos(matchedProductIds);
-  const vencidos = staleMatchedProducts(frescor);
-  if (vencidos.length > 0) {
-    result.blockedReason =
-      `${vencidos.length} produto(s) com preço vencido — revalide a consulta antes de gerar a proposta.`;
-    return result;
-  }
-
-  // 4. Geração da proposta (mesmo caminho validado do fluxo manual, com
-  //    margem por categoria quando houver regra ativa)
-  const response = await buildQuotationResponse(quotationId);
-  const pdfBuffer = Buffer.from(response.pdfBase64, "base64");
-  const stored = await storagePut(
-    `propostas/auto/orcamento-${quotationId}.pdf`,
-    pdfBuffer,
-    "application/pdf",
-  );
-
-  await db
+  // Claim atômico: reserva a cotação transicionando revisao→processando
+  // SÓ SE ainda estiver em revisao. Evita que o agendador, uma chamada manual
+  // e (em produção com mais de uma instância) outro processo processem a
+  // mesma cotação em paralelo. Se 0 linhas foram afetadas, outra execução já
+  // pegou esta cotação — não é erro, apenas não há nada a fazer aqui agora.
+  const claim = await db
     .update(emailQuotations)
-    .set({
-      propostaPdfUrl: stored.url,
-      propostaGeradaEm: new Date(),
-      propostaMargemPercent: String(response.effectiveMarginPercent.toFixed(2)),
-      valorProposto: String(response.total.toFixed(2)),
-    })
-    .where(eq(emailQuotations.id, quotationId));
-  result.proposalGenerated = true;
-
-  // Rastreabilidade: toda proposta gerada entra no funil de oportunidades.
-  try {
-    await ensureOpportunityFromQuotation(quotationId, AUTO_ACTOR);
-  } catch (err) {
-    logger.warn(
-      `[AutoPipeline] Cotação ${quotationId}: proposta gerada, mas o funil não foi atualizado: ${(err as Error).message}`,
-    );
+    .set({ status: "processando" })
+    .where(and(eq(emailQuotations.id, quotationId), eq(emailQuotations.status, "revisao")));
+  const claimedRows = (claim as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
+  if (claimedRows !== 1) {
+    result.blockedReason = "Cotação já está sendo processada por outra execução.";
+    return result;
   }
 
-  // 4. Envio automático — só com a chave explicitamente ligada, SMTP
-  //    configurado e remetente identificado (cotações de portal não têm e-mail).
-  if (isAutoSendEnabled() && isSmtpConfigured() && quotation.fromAddress) {
-    await sendEmail({
-      to: quotation.fromAddress,
-      subject: `Proposta comercial - ${quotation.subject ?? `Cotação ${quotationId}`}`,
-      text:
-        "Prezados,\n\nSegue em anexo nossa proposta comercial em resposta à solicitação de cotação.\n\nAtenciosamente.",
-      attachments: [
-        {
-          filename: `orcamento-${quotationId}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        },
-      ],
+  try {
+    const items = await db
+      .select()
+      .from(emailQuotationItems)
+      .where(eq(emailQuotationItems.quotationId, quotationId));
+    if (items.length === 0) {
+      result.blockedReason = "Cotação sem itens extraídos.";
+      return result;
+    }
+
+    // 1. Auto-confirmação dos matches de alta confiança
+    const threshold = autoConfirmThreshold();
+    for (const item of items) {
+      if (!shouldAutoConfirm(item, threshold)) continue;
+      await db
+        .update(emailQuotationItems)
+        .set({ matchConfirmado: true, matchAuto: true })
+        .where(eq(emailQuotationItems.id, item.id));
+      item.matchConfirmado = true;
+      result.autoConfirmedItems++;
+      // Trilha de auditoria: base para calibrar o limiar (quantas confirmações
+      // automáticas depois são corrigidas manualmente pelo operador).
+      await recordAudit({
+        action: "AUTO_MATCH_CONFIRMED",
+        entity: "email_quotation_items",
+        entityId: item.id,
+        summary: `Match auto-confirmado (${item.matchMethod}, score ${item.matchScore ?? "—"})`,
+        changes: { produtoMatchId: item.produtoMatchId, matchMethod: item.matchMethod, matchScore: item.matchScore },
+      });
+    }
+
+    // 2. Todos confirmados e com preço? Senão, a cotação fica para revisão humana.
+    const pendentes = items.filter(
+      (item) => item.produtoMatchId == null || item.matchConfirmado !== true,
+    );
+    if (pendentes.length > 0) {
+      result.blockedReason = `${pendentes.length} item(ns) aguardando revisão humana (match ausente ou abaixo do limiar).`;
+      return result;
+    }
+    const semPreco = items.filter((item) => {
+      const preco = Number(item.precoSugerido);
+      return !Number.isFinite(preco) || preco <= 0;
     });
+    if (semPreco.length > 0) {
+      result.blockedReason = `${semPreco.length} item(ns) sem preço de custo positivo.`;
+      return result;
+    }
+
+    // 3. Frescor do preço de custo — item cujo produto tem preço vencido
+    //    (histórico de consulta mais velho que a validade configurada) segura a
+    //    cotação na revisão humana. Produto sem histórico de consulta não é
+    //    considerado vencido aqui: nesse caso o preço vem de cadastro estático
+    //    (NF-e, planilha), não de uma consulta datada a revalidar.
+    const matchedProductIds = items
+      .map((item) => item.produtoMatchId)
+      .filter((id): id is number => id != null);
+    const frescor = await avaliarFrescorPrecos(matchedProductIds);
+    const vencidos = staleMatchedProducts(frescor);
+    if (vencidos.length > 0) {
+      result.blockedReason =
+        `${vencidos.length} produto(s) com preço vencido — revalide a consulta antes de gerar a proposta.`;
+      return result;
+    }
+
+    // 4. Geração da proposta (mesmo caminho validado do fluxo manual, com
+    //    margem por categoria quando houver regra ativa)
+    const response = await buildQuotationResponse(quotationId);
+    const pdfBuffer = Buffer.from(response.pdfBase64, "base64");
+    const stored = await storagePut(
+      `propostas/auto/orcamento-${quotationId}.pdf`,
+      pdfBuffer,
+      "application/pdf",
+    );
+
     await db
       .update(emailQuotations)
-      .set({ status: "respondida" })
+      .set({
+        status: "revisao",
+        propostaPdfUrl: stored.url,
+        propostaGeradaEm: new Date(),
+        propostaMargemPercent: String(response.effectiveMarginPercent.toFixed(2)),
+        valorProposto: String(response.total.toFixed(2)),
+      })
       .where(eq(emailQuotations.id, quotationId));
-    result.sent = true;
-  }
+    result.proposalGenerated = true;
 
-  return result;
+    // Rastreabilidade: toda proposta gerada entra no funil de oportunidades.
+    try {
+      await ensureOpportunityFromQuotation(quotationId, AUTO_ACTOR);
+    } catch (err) {
+      logger.warn(
+        `[AutoPipeline] Cotação ${quotationId}: proposta gerada, mas o funil não foi atualizado: ${(err as Error).message}`,
+      );
+    }
+
+    // 5. Envio automático — só com a chave explicitamente ligada, SMTP
+    //    configurado e remetente identificado (cotações de portal não têm e-mail).
+    if (isAutoSendEnabled() && isSmtpConfigured() && quotation.fromAddress) {
+      await sendEmail({
+        to: quotation.fromAddress,
+        subject: `Proposta comercial - ${quotation.subject ?? `Cotação ${quotationId}`}`,
+        text:
+          "Prezados,\n\nSegue em anexo nossa proposta comercial em resposta à solicitação de cotação.\n\nAtenciosamente.",
+        attachments: [
+          {
+            filename: `orcamento-${quotationId}.pdf`,
+            content: pdfBuffer,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+      await db
+        .update(emailQuotations)
+        .set({ status: "respondida" })
+        .where(eq(emailQuotations.id, quotationId));
+      result.sent = true;
+    }
+
+    return result;
+  } finally {
+    // Libera o claim se a cotação não chegou a virar proposta (qualquer
+    // bloqueio no meio do caminho) — senão ficaria travada em "processando"
+    // para sempre, fora do alcance de qualquer nova tentativa.
+    if (!result.proposalGenerated) {
+      await db
+        .update(emailQuotations)
+        .set({ status: "revisao" })
+        .where(and(eq(emailQuotations.id, quotationId), eq(emailQuotations.status, "processando")));
+    }
+  }
 }
 
 /**

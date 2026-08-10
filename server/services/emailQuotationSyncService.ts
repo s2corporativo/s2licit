@@ -63,21 +63,30 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
         continue;
       }
 
-      // Extrai itens: prioriza anexos processáveis; senão, o corpo.
+      // Extrai itens: tenta cada anexo processável, na ordem em que veio no
+      // e-mail, até um render itens (uma imagem sem itens não pode "roubar"
+      // a vez de um PDF/planilha válido que venha depois); sem nenhum anexo
+      // com itens, cai para o corpo do e-mail.
       let items: ExtractedItem[] = [];
       let sourceType: "spreadsheet" | "pdf" | "docx" | "image" | "body" = "body";
       let sourceFilename: string | null = null;
 
-      const attachment = email.attachments.find((a) => PROCESSABLE_ATTACHMENT.test(a.filename));
-      if (attachment) {
-        const extracted = await extractItemsFromAttachment(
-          attachment.content,
-          attachment.filename,
-          attachment.contentType,
-        );
-        items = extracted.items;
-        sourceType = extracted.sourceType;
-        sourceFilename = attachment.filename;
+      const candidatos = email.attachments.filter((a) => PROCESSABLE_ATTACHMENT.test(a.filename));
+      for (const attachment of candidatos) {
+        try {
+          const extracted = await extractItemsFromAttachment(
+            attachment.content,
+            attachment.filename,
+            attachment.contentType,
+          );
+          if (extracted.items.length === 0) continue;
+          items = extracted.items;
+          sourceType = extracted.sourceType;
+          sourceFilename = attachment.filename;
+          break;
+        } catch {
+          continue; // anexo corrompido/formato inesperado — tenta o próximo
+        }
       }
       if (items.length === 0) {
         items = await extractItemsFromText(email.text);

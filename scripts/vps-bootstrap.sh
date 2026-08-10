@@ -63,9 +63,9 @@ SMTP_FROM=adm@vetmg.com.br
 
 # ── Agendador ──
 EMAIL_SYNC_ENABLED=true
-EMAIL_SYNC_CRON=*/15 * * * *
+EMAIL_SYNC_CRON="*/15 * * * *"
 ALERTS_ENABLED=true
-ALERTS_CRON=0 8 * * *
+ALERTS_CRON="0 8 * * *"
 
 # ── WhatsApp para alertas (opcional) ──
 WHATSAPP_PHONE_ID=

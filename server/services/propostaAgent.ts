@@ -12,16 +12,12 @@
  * Fluxo: Login → Localizar licitação → Ler itens → Buscar preços S2 → Preencher → Screenshot → Aguardar aprovação → Enviar
  */
 
-import puppeteer, { Browser, Page } from "puppeteer";
+import puppeteer, { Browser, Page, type CookieSameSite } from "puppeteer";
 import { getDb } from "../db";
 import { proposals, proposalItems } from "../../drizzle/schema";
 import { eq, asc } from "drizzle-orm";
 import { decryptPassword } from "../utils/encryption";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
-import {
-  puppeteerCookiesToRecord,
-  recordToPuppeteerCookies,
-} from "./sessionCookies";
 import { logger } from "../_core/logger";
 
 // ─── Conformidade: detecção de CAPTCHA (sem resolução) ─────────────────────────
@@ -97,6 +93,23 @@ export interface PortalCredential {
   password: string;
   cpf?: string;
   cnpj?: string;
+}
+
+/**
+ * Descritor completo de cookie para reuso de sessão (domínio/path/flags
+ * preservados) — diferente do formato nome=valor usado pelo reuso de sessão
+ * do scraper de fornecedores (sessionCookies.ts), que é um recurso
+ * independente e não deve ser afetado por esta mudança.
+ */
+export interface PortalSessionCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: CookieSameSite;
+  expires?: number;
 }
 
 export interface ItemProposta {
@@ -505,6 +518,23 @@ export class PropostaAgente {
     return false;
   }
 
+  /**
+   * Verificação pontual (sem espera) de presença de um elemento — usada para
+   * reforçar a confirmação de login: um indicador de texto sozinho pode
+   * coincidir com a própria tela de login; a ausência do campo de senha é um
+   * segundo sinal independente de que a navegação saiu da tela de login.
+   */
+  private async campoPresente(seletor: string): Promise<boolean> {
+    if (!this.page) return false;
+    const lista = seletor.split(",").map(s => s.trim()).filter(Boolean);
+    for (const sel of lista) {
+      try {
+        if (await this.page.$(sel)) return true;
+      } catch {}
+    }
+    return false;
+  }
+
   private async preencherCampo(seletor: string, valor: string): Promise<boolean> {
     if (!this.page) return false;
     const lista = seletor.split(",").map(s => s.trim()).filter(Boolean);
@@ -594,10 +624,13 @@ export class PropostaAgente {
       throw new Error(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
     }
 
-    // Confirmação positiva: indicador de sucesso na página OU URL mudou.
-    // Sem isso, CAPTCHA/manutenção/layout novo passavam como "login ok".
+    // Confirmação positiva: indicador de sucesso na página (E sem o campo de
+    // senha mais visível — só o texto pode coincidir com a própria tela de
+    // login) OU a URL mudou. Sem isso, CAPTCHA/manutenção/layout novo
+    // passavam como "login ok".
     const indicador = cfg.seletores.loginSucesso?.toLowerCase();
-    const sucessoIndicado = indicador ? textoPage.toLowerCase().includes(indicador) : false;
+    const senhaAindaVisivel = await this.campoPresente(cfg.seletores.loginSenha);
+    const sucessoIndicado = indicador ? textoPage.toLowerCase().includes(indicador) && !senhaAindaVisivel : false;
     const urlMudou = urlAtual !== url;
     if (!sucessoIndicado && !urlMudou) {
       await this.capturarTela("Login não confirmado");
@@ -629,32 +662,47 @@ export class PropostaAgente {
   }
 
   /**
-   * Exporta os cookies da sessão atual (formato nome→valor) para reuso em uma
-   * execução futura sem repetir o login.
+   * Exporta os cookies completos (nome, valor, domínio, path, flags) da
+   * sessão atual, para reuso em uma execução futura sem repetir o login.
+   * Guarda o descritor inteiro — não só nome=valor — porque um portal que
+   * separa host de login e host de aplicação perderia domínio/path num
+   * formato reduzido, e a sessão restaurada nunca autenticaria de fato.
    */
-  async exportarCookies(): Promise<Record<string, string>> {
-    if (!this.page) return {};
+  async exportarCookies(): Promise<PortalSessionCookie[]> {
+    if (!this.page) return [];
     try {
-      const cookies = await this.page.cookies();
-      return puppeteerCookiesToRecord(cookies);
+      const cookies = await this.page.browserContext().cookies();
+      return cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
+        sameSite: c.sameSite,
+        expires: c.expires,
+      }));
     } catch {
-      return {};
+      return [];
     }
   }
 
   /**
    * Tenta restaurar uma sessão salva (cookies) em vez de logar de novo:
    * abre a página, aplica os cookies e navega até `url`. Retorna true se o
-   * indicador de sucesso do portal aparecer — nesse caso, `login()` pode ser
-   * pulado. Retorna false (sem lançar) em qualquer falha, para que o chamador
-   * caia no login completo normalmente.
+   * indicador de sucesso do portal aparecer (e o campo de senha não estiver
+   * mais visível) — nesse caso, `login()` pode ser pulado. Retorna false
+   * (sem lançar) em qualquer falha, para que o chamador caia no login
+   * completo normalmente; a página aberta aqui é sempre fechada antes de
+   * devolver false, para que ela — e seus cookies — não sobrevivam para o
+   * login() seguinte.
    */
   async restaurarSessao(
     cred: PortalCredential,
-    cookies: Record<string, string>,
+    cookies: PortalSessionCookie[],
     url: string,
   ): Promise<boolean> {
-    if (Object.keys(cookies).length === 0) return false;
+    if (cookies.length === 0) return false;
     try {
       if (!this.browser) await this.init();
       this.page = await this.browser!.newPage();
@@ -664,18 +712,32 @@ export class PropostaAgente {
       await this.page.setViewport({ width: 1366, height: 768 });
 
       assertSafeExternalUrl(url, "URL do portal");
-      await this.page.setCookie(...recordToPuppeteerCookies(cookies, url));
+      await this.page.browserContext().setCookie(...cookies);
       await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
       await new Promise((r) => setTimeout(r, 1200));
 
       const cfg = PORTAL_CONFIGS[cred.portal];
       const textoPage = await this.page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
       const indicador = cfg.seletores.loginSucesso?.toLowerCase();
-      const restaurada = indicador ? textoPage.toLowerCase().includes(indicador) : false;
-      if (restaurada) this.addLog(`♻️ Sessão restaurada sem novo login (${cfg.nome}).`);
-      return restaurada;
+      const senhaAindaVisivel = await this.campoPresente(cfg.seletores.loginSenha);
+      const restaurada = indicador
+        ? textoPage.toLowerCase().includes(indicador) && !senhaAindaVisivel
+        : false;
+
+      if (restaurada) {
+        this.addLog(`♻️ Sessão restaurada sem novo login (${cfg.nome}).`);
+        return true;
+      }
+      // Sessão não confirmada: fecha esta página agora — se ela ficar aberta,
+      // seus cookies (de uma sessão inválida/expirada) continuam no mesmo
+      // contexto de navegador e podem contaminar a página de login seguinte.
+      await this.page.close().catch(() => {});
+      this.page = null;
+      return false;
     } catch (err) {
       logger.warn(`[PropostaAgente] Falha ao restaurar sessão: ${(err as Error).message}`);
+      await this.page?.close().catch(() => {});
+      this.page = null;
       return false;
     }
   }

@@ -6,6 +6,7 @@ import {
   CaptchaRequerIntervencaoError,
   PORTAL_CONFIGS,
   PropostaAgente,
+  type PortalSessionCookie,
   type PortalType,
 } from "./propostaAgent";
 // Efeito colateral necessário: registra CEMIG/FIEMG/COPASA com as
@@ -34,6 +35,11 @@ import { logger } from "../_core/logger";
  */
 
 const DEFAULT_SESSION_TTL_HOURS = 6;
+// Depois de N falhas de login CONSECUTIVAS, para de tentar — a maioria dos
+// portais de fornecedor bloqueia a conta após um pequeno número de
+// tentativas, e uma conta bloqueada também impede o operador humano.
+// Reseta ao logar com sucesso, ou recadastrando a credencial no cofre.
+const LOGIN_FAIL_THRESHOLD = 3;
 
 export function isPortalAuthDiscoveryEnabled(): boolean {
   const flag = process.env.PORTAL_AUTH_DISCOVERY_ENABLED;
@@ -67,8 +73,9 @@ export interface DecryptedPortalCredential {
   usuario: string;
   senha: string;
   cnpj?: string;
-  sessaoCookies: Record<string, string> | null;
+  sessaoCookies: PortalSessionCookie[] | null;
   sessaoExpiraEm: Date | null;
+  loginFailCount: number;
 }
 
 /** Busca a credencial ativa mais recente do cofre para um portal. */
@@ -85,7 +92,7 @@ export async function getPortalCredentialForPortal(
     .limit(1);
   if (!row) return null;
 
-  let sessaoCookies: Record<string, string> | null = null;
+  let sessaoCookies: PortalSessionCookie[] | null = null;
   if (row.sessaoCookies) {
     try {
       sessaoCookies = JSON.parse(credentialEncryptionService.decrypt(row.sessaoCookies));
@@ -103,11 +110,12 @@ export async function getPortalCredentialForPortal(
     cnpj: row.cnpj ?? undefined,
     sessaoCookies,
     sessaoExpiraEm: row.sessaoExpiraEm ?? null,
+    loginFailCount: row.loginFailCount ?? 0,
   };
 }
 
-/** Persiste a sessão (cookies) da credencial, criptografada, com validade. */
-async function saveSession(credentialId: number, cookies: Record<string, string>): Promise<void> {
+/** Persiste a sessão (cookies) da credencial, criptografada, com validade, e zera o contador de falhas. */
+async function saveSession(credentialId: number, cookies: PortalSessionCookie[]): Promise<void> {
   const db = await getDb();
   if (!db) return;
   try {
@@ -116,11 +124,33 @@ async function saveSession(credentialId: number, cookies: Record<string, string>
       .set({
         sessaoCookies: credentialEncryptionService.encrypt(JSON.stringify(cookies)),
         sessaoExpiraEm: new Date(Date.now() + sessionTtlHours() * 60 * 60 * 1000),
+        loginFailCount: 0,
       })
       .where(eq(portalCredentials.id, credentialId));
   } catch (err) {
     logger.warn(`[PortalAuthDiscovery] Falha ao salvar sessão da credencial ${credentialId}: ${(err as Error).message}`);
   }
+}
+
+/** Login bem-sucedido sem cookies aproveitáveis (ex.: fluxo custom) — ainda assim zera o contador de falhas. */
+async function resetLoginFailures(credentialId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(portalCredentials).set({ loginFailCount: 0 }).where(eq(portalCredentials.id, credentialId));
+}
+
+/** Incrementa o contador de falhas consecutivas de login da credencial. */
+async function recordLoginFailure(credentialId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const [row] = await db
+    .select({ loginFailCount: portalCredentials.loginFailCount })
+    .from(portalCredentials)
+    .where(eq(portalCredentials.id, credentialId))
+    .limit(1);
+  const next = (row?.loginFailCount ?? 0) + 1;
+  await db.update(portalCredentials).set({ loginFailCount: next }).where(eq(portalCredentials.id, credentialId));
+  return next;
 }
 
 /**
@@ -141,15 +171,26 @@ export async function fetchAuthenticatedPortalHtml(
   const credential = await getPortalCredentialForPortal(portalType);
   if (!credential) return null;
 
+  const sessaoValida =
+    credential.sessaoCookies != null &&
+    credential.sessaoExpiraEm != null &&
+    new Date(credential.sessaoExpiraEm).getTime() > Date.now();
+
+  // Credencial bloqueada: só a sessão salva pode ser usada — nenhuma NOVA
+  // tentativa de login até o operador corrigir (recadastrar a credencial no
+  // cofre, o que cria uma linha nova com o contador zerado).
+  if (!sessaoValida && credential.loginFailCount >= LOGIN_FAIL_THRESHOLD) {
+    logger.warn(
+      `[PortalAuthDiscovery] ${source}: credencial bloqueada após ${credential.loginFailCount} falha(s) de login ` +
+        "consecutivas — recadastre a credencial no cofre para tentar novamente.",
+    );
+    return null;
+  }
+
   const url = getS2PortalUrl(source);
   const agente = new PropostaAgente();
   try {
     await agente.init();
-
-    const sessaoValida =
-      credential.sessaoCookies != null &&
-      credential.sessaoExpiraEm != null &&
-      new Date(credential.sessaoExpiraEm).getTime() > Date.now();
 
     let autenticado = false;
     if (sessaoValida) {
@@ -161,15 +202,22 @@ export async function fetchAuthenticatedPortalHtml(
     }
 
     if (!autenticado) {
-      await agente.login({
-        portal: portalType,
-        loginUrl: credential.loginUrl,
-        email: credential.usuario,
-        password: credential.senha,
-        cnpj: credential.cnpj,
-      });
+      try {
+        await agente.login({
+          portal: portalType,
+          loginUrl: credential.loginUrl,
+          email: credential.usuario,
+          password: credential.senha,
+          cnpj: credential.cnpj,
+        });
+      } catch (err) {
+        const falhas = await recordLoginFailure(credential.id);
+        logger.warn(`[PortalAuthDiscovery] ${source}: falha de login (${falhas}/${LOGIN_FAIL_THRESHOLD}).`);
+        throw err;
+      }
       const cookies = await agente.exportarCookies();
-      if (Object.keys(cookies).length > 0) await saveSession(credential.id, cookies);
+      if (cookies.length > 0) await saveSession(credential.id, cookies);
+      else await resetLoginFailures(credential.id);
     }
 
     return await agente.coletarHtml(url);
@@ -219,8 +267,10 @@ export async function checkPortalLoginHealth(source: S2TargetPortal): Promise<Po
       password: credential.senha,
       cnpj: credential.cnpj,
     });
+    await resetLoginFailures(credential.id);
     return { source, hasCredential: true, ok: true, detail: "Login confirmado." };
   } catch (err) {
+    await recordLoginFailure(credential.id);
     const detail = err instanceof CaptchaRequerIntervencaoError
       ? "CAPTCHA exigiu intervenção humana (não é necessariamente quebra de seletor)."
       : (err as Error).message;

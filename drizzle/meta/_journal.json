@@ -127,6 +127,13 @@
       "when": 1786403169929,
       "tag": "0017_fine_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1786404899126,
+      "tag": "0018_motionless_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

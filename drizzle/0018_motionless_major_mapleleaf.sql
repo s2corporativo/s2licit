@@ -1,0 +1,2 @@
+ALTER TABLE `portal_credentials` ADD `loginFailCount` int DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE `proposals` ADD CONSTRAINT `proposals_emailQuotationId_unique` UNIQUE(`emailQuotationId`);

@@ -42,6 +42,15 @@ export interface PortalOpportunity {
   items: PortalOpportunityItem[];
 }
 
+export interface PortalSourceSyncStats {
+  source: PortalOpportunitySource;
+  found: number;
+  imported: number;
+  skipped: number;
+  matchedItems: number;
+  unmatchedItems: number;
+}
+
 export interface PortalSyncResult {
   sources: PortalOpportunitySource[];
   found: number;
@@ -50,6 +59,8 @@ export interface PortalSyncResult {
   matchedItems: number;
   unmatchedItems: number;
   errors: string[];
+  /** Quebra por fonte (Fundep/Funarbe) — o agregado acima soma os dois. */
+  sourceStats: PortalSourceSyncStats[];
 }
 
 interface TambasaCatalogProduct {
@@ -511,14 +522,23 @@ export async function syncPortalOpportunities(options?: {
   let skipped = 0;
   let matchedItems = 0;
   let unmatchedItems = 0;
+  const bySource = new Map<PortalOpportunitySource, PortalSourceSyncStats>(
+    sources.map((source) => [source, { source, found: 0, imported: 0, skipped: 0, matchedItems: 0, unmatchedItems: 0 }]),
+  );
 
   for (const opportunity of opportunities) {
+    const sourceStats = bySource.get(opportunity.source);
+    if (sourceStats) sourceStats.found++;
     try {
       const persisted = await persistOpportunity(opportunity, tambasaCatalog);
-      if (persisted.imported) imported++;
-      else skipped++;
+      if (persisted.imported) { imported++; if (sourceStats) sourceStats.imported++; }
+      else { skipped++; if (sourceStats) sourceStats.skipped++; }
       matchedItems += persisted.matched;
       unmatchedItems += persisted.unmatched;
+      if (sourceStats) {
+        sourceStats.matchedItems += persisted.matched;
+        sourceStats.unmatchedItems += persisted.unmatched;
+      }
     } catch (error) {
       errors.push(
         `${opportunity.source.toUpperCase()} ${opportunity.externalId}: ${(error as Error).message}`,
@@ -539,5 +559,6 @@ export async function syncPortalOpportunities(options?: {
     matchedItems,
     unmatchedItems,
     errors,
+    sourceStats: Array.from(bySource.values()),
   };
 }

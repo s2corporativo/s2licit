@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, eq, gte } from "drizzle-orm";
+import { and, count, eq, gte, inArray } from "drizzle-orm";
 import { adminProcedure, editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { auditLogs, emailQuotationItems, emailQuotations } from "../../drizzle/schema";
@@ -47,10 +47,23 @@ export const emailQuotationsRouter = router({
         .optional(),
     )
     .mutation(async ({ input }) => {
+      const enabled = isAutoPipelineEnabled();
       if (input?.quotationId) {
+        if (!enabled) {
+          return {
+            enabled,
+            processed: 0,
+            autoConfirmedItems: 0,
+            proposalsGenerated: 0,
+            sent: 0,
+            blocked: 0,
+            errors: [] as string[],
+            quotations: [],
+          };
+        }
         const one = await runAutoPipelineForQuotation(input.quotationId);
         return {
-          enabled: isAutoPipelineEnabled(),
+          enabled,
           processed: 1,
           autoConfirmedItems: one.autoConfirmedItems,
           proposalsGenerated: one.proposalGenerated ? 1 : 0,
@@ -84,21 +97,25 @@ export const emailQuotationsRouter = router({
       if (!db) return { confirmados: 0, corrigidos: 0, taxaAcerto: null as number | null };
       const desde = new Date(Date.now() - (input?.diasJanela ?? 90) * 24 * 60 * 60 * 1000);
       const rows = await db
-        .select({ action: auditLogs.action })
+        .select({ action: auditLogs.action, total: count() })
         .from(auditLogs)
         .where(
           and(
             eq(auditLogs.entity, "email_quotation_items"),
             gte(auditLogs.createdAt, desde),
+            inArray(auditLogs.action, ["AUTO_MATCH_CONFIRMED", "AUTO_MATCH_CORRECTED"]),
           ),
-        );
-      const confirmados = rows.filter((r) => r.action === "AUTO_MATCH_CONFIRMED").length;
-      const corrigidos = rows.filter((r) => r.action === "AUTO_MATCH_CORRECTED").length;
-      return {
-        confirmados,
-        corrigidos,
-        taxaAcerto: confirmados > 0 ? Number((((confirmados - corrigidos) / confirmados) * 100).toFixed(1)) : null,
-      };
+        )
+        .groupBy(auditLogs.action);
+      const confirmados = rows.find((r) => r.action === "AUTO_MATCH_CONFIRMED")?.total ?? 0;
+      const corrigidos = rows.find((r) => r.action === "AUTO_MATCH_CORRECTED")?.total ?? 0;
+      // Corrigidos pode ultrapassar confirmados DENTRO da janela (correção de
+      // uma confirmação feita antes do início da janela) — nunca exibir taxa
+      // negativa nesse caso.
+      const taxaAcerto = confirmados > 0
+        ? Number((Math.max(0, (confirmados - corrigidos) / confirmados) * 100).toFixed(1))
+        : null;
+      return { confirmados, corrigidos, taxaAcerto };
     }),
 
   /** Dispara a sincronização da caixa de entrada (somente admin). */
@@ -150,6 +167,7 @@ export const emailQuotationsRouter = router({
         .from(emailQuotationItems)
         .where(eq(emailQuotationItems.id, input.itemId))
         .limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Item de cotação não encontrado." });
 
       await db
         .update(emailQuotationItems)
@@ -161,14 +179,17 @@ export const emailQuotationsRouter = router({
           // operador reconfirme o MESMO produto, a decisão passou a ser
           // humana — não conta mais como acerto nem erro da automação.
           matchAuto: false,
-          precoSugerido: input.precoSugerido ?? undefined,
+          // undefined omitiria a coluna do UPDATE (Drizzle a ignora) — só
+          // preserva o preço atual quando o campo nem foi enviado; um null
+          // explícito deve limpar o preço, não ficar sem efeito.
+          ...(input.precoSugerido !== undefined ? { precoSugerido: input.precoSugerido } : {}),
         })
         .where(eq(emailQuotationItems.id, input.itemId));
 
       // Calibração do limiar (§ auto-confirmação): registra quando o operador
       // substitui um match que a automação havia confirmado sozinha por um
       // produto DIFERENTE — é a correção que importa para medir acerto/erro.
-      if (current?.matchAuto && current.produtoMatchId !== input.produtoMatchId) {
+      if (current.matchAuto && current.produtoMatchId !== input.produtoMatchId) {
         await recordAudit({
           userId: ctx.user?.id ?? null,
           action: "AUTO_MATCH_CORRECTED",

@@ -313,7 +313,7 @@ export const proposals = mysqlTable("proposals", {
   // Cotação de e-mail/portal que originou esta proposta — permite localizar
   // (ou reaproveitar, de forma idempotente) a proposta ao "preencher no
   // portal" a partir da fila de cotações.
-  emailQuotationId: int("emailQuotationId").references(() => emailQuotations.id, { onDelete: "set null" }),
+  emailQuotationId: int("emailQuotationId").references(() => emailQuotations.id, { onDelete: "set null" }).unique(),
   // Registrados ao marcar status "cancelled" por perda para concorrente
   // (distinto de cancelamento interno, que deixa os dois campos vazios) —
   // alimenta o win rate consolidado em routers/desempenho.ts junto com
@@ -1601,6 +1601,11 @@ export const portalCredentials = mysqlTable(
     // e a bloqueio de conta por tentativas repetidas de login).
     sessaoCookies: text("sessaoCookies"),
     sessaoExpiraEm: timestamp("sessaoExpiraEm"),
+    // Falhas de login consecutivas — protege contra bloqueio de conta por
+    // tentativas repetidas quando a senha está errada ou o seletor quebrou.
+    // Zera a cada login bem-sucedido; ao atingir o limite, a descoberta
+    // autenticada para de tentar até o operador corrigir/recadastrar.
+    loginFailCount: int("loginFailCount").notNull().default(0),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
