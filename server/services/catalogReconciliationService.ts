@@ -3,6 +3,9 @@ import { getDb } from "../db";
 import { logger } from "../_core/logger";
 
 let reconciliationRun: Promise<{ offersBackfilled: number; aliasesNormalized: number; supplierFkChanged: boolean }> | null = null;
+let maintenanceStarted = false;
+let maintenanceRunning = false;
+const DEFAULT_MAINTENANCE_MS = 5 * 60 * 1000;
 
 function rowsOf(value: unknown): any[] {
   return Array.isArray(value) ? value : [];
@@ -31,87 +34,67 @@ export async function backfillMissingCanonicalOffers(): Promise<number> {
   return Number((insertResult as any)?.affectedRows ?? 0);
 }
 
-async function ensureOfferPriceMirrorTriggers(): Promise<void> {
+/**
+ * Espelha o menor custo canônico para `products.price` somente por
+ * compatibilidade com consumidores legados. A verdade permanece nas ofertas.
+ */
+export async function syncCanonicalPriceMirrors(): Promise<number> {
   const db = await getDb();
-  if (!db) return;
+  if (!db) return 0;
+  const [result] = await db.execute(sql.raw(`
+    UPDATE products p
+    JOIN (
+      SELECT productId,
+        MIN(CASE
+          WHEN promoPrice IS NOT NULL AND promoPrice > 0
+            AND (price IS NULL OR promoPrice < price)
+            THEN promoPrice
+          ELSE price
+        END) AS bestPrice
+      FROM product_supplier_offers
+      GROUP BY productId
+    ) x ON x.productId = p.id
+    SET p.price = x.bestPrice
+    WHERE NOT (p.price <=> x.bestPrice)
+  `));
+  return Number((result as any)?.affectedRows ?? 0);
+}
+
+async function runCatalogMaintenanceCycle(): Promise<void> {
+  if (maintenanceRunning) return;
+  maintenanceRunning = true;
   try {
-    const [triggerRows] = await db.execute(sql`
-      SELECT TRIGGER_NAME AS triggerName
-      FROM information_schema.TRIGGERS
-      WHERE TRIGGER_SCHEMA = DATABASE()
-        AND EVENT_OBJECT_TABLE = 'product_supplier_offers'
-    `);
-    const existing = new Set(rowsOf(triggerRows).map((row) => String(row.triggerName)));
-
-    const priceExpression = `(
-      SELECT MIN(CASE
-        WHEN o.promoPrice IS NOT NULL AND o.promoPrice > 0
-          AND (o.price IS NULL OR o.promoPrice < o.price)
-          THEN o.promoPrice
-        ELSE o.price
-      END)
-      FROM product_supplier_offers o
-      WHERE o.productId = `;
-
-    if (!existing.has("trg_offer_price_ai")) {
-      await db.execute(sql.raw(`
-        CREATE TRIGGER trg_offer_price_ai
-        AFTER INSERT ON product_supplier_offers
-        FOR EACH ROW
-        UPDATE products
-        SET price = ${priceExpression}NEW.productId)
-        WHERE id = NEW.productId
-      `));
+    const offersBackfilled = await backfillMissingCanonicalOffers();
+    const pricesMirrored = await syncCanonicalPriceMirrors();
+    if (offersBackfilled || pricesMirrored) {
+      logger.info(`[CatalogMaintenance] ${offersBackfilled} ofertas reconciliadas; ${pricesMirrored} espelhos de preço atualizados.`);
     }
-    if (!existing.has("trg_offer_price_au")) {
-      await db.execute(sql.raw(`
-        CREATE TRIGGER trg_offer_price_au
-        AFTER UPDATE ON product_supplier_offers
-        FOR EACH ROW
-        UPDATE products
-        SET price = ${priceExpression}NEW.productId)
-        WHERE id = NEW.productId
-      `));
-    }
-    if (!existing.has("trg_offer_price_ad")) {
-      await db.execute(sql.raw(`
-        CREATE TRIGGER trg_offer_price_ad
-        AFTER DELETE ON product_supplier_offers
-        FOR EACH ROW
-        UPDATE products
-        SET price = ${priceExpression}OLD.productId)
-        WHERE id = OLD.productId
-      `));
-    }
-
-    // Reconcilia o espelho imediatamente para ofertas já existentes antes dos triggers.
-    await db.execute(sql.raw(`
-      UPDATE products p
-      JOIN (
-        SELECT productId,
-          MIN(CASE
-            WHEN promoPrice IS NOT NULL AND promoPrice > 0
-              AND (price IS NULL OR promoPrice < price)
-              THEN promoPrice
-            ELSE price
-          END) AS bestPrice
-        FROM product_supplier_offers
-        GROUP BY productId
-      ) x ON x.productId = p.id
-      SET p.price = x.bestPrice
-    `));
   } catch (error) {
-    // O serviço de aplicação já sincroniza o espelho; triggers são uma defesa
-    // adicional para writers legados. Falha de privilégio não derruba o módulo.
-    logger.warn("[CatalogReconcile] Triggers de espelho de preço não puderam ser garantidos:", (error as Error).message);
+    logger.error("[CatalogMaintenance] Ciclo de manutenção falhou:", error);
+  } finally {
+    maintenanceRunning = false;
   }
+}
+
+/**
+ * Loop autônomo, local ao processo Node. Não depende de GitHub Actions, cron do
+ * SO ou operador. `unref()` impede que o timer segure o processo no shutdown.
+ */
+export function startCatalogMaintenanceLoop(intervalMs?: number): void {
+  if (maintenanceStarted || process.env.CATALOG_MAINTENANCE_ENABLED === "false") return;
+  maintenanceStarted = true;
+  const configured = Number(process.env.CATALOG_MAINTENANCE_INTERVAL_MS);
+  const everyMs = Math.max(60_000, intervalMs ?? (Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAINTENANCE_MS));
+  const timer = setInterval(() => void runCatalogMaintenanceCycle(), everyMs);
+  timer.unref?.();
+  logger.info(`[CatalogMaintenance] Loop autônomo ativo a cada ${Math.round(everyMs / 1000)}s.`);
 }
 
 /**
  * Reconciliação idempotente do catálogo legado.
  * - cria ofertas canônicas faltantes a partir de products.price + supplierId;
+ * - sincroniza o menor custo canônico para consumidores legados;
  * - normaliza aliases EAN/GTIN/barcode apenas quando o destino está vazio;
- * - protege o espelho de preço inclusive para writers legados;
  * - remove o risco de ON DELETE CASCADE do supplierId legado, tornando a FK
  *   nullable/SET NULL de forma dinâmica (o nome da constraint varia por banco).
  */
@@ -127,7 +110,7 @@ export async function reconcileLegacyCatalog(): Promise<{
     if (!db) throw new Error("Banco indisponível para reconciliar catálogo");
 
     const offersBackfilled = await backfillMissingCanonicalOffers();
-    await ensureOfferPriceMirrorTriggers();
+    await syncCanonicalPriceMirrors();
 
     const [aliasResult] = await db.execute(sql.raw(`
       UPDATE products
@@ -192,6 +175,7 @@ export async function reconcileLegacyCatalog(): Promise<{
       logger.warn("[CatalogReconcile] Não foi possível migrar a FK de fornecedor automaticamente:", (error as Error).message);
     }
 
+    startCatalogMaintenanceLoop();
     logger.info(`[CatalogReconcile] Concluído: ${offersBackfilled} ofertas, ${aliasesNormalized} aliases, FK=${supplierFkChanged ? "migrada" : "ok"}`);
     return { offersBackfilled, aliasesNormalized, supplierFkChanged };
   })().catch((error) => {
