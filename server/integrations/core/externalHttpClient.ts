@@ -55,6 +55,10 @@ function bodyFingerprint(text: string): string {
   return `sha256=${sha256(text)} bytes=${Buffer.byteLength(text, "utf8")}`;
 }
 
+/**
+ * Sanitização para retorno/proveniência funcional. Mantém pathname, mas remove
+ * credenciais e valores de query reconhecidamente sensíveis.
+ */
 function redactUrl(rawUrl: string): string {
   try {
     const url = new URL(rawUrl);
@@ -73,6 +77,24 @@ function redactUrl(rawUrl: string): string {
   }
 }
 
+/**
+ * Telemetria persiste somente a origem. Pathnames podem ser bearer secrets em
+ * webhooks/URLs assinadas; a operação lógica já é armazenada em `endpoint`.
+ */
+function redactTelemetryUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.username = "";
+    url.password = "";
+    url.pathname = "/";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "[INVALID_OR_REDACTED_URL]";
+  }
+}
+
 function redactText(text: string): string {
   return text
     .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,"'}]+/gi, "$1[REDACTED]")
@@ -84,11 +106,11 @@ function telemetryValues(event: TelemetryEvent) {
   return {
     source: event.source,
     endpoint: event.operation.slice(0, 512),
-    requestUrl: redactUrl(event.url),
+    requestUrl: redactTelemetryUrl(event.url),
     statusCode: event.statusCode,
     contentType: event.contentType.slice(0, 128),
     errorMessage: event.errorMessage ? redactText(event.errorMessage).slice(0, 2_000) : undefined,
-    rawSample: redactText(event.sample ?? ""),
+    rawSample: event.sample ?? "",
     durationMs: event.durationMs,
     success: event.success,
   };
