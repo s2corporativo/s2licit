@@ -59,9 +59,12 @@ import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 import { opportunitiesRouter } from "./routers/opportunities";
 import { licitacaoAgentRouter } from "./routers/licitacaoAgent";
+import { initCanonicalAutonomy } from "./services/canonicalAutonomy";
 
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
+
+initCanonicalAutonomy();
 
 export const appRouter = router({
   system: systemRouter,
