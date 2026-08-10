@@ -2,11 +2,13 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getCompanySettings } from "../db";
 import { sugerirPreco, type EstatisticasHomologado } from "../services/precificacaoInteligenteService";
-import { buscarResultadosItemPNCP, estatisticasPreco } from "../connectors/pncpConnector";
 
 /**
  * Precificação inteligente para a disputa: piso (não descer abaixo), alvo
  * (margem desejada) e sugerido (competitivo, calibrado pelo histórico).
+ *
+ * Consulta de histórico homologado permanece centralizada em pncpRadar,
+ * evitando dois endpoints tRPC com a mesma responsabilidade.
  */
 
 const ImpostosSchema = z.object({
@@ -22,7 +24,6 @@ const ItemSchema = z.object({
   descricao: z.string().max(500).optional(),
   custo: z.number().positive(),
   quantidade: z.number().positive().default(1),
-  // Estatística de preço homologado (opcional; pode vir do radar PNCP)
   medianaHomologado: z.number().positive().optional(),
 });
 
@@ -34,7 +35,6 @@ async function resolverMargens(margemMinima?: number, margemDesejada?: number) {
 }
 
 export const precificacaoRouter = router({
-  /** Sugere piso/alvo/sugerido para uma lista de itens (tela de disputa). */
   sugerirLote: protectedProcedure
     .input(
       z.object({
@@ -58,24 +58,30 @@ export const precificacaoRouter = router({
         roundingMethod: "round" as const,
       };
 
-      const itens = input.itens.map((it) => {
-        const stats: EstatisticasHomologado | null = it.medianaHomologado
-          ? { amostras: 1, media: it.medianaHomologado, minimo: it.medianaHomologado, maximo: it.medianaHomologado, mediana: it.medianaHomologado }
+      const itens = input.itens.map((item) => {
+        const stats: EstatisticasHomologado | null = item.medianaHomologado
+          ? {
+              amostras: 1,
+              media: item.medianaHomologado,
+              minimo: item.medianaHomologado,
+              maximo: item.medianaHomologado,
+              mediana: item.medianaHomologado,
+            }
           : null;
-        const s = sugerirPreco({
-          custo: it.custo,
+        const suggestion = sugerirPreco({
+          custo: item.custo,
           config,
           margemMinima: min,
           margemDesejada: desejada,
           estatisticasHomologado: stats,
         });
         return {
-          descricao: it.descricao ?? "",
-          quantidade: it.quantidade,
-          custo: it.custo,
-          ...s,
-          totalPiso: Number((s.piso * it.quantidade).toFixed(2)),
-          totalSugerido: Number((s.sugerido * it.quantidade).toFixed(2)),
+          descricao: item.descricao ?? "",
+          quantidade: item.quantidade,
+          custo: item.custo,
+          ...suggestion,
+          totalPiso: Number((suggestion.piso * item.quantidade).toFixed(2)),
+          totalSugerido: Number((suggestion.sugerido * item.quantidade).toFixed(2)),
         };
       });
 
@@ -83,16 +89,8 @@ export const precificacaoRouter = router({
         margemMinima: min,
         margemDesejada: desejada,
         itens,
-        totalPiso: Number(itens.reduce((a, b) => a + b.totalPiso, 0).toFixed(2)),
-        totalSugerido: Number(itens.reduce((a, b) => a + b.totalSugerido, 0).toFixed(2)),
+        totalPiso: Number(itens.reduce((sum, item) => sum + item.totalPiso, 0).toFixed(2)),
+        totalSugerido: Number(itens.reduce((sum, item) => sum + item.totalSugerido, 0).toFixed(2)),
       };
-    }),
-
-  /** Busca o preço homologado de um item no PNCP (para calibrar a sugestão). */
-  precoHomologadoPNCP: protectedProcedure
-    .input(z.object({ cnpj: z.string().length(14), ano: z.number().int(), sequencial: z.number().int(), numeroItem: z.number().int() }))
-    .query(async ({ input }) => {
-      const resultados = await buscarResultadosItemPNCP(input.cnpj, input.ano, input.sequencial, input.numeroItem);
-      return estatisticasPreco(resultados);
     }),
 });
