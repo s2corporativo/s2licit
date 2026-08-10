@@ -5,20 +5,22 @@
  * 1) API oficial atual de Dados Abertos (Módulo 07 - Contratações 14.133);
  * 2) fallback temporário para o endpoint SIASG legado quando a API atual estiver
  *    indisponível/incompatível;
- * 3) nunca converte falha em lista vazia silenciosa.
+ * 3) nunca converte falha nem truncamento em lista vazia/sucesso silencioso.
  */
 import { z } from "zod";
-import { parseDate, generateDedupeKey } from "./baseConnector";
+import { generateDedupeKey, parseDate } from "./baseConnector";
 import type { NormalizedLicitacao } from "./baseConnector";
 import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 import { classifyThrownError, IntegrationError } from "../integrations/core/integrationError";
 import { failureResult, successResult } from "../integrations/core/integrationResult";
-import type { IntegrationResult } from "../integrations/core/types";
+import type { ExternalHttpResponse, IntegrationResult } from "../integrations/core/types";
 
 const CURRENT_BASE = "https://dadosabertos.compras.gov.br";
 const LEGACY_BASE = "https://compras.dados.gov.br";
 const PAGE_SIZE = 250;
-const MAX_PAGES = 12;
+const MAX_CURRENT_PAGES = 12;
+const LEGACY_PAGE_SIZE = 500;
+const MAX_LEGACY_PAGES = 8;
 
 const ModernRawSchema = z.object({
   idCompra: z.union([z.string(), z.number()]).optional().nullable(),
@@ -49,10 +51,11 @@ const ModernResponseSchema = z.object({
   resultado: z.array(ModernRawSchema).default([]),
   totalRegistros: z.number().optional().default(0),
   totalPaginas: z.number().optional().default(1),
-  paginasRestantes: z.number().optional().default(0),
+  paginasRestantes: z.number().optional(),
 }).passthrough();
 
 type ModernRaw = z.infer<typeof ModernRawSchema>;
+type ModernResponse = z.infer<typeof ModernResponseSchema>;
 
 const LegacyRawSchema = z.object({
   identificador: z.string().optional(),
@@ -79,6 +82,16 @@ const LegacyResponseSchema = z.object({
 }).passthrough();
 
 type LegacyRaw = z.infer<typeof LegacyRawSchema>;
+type LegacyResponse = z.infer<typeof LegacyResponseSchema>;
+
+interface SourceFetchResult {
+  data: NormalizedLicitacao[];
+  requestId: string;
+  pages: number;
+  totalPages: number;
+  totalRecords: number;
+  truncated: boolean;
+}
 
 const MODALIDADE_NOME: Record<number, string> = {
   1: "Convite",
@@ -93,12 +106,19 @@ const MODALIDADE_NOME: Record<number, string> = {
   33: "Registro de Preços",
 };
 
+function responseError<T>(response: ExternalHttpResponse<T>, fallback: string): IntegrationError {
+  return new IntegrationError(response.error?.message ?? fallback, {
+    type: response.error?.type ?? "UPSTREAM",
+    retryable: response.error?.retryable ?? false,
+    upstreamStatus: response.statusCode || undefined,
+    code: response.error?.code,
+  });
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value !== "string") return 0;
-  const normalized = value.includes(",")
-    ? value.replace(/\./g, "").replace(",", ".")
-    : value;
+  const normalized = value.includes(",") ? value.replace(/\./g, "").replace(",", ".") : value;
   const number = Number(normalized);
   return Number.isFinite(number) ? number : 0;
 }
@@ -122,8 +142,10 @@ export function normalizeComprasGovModern(raw: ModernRaw): NormalizedLicitacao {
   const numeroControle = raw.numeroControlePNCP ?? raw.numeroControlePncp ?? "";
   const numeroCompra = raw.numeroCompra != null ? String(raw.numeroCompra) : "";
   const sourceId = idCompra || numeroControle || generateDedupeKey(orgao, objeto, dataAbertura);
-  const links = [raw.linkSistemaOrigem, numeroControle ? `https://pncp.gov.br/app/editais/${numeroControle}` : null]
-    .filter((link): link is string => Boolean(link));
+  const links = [
+    raw.linkSistemaOrigem,
+    numeroControle ? `https://pncp.gov.br/app/editais/${numeroControle}` : null,
+  ].filter((link): link is string => Boolean(link));
 
   return {
     source: "comprasgov",
@@ -161,6 +183,7 @@ export function normalizeComprasLicitacao(raw: LegacyRaw): NormalizedLicitacao {
     : uasg
       ? [`https://www.gov.br/compras/pt-br?uasg=${uasg}`]
       : [];
+
   return {
     source: "comprasgov",
     sourceId: sourceId || generateDedupeKey(orgao, objeto, dataAbertura),
@@ -182,17 +205,14 @@ export function normalizeComprasLicitacao(raw: LegacyRaw): NormalizedLicitacao {
   };
 }
 
-async function fetchCurrent(
-  inicio: Date,
-  fim: Date,
-  uf?: string,
-): Promise<{ data: NormalizedLicitacao[]; requestId: string; pages: number }> {
+async function fetchCurrent(inicio: Date, fim: Date, uf?: string): Promise<SourceFetchResult> {
   const collected = new Map<string, NormalizedLicitacao>();
   let requestId = "";
   let pages = 0;
   let totalPages = 1;
+  let totalRecords = 0;
 
-  for (let page = 1; page <= Math.min(totalPages, MAX_PAGES); page++) {
+  for (let page = 1; page <= totalPages && page <= MAX_CURRENT_PAGES; page += 1) {
     const params = new URLSearchParams({
       pagina: String(page),
       tamanhoPagina: String(PAGE_SIZE),
@@ -201,82 +221,76 @@ async function fetchCurrent(
     });
     if (uf) params.set("unidadeOrgaoUfSigla", uf.toUpperCase());
     const url = `${CURRENT_BASE}/modulo-contratacoes/1_consultarContratacoes_PNCP_14133?${params}`;
-    const response = await externalHttpRequest<unknown>({
+    const response = await externalHttpRequest<ModernResponse>({
       source: "comprasgov",
       operation: "contratacoes.list.current",
       url,
       expected: "json",
       timeoutMs: 25_000,
+      deadlineMs: 55_000,
       maxRetries: 2,
+      validator: (payload) => ModernResponseSchema.parse(payload),
     });
     requestId ||= response.requestId;
-    if (!response.ok || !response.data) {
-      throw new IntegrationError(response.error?.message ?? `Compras.gov HTTP ${response.statusCode}`, {
-        type: response.error?.type === "TIMEOUT" ? "TIMEOUT" : response.error?.type === "RATE_LIMIT" ? "RATE_LIMIT" : "UPSTREAM",
-        retryable: response.error?.retryable ?? false,
-        upstreamStatus: response.statusCode || undefined,
-      });
-    }
-    const parsed = ModernResponseSchema.safeParse(response.data);
-    if (!parsed.success) {
-      throw new IntegrationError("Contrato da API atual do Compras.gov divergiu do schema esperado.", {
-        type: "CONTRACT",
-        code: "COMPRASGOV_CURRENT_SCHEMA",
-        cause: parsed.error,
-      });
-    }
+    if (!response.ok || !response.data) throw responseError(response, `Compras.gov HTTP ${response.statusCode}`);
+
     pages += 1;
-    totalPages = Math.max(1, parsed.data.totalPaginas || 1);
-    for (const raw of parsed.data.resultado) {
+    totalPages = Math.max(1, response.data.totalPaginas || 1);
+    totalRecords = Math.max(totalRecords, response.data.totalRegistros || 0);
+    for (const raw of response.data.resultado) {
       const normalized = normalizeComprasGovModern(raw);
       collected.set(normalized.sourceId || normalized.dedupeKey, normalized);
     }
-    if (parsed.data.resultado.length === 0 || parsed.data.paginasRestantes === 0) break;
+    if (
+      response.data.resultado.length === 0 ||
+      page >= totalPages ||
+      response.data.paginasRestantes === 0
+    ) {
+      break;
+    }
   }
 
-  return { data: Array.from(collected.values()), requestId, pages };
+  return {
+    data: Array.from(collected.values()),
+    requestId,
+    pages,
+    totalPages,
+    totalRecords,
+    truncated: totalPages > MAX_CURRENT_PAGES,
+  };
 }
 
-async function fetchLegacy(
-  inicio: Date,
-  fim: Date,
-  uf?: string,
-): Promise<{ data: NormalizedLicitacao[]; requestId: string; pages: number }> {
+async function fetchLegacy(inicio: Date, fim: Date, uf?: string): Promise<SourceFetchResult> {
   const collected = new Map<string, NormalizedLicitacao>();
   let requestId = "";
   let pages = 0;
-  for (let page = 1; page <= 8; page++) {
-    const offset = (page - 1) * 500;
+  let totalRecords = 0;
+  let reachedBeforeWindow = false;
+  let lastPageWasFull = false;
+
+  for (let page = 1; page <= MAX_LEGACY_PAGES; page += 1) {
+    const offset = (page - 1) * LEGACY_PAGE_SIZE;
     const ufParam = uf ? `&uf=${encodeURIComponent(uf.toUpperCase())}` : "";
-    const url = `${LEGACY_BASE}/licitacoes/v1/licitacoes.json?ordenacao=-data_publicacao&tam_pagina=500&offset=${offset}${ufParam}`;
-    const response = await externalHttpRequest<unknown>({
+    const url = `${LEGACY_BASE}/licitacoes/v1/licitacoes.json?ordenacao=-data_publicacao&tam_pagina=${LEGACY_PAGE_SIZE}&offset=${offset}${ufParam}`;
+    const response = await externalHttpRequest<LegacyResponse>({
       source: "comprasgov",
       operation: "contratacoes.list.legacy-fallback",
       url,
       expected: "json",
       timeoutMs: 25_000,
+      deadlineMs: 55_000,
       maxRetries: 1,
+      validator: (payload) => LegacyResponseSchema.parse(payload),
     });
     requestId ||= response.requestId;
-    if (!response.ok || !response.data) {
-      throw new IntegrationError(response.error?.message ?? `Compras.gov legado HTTP ${response.statusCode}`, {
-        type: "UPSTREAM",
-        retryable: response.error?.retryable ?? false,
-        upstreamStatus: response.statusCode || undefined,
-      });
-    }
-    const parsed = LegacyResponseSchema.safeParse(response.data);
-    if (!parsed.success) {
-      throw new IntegrationError("Contrato do fallback legado do Compras.gov divergiu do esperado.", {
-        type: "CONTRACT",
-        code: "COMPRASGOV_LEGACY_SCHEMA",
-        cause: parsed.error,
-      });
-    }
+    if (!response.ok || !response.data) throw responseError(response, `Compras.gov legado HTTP ${response.statusCode}`);
+
     pages += 1;
-    const rows = parsed.data._embedded?.licitacoes ?? [];
+    totalRecords = Math.max(totalRecords, response.data.count ?? 0);
+    const rows = response.data._embedded?.licitacoes ?? [];
+    lastPageWasFull = rows.length >= LEGACY_PAGE_SIZE;
     if (!rows.length) break;
-    let reachedBeforeWindow = false;
+
     for (const raw of rows) {
       const published = parseDate(raw.data_publicacao);
       if (!published) continue;
@@ -288,7 +302,15 @@ async function fetchLegacy(
     }
     if (reachedBeforeWindow) break;
   }
-  return { data: Array.from(collected.values()), requestId, pages };
+
+  return {
+    data: Array.from(collected.values()),
+    requestId,
+    pages,
+    totalPages: pages,
+    totalRecords,
+    truncated: pages >= MAX_LEGACY_PAGES && lastPageWasFull && !reachedBeforeWindow,
+  };
 }
 
 export async function buscarLicitacoesComprasGovResult(
@@ -305,17 +327,21 @@ export async function buscarLicitacoesComprasGovResult(
       data: current.data,
       startedAt,
       requestId: current.requestId,
+      status: current.truncated ? "PARTIAL" : undefined,
       metadata: {
         pages: current.pages,
         records: current.data.length,
+        sourceTotalPages: current.totalPages,
+        sourceTotalRecords: current.totalRecords,
+        partial: current.truncated,
         sourceUrl: CURRENT_BASE,
         schemaVersion: "comprasgov-2026-v2",
       },
     });
   } catch (currentError) {
+    const currentFailure = classifyThrownError(currentError);
     try {
       const legacy = await fetchLegacy(inicio, fim, uf);
-      const error = classifyThrownError(currentError);
       return successResult({
         source: "comprasgov",
         operation: "contratacoes.list",
@@ -326,18 +352,28 @@ export async function buscarLicitacoesComprasGovResult(
         metadata: {
           pages: legacy.pages,
           records: legacy.data.length,
+          sourceTotalRecords: legacy.totalRecords,
           partial: true,
           sourceUrl: LEGACY_BASE,
-          schemaVersion: `legacy-fallback:${error.type}`,
+          schemaVersion: `legacy-fallback:${currentFailure.type}${legacy.truncated ? ":truncated" : ""}`,
         },
       });
     } catch (legacyError) {
+      const legacyFailure = classifyThrownError(legacyError);
       return failureResult({
         source: "comprasgov",
         operation: "contratacoes.list",
         data: [],
         startedAt,
-        error: classifyThrownError(legacyError),
+        error: new IntegrationError(
+          `API atual: ${currentFailure.message} | fallback legado: ${legacyFailure.message}`.slice(0, 2_000),
+          {
+            type: legacyFailure.type,
+            retryable: currentFailure.retryable || legacyFailure.retryable,
+            upstreamStatus: legacyFailure.upstreamStatus ?? currentFailure.upstreamStatus,
+            code: legacyFailure.code ?? currentFailure.code,
+          },
+        ),
         metadata: { partial: true, sourceUrl: CURRENT_BASE },
       });
     }
