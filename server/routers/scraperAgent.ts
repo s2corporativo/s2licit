@@ -10,18 +10,16 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
+import { scraperConfigs, scraperLogs, suppliers } from "../../drizzle/schema";
 import {
   captureConnectorHealth,
   captureJobs,
 } from "../../drizzle/captureCoreSchema";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
-import {
-  FORNECEDOR_CONFIGS,
-  testarLoginFornecedor,
-  type SelectorConfig,
-} from "../services/scraperEngine";
+import { FORNECEDOR_CONFIGS } from "../services/scraperPresets";
+import type { SelectorConfig } from "../services/scraperContracts";
+import { testarLoginFornecedor } from "../services/scraperEngine";
 import { getConnectorCapabilities } from "../services/captureConnectorCapabilities";
 import {
   decideCaptureObservation,
@@ -37,8 +35,8 @@ import { logger } from "../_core/logger";
 function isSafeExternalTemplate(raw: string): boolean {
   try {
     const probe = raw.replace(/\{q\}|\{termo\}/gi, "capture-probe");
-    const parsed = assertSafeExternalUrl(probe, "URL do conector");
-    return !parsed.username && !parsed.password;
+    assertSafeExternalUrl(probe, "URL do conector");
+    return true;
   } catch {
     return false;
   }
@@ -104,8 +102,6 @@ const cadastrarSchema = z
   .object({
     supplierId: z.number().int().positive(),
     scraperType: scraperTypeSchema,
-    // Nome legado preservado para compatibilidade com o frontend. Pode ser
-    // e-mail, usuário ou CPF/CNPJ conforme o portal do fornecedor.
     email: loginIdentifierSchema,
     password: z.string().min(1).max(512),
     scheduleTime: scheduleTimeSchema.default("02:00"),
@@ -164,6 +160,22 @@ function decryptLoginIdentifier(raw: string | null | undefined): string | null {
   }
 }
 
+function validateEffectiveConnector(
+  scraperType: string,
+  customSelectors: unknown,
+): ReturnType<typeof getConnectorCapabilities> {
+  const capabilities = getConnectorCapabilities(scraperType, customSelectors);
+  if (!capabilities.configured || !capabilities.authenticated) {
+    throw new Error("Configuração de captura incompleta ou não suportada.");
+  }
+  if (!capabilities.fullCatalog && !capabilities.search) {
+    throw new Error(
+      "O conector não possui catálogo completo nem busca configurada. Configure ao menos uma estratégia de captura.",
+    );
+  }
+  return capabilities;
+}
+
 export const scraperAgentRouter = router({
   listar: protectedProcedure.query(async () => {
     const db = await getDb();
@@ -176,6 +188,7 @@ export const scraperAgentRouter = router({
         scraperType: scraperConfigs.scraperType,
         enabled: scraperConfigs.enabled,
         scheduleTime: scraperConfigs.scheduleTime,
+        nextRunAt: scraperConfigs.nextRunAt,
         lastRunAt: scraperConfigs.lastRunAt,
         lastRunStatus: scraperConfigs.lastRunStatus,
         tosAprovado: scraperConfigs.tosAprovado,
@@ -250,45 +263,56 @@ export const scraperAgentRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Banco indisponível.");
 
-      const [existing] = await db
-        .select({ id: scraperConfigs.id })
-        .from(scraperConfigs)
-        .where(eq(scraperConfigs.supplierId, input.supplierId))
-        .limit(1);
-
-      if (existing) {
-        throw new Error(
-          "Este fornecedor já possui uma configuração de captura. Edite a existente para evitar jobs duplicados.",
-        );
-      }
-
       const scraperType = normalizeScraperType(input.scraperType);
-      const capabilities = getConnectorCapabilities(
+      const capabilities = validateEffectiveConnector(
         scraperType,
         input.customSelectors,
       );
-      if (!capabilities.configured || !capabilities.authenticated) {
-        throw new Error("Configuração de captura incompleta ou não suportada.");
-      }
-      if (!capabilities.fullCatalog && !capabilities.search) {
-        throw new Error(
-          "O conector não possui catálogo completo nem busca configurada. Configure ao menos uma estratégia de captura.",
-        );
-      }
 
-      const [result] = await db.insert(scraperConfigs).values({
-        supplierId: input.supplierId,
-        scraperType,
-        email: input.email.trim(),
-        passwordHash: encryptPassword(input.password),
-        scheduleTime: input.scheduleTime,
-        enabled: input.enabled,
-        customSelectors: input.customSelectors ?? null,
-        tosAprovado: input.tosAprovado,
+      const id = await db.transaction(async (tx) => {
+        const [supplier] = await tx
+          .select({ id: suppliers.id })
+          .from(suppliers)
+          .where(eq(suppliers.id, input.supplierId))
+          .for("update")
+          .limit(1);
+        if (!supplier) throw new Error("Fornecedor não encontrado.");
+
+        const [existing] = await tx
+          .select({ id: scraperConfigs.id })
+          .from(scraperConfigs)
+          .where(eq(scraperConfigs.supplierId, input.supplierId))
+          .limit(1);
+
+        if (existing) {
+          throw new Error(
+            "Este fornecedor já possui uma configuração de captura. Edite a existente para evitar jobs duplicados.",
+          );
+        }
+
+        const [result] = await tx.insert(scraperConfigs).values({
+          supplierId: input.supplierId,
+          scraperType,
+          email: input.email.trim(),
+          passwordHash: encryptPassword(input.password),
+          scheduleTime: input.scheduleTime,
+          nextRunAt: null,
+          enabled: input.enabled,
+          customSelectors: input.customSelectors ?? null,
+          tosAprovado: input.tosAprovado,
+        });
+
+        const insertedId = Number(
+          (result as { insertId?: number | string }).insertId,
+        );
+        if (!Number.isInteger(insertedId) || insertedId <= 0) {
+          throw new Error("Banco não retornou o ID da configuração criada.");
+        }
+        return insertedId;
       });
 
       return {
-        id: Number((result as { insertId?: unknown }).insertId),
+        id,
         message: "Fornecedor configurado com sucesso.",
         capabilities,
       };
@@ -299,6 +323,28 @@ export const scraperAgentRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Banco indisponível.");
+
+      const [current] = await db
+        .select({
+          id: scraperConfigs.id,
+          scraperType: scraperConfigs.scraperType,
+          enabled: scraperConfigs.enabled,
+          customSelectors: scraperConfigs.customSelectors,
+        })
+        .from(scraperConfigs)
+        .where(eq(scraperConfigs.id, input.id))
+        .limit(1);
+      if (!current) throw new Error("Configuração de captura não encontrada.");
+
+      const nextEnabled = input.enabled ?? current.enabled;
+      const nextCustomSelectors =
+        input.customSelectors !== undefined
+          ? input.customSelectors
+          : current.customSelectors;
+
+      if (nextEnabled === "yes") {
+        validateEffectiveConnector(current.scraperType, nextCustomSelectors);
+      }
 
       const updates: Record<string, unknown> = {};
       if (input.email !== undefined) updates.email = input.email.trim();
@@ -311,6 +357,13 @@ export const scraperAgentRouter = router({
         updates.customSelectors = input.customSelectors;
       }
       if (input.tosAprovado !== undefined) updates.tosAprovado = input.tosAprovado;
+
+      const scheduleRelevantChange =
+        input.scheduleTime !== undefined ||
+        input.enabled !== undefined ||
+        input.tosAprovado !== undefined ||
+        input.customSelectors !== undefined;
+      if (scheduleRelevantChange) updates.nextRunAt = null;
 
       if (Object.keys(updates).length === 0) {
         return { message: "Nenhuma alteração informada." };
@@ -384,7 +437,7 @@ export const scraperAgentRouter = router({
       if (captureHistory.length > 0 || legacyHistory.length > 0) {
         await db
           .update(scraperConfigs)
-          .set({ enabled: "no", tosAprovado: false })
+          .set({ enabled: "no", tosAprovado: false, nextRunAt: null })
           .where(eq(scraperConfigs.id, input.id));
 
         return {
@@ -563,7 +616,7 @@ export const scraperAgentRouter = router({
         observationId: z.number().int().positive(),
         decision: z.enum(["approve", "reject"]),
         expectedProductId: z.number().int().positive().nullable().optional(),
-        notes: z.string().max(2_000).nullable().optional(),
+        notes: z.string().trim().max(2_000).nullable().optional(),
       }),
     )
     .mutation(({ input, ctx }) =>
