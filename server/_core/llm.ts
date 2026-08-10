@@ -1,29 +1,24 @@
-import { ENV } from "./env";
 import { logger } from "./logger";
+import {
+  getAiRuntimeConfig,
+  resolveCredential,
+} from "../integrations/core/credentialResolver";
+import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
-export type TextContent = {
-  type: "text";
-  text: string;
-};
-
+export type TextContent = { type: "text"; text: string };
 export type ImageContent = {
   type: "image_url";
-  image_url: {
-    url: string;
-    detail?: "auto" | "low" | "high";
-  };
+  image_url: { url: string; detail?: "auto" | "low" | "high" };
 };
-
 export type FileContent = {
   type: "file_url";
   file_url: {
     url: string;
-    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4" ;
+    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4";
   };
 };
-
 export type MessageContent = string | TextContent | ImageContent | FileContent;
 
 export type Message = {
@@ -47,15 +42,9 @@ export type ToolChoicePrimitive = "none" | "auto" | "required";
 export type ToolChoiceByName = { name: string };
 export type ToolChoiceExplicit = {
   type: "function";
-  function: {
-    name: string;
-  };
+  function: { name: string };
 };
-
-export type ToolChoice =
-  | ToolChoicePrimitive
-  | ToolChoiceByName
-  | ToolChoiceExplicit;
+export type ToolChoice = ToolChoicePrimitive | ToolChoiceByName | ToolChoiceExplicit;
 
 export type InvokeParams = {
   messages: Message[];
@@ -73,10 +62,7 @@ export type InvokeParams = {
 export type ToolCall = {
   id: string;
   type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
+  function: { name: string; arguments: string };
 };
 
 export type InvokeResult = {
@@ -104,124 +90,12 @@ export type JsonSchema = {
   schema: Record<string, unknown>;
   strict?: boolean;
 };
-
 export type OutputSchema = JsonSchema;
-
 export type ResponseFormat =
   | { type: "text" }
   | { type: "json_object" }
   | { type: "json_schema"; json_schema: JsonSchema };
 
-const ensureArray = (
-  value: MessageContent | MessageContent[]
-): MessageContent[] => (Array.isArray(value) ? value : [value]);
-
-const normalizeContentPart = (
-  part: MessageContent
-): TextContent | ImageContent | FileContent => {
-  if (typeof part === "string") {
-    return { type: "text", text: part };
-  }
-
-  if (part.type === "text") {
-    return part;
-  }
-
-  if (part.type === "image_url") {
-    return part;
-  }
-
-  if (part.type === "file_url") {
-    return part;
-  }
-
-  throw new Error("Unsupported message content part");
-};
-
-const normalizeMessage = (message: Message) => {
-  const { role, name, tool_call_id, tool_calls } = message;
-
-  if (role === "tool" || role === "function") {
-    const content = ensureArray(message.content)
-      .map(part => (typeof part === "string" ? part : JSON.stringify(part)))
-      .join("\n");
-
-    return {
-      role,
-      name,
-      tool_call_id,
-      content,
-    };
-  }
-
-  const contentParts = ensureArray(message.content).map(normalizeContentPart);
-
-  // If there's only text content, collapse to a single string for compatibility
-  if (contentParts.length === 1 && contentParts[0].type === "text") {
-    return {
-      role,
-      name,
-      content: contentParts[0].text,
-      ...(tool_calls && tool_calls.length > 0 ? { tool_calls } : {}),
-    };
-  }
-
-  return {
-    role,
-    name,
-    content: contentParts,
-    ...(tool_calls && tool_calls.length > 0 ? { tool_calls } : {}),
-  };
-};
-
-const normalizeToolChoice = (
-  toolChoice: ToolChoice | undefined,
-  tools: Tool[] | undefined
-): "none" | "auto" | ToolChoiceExplicit | undefined => {
-  if (!toolChoice) return undefined;
-
-  if (toolChoice === "none" || toolChoice === "auto") {
-    return toolChoice;
-  }
-
-  if (toolChoice === "required") {
-    if (!tools || tools.length === 0) {
-      throw new Error(
-        "tool_choice 'required' was provided but no tools were configured"
-      );
-    }
-
-    if (tools.length > 1) {
-      throw new Error(
-        "tool_choice 'required' needs a single tool or specify the tool name explicitly"
-      );
-    }
-
-    return {
-      type: "function",
-      function: { name: tools[0].function.name },
-    };
-  }
-
-  if ("name" in toolChoice) {
-    return {
-      type: "function",
-      function: { name: toolChoice.name },
-    };
-  }
-
-  return toolChoice;
-};
-
-/**
- * Provedores de IA (todos usam endpoint compatível com OpenAI):
- * - anthropic: API da Anthropic (ANTHROPIC_API_KEY) — mais precisa.
- * - groq: GroqCloud (GROQ_API_KEY) — rápida, tem tier gratuito.
- * - forge: endpoint legado do Manus (BUILT_IN_FORGE_API_URL/KEY).
- *
- * A seleção é controlada por AI_PROVIDER ("anthropic"|"groq"|"auto").
- * Em "auto", tenta anthropic → groq → forge conforme as chaves presentes.
- */
 export type LlmProviderKind = "anthropic" | "groq" | "forge";
 
 interface LlmProvider {
@@ -229,88 +103,123 @@ interface LlmProvider {
   url: string;
   apiKey: string;
   model: string;
-  /** Provedores que só aceitam response_format json_object (sem json_schema). */
+  protocol: "anthropic-messages" | "openai-chat";
   jsonObjectOnly: boolean;
 }
 
-/**
- * Config de IA em tempo de EXECUÇÃO: prioriza process.env (onde a config
- * salva pela interface é aplicada por aiConfigService), com ENV — capturado no
- * boot a partir do .env — como fallback. Assim colar a chave na Central de IA
- * passa a valer sem reiniciar o servidor.
- */
-function aiEnv() {
-  return {
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY || ENV.anthropicApiKey,
-    anthropicModel: process.env.ANTHROPIC_MODEL || ENV.anthropicModel,
-    groqApiKey: process.env.GROQ_API_KEY || ENV.groqApiKey,
-    groqModel: process.env.GROQ_MODEL || ENV.groqModel,
-    forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL || ENV.forgeApiUrl,
-    forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY || ENV.forgeApiKey,
-    aiProvider: (process.env.AI_PROVIDER || ENV.aiProvider || "auto").toLowerCase(),
-  };
-}
+const ensureArray = (value: MessageContent | MessageContent[]): MessageContent[] =>
+  Array.isArray(value) ? value : [value];
 
-function anthropicProvider(): LlmProvider | null {
-  const env = aiEnv();
-  if (!env.anthropicApiKey) return null;
-  return {
-    kind: "anthropic",
-    url: "https://api.anthropic.com/v1/chat/completions",
-    apiKey: env.anthropicApiKey,
-    model: env.anthropicModel,
-    jsonObjectOnly: false,
-  };
-}
-function groqProvider(): LlmProvider | null {
-  const env = aiEnv();
-  if (!env.groqApiKey) return null;
-  return {
-    kind: "groq",
-    url: "https://api.groq.com/openai/v1/chat/completions",
-    apiKey: env.groqApiKey,
-    model: env.groqModel,
-    jsonObjectOnly: true,
-  };
-}
-function forgeProvider(): LlmProvider | null {
-  const env = aiEnv();
-  if (!env.forgeApiUrl || !env.forgeApiKey) return null;
-  return {
-    kind: "forge",
-    url: `${env.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
-    apiKey: env.forgeApiKey,
-    model: "gemini-2.5-flash",
-    jsonObjectOnly: false,
-  };
-}
-
-/** Lista os provedores configurados (para diagnóstico/central de IA). */
-export function listConfiguredProviders(): Array<{ kind: LlmProviderKind; model: string }> {
-  return [anthropicProvider(), groqProvider(), forgeProvider()]
-    .filter((p): p is LlmProvider => p != null)
-    .map((p) => ({ kind: p.kind, model: p.model }));
-}
-
-/** Retorna o provedor ativo (respeitando AI_PROVIDER) ou null se nenhum. */
-export function activeProvider(): LlmProvider | null {
-  const pref = aiEnv().aiProvider;
-  if (pref === "anthropic") return anthropicProvider() ?? groqProvider() ?? forgeProvider();
-  if (pref === "groq") return groqProvider() ?? anthropicProvider() ?? forgeProvider();
-  // auto
-  return anthropicProvider() ?? groqProvider() ?? forgeProvider();
-}
-
-const resolveProvider = (): LlmProvider => {
-  const p = activeProvider();
-  if (p) return p;
-  throw new Error(
-    "Nenhum provedor de IA configurado. Defina ANTHROPIC_API_KEY ou GROQ_API_KEY " +
-      "no ambiente para habilitar os recursos de IA (enriquecimento, classificação, agentes)."
-  );
+const normalizeContentPart = (part: MessageContent): TextContent | ImageContent | FileContent => {
+  if (typeof part === "string") return { type: "text", text: part };
+  return part;
 };
 
-const normalizeResponseFormat = ({
+const normalizeOpenAiMessage = (message: Message) => {
+  const { role, name, tool_call_id, tool_calls } = message;
+  if (role === "tool" || role === "function") {
+    return {
+      role,
+      name,
+      tool_call_id,
+      content: ensureArray(message.content)
+        .map((part) => (typeof part === "string" ? part : JSON.stringify(part)))
+        .join("\n"),
+    };
+  }
+  const contentParts = ensureArray(message.content).map(normalizeContentPart);
+  if (contentParts.length === 1 && contentParts[0].type === "text") {
+    return {
+      role,
+      name,
+      content: contentParts[0].text,
+      ...(tool_calls?.length ? { tool_calls } : {}),
+    };
+  }
+  return {
+    role,
+    name,
+    content: contentParts,
+    ...(tool_calls?.length ? { tool_calls } : {}),
+  };
+};
+
+function normalizeToolChoice(
+  toolChoice: ToolChoice | undefined,
+  tools: Tool[] | undefined,
+): "none" | "auto" | ToolChoiceExplicit | undefined {
+  if (!toolChoice) return undefined;
+  if (toolChoice === "none" || toolChoice === "auto") return toolChoice;
+  if (toolChoice === "required") {
+    if (!tools?.length) throw new Error("tool_choice 'required' was provided but no tools were configured");
+    if (tools.length > 1) {
+      throw new Error("tool_choice 'required' needs a single tool or specify the tool name explicitly");
+    }
+    return { type: "function", function: { name: tools[0].function.name } };
+  }
+  if ("name" in toolChoice) {
+    return { type: "function", function: { name: toolChoice.name } };
+  }
+  return toolChoice;
+}
+
+async function configuredProviders(): Promise<{ providers: LlmProvider[]; preference: string; timeoutMs: number }> {
+  const config = await getAiRuntimeConfig();
+  const providers: LlmProvider[] = [];
+  if (config.anthropicApiKey) {
+    providers.push({
+      kind: "anthropic",
+      url: "https://api.anthropic.com/v1/messages",
+      apiKey: config.anthropicApiKey,
+      model: config.anthropicModel,
+      protocol: "anthropic-messages",
+      jsonObjectOnly: false,
+    });
+  }
+  if (config.groqApiKey) {
+    providers.push({
+      kind: "groq",
+      url: "https://api.groq.com/openai/v1/chat/completions",
+      apiKey: config.groqApiKey,
+      model: config.groqModel,
+      protocol: "openai-chat",
+      jsonObjectOnly: true,
+    });
+  }
+  if (config.forgeApiUrl && config.forgeApiKey) {
+    providers.push({
+      kind: "forge",
+      url: `${config.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`,
+      apiKey: config.forgeApiKey,
+      model: "gemini-2.5-flash",
+      protocol: "openai-chat",
+      jsonObjectOnly: false,
+    });
+  }
+  return { providers, preference: config.provider, timeoutMs: config.timeoutMs };
+}
+
+function orderProviders(providers: LlmProvider[], preference: string): LlmProvider[] {
+  const rank = (provider: LlmProvider) => {
+    if (provider.kind === preference) return 0;
+    if (provider.kind === "anthropic") return 1;
+    if (provider.kind === "groq") return 2;
+    return 3;
+  };
+  return [...providers].sort((a, b) => rank(a) - rank(b));
+}
+
+export async function listConfiguredProviders(): Promise<Array<{ kind: LlmProviderKind; model: string }>> {
+  const { providers } = await configuredProviders();
+  return providers.map(({ kind, model }) => ({ kind, model }));
+}
+
+export async function activeProvider(): Promise<LlmProvider | null> {
+  const { providers, preference } = await configuredProviders();
+  return orderProviders(providers, preference)[0] ?? null;
+}
+
+function normalizeResponseFormat({
   responseFormat,
   response_format,
   outputSchema,
@@ -320,31 +229,17 @@ const normalizeResponseFormat = ({
   response_format?: ResponseFormat;
   outputSchema?: OutputSchema;
   output_schema?: OutputSchema;
-}):
-  | { type: "json_schema"; json_schema: JsonSchema }
-  | { type: "text" }
-  | { type: "json_object" }
-  | undefined => {
-  const explicitFormat = responseFormat || response_format;
-  if (explicitFormat) {
-    if (
-      explicitFormat.type === "json_schema" &&
-      !explicitFormat.json_schema?.schema
-    ) {
-      throw new Error(
-        "responseFormat json_schema requires a defined schema object"
-      );
+}): ResponseFormat | undefined {
+  const explicit = responseFormat || response_format;
+  if (explicit) {
+    if (explicit.type === "json_schema" && !explicit.json_schema?.schema) {
+      throw new Error("responseFormat json_schema requires a defined schema object");
     }
-    return explicitFormat;
+    return explicit;
   }
-
   const schema = outputSchema || output_schema;
   if (!schema) return undefined;
-
-  if (!schema.name || !schema.schema) {
-    throw new Error("outputSchema requires both name and schema");
-  }
-
+  if (!schema.name || !schema.schema) throw new Error("outputSchema requires both name and schema");
   return {
     type: "json_schema",
     json_schema: {
@@ -353,132 +248,264 @@ const normalizeResponseFormat = ({
       ...(typeof schema.strict === "boolean" ? { strict: schema.strict } : {}),
     },
   };
-};
+}
 
-/** Ordem de tentativa: provedor preferido primeiro, demais como fallback. */
-function orderedProviders(): LlmProvider[] {
-  const all = [anthropicProvider(), groqProvider(), forgeProvider()].filter(
-    (p): p is LlmProvider => p != null
+function anthropicImageBlock(url: string): Record<string, unknown> {
+  const dataUri = url.match(/^data:([^;,]+);base64,(.+)$/s);
+  if (dataUri) {
+    return {
+      type: "image",
+      source: { type: "base64", media_type: dataUri[1], data: dataUri[2] },
+    };
+  }
+  return { type: "image", source: { type: "url", url } };
+}
+
+function anthropicContentBlocks(message: Message): Array<Record<string, unknown>> {
+  const blocks: Array<Record<string, unknown>> = [];
+  for (const part of ensureArray(message.content)) {
+    if (typeof part === "string") blocks.push({ type: "text", text: part });
+    else if (part.type === "text") blocks.push({ type: "text", text: part.text });
+    else if (part.type === "image_url") blocks.push(anthropicImageBlock(part.image_url.url));
+    else if (part.type === "file_url") {
+      blocks.push({ type: "text", text: `[Arquivo fornecido: ${part.file_url.url}]` });
+    }
+  }
+  if (message.role === "assistant" && message.tool_calls?.length) {
+    for (const call of message.tool_calls) {
+      let input: unknown = {};
+      try {
+        input = JSON.parse(call.function.arguments || "{}");
+      } catch {
+        input = { raw: call.function.arguments };
+      }
+      blocks.push({ type: "tool_use", id: call.id, name: call.function.name, input });
+    }
+  }
+  return blocks;
+}
+
+function buildAnthropicConversation(messages: Message[]) {
+  const systemParts: string[] = [];
+  const converted: Array<{ role: "user" | "assistant"; content: Array<Record<string, unknown>> }> = [];
+
+  for (const message of messages) {
+    if (message.role === "system") {
+      const text = ensureArray(message.content)
+        .map((part) => (typeof part === "string" ? part : part.type === "text" ? part.text : ""))
+        .filter(Boolean)
+        .join("\n");
+      if (text) systemParts.push(text);
+      continue;
+    }
+
+    if (message.role === "tool" || message.role === "function") {
+      const resultText = ensureArray(message.content)
+        .map((part) => (typeof part === "string" ? part : JSON.stringify(part)))
+        .join("\n");
+      converted.push({
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: message.tool_call_id ?? message.name ?? "tool", content: resultText }],
+      });
+      continue;
+    }
+
+    converted.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: anthropicContentBlocks(message),
+    });
+  }
+
+  return { system: systemParts.join("\n\n"), messages: converted };
+}
+
+function anthropicToolChoice(choice: ToolChoice | undefined, tools: Tool[] | undefined): Record<string, unknown> | undefined {
+  if (!choice) return undefined;
+  if (choice === "auto") return { type: "auto" };
+  if (choice === "none") return { type: "none" };
+  if (choice === "required") {
+    if (!tools?.length) throw new Error("tool_choice 'required' was provided but no tools were configured");
+    return tools.length === 1 ? { type: "tool", name: tools[0].function.name } : { type: "any" };
+  }
+  const name = "name" in choice ? choice.name : choice.function.name;
+  return { type: "tool", name };
+}
+
+function anthropicJsonInstruction(format: ResponseFormat | undefined): string {
+  if (!format || format.type === "text") return "";
+  if (format.type === "json_object") {
+    return "Responda exclusivamente com um objeto JSON válido, sem markdown ou texto adicional.";
+  }
+  return (
+    "Responda exclusivamente com JSON válido que obedeça ao seguinte JSON Schema, sem markdown ou texto adicional:\n" +
+    JSON.stringify(format.json_schema.schema)
   );
-  const pref = aiEnv().aiProvider;
-  const rank = (p: LlmProvider) =>
-    (pref === "anthropic" && p.kind === "anthropic") || (pref === "groq" && p.kind === "groq")
-      ? 0
-      : p.kind === "anthropic"
-        ? 1
-        : p.kind === "groq"
-          ? 2
-          : 3;
-  return all.sort((a, b) => rank(a) - rank(b));
 }
 
-/** Erros transitórios que merecem retry/fallback (limite de taxa, 5xx, rede). */
-function isTransientLlmError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /\b(429|500|502|503|504|529)\b|timeout|fetch failed|ECONNRESET|ETIMEDOUT/i.test(msg);
+interface AnthropicResponse {
+  id: string;
+  model: string;
+  content?: Array<
+    | { type: "text"; text: string }
+    | { type: "tool_use"; id: string; name: string; input: unknown }
+    | Record<string, unknown>
+  >;
+  stop_reason?: string | null;
+  usage?: { input_tokens?: number; output_tokens?: number };
 }
 
-async function invokeProvider(
+function adaptAnthropicResponse(raw: AnthropicResponse, provider: LlmProvider): InvokeResult {
+  const text = (raw.content ?? [])
+    .filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof (block as any).text === "string")
+    .map((block) => block.text)
+    .join("\n");
+  const toolCalls: ToolCall[] = (raw.content ?? [])
+    .filter((block): block is { type: "tool_use"; id: string; name: string; input: unknown } => block.type === "tool_use")
+    .map((block) => ({
+      id: block.id,
+      type: "function" as const,
+      function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+    }));
+  const input = raw.usage?.input_tokens ?? 0;
+  const output = raw.usage?.output_tokens ?? 0;
+  const finishReason =
+    raw.stop_reason === "tool_use"
+      ? "tool_calls"
+      : raw.stop_reason === "max_tokens"
+        ? "length"
+        : raw.stop_reason === "end_turn" || raw.stop_reason === "stop_sequence"
+          ? "stop"
+          : raw.stop_reason ?? null;
+  return {
+    id: raw.id || `anthropic-${Date.now()}`,
+    created: Math.floor(Date.now() / 1000),
+    model: raw.model || provider.model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: text,
+          ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+        },
+        finish_reason: finishReason,
+      },
+    ],
+    usage: {
+      prompt_tokens: input,
+      completion_tokens: output,
+      total_tokens: input + output,
+    },
+  };
+}
+
+async function invokeAnthropicProvider(
   provider: LlmProvider,
-  params: InvokeParams
+  params: InvokeParams,
+  timeoutMs: number,
 ): Promise<InvokeResult> {
-  const {
-    messages,
-    tools,
-    toolChoice,
-    tool_choice,
-    outputSchema,
-    output_schema,
-    responseFormat,
-    response_format,
-    maxTokens,
-    max_tokens,
-  } = params;
-
+  const conversation = buildAnthropicConversation(params.messages);
+  const format = normalizeResponseFormat(params);
+  const jsonInstruction = anthropicJsonInstruction(format);
   const payload: Record<string, unknown> = {
     model: provider.model,
-    messages: messages.map(normalizeMessage),
+    max_tokens: Math.min(params.maxTokens ?? params.max_tokens ?? 8192, 32768),
+    messages: conversation.messages,
   };
-
-  if (tools && tools.length > 0) {
-    payload.tools = tools;
+  const system = [conversation.system, jsonInstruction].filter(Boolean).join("\n\n");
+  if (system) payload.system = system;
+  if (params.tools?.length) {
+    payload.tools = params.tools.map((tool) => ({
+      name: tool.function.name,
+      description: tool.function.description,
+      input_schema: tool.function.parameters ?? { type: "object", properties: {} },
+    }));
+    const choice = anthropicToolChoice(params.toolChoice || params.tool_choice, params.tools);
+    if (choice) payload.tool_choice = choice;
   }
 
-  const normalizedToolChoice = normalizeToolChoice(
-    toolChoice || tool_choice,
-    tools
-  );
-  if (normalizedToolChoice) {
-    payload.tool_choice = normalizedToolChoice;
-  }
-
-  // Respeita o teto pedido pelo chamador (antes era fixo em 32768, inflando
-  // custo/latência e ignorando a intenção de quem chamou).
-  payload.max_tokens = Math.min(maxTokens ?? max_tokens ?? 8192, 32768);
-  if (provider.kind === "forge") {
-    // Parâmetro específico do endpoint legado (Manus Forge)
-    payload.thinking = { budget_tokens: 128 };
-  }
-
-  let normalizedResponseFormat = normalizeResponseFormat({
-    responseFormat,
-    response_format,
-    outputSchema,
-    output_schema,
+  const response = await externalHttpRequest<AnthropicResponse>({
+    source: "anthropic",
+    operation: "messages.create",
+    url: provider.url,
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": provider.apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify(payload),
+    expected: "json",
+    timeoutMs,
+    maxRetries: 0,
+    idempotent: false,
+    maxBodyBytes: 10 * 1024 * 1024,
   });
-
-  // Provedores que não suportam json_schema (ex.: Groq) recebem json_object.
-  // O schema continua guiando via prompt/outputSchema; o cliente faz JSON.parse.
-  if (normalizedResponseFormat?.type === "json_schema" && provider.jsonObjectOnly) {
-    normalizedResponseFormat = { type: "json_object" };
-  }
-
-  if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
-  }
-
-  // Timeout: sem isto, uma chamada travada deixava a request tRPC pendurada
-  // indefinidamente. Configurável por env (padrão 90s).
-  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 90000);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
-  try {
-    response = await fetch(provider.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${provider.apiKey}`,
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } catch (err: any) {
-    if (err?.name === "AbortError") {
-      throw new Error(`LLM invoke timeout após ${timeoutMs}ms`);
-    }
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text();
+  if (!response.ok || !response.data) {
     throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+      `Anthropic Messages API falhou${response.statusCode ? ` (${response.statusCode})` : ""}: ${response.error?.message ?? "resposta inválida"}`,
     );
   }
-
-  return (await response.json()) as InvokeResult;
+  return adaptAnthropicResponse(response.data, provider);
 }
 
-/**
- * Tabela de preços por modelo (USD por 1M de tokens), usada para estimar o
- * custo de cada chamada. Modelos fora da tabela (ex.: tier gratuito do Groq)
- * contam custo 0 — o número de tokens continua registrado.
- */
+async function invokeOpenAiProvider(
+  provider: LlmProvider,
+  params: InvokeParams,
+  timeoutMs: number,
+): Promise<InvokeResult> {
+  const payload: Record<string, unknown> = {
+    model: provider.model,
+    messages: params.messages.map(normalizeOpenAiMessage),
+    max_tokens: Math.min(params.maxTokens ?? params.max_tokens ?? 8192, 32768),
+  };
+  if (params.tools?.length) payload.tools = params.tools;
+  const choice = normalizeToolChoice(params.toolChoice || params.tool_choice, params.tools);
+  if (choice) payload.tool_choice = choice;
+  if (provider.kind === "forge") payload.thinking = { budget_tokens: 128 };
+
+  let format = normalizeResponseFormat(params);
+  if (format?.type === "json_schema" && provider.jsonObjectOnly) format = { type: "json_object" };
+  if (format) payload.response_format = format;
+
+  const response = await externalHttpRequest<InvokeResult>({
+    source: provider.kind,
+    operation: "chat.completions.create",
+    url: provider.url,
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${provider.apiKey}`,
+    },
+    body: JSON.stringify(payload),
+    expected: "json",
+    timeoutMs,
+    maxRetries: 0,
+    idempotent: false,
+    maxBodyBytes: 10 * 1024 * 1024,
+  });
+  if (!response.ok || !response.data) {
+    throw new Error(
+      `${provider.kind} LLM falhou${response.statusCode ? ` (${response.statusCode})` : ""}: ${response.error?.message ?? "resposta inválida"}`,
+    );
+  }
+  return response.data;
+}
+
+async function invokeProvider(provider: LlmProvider, params: InvokeParams, timeoutMs: number): Promise<InvokeResult> {
+  return provider.protocol === "anthropic-messages"
+    ? invokeAnthropicProvider(provider, params, timeoutMs)
+    : invokeOpenAiProvider(provider, params, timeoutMs);
+}
+
+function isTransientLlmError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b(408|429|500|502|503|504|529)\b|timeout|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|circuit breaker/i.test(msg);
+}
+
 const MODEL_PRICES_USD_PER_MTOK: Array<{ match: RegExp; input: number; output: number }> = [
-  { match: /claude-opus/i, input: 15, output: 75 },
+  { match: /claude-opus-4/i, input: 15, output: 75 },
+  { match: /claude-sonnet-4/i, input: 3, output: 15 },
   { match: /claude-(3-7-|3-5-)?sonnet/i, input: 3, output: 15 },
   { match: /claude-(3-5-)?haiku/i, input: 0.8, output: 4 },
   { match: /llama-?3\.3-70b|llama-?3-70b/i, input: 0.59, output: 0.79 },
@@ -488,23 +515,16 @@ const MODEL_PRICES_USD_PER_MTOK: Array<{ match: RegExp; input: number; output: n
 ];
 
 export function estimateCostUsd(model: string, promptTokens: number, completionTokens: number): number {
-  const price = MODEL_PRICES_USD_PER_MTOK.find((p) => p.match.test(model));
+  const price = MODEL_PRICES_USD_PER_MTOK.find((entry) => entry.match.test(model));
   if (!price) return 0;
   return (promptTokens * price.input + completionTokens * price.output) / 1_000_000;
 }
 
-/** Cotação USD→BRL usada só para exibir o custo estimado em reais na UI. */
-export function usdBrlRate(): number {
-  const raw = Number(process.env.USD_BRL_RATE);
+export async function usdBrlRate(): Promise<number> {
+  const raw = Number((await resolveCredential("USD_BRL_RATE")) ?? "");
   return Number.isFinite(raw) && raw > 0 ? raw : 5.5;
 }
 
-/**
- * Contadores de consumo de IA desde o boot do servidor (em memória) +
- * persistência agregada por dia/provedor/modelo em `ai_usage_daily`.
- * O acumulado histórico e o custo estimado ficam visíveis na Central de IA
- * e sobrevivem a restart — antes o consumo zerava a cada boot.
- */
 const usageTotals = {
   desde: new Date().toISOString(),
   chamadas: 0,
@@ -522,10 +542,9 @@ async function persistUsage(
   model: string,
   promptTokens: number,
   completionTokens: number,
-  custoUsd: number
+  custoUsd: number,
 ) {
   try {
-    // Import dinâmico para não criar ciclo _core/llm → db → _core.
     const [{ getDb }, { aiUsageDaily }, { sql }] = await Promise.all([
       import("../db"),
       import("../../drizzle/schema"),
@@ -554,30 +573,30 @@ async function persistUsage(
         },
       });
   } catch {
-    // Registrar consumo nunca pode derrubar a chamada de IA em si.
+    // Telemetria de consumo nunca derruba a chamada principal.
   }
 }
 
 function recordUsage(provider: LlmProvider, result: InvokeResult) {
   usageTotals.chamadas += 1;
-  const u = result.usage;
-  const promptTokens = u?.prompt_tokens ?? 0;
-  const completionTokens = u?.completion_tokens ?? 0;
+  const usage = result.usage;
+  const promptTokens = usage?.prompt_tokens ?? 0;
+  const completionTokens = usage?.completion_tokens ?? 0;
   const model = result.model || provider.model;
   const custoUsd = estimateCostUsd(model, promptTokens, completionTokens);
-  const porProv = (usageTotals.porProvedor[provider.kind] ??= {
+  const providerTotals = (usageTotals.porProvedor[provider.kind] ??= {
     chamadas: 0,
     promptTokens: 0,
     completionTokens: 0,
     custoUsd: 0,
   });
-  porProv.chamadas += 1;
+  providerTotals.chamadas += 1;
   usageTotals.promptTokens += promptTokens;
   usageTotals.completionTokens += completionTokens;
   usageTotals.custoUsd += custoUsd;
-  porProv.promptTokens += promptTokens;
-  porProv.completionTokens += completionTokens;
-  porProv.custoUsd += custoUsd;
+  providerTotals.promptTokens += promptTokens;
+  providerTotals.completionTokens += completionTokens;
+  providerTotals.custoUsd += custoUsd;
   void persistUsage(provider.kind, model, promptTokens, completionTokens, custoUsd);
 }
 
@@ -586,64 +605,61 @@ export function getUsageTotals() {
 }
 
 /**
- * Invoca o LLM com resiliência: erro transitório (429/5xx/timeout/rede) tenta
- * mais uma vez no mesmo provedor e depois cai para o próximo configurado.
- * Um pico de rate-limit no tier gratuito do Groq deixa de perder a extração.
+ * Gateway único de IA. Faz retry controlado apenas para erros transitórios e,
+ * depois, fallback para outro provedor configurado. Cada protocolo fica isolado
+ * no adapter correspondente.
  */
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  const providers = orderedProviders();
-  if (providers.length === 0) {
-    resolveProvider(); // lança o erro padrão "nenhum provedor configurado"
+  const { providers, preference, timeoutMs } = await configuredProviders();
+  const ordered = orderProviders(providers, preference);
+  if (!ordered.length) {
+    throw new Error(
+      "Nenhum provedor de IA configurado. Cadastre Anthropic ou Groq na Central de Integrações.",
+    );
   }
 
   let lastError: unknown;
-  for (const provider of providers) {
+  for (const provider of ordered) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const result = await invokeProvider(provider, params);
+        const result = await invokeProvider(provider, params, timeoutMs);
         recordUsage(provider, result);
         return result;
       } catch (err) {
         lastError = err;
-        if (!isTransientLlmError(err)) {
-          throw err; // erro de payload/schema/autorização: retry não ajuda
-        }
+        if (!isTransientLlmError(err)) throw err;
         logger.warn(
-          `[LLM] ${provider.kind} falhou (tentativa ${attempt}/2): ${(err as Error).message.slice(0, 200)}`
+          `[LLM] ${provider.kind} falhou (tentativa ${attempt}/2): ${(err as Error).message.slice(0, 200)}`,
         );
         if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 1500 * attempt));
+          const delay = 1_000 * attempt + Math.floor(Math.random() * 500);
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
   }
   throw lastError instanceof Error
     ? lastError
-    : new Error("LLM invoke failed em todos os provedores configurados");
+    : new Error("Falha de IA em todos os provedores configurados.");
 }
 
-/**
- * Faz o parse tolerante do JSON devolvido por um LLM: aceita resposta com
- * cerca de markdown (```json ... ```) ou texto ao redor do objeto/array.
- * Lança se não houver JSON válido.
- */
 export function parseLlmJson<T = unknown>(raw: string): T {
   const text = raw.trim();
   try {
     return JSON.parse(text) as T;
   } catch {
-    // segue para as heurísticas
+    // segue para heurísticas tolerantes
   }
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fenced) {
     try {
       return JSON.parse(fenced[1].trim()) as T;
     } catch {
-      // segue para o recorte bruto
+      // segue para recorte do primeiro JSON
     }
   }
   const firstBrace = Math.min(
-    ...["{", "["].map((c) => (text.indexOf(c) === -1 ? Infinity : text.indexOf(c)))
+    ...["{", "["].map((char) => (text.indexOf(char) === -1 ? Infinity : text.indexOf(char))),
   );
   const lastBrace = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
   if (firstBrace !== Infinity && lastBrace > firstBrace) {
