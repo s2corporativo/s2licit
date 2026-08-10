@@ -263,7 +263,8 @@ export async function createCanonicalProduct(
   const [result] = await db.insert(products).values({
     ...masterInput,
     name: input.name.trim(),
-    supplierId: supplierId ?? null,
+    // supplierId é somente cache legado; a relação real é criada abaixo.
+    supplierId: null,
     price: null,
     isActive: input.isActive ?? "yes",
   } as any);
@@ -275,8 +276,8 @@ export async function createCanonicalProduct(
 
   await recordFieldProvenance(productId, masterInput, userId, "manual_create");
 
-  if (supplierId && initialPrice != null) {
-    await upsertProductSupplierPrice(productId, supplierId, initialPrice, {
+  if (supplierId) {
+    await upsertProductSupplierPrice(productId, supplierId, initialPrice ?? null, {
       codigoFornecedor: supplierCode ?? undefined,
       linkProduto: supplierLink ?? undefined,
       origem: "canonical_product_create",
