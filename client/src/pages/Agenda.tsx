@@ -1,12 +1,26 @@
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { CalendarClock, Loader2, MailCheck, ShieldCheck, FileText, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarClock,
+  CircleDollarSign,
+  FileText,
+  Gavel,
+  Loader2,
+  MailCheck,
+  PackageCheck,
+  ShieldCheck,
+} from "lucide-react";
 
-const TIPO_ICON: Record<string, any> = {
+const TIPO_ICON: Record<string, React.ElementType> = {
+  oportunidade: FileText,
+  sessao: Gavel,
   cotacao: MailCheck,
   certidao: ShieldCheck,
-  contrato_alerta: AlertTriangle,
-  contrato_fim: FileText,
+  contrato: AlertTriangle,
+  entrega: PackageCheck,
+  receber: CircleDollarSign,
+  pagar: CircleDollarSign,
 };
 
 const URGENCIA_STYLE: Record<string, string> = {
@@ -14,7 +28,7 @@ const URGENCIA_STYLE: Record<string, string> = {
   hoje: "border-red-200 bg-red-50 text-red-700",
   urgente: "border-amber-200 bg-amber-50 text-amber-800",
   proximo: "border-blue-200 bg-blue-50 text-blue-800",
-  futuro: "border-gray-200 bg-white text-gray-700",
+  futuro: "border-slate-200 bg-white text-slate-700",
 };
 
 function rotuloPrazo(dias: number): string {
@@ -29,56 +43,54 @@ export default function Agenda() {
   const data = query.data;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center gap-3 mb-2">
-        <CalendarClock className="w-7 h-7 text-blue-600" />
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Agenda</h1>
-          <p className="text-sm text-gray-500">Todos os prazos num lugar só — cotações, certidões e contratos</p>
+    <div className="mx-auto max-w-5xl space-y-5">
+      <section className="rounded-2xl bg-blue-950 p-5 text-white">
+        <div className="flex items-start gap-3">
+          <CalendarClock className="mt-0.5 h-7 w-7" />
+          <div>
+            <p className="m-0 text-[10px] font-black uppercase tracking-[0.16em] text-blue-200">Agenda global</p>
+            <h1 className="mb-1 mt-1 text-2xl font-black">Prazos e próximas ações</h1>
+            <p className="m-0 text-sm text-blue-100">Oportunidades, sessões, cotações, certidões, contratos, entregas, recebimentos e pagamentos em uma fila cronológica.</p>
+          </div>
         </div>
-      </div>
+      </section>
 
       {data && (
-        <div className="flex gap-3 my-4">
-          <div className="flex-1 border border-red-200 bg-red-50 p-3 text-center">
-            <div className="text-2xl font-bold text-red-700">{data.resumo.vencidos}</div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-red-600">Vencidos</div>
-          </div>
-          <div className="flex-1 border border-amber-200 bg-amber-50 p-3 text-center">
-            <div className="text-2xl font-bold text-amber-700">{data.resumo.hoje}</div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Hoje</div>
-          </div>
-          <div className="flex-1 border border-blue-200 bg-blue-50 p-3 text-center">
-            <div className="text-2xl font-bold text-blue-700">{data.resumo.semana}</div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Nesta semana</div>
-          </div>
-        </div>
+        <section className="grid grid-cols-3 gap-3">
+          <Metric label="Vencidos" value={data.resumo.vencidos} danger={data.resumo.vencidos > 0} />
+          <Metric label="Hoje" value={data.resumo.hoje} danger={data.resumo.hoje > 0} />
+          <Metric label="Nesta semana" value={data.resumo.semana} />
+        </section>
       )}
 
       {query.isLoading ? (
-        <div className="p-8 text-center text-gray-400"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
+        <div className="p-8 text-center text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></div>
       ) : data && data.itens.length > 0 ? (
-        <div className="space-y-2">
-          {data.itens.map((it, i) => {
-            const Icon = TIPO_ICON[it.tipo] ?? CalendarClock;
+        <section className="space-y-2">
+          {data.itens.map((item) => {
+            const Icon = TIPO_ICON[item.tipo] ?? CalendarClock;
             return (
-              <Link key={i} href={it.link} className={`flex items-center gap-3 border p-3 hover:shadow-sm transition-shadow ${URGENCIA_STYLE[it.urgencia]}`}>
-                <Icon className="w-5 h-5 shrink-0" />
+              <Link key={item.key} href={item.link} className={`flex items-center gap-3 rounded-xl border p-3 no-underline transition hover:shadow-sm ${URGENCIA_STYLE[item.urgencia]}`}>
+                <Icon className="h-5 w-5 shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium truncate">{it.titulo}</div>
-                  {it.detalhe && <div className="text-xs opacity-70 truncate">{it.detalhe}</div>}
+                  <div className="truncate text-sm font-bold">{item.titulo}</div>
+                  {item.detalhe && <div className="truncate text-xs opacity-70">{item.detalhe}</div>}
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-sm font-bold">{rotuloPrazo(it.diasRestantes)}</div>
-                  <div className="text-[10px] opacity-70">{new Date(it.data).toLocaleDateString("pt-BR")}</div>
+                <div className="shrink-0 text-right">
+                  <div className="text-sm font-black">{rotuloPrazo(item.diasRestantes)}</div>
+                  <div className="text-[10px] opacity-70">{new Date(item.data).toLocaleDateString("pt-BR")}</div>
                 </div>
               </Link>
             );
           })}
-        </div>
+        </section>
       ) : (
-        <div className="p-10 text-center text-sm text-gray-400">Nenhum prazo próximo. Tudo em dia. ✅</div>
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white p-12 text-center text-sm text-slate-400">Nenhuma pendência com data registrada.</div>
       )}
     </div>
   );
+}
+
+function Metric({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
+  return <div className={`rounded-xl border bg-white p-4 text-center ${danger ? "border-red-200" : "border-slate-200"}`}><div className={`text-2xl font-black ${danger ? "text-red-700" : "text-slate-900"}`}>{value}</div><div className="mt-1 text-[10px] font-black uppercase tracking-wider text-slate-500">{label}</div></div>;
 }
