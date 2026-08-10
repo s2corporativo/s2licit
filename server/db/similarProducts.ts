@@ -1,5 +1,11 @@
 import { and, asc, eq, like, sql } from "drizzle-orm";
-import { products, suppliers } from "../../drizzle/schema";
+import { products } from "../../drizzle/schema";
+import {
+  bestOfferPriceSql,
+  bestOfferSupplierIdSql,
+  bestOfferSupplierNameSql,
+} from "./catalogOfferExpressions";
+import { escapeLike } from "./_helpers";
 import { getDb } from "./_client";
 
 export type SimilarProduct = {
@@ -11,34 +17,38 @@ export type SimilarProduct = {
   presentation: string | null;
   price: string | null;
   priceUnit: string | null;
-  supplierId: number;
-  supplierName: string;
+  supplierId: number | null;
+  supplierName: string | null;
   imageUrl: string | null;
   productUrl: string | null;
   savingsPercent: number | null;
 };
 
 /**
- * Busca produtos similares com a mesma composição (princípio ativo),
- * ordenados por preço crescente. Retorna apenas produtos mais baratos que o referência.
+ * Compatibilidade legada por princípio ativo. Novas decisões de equivalência
+ * devem usar o Compêndio; aqui o resumo comercial já é derivado da melhor
+ * oferta canônica.
  */
 export async function getSimilarProductsByIngredient(
   productId: number,
-  referencePrice: number | null
+  referencePrice: number | null,
 ): Promise<SimilarProduct[]> {
   const db = await getDb();
   if (!db) return [];
 
-  // Busca o produto de referência
   const [ref] = await db
-    .select()
+    .select({
+      id: products.id,
+      activeIngredient: products.activeIngredient,
+      bestPrice: bestOfferPriceSql,
+    })
     .from(products)
     .where(eq(products.id, productId))
     .limit(1);
 
-  if (!ref || !ref.activeIngredient?.trim()) return [];
+  if (!ref?.activeIngredient?.trim()) return [];
+  const term = `%${escapeLike(ref.activeIngredient.trim())}%`;
 
-  // Busca todos os produtos com o mesmo princípio ativo
   const similar = await db
     .select({
       id: products.id,
@@ -47,51 +57,54 @@ export async function getSimilarProductsByIngredient(
       manufacturer: products.manufacturer,
       concentration: products.concentration,
       presentation: products.presentation,
-      price: products.price,
+      price: bestOfferPriceSql,
       priceUnit: products.priceUnit,
-      supplierId: products.supplierId,
-      supplierName: suppliers.name,
+      supplierId: bestOfferSupplierIdSql,
+      supplierName: bestOfferSupplierNameSql,
       imageUrl: products.imageUrl,
       productUrl: products.productUrl,
     })
     .from(products)
-    .innerJoin(suppliers, eq(products.supplierId, suppliers.id))
     .where(
       and(
         eq(products.isActive, "yes"),
-        like(products.activeIngredient, `%${ref.activeIngredient.trim()}%`),
-        // Exclui o próprio produto
-        sql`${products.id} != ${productId}`
-      )
+        like(products.activeIngredient, term),
+        sql`${products.id} <> ${productId}`,
+      ),
     )
-    .orderBy(asc(products.price))
+    .orderBy(asc(bestOfferPriceSql), asc(products.name))
     .limit(20);
 
-  const refPrice = referencePrice ?? (ref.price ? parseFloat(ref.price) : null);
-
-  return similar.map((p) => {
-    const pPrice = p.price ? parseFloat(p.price) : null;
-    const savingsPercent =
-      refPrice && pPrice && refPrice > 0 && pPrice < refPrice
-        ? Math.round(((refPrice - pPrice) / refPrice) * 100)
+  const canonicalReferencePrice = ref.bestPrice == null ? null : Number(ref.bestPrice);
+  const refPrice =
+    referencePrice != null && Number.isFinite(referencePrice) && referencePrice > 0
+      ? referencePrice
+      : canonicalReferencePrice != null && Number.isFinite(canonicalReferencePrice) && canonicalReferencePrice > 0
+        ? canonicalReferencePrice
         : null;
-    return { ...p, savingsPercent };
+
+  return similar.map((product) => {
+    const price = product.price == null ? null : Number(product.price);
+    const savingsPercent =
+      refPrice != null && price != null && Number.isFinite(price) && price > 0 && price < refPrice
+        ? Math.round(((refPrice - price) / refPrice) * 100)
+        : null;
+    return { ...product, savingsPercent };
   });
 }
 
-/**
- * Busca produtos similares mais baratos que o produto selecionado.
- * Retorna apenas os que têm preço inferior ao de referência.
- */
 export async function getCheaperAlternatives(
   productId: number,
-  referencePrice: number | null
+  referencePrice: number | null,
 ): Promise<SimilarProduct[]> {
   const all = await getSimilarProductsByIngredient(productId, referencePrice);
-  const refPrice = referencePrice;
-  if (!refPrice) return all.slice(0, 5);
-  return all.filter((p) => {
-    const pPrice = p.price ? parseFloat(p.price) : null;
-    return pPrice !== null && pPrice < refPrice;
-  }).slice(0, 5);
+  if (referencePrice == null || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+    return all.slice(0, 5);
+  }
+  return all
+    .filter((product) => {
+      const price = product.price == null ? null : Number(product.price);
+      return price != null && Number.isFinite(price) && price > 0 && price < referencePrice;
+    })
+    .slice(0, 5);
 }
