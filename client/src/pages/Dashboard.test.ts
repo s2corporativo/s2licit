@@ -9,4 +9,15 @@ describe("Dashboard shortcuts", () => {
     expect(source).toContain('href="/importar-nfe"');
     expect(source).toContain("Importar XML");
   });
+
+  it("oferece importação de produtos por planilha, XML e PDF", () => {
+    const source = readFileSync(resolve(__dirname, "Dashboard.tsx"), "utf8");
+
+    expect(source).toContain("Importar produtos");
+    expect(source).toContain('href="/importar"');
+    expect(source).toContain("Importar planilha");
+    expect(source).toContain('href="/importar-nfe"');
+    expect(source).toContain('href="/captura-inteligente?origem=documento"');
+    expect(source).toContain("Importar PDF");
+  });
 });
