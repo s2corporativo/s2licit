@@ -2,6 +2,7 @@ import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import {
   getEmailConfigView,
+  resetEmailConfig,
   saveEmailConfig,
   testImapConnection,
   testSmtpConnection,
@@ -9,8 +10,9 @@ import {
 import { recordAudit } from "../services/auditService";
 
 /**
- * Configuração de e-mail (IMAP para receber cotações, SMTP para enviar)
- * pela interface — antes só era possível por variável de ambiente.
+ * Configuração de e-mail (IMAP/SMTP) pela interface. Overrides persistidos
+ * têm prioridade sobre a configuração de infraestrutura e podem ser removidos
+ * explicitamente sem alterar process.env nem exigir redeploy.
  */
 export const emailConfigRouter = router({
   get: adminProcedure.query(() => getEmailConfigView()),
@@ -30,7 +32,7 @@ export const emailConfigRouter = router({
         smtpPassword: z.string().max(512).optional().nullable(),
         smtpSecure: z.boolean().optional(),
         smtpFrom: z.string().max(320).optional().nullable(),
-      })
+      }),
     )
     .mutation(async ({ input, ctx }) => {
       await saveEmailConfig(input);
@@ -43,9 +45,20 @@ export const emailConfigRouter = router({
       return { ok: true };
     }),
 
+  reset: adminProcedure.mutation(async ({ ctx }) => {
+    await resetEmailConfig();
+    await recordAudit({
+      userId: ctx.user?.id,
+      action: "email_config_reset",
+      entity: "email_settings",
+      summary: "Overrides de e-mail removidos; configuração padrão da instalação restaurada",
+    });
+    return { ok: true };
+  }),
+
   testar: adminProcedure
     .input(z.object({ tipo: z.enum(["imap", "smtp"]) }))
     .mutation(async ({ input }) =>
-      input.tipo === "imap" ? testImapConnection() : testSmtpConnection()
+      input.tipo === "imap" ? testImapConnection() : testSmtpConnection(),
     ),
 });
