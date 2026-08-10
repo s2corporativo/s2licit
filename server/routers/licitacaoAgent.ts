@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import {
   invokeLLM,
   type Message,
@@ -284,7 +284,7 @@ const chatInputSchema = z.object({
 });
 
 export const licitacaoAgentRouter = router({
-  chat: protectedProcedure
+  chat: editorProcedure
     .input(chatInputSchema)
     .mutation(async ({ input }) => {
       const messages: Message[] = [
