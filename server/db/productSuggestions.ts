@@ -1,33 +1,73 @@
 import { and, asc, eq, like, or, sql } from "drizzle-orm";
-import { categories, products, suppliers } from "../../drizzle/schema";
+import { categories, products } from "../../drizzle/schema";
+import {
+  bestOfferPriceSql,
+  bestOfferSupplierIdSql,
+  bestOfferSupplierNameSql,
+} from "./catalogOfferExpressions";
 import { escapeLike } from "./_helpers";
 import { getDb } from "./_client";
 
+type SuggestedProduct = {
+  id: number;
+  name: string;
+  activeIngredient: string | null;
+  manufacturer: string | null;
+  concentration: string | null;
+  presentation: string | null;
+  price: string | null;
+  priceUnit: string | null;
+  unit: string | null;
+  supplierId: number | null;
+  supplierName: string | null;
+  categoryName: string | null;
+  imageUrl: string | null;
+  productUrl: string | null;
+};
+
+const projection = {
+  id: products.id,
+  name: products.name,
+  activeIngredient: products.activeIngredient,
+  manufacturer: products.manufacturer,
+  concentration: products.concentration,
+  presentation: products.presentation,
+  price: bestOfferPriceSql,
+  priceUnit: products.priceUnit,
+  unit: products.unit,
+  supplierId: bestOfferSupplierIdSql,
+  supplierName: bestOfferSupplierNameSql,
+  categoryName: categories.name,
+  imageUrl: products.imageUrl,
+  productUrl: products.productUrl,
+};
+
+function tokenize(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 1);
+}
+
+function jaccard(inputTokens: string[], candidateName: string) {
+  const inputSet = new Set(inputTokens);
+  const candidateSet = new Set(tokenize(candidateName));
+  const intersection = [...inputSet].filter((token) => candidateSet.has(token)).length;
+  const union = new Set([...inputSet, ...candidateSet]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
 /**
- * Dado uma lista de nomes de produtos (texto livre), busca no banco o melhor
- * match para cada item, retornando o produto com menor preço e equivalências.
+ * Sugestão legada usada por propostas. A identidade permanece no produto e o
+ * resumo comercial vem sempre da melhor oferta canônica.
  */
-export async function suggestProductsFromList(
-  productNames: string[]
-): Promise<
+export async function suggestProductsFromList(productNames: string[]): Promise<
   Array<{
     inputName: string;
-    matchedProduct: {
-      id: number;
-      name: string;
-      activeIngredient: string | null;
-      manufacturer: string | null;
-      concentration: string | null;
-      presentation: string | null;
-      price: string | null;
-      priceUnit: string | null;
-      unit: string | null;
-      supplierId: number | null;
-      supplierName: string | null;
-      categoryName: string | null;
-      imageUrl: string | null;
-      productUrl: string | null;
-    } | null;
+    matchedProduct: SuggestedProduct | null;
     alternatives: Array<{
       id: number;
       name: string;
@@ -41,46 +81,27 @@ export async function suggestProductsFromList(
   }>
 > {
   const db = await getDb();
-  if (!db) return productNames.map((n) => ({ inputName: n, matchedProduct: null, alternatives: [], similarity: 0 }));
+  if (!db) {
+    return productNames.map((name) => ({
+      inputName: name,
+      matchedProduct: null,
+      alternatives: [],
+      similarity: 0,
+    }));
+  }
 
   const results = [];
-
-  for (const rawName of productNames) {
+  for (const rawName of productNames.slice(0, 200)) {
     const name = rawName.trim();
     if (!name) continue;
 
-    // Normaliza tokens do input
-    const inputTokens = name
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((t) => t.length > 2);
-
-    // Busca candidatos por LIKE em múltiplos campos
+    const inputTokens = tokenize(name).filter((token) => token.length > 2);
     const term = `%${escapeLike(name)}%`;
-    const shortTokenTerm = inputTokens.length > 0 ? `%${inputTokens[0]}%` : term;
+    const shortTokenTerm = inputTokens.length > 0 ? `%${escapeLike(inputTokens[0])}%` : term;
 
     const candidates = await db
-      .select({
-        id: products.id,
-        name: products.name,
-        activeIngredient: products.activeIngredient,
-        manufacturer: products.manufacturer,
-        concentration: products.concentration,
-        presentation: products.presentation,
-        price: products.price,
-        priceUnit: products.priceUnit,
-        unit: products.unit,
-        supplierId: products.supplierId,
-        supplierName: suppliers.name,
-        categoryName: categories.name,
-        imageUrl: products.imageUrl,
-        productUrl: products.productUrl,
-      })
+      .select(projection)
       .from(products)
-      .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
       .where(
         and(
@@ -88,93 +109,59 @@ export async function suggestProductsFromList(
           or(
             like(products.name, term),
             like(products.name, shortTokenTerm),
-            like(products.activeIngredient, term)
-          )!
-        )
+            like(products.activeIngredient, term),
+          )!,
+        ),
       )
-      .orderBy(asc(products.price))
+      .orderBy(asc(bestOfferPriceSql), asc(products.name))
       .limit(30);
 
-    if (candidates.length === 0) {
+    if (!candidates.length) {
       results.push({ inputName: name, matchedProduct: null, alternatives: [], similarity: 0 });
       continue;
     }
 
-    // Calcula similaridade Jaccard por tokens
-    const normalize = (s: string) =>
-      s
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter((t) => t.length > 1);
-
-    const inputSet = new Set(inputTokens);
-
-    let bestMatch = candidates[0];
-    let bestSim = 0;
-
-    for (const c of candidates) {
-      const cTokens = normalize(c.name);
-      const cSet = new Set(cTokens);
-      const intersection = Array.from(inputSet).filter((t) => cSet.has(t)).length;
-      const union = new Set(Array.from(inputSet).concat(Array.from(cSet))).size;
-      const sim = union > 0 ? intersection / union : 0;
-      if (sim > bestSim) {
-        bestSim = sim;
-        bestMatch = c;
+    let bestMatch = candidates[0] as SuggestedProduct;
+    let bestSimilarity = 0;
+    for (const candidate of candidates) {
+      const similarity = jaccard(inputTokens, candidate.name);
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        bestMatch = candidate as SuggestedProduct;
       }
     }
 
-    // Busca alternativas pelo mesmo princípio ativo (se disponível)
-    let alternatives: typeof candidates = [];
+    let alternatives: SuggestedProduct[] = [];
     if (bestMatch.activeIngredient) {
-      const altTerm = `%${bestMatch.activeIngredient}%`;
-      alternatives = await db
-        .select({
-          id: products.id,
-          name: products.name,
-          activeIngredient: products.activeIngredient,
-          manufacturer: products.manufacturer,
-          concentration: products.concentration,
-          presentation: products.presentation,
-          price: products.price,
-          priceUnit: products.priceUnit,
-          unit: products.unit,
-          supplierId: products.supplierId,
-          supplierName: suppliers.name,
-          categoryName: categories.name,
-          imageUrl: products.imageUrl,
-          productUrl: products.productUrl,
-        })
+      const alternativeTerm = `%${escapeLike(bestMatch.activeIngredient)}%`;
+      alternatives = (await db
+        .select(projection)
         .from(products)
-        .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
         .leftJoin(categories, eq(products.categoryId, categories.id))
         .where(
           and(
             eq(products.isActive, "yes"),
-            like(products.activeIngredient, altTerm),
-            sql`${products.id} != ${bestMatch.id}`
-          )
+            like(products.activeIngredient, alternativeTerm),
+            sql`${products.id} <> ${bestMatch.id}`,
+          ),
         )
-        .orderBy(asc(products.price))
-        .limit(5);
+        .orderBy(asc(bestOfferPriceSql), asc(products.name))
+        .limit(5)) as SuggestedProduct[];
     }
 
     results.push({
       inputName: name,
       matchedProduct: bestMatch,
-      alternatives: alternatives.map((a) => ({
-        id: a.id,
-        name: a.name,
-        price: a.price,
-        supplierName: a.supplierName,
-        activeIngredient: a.activeIngredient,
-        concentration: a.concentration,
-        imageUrl: a.imageUrl,
+      alternatives: alternatives.map((alternative) => ({
+        id: alternative.id,
+        name: alternative.name,
+        price: alternative.price,
+        supplierName: alternative.supplierName,
+        activeIngredient: alternative.activeIngredient,
+        concentration: alternative.concentration,
+        imageUrl: alternative.imageUrl,
       })),
-      similarity: bestSim,
+      similarity: bestSimilarity,
     });
   }
 
