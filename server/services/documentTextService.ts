@@ -124,7 +124,7 @@ export function approximateDecodedBytes(base64: string): number {
       (code >= 65 && code <= 90) ||
       (code >= 97 && code <= 122);
     const isBase64Symbol = code === 43 || code === 47 || code === 45 || code === 95;
-    if (!isAlphaNumeric || !isBase64Symbol && !isAlphaNumeric || sawPadding) {
+    if ((!isAlphaNumeric && !isBase64Symbol) || sawPadding) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Conteúdo base64 inválido." });
     }
   }
