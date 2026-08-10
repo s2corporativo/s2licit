@@ -33,6 +33,8 @@ export interface IntegrationErrorPayload {
 export interface IntegrationMetadata {
   pages?: number;
   records?: number;
+  sourceTotalPages?: number;
+  sourceTotalRecords?: number;
   cached?: boolean;
   partial?: boolean;
   attempts?: number;
