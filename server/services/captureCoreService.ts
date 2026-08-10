@@ -76,7 +76,14 @@ export function evaluateCaptureQuality(input: {
   const reasons: string[] = [];
 
   if (input.captured === 0) {
-    return { score: 0, quarantine: true, reasons: ["Nenhum produto foi capturado."] };
+    if (input.mode === "full") {
+      return { score: 0, quarantine: true, reasons: ["Nenhum produto foi capturado no catálogo completo."] };
+    }
+    return {
+      score: 70,
+      quarantine: false,
+      reasons: ["A busca/atualização seletiva não retornou produtos; o conector ficou em atenção sem alterar o catálogo."],
+    };
   }
 
   if (input.mode === "full" && input.baseline && input.baseline > 0) {
@@ -189,7 +196,7 @@ export async function enqueueCaptureJob(input: {
       progressStage: "queued",
       progressMessage: "Captura aguardando worker.",
     });
-    const id = Number((inserted as { insertId?: number }).insertId);
+    const id = Number((inserted as any).insertId);
     await addEvent(id, "queued", `Job criado (${mode}/${input.trigger ?? "manual"}).`);
     return { id, status: "queued" as const, reused: false as const, mode };
   } catch (error) {
