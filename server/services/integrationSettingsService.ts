@@ -9,16 +9,19 @@ import cron from "node-cron";
 import { eq, inArray } from "drizzle-orm";
 import { integrationSettings } from "../../drizzle/schema";
 import { getDb } from "../db";
-import { encryptPassword, decryptPassword } from "../utils/encryption";
+import { decryptPassword, encryptPassword } from "../utils/encryption";
 import {
   invalidateCredentialCache,
   resolveCredentialWithOrigin,
 } from "../integrations/core/credentialResolver";
 
-export const INTEGRATION_KEYS: Record<
-  string,
-  { label: string; secreta: boolean; grupo: string }
-> = {
+interface IntegrationKeyMetadata {
+  label: string;
+  secreta: boolean;
+  grupo: "whatsapp" | "geral" | "fontes" | "automacao" | "legado";
+}
+
+export const INTEGRATION_KEYS = {
   WHATSAPP_PHONE_ID: { label: "ID do telefone (Meta Cloud API)", secreta: false, grupo: "whatsapp" },
   WHATSAPP_TOKEN: { label: "Token de acesso", secreta: true, grupo: "whatsapp" },
   WHATSAPP_API_VERSION: { label: "Versão da API", secreta: false, grupo: "whatsapp" },
@@ -29,7 +32,6 @@ export const INTEGRATION_KEYS: Record<
   COMPRASMG_OPPORTUNITIES_URL: { label: "URL pública Compras MG", secreta: false, grupo: "fontes" },
   CEMIG_OPPORTUNITIES_URL: { label: "URL pública CEMIG", secreta: false, grupo: "fontes" },
   COPASA_OPPORTUNITIES_URL: { label: "URL pública COPASA", secreta: false, grupo: "fontes" },
-  // Alias legado: oculto da UI nova, mas ainda aceito durante a migração.
   FIEMG_LICITACOES_URL: { label: "URL FIEMG (legado)", secreta: false, grupo: "legado" },
   EMAIL_SYNC_ENABLED: { label: "Sincronização de e-mail ativa (true/false)", secreta: false, grupo: "automacao" },
   EMAIL_SYNC_CRON: { label: "Agenda de e-mail (cron)", secreta: false, grupo: "automacao" },
@@ -43,19 +45,44 @@ export const INTEGRATION_KEYS: Record<
   BACKUP_CRON: { label: "Agenda do backup (cron)", secreta: false, grupo: "automacao" },
   BACKUP_KEEP_DAYS: { label: "Retenção de backups (dias)", secreta: false, grupo: "automacao" },
   FAILURE_ALERTS_ENABLED: { label: "Alertas de falha ativos (true/false)", secreta: false, grupo: "automacao" },
-};
+} as const satisfies Record<string, IntegrationKeyMetadata>;
+
+export type IntegrationKey = keyof typeof INTEGRATION_KEYS;
 
 export type IntegrationView = Array<{
-  chave: string;
+  chave: IntegrationKey;
   label: string;
-  grupo: string;
+  grupo: IntegrationKeyMetadata["grupo"];
   secreta: boolean;
   valor: string | null;
   temValor: boolean;
   origem: "interface" | "ambiente" | "nao_configurado";
 }>;
 
-function validateValue(chave: string, value: string): string {
+function isIntegrationKey(value: string): value is IntegrationKey {
+  return Object.prototype.hasOwnProperty.call(INTEGRATION_KEYS, value);
+}
+
+function validateHttpUrl(chave: IntegrationKey, valor: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(valor);
+  } catch {
+    throw new Error(`${chave}: URL inválida.`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`${chave}: somente HTTP/HTTPS é permitido.`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${chave}: credenciais embutidas na URL não são permitidas.`);
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+    throw new Error(`${chave}: destinos locais não são permitidos.`);
+  }
+}
+
+function validateValue(chave: IntegrationKey, value: string): string {
   const valor = value.trim();
   if (!valor) throw new Error(`${chave}: valor vazio.`);
 
@@ -76,33 +103,37 @@ function validateValue(chave: string, value: string): string {
     chave.endsWith("_OPPORTUNITIES_URL") ||
     chave === "WHATSAPP_WEBHOOK_URL"
   ) {
-    let parsed: URL;
-    try {
-      parsed = new URL(valor);
-    } catch {
-      throw new Error(`${chave}: URL inválida.`);
-    }
-    if (!["https:", "http:"].includes(parsed.protocol)) {
-      throw new Error(`${chave}: somente HTTP/HTTPS é permitido.`);
-    }
+    validateHttpUrl(chave, valor);
   }
   if (chave === "USD_BRL_RATE") {
     const rate = Number(valor.replace(",", "."));
     if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
       throw new Error("USD_BRL_RATE: informe uma cotação positiva e plausível.");
     }
+    return String(rate);
   }
   if (chave === "WHATSAPP_API_VERSION" && !/^v\d+(?:\.\d+)?$/i.test(valor)) {
     throw new Error("WHATSAPP_API_VERSION: formato esperado vNN.N.");
   }
   if (chave === "WHATSAPP_TO") {
-    const invalid = valor
-      .split(",")
-      .map((item) => item.replace(/\D/g, ""))
-      .some((item) => item.length < 10 || item.length > 15);
-    if (invalid) throw new Error("WHATSAPP_TO: informe números E.164 válidos separados por vírgula.");
+    const numbers = valor.split(",").map((item) => item.replace(/\D/g, ""));
+    if (!numbers.length || numbers.some((item) => item.length < 10 || item.length > 15)) {
+      throw new Error("WHATSAPP_TO: informe números E.164 válidos separados por vírgula.");
+    }
+    return numbers.join(",");
   }
   return valor;
+}
+
+function normalizeEntries(entries: Record<string, string>): Array<{ chave: IntegrationKey; valorEnc: string }> {
+  const normalized: Array<{ chave: IntegrationKey; valorEnc: string }> = [];
+  for (const [rawKey, rawValue] of Object.entries(entries)) {
+    if (!isIntegrationKey(rawKey)) throw new Error(`Chave de integração não permitida: ${rawKey}.`);
+    if (rawValue == null || rawValue.trim() === "") continue;
+    const value = validateValue(rawKey, rawValue);
+    normalized.push({ chave: rawKey, valorEnc: encryptPassword(value) });
+  }
+  return normalized;
 }
 
 export async function getIntegrationView(): Promise<IntegrationView> {
@@ -114,8 +145,10 @@ export async function getIntegrationView(): Promise<IntegrationView> {
         .where(inArray(integrationSettings.chave, Object.keys(INTEGRATION_KEYS)))
     : [];
   const byKey = new Map(rows.map((row) => [row.chave, row] as const));
+  const visibleEntries = Object.entries(INTEGRATION_KEYS).filter(([, meta]) => meta.grupo !== "legado") as Array<
+    [IntegrationKey, IntegrationKeyMetadata]
+  >;
 
-  const visibleEntries = Object.entries(INTEGRATION_KEYS).filter(([, meta]) => meta.grupo !== "legado");
   return Promise.all(
     visibleEntries.map(async ([chave, meta]) => {
       const row = byKey.get(chave);
@@ -145,32 +178,40 @@ export async function getIntegrationView(): Promise<IntegrationView> {
   );
 }
 
-/** Valor vazio mantém o atual. Remoção é feita pela operação explícita `remove`. */
+/**
+ * Valida e criptografa o lote inteiro antes de abrir a transação. A persistência
+ * é atômica: ou todas as chaves são atualizadas, ou nenhuma é alterada.
+ * O número de chaves é limitado pela lista-branca (O(K), K constante pequeno).
+ */
 export async function saveIntegrationSettings(entries: Record<string, string>): Promise<void> {
+  const normalized = normalizeEntries(entries);
+  if (!normalized.length) return;
+
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
 
-  for (const [chave, rawValue] of Object.entries(entries)) {
-    if (!(chave in INTEGRATION_KEYS)) throw new Error(`Chave de integração não permitida: ${chave}.`);
-    if (rawValue == null || rawValue.trim() === "") continue;
-    const valor = validateValue(chave, rawValue);
-    const valorEnc = encryptPassword(valor);
-    const [existing] = await db
-      .select({ id: integrationSettings.id })
-      .from(integrationSettings)
-      .where(eq(integrationSettings.chave, chave))
-      .limit(1);
-    if (existing) {
-      await db.update(integrationSettings).set({ valorEnc }).where(eq(integrationSettings.id, existing.id));
-    } else {
-      await db.insert(integrationSettings).values({ chave, valorEnc });
+  await db.transaction(async (tx) => {
+    for (const entry of normalized) {
+      const [existing] = await tx
+        .select({ id: integrationSettings.id })
+        .from(integrationSettings)
+        .where(eq(integrationSettings.chave, entry.chave))
+        .limit(1);
+      if (existing) {
+        await tx
+          .update(integrationSettings)
+          .set({ valorEnc: entry.valorEnc })
+          .where(eq(integrationSettings.id, existing.id));
+      } else {
+        await tx.insert(integrationSettings).values(entry);
+      }
     }
-  }
+  });
   invalidateCredentialCache();
 }
 
 export async function removeIntegrationSetting(chave: string): Promise<void> {
-  if (!(chave in INTEGRATION_KEYS)) throw new Error(`Chave de integração não permitida: ${chave}.`);
+  if (!isIntegrationKey(chave)) throw new Error(`Chave de integração não permitida: ${chave}.`);
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
   await db.delete(integrationSettings).where(eq(integrationSettings.chave, chave));
