@@ -4,11 +4,9 @@ import { logger } from "../_core/logger";
 /**
  * Fachada canônica de custo por fornecedor.
  *
- * A fonte operacional passa a ser `product_supplier_offers`. A tabela
- * `product_supplier_prices` continua recebendo dual-write temporário apenas
- * para compatibilidade com telas/rotinas antigas, mas nenhuma leitura desta
- * fachada depende mais dela. Isso evita que fluxos diferentes enxerguem custos
- * divergentes durante a migração gradual.
+ * A fonte operacional é `product_supplier_offers`. A tabela
+ * `product_supplier_prices` e `products.price` recebem espelhamento temporário
+ * apenas para manter consumidores legados consistentes durante a migração.
  */
 export async function getProductSupplierPrices(productId: number) {
   const db = await getDb();
@@ -33,6 +31,29 @@ export async function getProductSupplierPrices(productId: number) {
     .leftJoin(suppliers, eq(productSupplierOffers.supplierId, suppliers.id))
     .where(eq(productSupplierOffers.productId, productId))
     .orderBy(asc(productSupplierOffers.supplierId));
+}
+
+async function syncLegacyBestPrice(productId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const { productSupplierOffers, products } = await import("../../drizzle/schema");
+  const { eq, sql } = await import("drizzle-orm");
+
+  const rows = await db
+    .select({
+      bestPrice: sql<string | null>`MIN(CASE
+        WHEN ${productSupplierOffers.promoPrice} IS NOT NULL
+          AND ${productSupplierOffers.promoPrice} > 0
+          AND (${productSupplierOffers.price} IS NULL OR ${productSupplierOffers.promoPrice} < ${productSupplierOffers.price})
+          THEN ${productSupplierOffers.promoPrice}
+        ELSE ${productSupplierOffers.price}
+      END)`,
+    })
+    .from(productSupplierOffers)
+    .where(eq(productSupplierOffers.productId, productId));
+
+  const best = rows[0]?.bestPrice ?? null;
+  await db.update(products).set({ price: best }).where(eq(products.id, productId));
 }
 
 export async function upsertProductSupplierPrice(
@@ -84,8 +105,6 @@ export async function upsertProductSupplierPrice(
       });
     }
 
-    // Dual-write de transição: mantém consumidores legados consistentes até a
-    // remoção definitiva da tabela antiga em migração futura controlada.
     const existingLegacy = await tx
       .select({ id: productSupplierPrices.id })
       .from(productSupplierPrices)
@@ -113,7 +132,8 @@ export async function upsertProductSupplierPrice(
     }
   });
 
-  // Mudança de custo entra uma única vez na trilha relacional de histórico.
+  await syncLegacyBestPrice(productId);
+
   const previousPrice = existingOffer[0]?.price != null ? Number(existingOffer[0].price) : null;
   const nextPrice = price != null ? Number(price) : null;
   if (nextPrice !== null && nextPrice !== previousPrice) {
@@ -154,8 +174,14 @@ export async function findProductByEan(ean: string) {
   const db = await getDb();
   if (!db) return null;
   const { products } = await import("../../drizzle/schema");
-  const { eq } = await import("drizzle-orm");
-  const rows = await db.select().from(products).where(eq((products as any).ean, ean)).limit(1);
+  const { eq, or } = await import("drizzle-orm");
+  const normalized = ean.trim();
+  if (!normalized) return null;
+  const rows = await db
+    .select()
+    .from(products)
+    .where(or(eq(products.ean, normalized), eq(products.gtin, normalized), eq(products.barcode, normalized)))
+    .limit(1);
   return rows[0] ?? null;
 }
 
@@ -168,21 +194,12 @@ export async function deleteProductSupplierPrice(productId: number, supplierId: 
   await db.transaction(async (tx) => {
     await tx
       .delete(productSupplierOffers)
-      .where(
-        and(
-          eq(productSupplierOffers.productId, productId),
-          eq(productSupplierOffers.supplierId, supplierId),
-        ),
-      );
+      .where(and(eq(productSupplierOffers.productId, productId), eq(productSupplierOffers.supplierId, supplierId)));
     await tx
       .delete(productSupplierPrices)
-      .where(
-        and(
-          eq(productSupplierPrices.productId, productId),
-          eq(productSupplierPrices.supplierId, supplierId),
-        ),
-      );
+      .where(and(eq(productSupplierPrices.productId, productId), eq(productSupplierPrices.supplierId, supplierId)));
   });
+  await syncLegacyBestPrice(productId);
 }
 
 export async function batchUpsertSupplierPrices(
