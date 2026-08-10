@@ -90,28 +90,15 @@ function setValue(
   origins.set(key, origin);
 }
 
-function clearValue(
-  values: Map<string, string>,
-  origins: Map<string, CredentialOrigin>,
-  key: string,
-): void {
+function clearValue(values: Map<string, string>, origins: Map<string, CredentialOrigin>, key: string): void {
   values.delete(key);
   origins.delete(key);
 }
 
-function clearValues(
-  values: Map<string, string>,
-  origins: Map<string, CredentialOrigin>,
-  keys: readonly string[],
-): void {
+function clearValues(values: Map<string, string>, origins: Map<string, CredentialOrigin>, keys: readonly string[]): void {
   for (const key of keys) clearValue(values, origins, key);
 }
 
-/**
- * Se existe override criptografado, o fallback de ambiente é removido antes da
- * decriptação. Uma chave corrompida/rotacionada falha fechada em vez de misturar
- * credenciais de duas origens diferentes.
- */
 function decryptInto(
   values: Map<string, string>,
   origins: Map<string, CredentialOrigin>,
@@ -138,11 +125,7 @@ function bootstrapSnapshot(): RuntimeSnapshot {
 }
 
 function refreshTimestamp(snapshot: RuntimeSnapshot): RuntimeSnapshot {
-  return {
-    values: new Map(snapshot.values),
-    origins: new Map(snapshot.origins),
-    loadedAt: Date.now(),
-  };
+  return { values: new Map(snapshot.values), origins: new Map(snapshot.origins), loadedAt: Date.now() };
 }
 
 async function loadSnapshot(): Promise<RuntimeSnapshot> {
@@ -154,10 +137,7 @@ async function loadSnapshot(): Promise<RuntimeSnapshot> {
   const [aiRows, emailRows, generalRows] = await Promise.all([
     db.select().from(aiSettings).limit(1),
     db.select().from(emailSettings).limit(1),
-    db
-      .select()
-      .from(integrationSettings)
-      .where(inArray(integrationSettings.chave, [...GENERAL_KEYS])),
+    db.select().from(integrationSettings).where(inArray(integrationSettings.chave, [...GENERAL_KEYS])),
   ]);
 
   const ai = aiRows[0];
@@ -195,19 +175,12 @@ async function loadSnapshot(): Promise<RuntimeSnapshot> {
     if (!row.valorEnc) continue;
     decryptInto(values, origins, row.chave, row.valorEnc);
   }
-
   return { values, origins, loadedAt: Date.now() };
 }
 
-/**
- * Em falha transitória do banco, mantém o último snapshot válido. No primeiro
- * carregamento, quando ainda não existe snapshot, usa somente o ambiente de
- * bootstrap. Assim uma indisponibilidade do DB não troca credenciais em voo.
- */
 async function snapshot(force = false): Promise<RuntimeSnapshot> {
   if (!force && cached && Date.now() - cached.loadedAt < CACHE_TTL_MS) return cached;
   if (loadPromise) return loadPromise;
-
   loadPromise = loadSnapshot().catch((error) => {
     logger.error("[CredentialResolver] Falha ao renovar configuração; mantendo último snapshot válido.", error);
     return cached ? refreshTimestamp(cached) : bootstrapSnapshot();
@@ -220,32 +193,18 @@ async function snapshot(force = false): Promise<RuntimeSnapshot> {
   }
 }
 
-/**
- * Marca o snapshot atual como vencido sem apagá-lo. A próxima leitura força o
- * reload do banco; se o banco falhar nesse intervalo, o último snapshot válido
- * continua disponível e não há regressão súbita para valores de bootstrap.
- */
 export function invalidateCredentialCache(): void {
   if (!cached) return;
-  cached = {
-    values: new Map(cached.values),
-    origins: new Map(cached.origins),
-    loadedAt: 0,
-  };
+  cached = { values: new Map(cached.values), origins: new Map(cached.origins), loadedAt: 0 };
 }
 
 export async function resolveCredential(key: string): Promise<string | undefined> {
   return (await snapshot()).values.get(key);
 }
 
-export async function resolveCredentialWithOrigin(
-  key: string,
-): Promise<{ value?: string; origin: CredentialOrigin }> {
+export async function resolveCredentialWithOrigin(key: string): Promise<{ value?: string; origin: CredentialOrigin }> {
   const current = await snapshot();
-  return {
-    value: current.values.get(key),
-    origin: current.origins.get(key) ?? "nao_configurado",
-  };
+  return { value: current.values.get(key), origin: current.origins.get(key) ?? "nao_configurado" };
 }
 
 export async function resolveCredentials(keys: string[]): Promise<Record<string, string | undefined>> {
@@ -287,13 +246,11 @@ export async function getAiRuntimeConfig() {
   const current = await snapshot();
   const get = (key: string) => current.values.get(key);
   const requestedTimeout = Number(get("LLM_TIMEOUT_MS") ?? 90_000);
-  const timeoutMs = Number.isFinite(requestedTimeout)
-    ? Math.min(300_000, Math.max(5_000, requestedTimeout))
-    : 90_000;
+  const timeoutMs = Number.isFinite(requestedTimeout) ? Math.min(300_000, Math.max(5_000, requestedTimeout)) : 90_000;
   return {
     provider: (get("AI_PROVIDER") ?? "auto").toLowerCase(),
     anthropicApiKey: get("ANTHROPIC_API_KEY") ?? "",
-    anthropicModel: get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-20250514",
+    anthropicModel: get("ANTHROPIC_MODEL") ?? "claude-sonnet-5",
     groqApiKey: get("GROQ_API_KEY") ?? "",
     groqModel: get("GROQ_MODEL") ?? "llama-3.3-70b-versatile",
     forgeApiUrl: get("BUILT_IN_FORGE_API_URL") ?? "",
