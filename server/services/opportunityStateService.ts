@@ -54,6 +54,15 @@ export const OPPORTUNITY_TRANSITIONS: Readonly<Record<EtapaFunil, readonly Etapa
   encerrada: [],
 });
 
+const EVIDENCE_MIN_SOURCE: Partial<Record<EtapaFunil, EtapaFunil>> = Object.freeze({
+  enviada: "proposta",
+  contrato: "enviada",
+  entrega: "contrato",
+  faturamento: "contrato",
+  recebimento: "faturamento",
+  encerrada: "recebimento",
+});
+
 export function macroEtapa(etapa: EtapaFunil): MacroEtapa {
   switch (etapa) {
     case "nova":
@@ -132,12 +141,19 @@ export function assertTransitionAllowed(from: EtapaFunil, to: EtapaFunil): void 
 }
 
 /**
- * Regra única para eventos downstream inferidos de proposta/pedido/entrega/NF.
- * Nunca regride, nunca reabre estágio final e nunca ultrapassa GO/NO-GO a partir da entrada.
+ * Regra única para evidências downstream inferidas de proposta/pedido/entrega/NF.
+ * Pode condensar etapas quando existe um fato operacional forte, mas exige que
+ * a oportunidade já tenha alcançado a fase mínima que torna aquela evidência
+ * coerente. Assim um pedido manual nunca salta "análise" → "entrega".
  */
 export function canEvidenceAdvance(from: EtapaFunil, to: EtapaFunil): boolean {
   if (FINAL_STAGES.has(from) || from === to) return false;
   if (to !== "perdida" && to !== "cancelada" && STAGE_RANK[to] <= STAGE_RANK[from]) return false;
+
+  const minimumSource = EVIDENCE_MIN_SOURCE[to];
+  if (minimumSource && STAGE_RANK[from] < STAGE_RANK[minimumSource]) return false;
+
+  // Entrada nunca é ultrapassada por inferência; GO/NO-GO precisa existir.
   if (
     ENTRY_STAGES.has(from) &&
     to !== "perdida" &&
