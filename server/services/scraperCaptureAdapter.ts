@@ -1,4 +1,4 @@
-import { asc, and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import {
@@ -10,23 +10,20 @@ import {
 import { decryptPassword } from "../utils/encryption";
 import { normalizeText } from "../matching/productMatcher";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
-import { FORNECEDOR_CONFIGS } from "./scraperEngine";
-import {
-  type ScrapedProduct,
-  type SelectorConfig,
-} from "./scraperContracts";
 import { BrowserCaptureEngine } from "./browserCaptureEngine";
-import { discoverTambasaCategories } from "./tambasaCatalogService";
 import {
   chooseCaptureMode,
   getConnectorCapabilities,
 } from "./captureConnectorCapabilities";
+import { normalizeCaptureEan } from "./captureCoreService";
 import {
   attachNetworkJsonProductProbe,
   type NetworkJsonProbe,
   type ProbedProduct,
 } from "./networkJsonProductProbe";
-import { normalizeCaptureEan } from "./captureCoreService";
+import { FORNECEDOR_CONFIGS } from "./scraperPresets";
+import type { ScrapedProduct, SelectorConfig } from "./scraperContracts";
+import { discoverTambasaCategoriesOnPage } from "./tambasaCatalogService";
 
 export type CapturedSupplierProduct = ScrapedProduct & {
   sourceType: "api" | "browser" | "structured";
@@ -49,29 +46,31 @@ export interface CaptureAdapterResult {
   capabilities: ReturnType<typeof getConnectorCapabilities>;
 }
 
-const selectorConfigSchema = z.object({
-  loginUrl: z.string().trim().min(1).optional(),
-  loginTrigger: z.string().trim().min(1).optional(),
-  loginEmail: z.string().trim().min(1),
-  loginPassword: z.string().trim().min(1),
-  loginSubmit: z.string().trim().min(1),
-  loginSuccessUrl: z.string().trim().min(1).optional(),
-  loginSuccessText: z.string().trim().min(1).optional(),
-  loginSuccessSelector: z.string().trim().min(1).optional(),
-  useStructuredData: z.boolean().optional(),
-  categoryUrls: z.array(z.string().trim().min(1)).max(5_000),
-  searchUrlTemplate: z.string().trim().min(1).optional(),
-  productItem: z.string().trim().min(1),
-  productName: z.string().trim().min(1),
-  productPrice: z.string().trim().min(1),
-  productCode: z.string().trim().min(1).optional(),
-  productEan: z.string().trim().min(1).optional(),
-  productImage: z.string().trim().min(1).optional(),
-  productLink: z.string().trim().min(1).optional(),
-  nextPage: z.string().trim().min(1).optional(),
-  waitForSelector: z.string().trim().min(1).optional(),
-  navigationWait: z.number().int().min(0).max(60_000).optional(),
-}).passthrough();
+const selectorConfigSchema = z
+  .object({
+    loginUrl: z.string().trim().min(1).optional(),
+    loginTrigger: z.string().trim().min(1).optional(),
+    loginEmail: z.string().trim().min(1),
+    loginPassword: z.string().trim().min(1),
+    loginSubmit: z.string().trim().min(1),
+    loginSuccessUrl: z.string().trim().min(1).optional(),
+    loginSuccessText: z.string().trim().min(1).optional(),
+    loginSuccessSelector: z.string().trim().min(1).optional(),
+    useStructuredData: z.boolean().optional(),
+    categoryUrls: z.array(z.string().trim().min(1)).max(5_000),
+    searchUrlTemplate: z.string().trim().min(1).optional(),
+    productItem: z.string().trim().min(1),
+    productName: z.string().trim().min(1),
+    productPrice: z.string().trim().min(1),
+    productCode: z.string().trim().min(1).optional(),
+    productEan: z.string().trim().min(1).optional(),
+    productImage: z.string().trim().min(1).optional(),
+    productLink: z.string().trim().min(1).optional(),
+    nextPage: z.string().trim().min(1).optional(),
+    waitForSelector: z.string().trim().min(1).optional(),
+    navigationWait: z.number().int().min(0).max(60_000).optional(),
+  })
+  .passthrough();
 
 function readBoundedIntegerEnv(
   name: string,
@@ -92,11 +91,13 @@ function normalizeConfiguredUrl(raw: string, context: string): string {
 }
 
 function normalizeSelectorUrls(selectors: SelectorConfig): SelectorConfig {
-  const categoryUrls = Array.from(new Set(
-    selectors.categoryUrls.map((url, index) =>
-      normalizeConfiguredUrl(url, `URL de categoria #${index + 1}`),
+  const categoryUrls = Array.from(
+    new Set(
+      selectors.categoryUrls.map((url, index) =>
+        normalizeConfiguredUrl(url, `URL de categoria #${index + 1}`),
+      ),
     ),
-  ));
+  );
 
   return {
     ...selectors,
@@ -207,7 +208,6 @@ async function loadConfig(scraperConfigId: number) {
     .from(suppliers)
     .where(eq(suppliers.id, config.supplierId))
     .limit(1);
-
   if (!supplier) throw new Error(`Fornecedor #${config.supplierId} não encontrado.`);
 
   const scraperType = config.scraperType.trim().toLowerCase();
@@ -216,7 +216,6 @@ async function loadConfig(scraperConfigId: number) {
   const selectors = resolveSelectorConfig(scraperType, config.customSelectors);
   const loginIdentifier = resolveLoginIdentifier(config.email);
   const password = decryptRequiredPassword(config.passwordHash);
-
   if (!loginIdentifier) {
     throw new Error("Usuário/e-mail do fornecedor não configurado.");
   }
@@ -278,7 +277,8 @@ function choosePreferredProduct(
   current: CapturedSupplierProduct,
   candidate: CapturedSupplierProduct,
 ): CapturedSupplierProduct {
-  const sourceDelta = sourcePriority(candidate.sourceType) - sourcePriority(current.sourceType);
+  const sourceDelta =
+    sourcePriority(candidate.sourceType) - sourcePriority(current.sourceType);
   if (sourceDelta > 0) return candidate;
   if (sourceDelta < 0) return current;
   return richness(candidate) > richness(current) ? candidate : current;
@@ -293,7 +293,10 @@ function mergeProductEvidence(
     ...preferred,
     name: preferred.name || fallback.name,
     code: preferred.code ?? fallback.code,
-    ean: normalizeCaptureEan(preferred.ean) ?? normalizeCaptureEan(fallback.ean) ?? undefined,
+    ean:
+      normalizeCaptureEan(preferred.ean) ??
+      normalizeCaptureEan(fallback.ean) ??
+      undefined,
     unit: preferred.unit ?? fallback.unit,
     stock: preferred.stock ?? fallback.stock,
     availability: preferred.availability ?? fallback.availability,
@@ -301,7 +304,9 @@ function mergeProductEvidence(
     productUrl: preferred.productUrl ?? fallback.productUrl,
     priceNormal: preferred.priceNormal ?? fallback.priceNormal,
     pricePromo: preferred.pricePromo ?? fallback.pricePromo,
-    consultadoEm: Math.max(preferred.consultadoEm ?? 0, fallback.consultadoEm ?? 0) || undefined,
+    consultadoEm:
+      Math.max(preferred.consultadoEm ?? 0, fallback.consultadoEm ?? 0) ||
+      undefined,
     fonteUrl: preferred.fonteUrl ?? fallback.fonteUrl,
     sourceType: preferred.sourceType,
   };
@@ -405,9 +410,11 @@ function allowedHosts(selectors: SelectorConfig, loginUrl: string): Set<string> 
     if (!raw) continue;
     try {
       const probe = raw.replace(/\{q\}|\{termo\}/gi, "capture-probe");
-      hosts.add(assertSafeExternalUrl(probe, "URL do conector").hostname.toLowerCase());
+      hosts.add(
+        assertSafeExternalUrl(probe, "URL do conector").hostname.toLowerCase(),
+      );
     } catch {
-      // Configuração já foi validada; URL inesperada não amplia o allowlist do probe.
+      // URL inesperada não amplia o allowlist do probe.
     }
   }
 
@@ -421,7 +428,6 @@ function browserProducts(
   const sourceType: CapturedSupplierProduct["sourceType"] = selectors.useStructuredData
     ? "structured"
     : "browser";
-
   return items.map((product) => ({ ...product, sourceType }));
 }
 
@@ -434,9 +440,31 @@ async function drainProbe(
   target.push(...probed);
 }
 
+async function discoverTambasaOnAuthenticatedSession(
+  engine: BrowserCaptureEngine,
+  selectors: SelectorConfig,
+  warnings: string[],
+): Promise<SelectorConfig> {
+  const page = engine.authenticatedPage;
+  if (!page) throw new Error("Página autenticada da Tambasa indisponível.");
+
+  const discovery = await discoverTambasaCategoriesOnPage(
+    page,
+    selectors,
+    readBoundedIntegerEnv("TAMBASA_MAX_CATEGORIES", 1_500, 10, 3_000),
+  );
+  warnings.push(...discovery.warnings.slice(0, 20));
+
+  return normalizeSelectorUrls({
+    ...selectors,
+    categoryUrls: discovery.categoryUrls,
+    useStructuredData: true,
+  });
+}
+
 /**
- * Adapter de captura sem persistência. Autenticação/navegação pertencem ao
- * BrowserCaptureEngine; matching, quality gate e mutação pertencem ao Core.
+ * Adapter sem persistência: abre uma única sessão autenticada por job.
+ * Browser/extração ficam aqui; matching, quality gate e mutações pertencem ao Core.
  */
 export async function captureSupplierProducts(
   input: CaptureAdapterInput,
@@ -458,31 +486,6 @@ export async function captureSupplierProducts(
   const capabilities = getConnectorCapabilities(scraperType, selectors);
   const mode = chooseCaptureMode(input.mode, capabilities, input.query);
   const warnings: string[] = [];
-
-  if (mode === "full" && scraperType === "tambasa") {
-    try {
-      const discovery = await discoverTambasaCategories(input.scraperConfigId, {
-        maxCategories: readBoundedIntegerEnv(
-          "TAMBASA_MAX_CATEGORIES",
-          1_500,
-          1,
-          5_000,
-        ),
-      });
-      selectors = normalizeSelectorUrls({
-        ...selectors,
-        categoryUrls: discovery.categoryUrls,
-        useStructuredData: true,
-      });
-      warnings.push(...discovery.warnings.slice(0, 20));
-    } catch (error) {
-      warnings.push(
-        `Descoberta ampla Tambasa indisponível; usando categorias configuradas: ` +
-          `${(error as Error).message}`,
-      );
-    }
-  }
-
   const loginUrl = resolveLoginUrl(selectors);
   const engine = new BrowserCaptureEngine();
   const capturedProducts: CapturedSupplierProduct[] = [];
@@ -496,6 +499,21 @@ export async function captureSupplierProducts(
       selectors,
       config.supplierId,
     );
+
+    if (mode === "full" && scraperType === "tambasa") {
+      try {
+        selectors = await discoverTambasaOnAuthenticatedSession(
+          engine,
+          selectors,
+          warnings,
+        );
+      } catch (error) {
+        warnings.push(
+          "Descoberta ampla Tambasa indisponível; usando categorias configuradas: " +
+            `${(error as Error).message}`,
+        );
+      }
+    }
 
     const page = engine.authenticatedPage;
     if (page && capabilities.method === "hybrid") {
@@ -531,9 +549,7 @@ export async function captureSupplierProducts(
             );
             await drainProbe(probe, capturedProducts);
           } catch (error) {
-            warnings.push(
-              `Categoria ${categoryUrl}: ${(error as Error).message}`,
-            );
+            warnings.push(`Categoria ${categoryUrl}: ${(error as Error).message}`);
           }
         }
       } else if (refreshTerms.length === 0) {
@@ -573,7 +589,7 @@ export async function captureSupplierProducts(
     }
 
     if (probe) {
-      capturedProducts.push(...await probe.stop());
+      capturedProducts.push(...(await probe.stop()));
       probe = null;
     }
   } finally {
