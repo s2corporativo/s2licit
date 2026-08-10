@@ -8,6 +8,29 @@ function rowsOf(value: unknown): any[] {
   return Array.isArray(value) ? value : [];
 }
 
+export async function backfillMissingCanonicalOffers(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const [insertResult] = await db.execute(sql.raw(`
+    INSERT INTO product_supplier_offers
+      (productId, supplierId, price, supplierCode, link, updatedAt)
+    SELECT
+      p.id,
+      p.supplierId,
+      p.price,
+      p.codigoFornecedor,
+      p.productUrl,
+      COALESCE(p.updatedAt, CURRENT_TIMESTAMP)
+    FROM products p
+    LEFT JOIN product_supplier_offers o
+      ON o.productId = p.id AND o.supplierId = p.supplierId
+    WHERE p.supplierId IS NOT NULL
+      AND p.price IS NOT NULL
+      AND o.id IS NULL
+  `));
+  return Number((insertResult as any)?.affectedRows ?? 0);
+}
+
 /**
  * Reconciliação idempotente do catálogo legado.
  * - cria ofertas canônicas faltantes a partir de products.price + supplierId;
@@ -28,27 +51,8 @@ export async function reconcileLegacyCatalog(): Promise<{
     const db = await getDb();
     if (!db) throw new Error("Banco indisponível para reconciliar catálogo");
 
-    // 1) Backfill de ofertas sem sobrescrever oferta já existente.
-    const [insertResult] = await db.execute(sql.raw(`
-      INSERT INTO product_supplier_offers
-        (productId, supplierId, price, supplierCode, link, updatedAt)
-      SELECT
-        p.id,
-        p.supplierId,
-        p.price,
-        p.codigoFornecedor,
-        p.productUrl,
-        COALESCE(p.updatedAt, CURRENT_TIMESTAMP)
-      FROM products p
-      LEFT JOIN product_supplier_offers o
-        ON o.productId = p.id AND o.supplierId = p.supplierId
-      WHERE p.supplierId IS NOT NULL
-        AND p.price IS NOT NULL
-        AND o.id IS NULL
-    `));
-    const offersBackfilled = Number((insertResult as any)?.affectedRows ?? 0);
+    const offersBackfilled = await backfillMissingCanonicalOffers();
 
-    // 2) Normalização não destrutiva dos identificadores.
     const [aliasResult] = await db.execute(sql.raw(`
       UPDATE products
       SET
@@ -68,7 +72,6 @@ export async function reconcileLegacyCatalog(): Promise<{
     `));
     const aliasesNormalized = Number((aliasResult as any)?.affectedRows ?? 0);
 
-    // 3) Descobre a FK real supplierId -> suppliers.id e troca CASCADE por SET NULL.
     let supplierFkChanged = false;
     try {
       const [fkRows] = await db.execute(sql`
@@ -99,7 +102,6 @@ export async function reconcileLegacyCatalog(): Promise<{
       const isNullable = String(rowsOf(colRows)[0]?.nullable ?? "NO") === "YES";
 
       if (constraintName && (deleteRule !== "SET NULL" || !isNullable)) {
-        // Constraint name vem exclusivamente de information_schema e é escapado.
         const safeConstraint = constraintName.replace(/`/g, "``");
         await db.execute(sql.raw(`ALTER TABLE products DROP FOREIGN KEY \`${safeConstraint}\``));
         if (!isNullable) await db.execute(sql.raw("ALTER TABLE products MODIFY COLUMN supplierId INT NULL"));
@@ -111,8 +113,6 @@ export async function reconcileLegacyCatalog(): Promise<{
         supplierFkChanged = true;
       }
     } catch (error) {
-      // Falha da proteção de FK não deve impedir o catálogo de subir; a operação
-      // deleteSupplier já foi convertida em desativação, eliminando o risco imediato.
       logger.warn("[CatalogReconcile] Não foi possível migrar a FK de fornecedor automaticamente:", (error as Error).message);
     }
 
