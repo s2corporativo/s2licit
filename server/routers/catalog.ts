@@ -23,7 +23,8 @@ const optionalUrl = z.string().trim().url().max(2048).optional();
 const canonicalPrice = z
   .string()
   .trim()
-  .regex(/^\d{1,10}(?:[.,]\d{1,4})?$/, "Preço inválido")
+  .regex(/^\d{1,10}(?:[.,]\d{1,2})?$/, "Preço inválido")
+  .refine((value) => Number(value.replace(",", ".")) > 0, "Preço deve ser maior que zero")
   .transform((value) => value.replace(",", "."));
 
 const productMasterInput = z
