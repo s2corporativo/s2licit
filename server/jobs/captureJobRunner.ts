@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { getDb } from "../db";
 import { captureJobEvents, captureJobs } from "../../drizzle/captureCoreSchema";
 import { recoverStaleCaptureJobs } from "../services/captureCoreService";
-import { processCaptureJobSafe } from "../services/captureSafeProcessor";
+import { processCaptureJob } from "../services/captureJobProcessor";
 import { logger } from "../_core/logger";
 
 interface NumericEnvOptions {
@@ -61,10 +61,6 @@ let recovering = false;
 let pollTimer: NodeJS.Timeout | null = null;
 let recoveryTimer: NodeJS.Timeout | null = null;
 
-/**
- * Estado local serve apenas para limitar concorrência desta instância.
- * A fonte de verdade da fila/lease continua sendo o MySQL.
- */
 const activeJobs = new Map<number, Promise<void>>();
 
 function affectedRows(result: unknown): number {
@@ -129,9 +125,6 @@ async function claimNextJob(): Promise<number | null> {
       );
 
     if (affectedRows(result) > 0) return candidate.id;
-
-    // Outra instância venceu o compare-and-set. Reconsulta imediatamente para
-    // não desperdiçar um ciclo de polling caso existam outros jobs elegíveis.
   }
 
   return null;
@@ -189,8 +182,6 @@ async function markUnexpectedFailure(jobId: number, error: unknown): Promise<voi
           ),
         );
 
-      // Se o processador já encerrou o job, não sobrescrevemos seu estado nem
-      // duplicamos evento de falha.
       if (affectedRows(result) === 0) return;
 
       await tx.insert(captureJobEvents).values({
@@ -220,7 +211,7 @@ async function executeClaimedJob(jobId: number): Promise<void> {
 
   try {
     await heartbeat(jobId);
-    await processCaptureJobSafe(jobId);
+    await processCaptureJob(jobId);
   } catch (error) {
     logger.error(`[CaptureRunner] Falha não tratada no job #${jobId}:`, error);
     await markUnexpectedFailure(jobId, error);
@@ -272,12 +263,6 @@ async function recover(): Promise<void> {
   }
 }
 
-/**
- * Inicia o worker autônomo da instância atual.
- *
- * MySQL é a fonte de verdade para fila, exclusão mútua, lease, heartbeat e
- * recuperação. Memória local controla somente concorrência do processo atual.
- */
 export function startCaptureJobRunner(): void {
   if (started) return;
   started = true;
@@ -300,10 +285,6 @@ export function startCaptureJobRunner(): void {
   );
 }
 
-/**
- * Interrompe novos claims e timers. Jobs em execução não são abortados à força;
- * opcionalmente o chamador pode aguardar o drain para shutdown gracioso/testes.
- */
 export async function stopCaptureJobRunner(options?: {
   drain?: boolean;
   timeoutMs?: number;
