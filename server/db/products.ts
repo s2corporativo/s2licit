@@ -157,9 +157,6 @@ export async function listProducts(opts: {
 export async function getProductById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await listProducts({ isActive: "all", limit: 1, offset: 0 });
-  // Evita manter duas projeções divergentes: a busca específica abaixo usa a
-  // mesma estrutura completa de listProducts, mas com filtro exato.
   const rows = await db
     .select({
       id: products.id,
@@ -217,7 +214,6 @@ export async function getProductById(id: number) {
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(eq(products.id, id))
     .limit(1);
-  void result;
   return rows[0];
 }
 
@@ -225,13 +221,50 @@ export async function createProduct(data: InsertProduct) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   const [result] = await db.insert(products).values(data);
+  const productId = Number((result as any)?.insertId ?? 0);
+  if (productId > 0 && data.supplierId && data.price !== undefined) {
+    const { upsertProductSupplierPrice } = await import("./supplierPrices");
+    await upsertProductSupplierPrice(productId, Number(data.supplierId), data.price == null ? null : String(data.price), {
+      codigoFornecedor: data.codigoFornecedor ?? undefined,
+      linkProduto: data.productUrl ?? undefined,
+      origem: "product_create_legacy_bridge",
+    });
+  }
   return result;
 }
 
 export async function updateProduct(id: number, data: Partial<InsertProduct>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(products).set(data).where(eq(products.id, id));
+
+  const [existing] = await db
+    .select({ supplierId: products.supplierId })
+    .from(products)
+    .where(eq(products.id, id))
+    .limit(1);
+  if (!existing) throw new Error("Produto não encontrado");
+
+  const { price, ...productFields } = data as Partial<InsertProduct> & { price?: string | null };
+  const cleanFields = Object.fromEntries(Object.entries(productFields).filter(([, value]) => value !== undefined));
+  if (Object.keys(cleanFields).length > 0) {
+    await db.update(products).set(cleanFields as Partial<InsertProduct>).where(eq(products.id, id));
+  }
+
+  if (price !== undefined) {
+    const supplierId = Number((data as any).supplierId ?? existing.supplierId ?? 0);
+    if (supplierId > 0) {
+      const { upsertProductSupplierPrice } = await import("./supplierPrices");
+      await upsertProductSupplierPrice(id, supplierId, price == null ? null : String(price), {
+        codigoFornecedor: (data as any).codigoFornecedor ?? undefined,
+        linkProduto: (data as any).productUrl ?? undefined,
+        origem: "product_update_legacy_bridge",
+      });
+    } else {
+      // Produto canônico sem fornecedor não deve perder a edição; mantém preço
+      // legado apenas quando ainda não existe uma oferta associável.
+      await db.update(products).set({ price: price as any }).where(eq(products.id, id));
+    }
+  }
 }
 
 /**
@@ -278,6 +311,16 @@ export async function bulkInsertProducts(data: InsertProduct[]): Promise<{ inser
         }
       }
     }
+  }
+
+  // Importadores legados podem inserir preço diretamente em products; fecha a
+  // lacuna criando as ofertas canônicas faltantes após o lote.
+  try {
+    const { backfillMissingCanonicalOffers } = await import("../services/catalogReconciliationService");
+    await backfillMissingCanonicalOffers();
+  } catch {
+    // A importação do produto não falha por uma reconciliação auxiliar; o boot
+    // do catálogo executará a mesma rotina novamente.
   }
 
   return { inserted, skipped, errors };
