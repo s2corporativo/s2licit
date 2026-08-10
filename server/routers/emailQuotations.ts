@@ -14,39 +14,35 @@ import { buildQuotationResponse } from "../services/emailQuotationResponseServic
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 import { ensureOpportunityFromQuotation } from "../services/opportunityWorkflowService";
 
+const EmailQuotationStatusSchema = z.enum([
+  "nova",
+  "processando",
+  "revisao",
+  "respondida",
+  "descartada",
+  "erro",
+]);
+
 /**
  * Cotações recebidas por e-mail (COTEP/Compras MG, FUNARB, COPASA, Cemig...).
  */
 export const emailQuotationsRouter = router({
-  /** Status da configuração IMAP/SMTP (para a UI mostrar orientação). */
-  status: protectedProcedure.query(() => ({
-    imapConfigured: isImapConfigured(),
-    smtpConfigured: isSmtpConfigured(),
-  })),
+  status: protectedProcedure.query(async () => {
+    const [imapConfigured, smtpConfigured] = await Promise.all([
+      isImapConfigured(),
+      isSmtpConfigured(),
+    ]);
+    return { imapConfigured, smtpConfigured };
+  }),
 
-  /** Dispara a sincronização da caixa de entrada (somente admin). */
   sync: adminProcedure
-    .input(z.object({ limit: z.number().int().min(1).max(100).default(25) }).optional())
-    .mutation(async ({ input }) => {
-      return syncEmailQuotations({ limit: input?.limit });
-    }),
+    .input(z.object({ limit: z.number().int().min(1).max(50).default(25) }).optional())
+    .mutation(({ input }) => syncEmailQuotations({ limit: input?.limit })),
 
-  /** Lista cotações recebidas (opcionalmente por status). */
   list: protectedProcedure
-    .input(
-      z
-        .object({
-          status: z
-            .enum(["nova", "processando", "revisao", "respondida", "descartada", "erro"])
-            .optional(),
-        })
-        .optional(),
-    )
-    .query(async ({ input }) => {
-      return listEmailQuotations(input?.status);
-    }),
+    .input(z.object({ status: EmailQuotationStatusSchema.optional() }).optional())
+    .query(({ input }) => listEmailQuotations(input?.status)),
 
-  /** Detalhe de uma cotação com seus itens. */
   get: protectedProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ input }) => {
@@ -55,7 +51,6 @@ export const emailQuotationsRouter = router({
       return data;
     }),
 
-  /** Confirma (ou corrige) o produto associado a um item. */
   setItemMatch: editorProcedure
     .input(
       z.object({
@@ -79,7 +74,6 @@ export const emailQuotationsRouter = router({
       return { success: true };
     }),
 
-  /** Gera o PDF do orçamento-resposta (aplica margem sobre os itens casados). */
   gerarOrcamento: editorProcedure
     .input(
       z.object({
@@ -105,7 +99,6 @@ export const emailQuotationsRouter = router({
       };
     }),
 
-  /** Gera o orçamento e envia por e-mail ao remetente, marcando como respondida. */
   responderPorEmail: editorProcedure
     .input(
       z.object({
@@ -117,10 +110,10 @@ export const emailQuotationsRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      if (!isSmtpConfigured()) {
+      if (!(await isSmtpConfigured())) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "SMTP não configurado. Defina SMTP_HOST, SMTP_USER e SMTP_PASSWORD.",
+          message: "SMTP não configurado. Cadastre servidor, usuário e senha na Central de Integrações.",
         });
       }
 
@@ -139,12 +132,10 @@ export const emailQuotationsRouter = router({
         marginPercent: input.marginPercent,
         validDays: input.validDays,
       });
-      // A validação do orçamento e a criação idempotente da oportunidade ocorrem
-      // antes do envio: nenhuma proposta sai sem rastreabilidade no fluxo central.
       const opportunity = await ensureOpportunityFromQuotation(input.id, ctx.user);
       const pdfBuffer = Buffer.from(response.pdfBase64, "base64");
 
-      await sendEmail({
+      const delivery = await sendEmail({
         to: destinatario,
         subject: `Proposta comercial - ${data.quotation.subject ?? `Cotação ${input.id}`}`,
         text:
@@ -156,35 +147,42 @@ export const emailQuotationsRouter = router({
       });
 
       const db = await getDb();
-      if (db) {
-        await db
-          .update(emailQuotations)
-          .set({ status: "respondida" })
-          .where(eq(emailQuotations.id, input.id));
+      if (!db) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `E-mail enviado (${delivery.messageId}), mas o banco ficou indisponível antes de registrar o status. Não reenvie sem verificar o destinatário.`,
+        });
       }
+      await db
+        .update(emailQuotations)
+        .set({ status: "respondida" })
+        .where(eq(emailQuotations.id, input.id));
 
       return {
         success: true as const,
         to: destinatario,
+        messageId: delivery.messageId,
         itemCount: response.itemCount,
         funilId: opportunity.id,
       };
     }),
 
-  /** Define o prazo de resposta de uma cotação. */
   setPrazo: editorProcedure
     .input(z.object({ id: z.number().int().positive(), prazoResposta: z.string().nullable() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB indisponível." });
+      const prazoResposta = input.prazoResposta ? new Date(input.prazoResposta) : null;
+      if (prazoResposta && Number.isNaN(prazoResposta.getTime())) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Prazo de resposta inválido." });
+      }
       await db
         .update(emailQuotations)
-        .set({ prazoResposta: input.prazoResposta ? new Date(input.prazoResposta) : null })
+        .set({ prazoResposta })
         .where(eq(emailQuotations.id, input.id));
       return { success: true };
     }),
 
-  /** Cotações ainda não respondidas com prazo vencendo em até N dias. */
   prazosProximos: protectedProcedure
     .input(z.object({ diasAlerta: z.number().int().min(1).max(60).default(3) }).optional())
     .query(async ({ input }) => {
@@ -196,23 +194,17 @@ export const emailQuotationsRouter = router({
       const msPorDia = 24 * 60 * 60 * 1000;
       const vencidos: typeof rows = [];
       const proximos: typeof rows = [];
-      for (const q of rows) {
-        if (!q.prazoResposta || q.status === "respondida" || q.status === "descartada") continue;
-        const dias = Math.floor((new Date(q.prazoResposta).getTime() - hoje) / msPorDia);
-        if (dias < 0) vencidos.push(q);
-        else if (dias <= diasAlerta) proximos.push(q);
+      for (const quotation of rows) {
+        if (!quotation.prazoResposta || quotation.status === "respondida" || quotation.status === "descartada") continue;
+        const dias = Math.floor((new Date(quotation.prazoResposta).getTime() - hoje) / msPorDia);
+        if (dias < 0) vencidos.push(quotation);
+        else if (dias <= diasAlerta) proximos.push(quotation);
       }
       return { vencidos, proximos };
     }),
 
-  /** Atualiza o status de uma cotação (ex.: marcar como respondida/descartada). */
   setStatus: editorProcedure
-    .input(
-      z.object({
-        id: z.number().int().positive(),
-        status: z.enum(["nova", "processando", "revisao", "respondida", "descartada", "erro"]),
-      }),
-    )
+    .input(z.object({ id: z.number().int().positive(), status: EmailQuotationStatusSchema }))
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB indisponível." });
