@@ -31,35 +31,95 @@ export async function getCatalogIntegrityHealth() {
         FROM products p
         LEFT JOIN product_supplier_offers o
           ON o.productId = p.id AND o.supplierId = p.supplierId
-        WHERE p.isActive = 'yes'
-          AND p.deletedAt IS NULL
-          AND p.supplierId IS NOT NULL
-          AND p.price IS NOT NULL
-          AND p.price > 0
+        WHERE p.supplierId IS NOT NULL
           AND o.id IS NULL
       ) AS missingOfferBridges,
       (
         SELECT COUNT(*)
         FROM products p
         LEFT JOIN (
-          SELECT
-            productId,
-            MIN(
+          SELECT ranked.productId, ranked.supplierId, ranked.bestPrice
+          FROM (
+            SELECT
+              o.id,
+              o.productId,
+              o.supplierId,
               CASE
-                WHEN promoPrice IS NOT NULL
-                  AND promoPrice > 0
-                  AND (price IS NULL OR promoPrice < price)
-                  THEN promoPrice
-                WHEN price IS NOT NULL AND price > 0
-                  THEN price
+                WHEN o.promoPrice IS NOT NULL
+                  AND o.promoPrice > 0
+                  AND (o.price IS NULL OR o.promoPrice < o.price)
+                  THEN o.promoPrice
+                WHEN o.price IS NOT NULL AND o.price > 0
+                  THEN o.price
                 ELSE NULL
-              END
-            ) AS bestPrice
-          FROM product_supplier_offers
-          GROUP BY productId
+              END AS bestPrice,
+              ROW_NUMBER() OVER (
+                PARTITION BY o.productId
+                ORDER BY
+                  CASE
+                    WHEN o.promoPrice IS NOT NULL
+                      AND o.promoPrice > 0
+                      AND (o.price IS NULL OR o.promoPrice < o.price)
+                      THEN o.promoPrice
+                    WHEN o.price IS NOT NULL AND o.price > 0
+                      THEN o.price
+                    ELSE NULL
+                  END ASC,
+                  o.updatedAt DESC,
+                  o.id ASC
+              ) AS rn
+            FROM product_supplier_offers o
+            WHERE
+              (o.promoPrice IS NOT NULL AND o.promoPrice > 0)
+              OR (o.price IS NOT NULL AND o.price > 0)
+          ) ranked
+          WHERE ranked.rn = 1 AND ranked.bestPrice IS NOT NULL
         ) best ON best.productId = p.id
         WHERE NOT (p.price <=> best.bestPrice)
       ) AS priceMirrorMismatches,
+      (
+        SELECT COUNT(*)
+        FROM products p
+        LEFT JOIN (
+          SELECT ranked.productId, ranked.supplierId, ranked.bestPrice
+          FROM (
+            SELECT
+              o.id,
+              o.productId,
+              o.supplierId,
+              CASE
+                WHEN o.promoPrice IS NOT NULL
+                  AND o.promoPrice > 0
+                  AND (o.price IS NULL OR o.promoPrice < o.price)
+                  THEN o.promoPrice
+                WHEN o.price IS NOT NULL AND o.price > 0
+                  THEN o.price
+                ELSE NULL
+              END AS bestPrice,
+              ROW_NUMBER() OVER (
+                PARTITION BY o.productId
+                ORDER BY
+                  CASE
+                    WHEN o.promoPrice IS NOT NULL
+                      AND o.promoPrice > 0
+                      AND (o.price IS NULL OR o.promoPrice < o.price)
+                      THEN o.promoPrice
+                    WHEN o.price IS NOT NULL AND o.price > 0
+                      THEN o.price
+                    ELSE NULL
+                  END ASC,
+                  o.updatedAt DESC,
+                  o.id ASC
+              ) AS rn
+            FROM product_supplier_offers o
+            WHERE
+              (o.promoPrice IS NOT NULL AND o.promoPrice > 0)
+              OR (o.price IS NOT NULL AND o.price > 0)
+          ) ranked
+          WHERE ranked.rn = 1 AND ranked.bestPrice IS NOT NULL
+        ) best ON best.productId = p.id
+        WHERE NOT (p.supplierId <=> best.supplierId)
+      ) AS supplierMirrorMismatches,
       (SELECT COUNT(*) FROM equivalence_compendium_entries) AS compendiumEntries,
       (SELECT COUNT(*) FROM equivalence_compendium_entries WHERE validationStatus = 'human_validated') AS humanValidatedEntries,
       (SELECT COUNT(*) FROM product_merge_events WHERE status = 'applied') AS activeMergeEvents
@@ -87,6 +147,7 @@ export async function getCatalogIntegrityHealth() {
   const fk = firstRow(fkRows);
   const missingOfferBridges = Number(metrics.missingOfferBridges ?? 0);
   const priceMirrorMismatches = Number(metrics.priceMirrorMismatches ?? 0);
+  const supplierMirrorMismatches = Number(metrics.supplierMirrorMismatches ?? 0);
   const hasSupplierFk = Object.keys(fk).length > 0;
   const deleteRule = String(fk.deleteRule ?? "MISSING").toUpperCase();
   const nullable = String(fk.nullable ?? "UNKNOWN").toUpperCase();
@@ -94,11 +155,14 @@ export async function getCatalogIntegrityHealth() {
   const issues: string[] = [];
   if (missingOfferBridges > 0) {
     issues.push(
-      `${missingOfferBridges} produto(s) legado(s) ainda sem oferta canônica correspondente`,
+      `${missingOfferBridges} produto(s) com fornecedor legado sem oferta canônica correspondente`,
     );
   }
   if (priceMirrorMismatches > 0) {
-    issues.push(`${priceMirrorMismatches} produto(s) com espelho de preço divergente`);
+    issues.push(`${priceMirrorMismatches} produto(s) com cache de preço divergente da melhor oferta`);
+  }
+  if (supplierMirrorMismatches > 0) {
+    issues.push(`${supplierMirrorMismatches} produto(s) com cache de fornecedor divergente da melhor oferta`);
   }
   if (!hasSupplierFk) issues.push("FK products.supplierId → suppliers.id ausente");
   if (deleteRule === "CASCADE") {
@@ -118,6 +182,7 @@ export async function getCatalogIntegrityHealth() {
       canonicalOffers: Number(metrics.canonicalOffers ?? 0),
       missingOfferBridges,
       priceMirrorMismatches,
+      supplierMirrorMismatches,
       compendiumEntries: Number(metrics.compendiumEntries ?? 0),
       humanValidatedEntries: Number(metrics.humanValidatedEntries ?? 0),
       activeMergeEvents: Number(metrics.activeMergeEvents ?? 0),
