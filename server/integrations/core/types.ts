@@ -98,7 +98,7 @@ export interface IntegrationHealthSnapshot {
  */
 export type ExternalNetworkPolicy = "public-only" | "allow-private";
 
-export interface ExternalHttpRequest {
+export interface ExternalHttpRequest<T = unknown> {
   source: string;
   operation: string;
   url: string;
@@ -114,6 +114,11 @@ export interface ExternalHttpRequest {
   maxRedirects?: number;
   accept?: string;
   expected?: "json" | "text" | "any";
+  /**
+   * Validador/normalizador executado dentro da fronteira de transporte. Uma
+   * exceção vira CONTRACT_ERROR e entra na mesma telemetria da chamada HTTP.
+   */
+  validator?: (data: unknown) => T;
   /** Operações com efeito colateral só recebem retry quando explicitamente idempotentes. */
   idempotent?: boolean;
   /** Limite de leitura do corpo. Evita carregar respostas acidentalmente gigantes. */
