@@ -38,6 +38,7 @@ const AplicarPrecificacao = lazy(() => import("./pages/AplicarPrecificacao"));
 const RegrasCategoria = lazy(() => import("./pages/RegrasCategoria"));
 const AnalisePrecosV2 = lazy(() => named(import("./pages/AnalisePrecosV2"), "AnalisePrecosV2"));
 const ScraperFornecedores = lazy(() => import("./pages/ScraperFornecedores"));
+const CaptureCoreReview = lazy(() => import("./pages/CaptureCoreReview"));
 const AgenteProposta = lazy(() => import("./pages/AgenteProposta"));
 const Agente = lazy(() => import("./pages/Agente"));
 const CaptureReview = lazy(() => named(import("./pages/CaptureReview"), "CaptureReview"));
@@ -110,9 +111,10 @@ function Router() {
                 <Route path="/aplicar-precificacao"><RequireAuth message="Aplique precificação após fazer login." minRole="admin"><AplicarPrecificacao /></RequireAuth></Route>
                 <Route path="/regras-categoria"><RequireAuth message="Configure regras após fazer login." minRole="admin"><RegrasCategoria /></RequireAuth></Route>
                 <Route path="/analise-precos"><RequireAuth message="Analise preços após fazer login." minRole="editor"><AnalisePrecosV2 /></RequireAuth></Route>
-                <Route path="/captura-revisao"><RequireAuth message="Revise produtos capturados após fazer login." minRole="editor"><CaptureReview /></RequireAuth></Route>
-                <Route path="/captura-scheduler"><Redirect to="/captura-inteligente" /></Route>
-                <Route path="/captura-analytics"><Redirect to="/captura-inteligente" /></Route>
+                <Route path="/captura-revisao"><RequireAuth message="Revise capturas legadas após fazer login." minRole="editor"><CaptureReview /></RequireAuth></Route>
+                <Route path="/captura-core"><RequireAuth message="Acesse a Central do Capture Core após fazer login." minRole="admin"><CaptureCoreReview /></RequireAuth></Route>
+                <Route path="/captura-scheduler"><Redirect to="/captura-core" /></Route>
+                <Route path="/captura-analytics"><Redirect to="/captura-core" /></Route>
                 <Route path="/central-operacional"><Redirect to="/funil" /></Route>
                 <Route path="/cotacoes-recebidas"><RequireAuth message="Acesse as cotações recebidas após fazer login."><CotacoesRecebidas /></RequireAuth></Route>
                 <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login."><RadarPncp /></RequireAuth></Route>
@@ -144,7 +146,7 @@ function Router() {
                 <Route path="/templates-proposta"><RequireAuth message="Faça login para gerenciar templates de proposta."><TemplatesProposta /></RequireAuth></Route>
                 <Route path="/analisador-edital"><Redirect to="/edital" /></Route>
                 <Route path="/proposta-automatica"><Redirect to="/edital" /></Route>
-                <Route path="/scraper-fornecedores"><RequireAuth message="Faça login para acessar o agente de scraping." minRole="admin"><ScraperFornecedores /></RequireAuth></Route>
+                <Route path="/scraper-fornecedores"><RequireAuth message="Faça login para acessar o agente de captura." minRole="admin"><ScraperFornecedores /></RequireAuth></Route>
                 <Route path="/agente-proposta"><RequireAuth message="Faça login para usar o agente de propostas." minRole="editor"><AgenteProposta /></RequireAuth></Route>
                 <Route path="/agente"><RequireAuth message="Faça login para acessar o assistente IA."><Agente /></RequireAuth></Route>
                 <Route path="/404" component={NotFound} />
