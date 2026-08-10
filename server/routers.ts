@@ -70,6 +70,7 @@ export const appRouter = router({
   system: systemRouter,
   opportunities: opportunitiesRouter,
   licitacaoAgent: licitacaoAgentRouter,
+  pricingEngine: precificacaoRouter,
   importSmart: importSmartRouter,
   nfeImport: nfeImportRouter,
   priceAnalysis: priceAnalysisRouter,
