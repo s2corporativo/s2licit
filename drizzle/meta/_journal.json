@@ -2,124 +2,23 @@
   "version": "7",
   "dialect": "mysql",
   "entries": [
-    {
-      "idx": 0,
-      "version": "5",
-      "when": 1783787044933,
-      "tag": "0000_consolidado_producao",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1783799912322,
-      "tag": "0001_funil_oportunidades",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1783800605748,
-      "tag": "0002_tax_engine",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1783800915044,
-      "tag": "0003_freight_engine",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1783801276704,
-      "tag": "0004_pos_venda",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1784036967082,
-      "tag": "0005_tense_hex",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "5",
-      "when": 1784072125161,
-      "tag": "0006_odd_gamma_corps",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "5",
-      "when": 1784405859816,
-      "tag": "0007_curious_lyja",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "5",
-      "when": 1784406291082,
-      "tag": "0008_easy_expediter",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "5",
-      "when": 1784406735565,
-      "tag": "0009_bright_valeria_richards",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "5",
-      "when": 1784407312893,
-      "tag": "0010_windy_wolf_cub",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "5",
-      "when": 1784408030023,
-      "tag": "0011_abnormal_sentry",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "5",
-      "when": 1784410504639,
-      "tag": "0012_cooing_korvac",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "5",
-      "when": 1784425000000,
-      "tag": "0013_operational_governance",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "5",
-      "when": 1785852244916,
-      "tag": "0014_drop_orphan_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "5",
-      "when": 1785853954790,
-      "tag": "0015_proposal_outcome_and_order_link",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "5",
-      "when": 1786359600000,
-      "tag": "0016_canonical_workflow_indexes",
-      "breakpoints": true
-    }
+    { "idx": 0, "version": "5", "when": 1783787044933, "tag": "0000_consolidado_producao", "breakpoints": true },
+    { "idx": 1, "version": "5", "when": 1783799912322, "tag": "0001_funil_oportunidades", "breakpoints": true },
+    { "idx": 2, "version": "5", "when": 1783800605748, "tag": "0002_tax_engine", "breakpoints": true },
+    { "idx": 3, "version": "5", "when": 1783800915044, "tag": "0003_freight_engine", "breakpoints": true },
+    { "idx": 4, "version": "5", "when": 1783801276704, "tag": "0004_pos_venda", "breakpoints": true },
+    { "idx": 5, "version": "5", "when": 1784036967082, "tag": "0005_tense_hex", "breakpoints": true },
+    { "idx": 6, "version": "5", "when": 1784072125161, "tag": "0006_odd_gamma_corps", "breakpoints": true },
+    { "idx": 7, "version": "5", "when": 1784405859816, "tag": "0007_curious_lyja", "breakpoints": true },
+    { "idx": 8, "version": "5", "when": 1784406291082, "tag": "0008_easy_expediter", "breakpoints": true },
+    { "idx": 9, "version": "5", "when": 1784406735565, "tag": "0009_bright_valeria_richards", "breakpoints": true },
+    { "idx": 10, "version": "5", "when": 1784407312893, "tag": "0010_windy_wolf_cub", "breakpoints": true },
+    { "idx": 11, "version": "5", "when": 1784408030023, "tag": "0011_abnormal_sentry", "breakpoints": true },
+    { "idx": 12, "version": "5", "when": 1784410504639, "tag": "0012_cooing_korvac", "breakpoints": true },
+    { "idx": 13, "version": "5", "when": 1784425000000, "tag": "0013_operational_governance", "breakpoints": true },
+    { "idx": 14, "version": "5", "when": 1785852244916, "tag": "0014_drop_orphan_tables", "breakpoints": true },
+    { "idx": 15, "version": "5", "when": 1785853954790, "tag": "0015_proposal_outcome_and_order_link", "breakpoints": true },
+    { "idx": 16, "version": "5", "when": 1786359600000, "tag": "0016_canonical_workflow_indexes", "breakpoints": true },
+    { "idx": 17, "version": "5", "when": 1786359660000, "tag": "0017_global_search_indexes", "breakpoints": true }
   ]
 }
