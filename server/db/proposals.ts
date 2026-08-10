@@ -18,6 +18,18 @@ const PROPOSAL_STATUSES = new Set<ProposalStatus>([
   "cancelled",
 ]);
 
+const LEGACY_ALLOWED_TRANSITIONS: Readonly<Record<ProposalStatus, readonly ProposalStatus[]>> = {
+  draft: ["sent", "order", "cancelled"],
+  sent: ["order", "cancelled"],
+  order: ["in_transit", "delivered", "cancelled"],
+  in_transit: ["delivered", "cancelled"],
+  delivered: [],
+  cancelled: [],
+};
+
+type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 function getInsertId(result: unknown): number {
   if (Array.isArray(result)) {
     const first = result[0];
@@ -40,6 +52,45 @@ function getAffectedRows(result: unknown): number {
 
 function escapeLikePrefix(value: string): string {
   return `${value.replace(/[\\%_]/g, (match) => `\\${match}`)}%`;
+}
+
+function explicitSaleTotal(
+  suggestedPrice: string | number | null | undefined,
+  quantity: number | null | undefined,
+): string | null {
+  if (suggestedPrice == null || suggestedPrice === "") return null;
+  const price = Number(suggestedPrice);
+  const qty = Number(quantity ?? 0);
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
+  return (price * qty).toFixed(2);
+}
+
+async function recalcProposalTotalInTransaction(
+  tx: Transaction,
+  proposalId: number,
+): Promise<string | null> {
+  const [row] = await tx
+    .select({
+      itemCount: sql<number>`COUNT(*)`,
+      missingSalePrice: sql<number>`COALESCE(SUM(CASE WHEN ${proposalItems.suggestedPrice} IS NULL OR CAST(${proposalItems.suggestedPrice} AS DECIMAL(15,2)) <= 0 THEN 1 ELSE 0 END), 0)`,
+      total: sql<number>`COALESCE(SUM(CAST(${proposalItems.suggestedPrice} AS DECIMAL(15,2)) * ${proposalItems.quantity}), 0)`,
+    })
+    .from(proposalItems)
+    .where(eq(proposalItems.proposalId, proposalId));
+
+  const itemCount = Number(row?.itemCount ?? 0);
+  const missingSalePrice = Number(row?.missingSalePrice ?? 0);
+  const total = Number(row?.total ?? 0);
+  const totalValue =
+    itemCount > 0 && missingSalePrice === 0 && Number.isFinite(total) && total > 0
+      ? total.toFixed(2)
+      : null;
+
+  await tx
+    .update(proposals)
+    .set({ totalValue })
+    .where(eq(proposals.id, proposalId));
+  return totalValue;
 }
 
 export async function listProposals(limit = 500) {
@@ -102,24 +153,13 @@ export async function deleteProposal(id: number) {
 
 export async function recalcProposalTotal(proposalId: number) {
   const db = await getDb();
-  if (!db) return;
-  const [row] = await db
-    .select({
-      total: sql<number>`COALESCE(SUM(CAST(${proposalItems.totalPrice} AS DECIMAL(15,2))), 0)`,
-    })
-    .from(proposalItems)
-    .where(eq(proposalItems.proposalId, proposalId));
-  const total = Number(row?.total ?? 0);
-  await db
-    .update(proposals)
-    .set({ totalValue: total.toFixed(2) })
-    .where(eq(proposals.id, proposalId));
+  if (!db) return null;
+  return db.transaction((tx) => recalcProposalTotalInTransaction(tx, proposalId));
 }
 
 /**
- * Adição interativa de item. Serializa numeração por proposta e atualiza o
- * total incrementalmente no mesmo commit. Com índice (proposalId,itemNumber),
- * MAX passa a O(log n) e não há SUM completo a cada inserção.
+ * Adição interativa de item. Serializa a numeração por proposta. O total
+ * comercial só é persistido quando TODOS os itens têm preço de venda explícito.
  */
 export async function addProposalItem(data: InsertProposalItem) {
   const db = await getDb();
@@ -134,30 +174,18 @@ export async function addProposalItem(data: InsertProposalItem) {
       .from(proposalItems)
       .where(eq(proposalItems.proposalId, data.proposalId));
     const nextNumber = Number(existing?.max ?? 0) + 1;
-    const unitPrice = data.unitPrice == null ? null : Number(data.unitPrice);
-    const quantity = Number(data.quantity ?? 1);
-    const total =
-      unitPrice != null && Number.isFinite(unitPrice) && Number.isFinite(quantity)
-        ? (unitPrice * quantity).toFixed(2)
-        : null;
+    const totalPrice = explicitSaleTotal(data.suggestedPrice, data.quantity ?? 1);
 
     const result = await tx.insert(proposalItems).values({
       ...data,
       itemNumber: nextNumber,
-      totalPrice: total,
+      totalPrice,
       sortOrder: nextNumber,
     });
     const id = getInsertId(result);
     if (!id) throw new Error("Proposal item insert did not return an id");
 
-    if (total != null) {
-      await tx
-        .update(proposals)
-        .set({
-          totalValue: sql`COALESCE(${proposals.totalValue}, 0) + ${total}`,
-        })
-        .where(eq(proposals.id, data.proposalId));
-    }
+    await recalcProposalTotalInTransaction(tx, data.proposalId);
     return id;
   });
 }
@@ -166,66 +194,48 @@ export async function updateProposalItem(id: number, data: Partial<InsertProposa
   const db = await getDb();
   if (!db) throw new Error("DB not available");
 
-  const [existing] = await db.select().from(proposalItems).where(eq(proposalItems.id, id)).limit(1);
-  if (!existing) throw new Error("Proposal item not found");
-
-  if (
-    data.suggestedPrice !== undefined ||
-    data.unitPrice !== undefined ||
-    data.quantity !== undefined
-  ) {
-    const suggestedPrice =
-      data.suggestedPrice !== undefined
-        ? data.suggestedPrice == null
-          ? null
-          : Number(data.suggestedPrice)
-        : existing.suggestedPrice == null
-          ? null
-          : Number(existing.suggestedPrice);
-    const unitPrice =
-      data.unitPrice !== undefined
-        ? data.unitPrice == null
-          ? 0
-          : Number(data.unitPrice)
-        : Number(existing.unitPrice ?? 0);
-    const price = suggestedPrice ?? unitPrice;
-    const quantity = Number(data.quantity ?? existing.quantity);
-    data.totalPrice = (price * quantity).toFixed(2);
-  }
-
-  await db.transaction(async (tx) => {
-    await tx.update(proposalItems).set(data).where(eq(proposalItems.id, id));
-    const [row] = await tx
-      .select({ total: sql<number>`COALESCE(SUM(CAST(${proposalItems.totalPrice} AS DECIMAL(15,2))), 0)` })
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT ${proposalItems.id} FROM ${proposalItems} WHERE ${proposalItems.id} = ${id} FOR UPDATE`,
+    );
+    const [existing] = await tx
+      .select()
       .from(proposalItems)
-      .where(eq(proposalItems.proposalId, existing.proposalId));
-    await tx
-      .update(proposals)
-      .set({ totalValue: Number(row?.total ?? 0).toFixed(2) })
-      .where(eq(proposals.id, existing.proposalId));
+      .where(eq(proposalItems.id, id))
+      .limit(1);
+    if (!existing) throw new Error("Proposal item not found");
+
+    if (data.suggestedPrice !== undefined || data.quantity !== undefined) {
+      const suggestedPrice =
+        data.suggestedPrice !== undefined ? data.suggestedPrice : existing.suggestedPrice;
+      const quantity = data.quantity !== undefined ? data.quantity : existing.quantity;
+      data.totalPrice = explicitSaleTotal(suggestedPrice, quantity);
+    }
+
+    await tx.update(proposalItems).set(data).where(eq(proposalItems.id, id));
+    await recalcProposalTotalInTransaction(tx, existing.proposalId);
+    return { success: true as const };
   });
 }
 
 export async function removeProposalItem(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const [existing] = await db
-    .select({ proposalId: proposalItems.proposalId })
-    .from(proposalItems)
-    .where(eq(proposalItems.id, id))
-    .limit(1);
-  if (!existing) return;
 
-  await db.transaction(async (tx) => {
-    await tx.delete(proposalItems).where(eq(proposalItems.id, id));
-    const [row] = await tx
-      .select({ total: sql<number>`COALESCE(SUM(CAST(${proposalItems.totalPrice} AS DECIMAL(15,2))), 0)` })
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT ${proposalItems.id} FROM ${proposalItems} WHERE ${proposalItems.id} = ${id} FOR UPDATE`,
+    );
+    const [existing] = await tx
+      .select({ proposalId: proposalItems.proposalId })
       .from(proposalItems)
-      .where(eq(proposalItems.proposalId, existing.proposalId));
-    await tx
-      .update(proposals)
-      .set({ totalValue: Number(row?.total ?? 0).toFixed(2) })
-      .where(eq(proposals.id, existing.proposalId));
+      .where(eq(proposalItems.id, id))
+      .limit(1);
+    if (!existing) return { success: true as const, unchanged: true as const };
+
+    await tx.delete(proposalItems).where(eq(proposalItems.id, id));
+    await recalcProposalTotalInTransaction(tx, existing.proposalId);
+    return { success: true as const, unchanged: false as const };
   });
 }
 
@@ -258,6 +268,7 @@ export async function listProposalsAdmin(filters?: {
     .limit(limit);
 }
 
+/** @deprecated Use proposalLifecycleService for business transitions. */
 export async function advanceProposalStatus(
   id: number,
   newStatus: string,
@@ -278,6 +289,9 @@ export async function advanceProposalStatus(
       .limit(1);
     if (!current) throw new Error("Proposal not found");
     if (current.status === target) return { success: true, unchanged: true };
+    if (!LEGACY_ALLOWED_TRANSITIONS[current.status].includes(target)) {
+      throw new Error(`Invalid proposal transition: ${current.status} -> ${target}`);
+    }
 
     const now = new Date();
     const dateFields: Partial<typeof proposals.$inferInsert> = {};
@@ -347,6 +361,7 @@ export async function duplicateProposal(id: number) {
       paymentTerms: proposalData.paymentTerms,
       deliveryTerms: proposalData.deliveryTerms,
       notes: proposalData.notes,
+      totalValue: proposalData.totalValue,
     });
     const newId = getInsertId(result);
     if (!newId) throw new Error("Proposal copy insert did not return an id");
@@ -378,10 +393,6 @@ export async function duplicateProposal(id: number) {
         })),
       );
     }
-    await tx
-      .update(proposals)
-      .set({ totalValue: proposalData.totalValue })
-      .where(eq(proposals.id, newId));
     return newId;
   });
 }
