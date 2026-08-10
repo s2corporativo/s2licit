@@ -59,14 +59,8 @@ import { operationalGovernanceRouter } from "./routers/operationalGovernance";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
-import { startCatalogMaintenanceLoop } from "./services/catalogReconciliationService";
-
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
-
-// O timer só agenda a primeira execução; não toca no banco durante a importação
-// dos módulos. Assim o boot continua respeitando a ordem das ensure*Columns().
-startCatalogMaintenanceLoop();
 
 export const appRouter = router({
   system: systemRouter,
@@ -112,13 +106,12 @@ export const appRouter = router({
   categories: categoriesRouter,
   suppliers: suppliersRouter,
 
-  // Catálogo legado permanece disponível durante a transição.
+  // Fachada de compatibilidade; a Central canônica é o caminho preferencial.
   products: productsRouter,
-  // Fonte canônica nova: produto mestre + ofertas + qualidade + proveniência.
   catalog: catalogRouter,
 
-  // Grupos legados permanecem como compatibilidade; o compêndio é o módulo
-  // especializado e persistente para equivalência multi-produto.
+  // Grupos históricos permanecem somente por compatibilidade; o Compêndio é
+  // a fronteira especializada de equivalência multiproduto.
   equivalences: equivalencesRouter,
   equivalenceCompendium: equivalenceCompendiumRouter,
 
@@ -140,4 +133,5 @@ export const appRouter = router({
   intelligentCapture: intelligentCaptureRouter,
   images: imagesRouter,
 });
+
 export type AppRouter = typeof appRouter;
