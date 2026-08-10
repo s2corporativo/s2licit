@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { AlertTriangle, ArrowRight, Bot, BrainCircuit, CheckCircle2, Code2, FileCode2, FileSpreadsheet, FileText, Globe, Layers3, Upload } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,8 @@ const sourceLabels: Record<string, string> = {
   text: "Texto estruturado",
 };
 
+const captureTabs = ["site", "documento", "planilha", "xml", "texto"] as const;
+
 async function fileToBase64(file: File) {
   const buffer = await file.arrayBuffer();
   let binary = "";
@@ -43,6 +45,11 @@ async function fileToBase64(file: File) {
 }
 
 export default function IntelligentCaptureCenter() {
+  const searchString = useSearch();
+  const initialTab = useMemo(() => {
+    const origem = new URLSearchParams(searchString).get("origem");
+    return origem && (captureTabs as readonly string[]).includes(origem) ? origem : "site";
+  }, [searchString]);
   const utils = trpc.useUtils();
   const batchesQuery = trpc.intelligentCapture.listBatches.useQuery({ limit: 20 });
   const batches = batchesQuery.data ?? [];
@@ -239,7 +246,7 @@ export default function IntelligentCaptureCenter() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="site" className="space-y-6">
+            <Tabs key={initialTab} defaultValue={initialTab} className="space-y-6">
               <TabsList className="grid w-full grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
                 <TabsTrigger value="site">Sites</TabsTrigger>
                 <TabsTrigger value="documento">PDF / DOCX</TabsTrigger>

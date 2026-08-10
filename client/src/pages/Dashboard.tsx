@@ -6,12 +6,15 @@ import {
   ArrowRight,
   CalendarClock,
   CircleDollarSign,
+  FileCode2,
   FileScan,
+  FileSpreadsheet,
   FileText,
   PackageCheck,
   Plus,
   Radar,
   TrendingUp,
+  Upload,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -184,6 +187,36 @@ export default function Dashboard() {
         </div>
       </section>
 
+      <section className="rounded-xl border border-slate-200 bg-white p-5" aria-label="Importar produtos">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="m-0 text-base font-black text-slate-950">Importar produtos</h2>
+            <p className="mb-0 mt-1 text-xs text-slate-500">Traga produtos para o catálogo a partir de planilha, XML ou PDF.</p>
+          </div>
+          <Upload className="text-blue-900" size={18} />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <ActionLink
+            href="/importar"
+            title="Importar planilha"
+            description="Arquivos CSV, XLS ou XLSX"
+            icon={<FileSpreadsheet size={17} />}
+          />
+          <ActionLink
+            href="/importar-nfe"
+            title="Importar XML"
+            description="Notas fiscais (NF-e) e XML de produtos"
+            icon={<FileCode2 size={17} />}
+          />
+          <ActionLink
+            href="/captura-inteligente?origem=documento"
+            title="Importar PDF"
+            description="Documentos PDF, DOCX ou imagem (OCR)"
+            icon={<FileText size={17} />}
+          />
+        </div>
+      </section>
+
       <section className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
@@ -196,7 +229,7 @@ export default function Dashboard() {
           <Link href="/cotacoes-recebidas" className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 no-underline hover:bg-blue-50">Cotações recebidas</Link>
           <Link href="/produtos" className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 no-underline hover:bg-blue-50">Catálogo e equivalências</Link>
           <Link href="/fornecedores" className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 no-underline hover:bg-blue-50">Fornecedores</Link>
-          <Link href="/importar-nfe" className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 no-underline hover:bg-blue-50">Importar XML</Link>
+          <Link href="/captura-inteligente" className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 no-underline hover:bg-blue-50">Captura inteligente</Link>
         </div>
       </section>
 
