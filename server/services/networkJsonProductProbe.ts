@@ -4,31 +4,124 @@ import type { ScrapedProduct } from "./scraperEngine";
 
 export type ProbedProduct = ScrapedProduct & { sourceType: "api" };
 
-const NAME_KEYS = ["name", "nome", "title", "titulo", "productname", "product_name", "descricao", "description"];
-const PRICE_KEYS = [
-  "price", "preco", "preço", "valor", "saleprice", "sale_price", "spot_price",
-  "preco_venda", "precovenda", "precofinal", "preco_final", "unitprice", "unit_price",
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const MAX_JSON_NODES = 20_000;
+const MAX_PRODUCTS_PER_RESPONSE = 5_000;
+const MAX_DEPTH = 9;
+
+const NAME_KEYS = [
+  "name",
+  "nome",
+  "title",
+  "titulo",
+  "productname",
+  "product_name",
+  "descricao",
+  "description",
 ];
-const NORMAL_PRICE_KEYS = ["old_price", "listprice", "list_price", "preco_de", "precode", "regularprice", "regular_price"];
-const SKU_KEYS = ["sku", "code", "codigo", "código", "productcode", "product_code", "codproduto", "cod_produto"];
-const EAN_KEYS = ["ean", "gtin", "gtin13", "gtin14", "barcode", "codigo_barras", "codigobarras"];
-const STOCK_KEYS = ["stock", "estoque", "quantity", "qty", "saldo", "availablequantity", "available_quantity"];
-const AVAILABILITY_KEYS = ["availability", "disponibilidade", "stockstatus", "stock_status", "statusestoque"];
-const IMAGE_KEYS = ["image", "imageurl", "image_url", "imagem", "foto", "thumbnail", "thumbnailurl"];
-const URL_KEYS = ["url", "producturl", "product_url", "link", "href", "permalink"];
-const UNIT_KEYS = ["unit", "unidade", "uom", "unitofmeasure", "unit_of_measure"];
+const PRICE_KEYS = [
+  "price",
+  "preco",
+  "preço",
+  "valor",
+  "saleprice",
+  "sale_price",
+  "spot_price",
+  "preco_venda",
+  "precovenda",
+  "precofinal",
+  "preco_final",
+  "unitprice",
+  "unit_price",
+];
+const NORMAL_PRICE_KEYS = [
+  "old_price",
+  "listprice",
+  "list_price",
+  "preco_de",
+  "precode",
+  "regularprice",
+  "regular_price",
+];
+const SKU_KEYS = [
+  "sku",
+  "code",
+  "codigo",
+  "código",
+  "productcode",
+  "product_code",
+  "codproduto",
+  "cod_produto",
+];
+const EAN_KEYS = [
+  "ean",
+  "gtin",
+  "gtin13",
+  "gtin14",
+  "barcode",
+  "codigo_barras",
+  "codigobarras",
+];
+const STOCK_KEYS = [
+  "stock",
+  "estoque",
+  "quantity",
+  "qty",
+  "saldo",
+  "availablequantity",
+  "available_quantity",
+];
+const AVAILABILITY_KEYS = [
+  "availability",
+  "disponibilidade",
+  "stockstatus",
+  "stock_status",
+  "statusestoque",
+];
+const IMAGE_KEYS = [
+  "image",
+  "imageurl",
+  "image_url",
+  "imagem",
+  "foto",
+  "thumbnail",
+  "thumbnailurl",
+];
+const URL_KEYS = [
+  "url",
+  "producturl",
+  "product_url",
+  "link",
+  "href",
+  "permalink",
+];
+const UNIT_KEYS = [
+  "unit",
+  "unidade",
+  "uom",
+  "unitofmeasure",
+  "unit_of_measure",
+];
+
+const SENSITIVE_QUERY_PARAM = /(?:^|_)(?:access|auth|bearer|credential|jwt|key|password|secret|session|signature|sig|token)(?:$|_)/i;
 
 function normalizedKey(value: string): string {
-  return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_]/g, "");
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9_]/g, "");
 }
 
 function indexObject(value: Record<string, unknown>): Map<string, unknown> {
-  const out = new Map<string, unknown>();
-  for (const [key, item] of Object.entries(value)) out.set(normalizedKey(key), item);
-  return out;
+  const output = new Map<string, unknown>();
+  for (const [key, item] of Object.entries(value)) {
+    output.set(normalizedKey(key), item);
+  }
+  return output;
 }
 
-function pick(index: Map<string, unknown>, keys: string[]): unknown {
+function pick(index: Map<string, unknown>, keys: readonly string[]): unknown {
   for (const key of keys) {
     const value = index.get(normalizedKey(key));
     if (value !== undefined && value !== null && value !== "") return value;
@@ -50,48 +143,92 @@ function numeric(value: unknown): number | undefined {
   return parsed == null || !Number.isFinite(parsed) ? undefined : parsed;
 }
 
+function stockNumber(value: unknown): number | undefined {
+  const parsed = numeric(value);
+  if (parsed == null || parsed < 0) return undefined;
+  return Math.trunc(parsed);
+}
+
+function normalizeEan(value: unknown): string | undefined {
+  const raw = text(value);
+  if (!raw) return undefined;
+  const digits = raw.replace(/\D/g, "");
+  return /^\d{8,14}$/.test(digits) ? digits : undefined;
+}
+
+function sanitizeUrl(raw: string, baseUrl?: string): string | undefined {
+  try {
+    const url = new URL(raw, baseUrl);
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+
+    for (const key of [...url.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_PARAM.test(normalizedKey(key))) {
+        url.searchParams.set(key, "REDACTED");
+      }
+    }
+
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function absoluteUrl(raw: unknown, baseUrl: string): string | undefined {
   const value = text(raw);
   if (!value) return undefined;
-  try { return new URL(value, baseUrl).toString(); } catch { return undefined; }
+  return sanitizeUrl(value, baseUrl);
 }
 
-function objectToProduct(value: Record<string, unknown>, baseUrl: string): ProbedProduct | null {
+function objectToProduct(
+  value: Record<string, unknown>,
+  baseUrl: string,
+): ProbedProduct | null {
   const index = indexObject(value);
   const name = text(pick(index, NAME_KEYS));
   const price = numeric(pick(index, PRICE_KEYS));
-  if (!name || name.length < 3 || !price || price <= 0) return null;
 
-  // Reduz falso positivo: além de nome+preço, exige algum sinal típico de
-  // catálogo (SKU/EAN/estoque/imagem/url ou chave explicitamente de produto).
+  if (!name || name.length < 3 || price == null || price <= 0) return null;
+
   const code = text(pick(index, SKU_KEYS));
-  const eanRaw = text(pick(index, EAN_KEYS));
-  const stock = numeric(pick(index, STOCK_KEYS));
+  const ean = normalizeEan(pick(index, EAN_KEYS));
+  const stock = stockNumber(pick(index, STOCK_KEYS));
   const imageUrl = absoluteUrl(pick(index, IMAGE_KEYS), baseUrl);
   const productUrl = absoluteUrl(pick(index, URL_KEYS), baseUrl);
   const hasProductSignal = Boolean(
-    code || eanRaw || stock != null || imageUrl || productUrl ||
-    [...index.keys()].some((key) => key.includes("product") || key.includes("produto")),
+    code ||
+    ean ||
+    stock != null ||
+    imageUrl ||
+    productUrl ||
+    [...index.keys()].some(
+      (key) => key.includes("product") || key.includes("produto"),
+    ),
   );
+
   if (!hasProductSignal) return null;
 
   const normalPrice = numeric(pick(index, NORMAL_PRICE_KEYS));
   const availability = text(pick(index, AVAILABILITY_KEYS));
-  const eanDigits = eanRaw?.replace(/\D/g, "");
+
   return {
     name,
     price,
     code,
-    ean: eanDigits && /^\d{8,14}$/.test(eanDigits) ? eanDigits : undefined,
+    ean,
     unit: text(pick(index, UNIT_KEYS)),
-    stock: stock != null ? Math.max(0, Math.trunc(stock)) : undefined,
+    stock,
     availability,
     imageUrl,
     productUrl,
-    priceNormal: normalPrice && normalPrice > 0 ? normalPrice : undefined,
-    pricePromo: normalPrice && price < normalPrice ? price : undefined,
+    priceNormal: normalPrice != null && normalPrice > 0 ? normalPrice : undefined,
+    pricePromo:
+      normalPrice != null && normalPrice > 0 && price < normalPrice
+        ? price
+        : undefined,
     consultadoEm: Date.now(),
-    fonteUrl: baseUrl,
+    fonteUrl: sanitizeUrl(baseUrl),
     sourceType: "api",
   };
 }
@@ -103,35 +240,145 @@ function collectProducts(
   state: { nodes: number },
   depth = 0,
 ): void {
-  if (node == null || depth > 9 || state.nodes >= 20_000 || output.length >= 5_000) return;
-  state.nodes++;
-  if (Array.isArray(node)) {
-    for (const item of node) collectProducts(item, baseUrl, output, state, depth + 1);
+  if (
+    node == null ||
+    depth > MAX_DEPTH ||
+    state.nodes >= MAX_JSON_NODES ||
+    output.length >= MAX_PRODUCTS_PER_RESPONSE
+  ) {
     return;
   }
+
+  state.nodes += 1;
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      collectProducts(item, baseUrl, output, state, depth + 1);
+      if (output.length >= MAX_PRODUCTS_PER_RESPONSE) break;
+    }
+    return;
+  }
+
   if (typeof node !== "object") return;
+
   const record = node as Record<string, unknown>;
   const product = objectToProduct(record, baseUrl);
   if (product) output.push(product);
-  for (const value of Object.values(record)) {
-    if (typeof value === "object" && value !== null) collectProducts(value, baseUrl, output, state, depth + 1);
+
+  for (const child of Object.values(record)) {
+    if (typeof child !== "object" || child === null) continue;
+    collectProducts(child, baseUrl, output, state, depth + 1);
+    if (output.length >= MAX_PRODUCTS_PER_RESPONSE) break;
   }
 }
 
+function productIdentity(product: ProbedProduct): string {
+  if (product.ean) return `ean:${product.ean}`;
+  if (product.code?.trim()) return `sku:${product.code.trim().toUpperCase()}`;
+  if (product.productUrl) return `url:${product.productUrl}`;
+  return `name:${product.name.trim().toLowerCase()}|price:${product.price}`;
+}
+
+function richness(product: ProbedProduct): number {
+  return (
+    Number(Boolean(product.ean)) * 4 +
+    Number(Boolean(product.code)) * 3 +
+    Number(product.stock != null) * 2 +
+    Number(Boolean(product.productUrl)) +
+    Number(Boolean(product.imageUrl)) +
+    Number(Boolean(product.unit)) +
+    Number(product.priceNormal != null) +
+    Number(product.pricePromo != null)
+  );
+}
+
+function mergeProduct(
+  preferred: ProbedProduct,
+  fallback: ProbedProduct,
+): ProbedProduct {
+  return {
+    ...fallback,
+    ...preferred,
+    code: preferred.code ?? fallback.code,
+    ean: preferred.ean ?? fallback.ean,
+    unit: preferred.unit ?? fallback.unit,
+    stock: preferred.stock ?? fallback.stock,
+    availability: preferred.availability ?? fallback.availability,
+    imageUrl: preferred.imageUrl ?? fallback.imageUrl,
+    productUrl: preferred.productUrl ?? fallback.productUrl,
+    priceNormal: preferred.priceNormal ?? fallback.priceNormal,
+    pricePromo: preferred.pricePromo ?? fallback.pricePromo,
+    consultadoEm: Math.max(
+      preferred.consultadoEm ?? 0,
+      fallback.consultadoEm ?? 0,
+    ) || undefined,
+    fonteUrl: preferred.fonteUrl ?? fallback.fonteUrl,
+    sourceType: "api",
+  };
+}
+
 function dedupe(products: ProbedProduct[]): ProbedProduct[] {
-  const out = new Map<string, ProbedProduct>();
+  const output = new Map<string, ProbedProduct>();
+
   for (const product of products) {
-    const key = product.ean || product.code || product.productUrl || `${product.name.toLowerCase()}|${product.price}`;
-    const previous = out.get(key);
+    const key = productIdentity(product);
+    const previous = output.get(key);
     if (!previous) {
-      out.set(key, product);
+      output.set(key, product);
       continue;
     }
-    const previousScore = Number(Boolean(previous.ean)) + Number(Boolean(previous.code)) + Number(previous.stock != null);
-    const nextScore = Number(Boolean(product.ean)) + Number(Boolean(product.code)) + Number(product.stock != null);
-    if (nextScore > previousScore) out.set(key, product);
+
+    const preferred = richness(product) > richness(previous) ? product : previous;
+    const fallback = preferred === product ? previous : product;
+    output.set(key, mergeProduct(preferred, fallback));
   }
-  return [...out.values()];
+
+  return [...output.values()];
+}
+
+function isAllowedResponse(response: HTTPResponse, allowedHosts: Set<string>): boolean {
+  const status = response.status();
+  if (status < 200 || status >= 300) return false;
+
+  const resourceType = response.request().resourceType();
+  if (resourceType !== "xhr" && resourceType !== "fetch") return false;
+
+  let url: URL;
+  try {
+    url = new URL(response.url());
+  } catch {
+    return false;
+  }
+
+  if (allowedHosts.size > 0 && !allowedHosts.has(url.hostname.toLowerCase())) {
+    return false;
+  }
+
+  const headers = response.headers();
+  const contentType = String(headers["content-type"] || "").toLowerCase();
+  const pathLooksStructured = /\/api\/|graphql|catalog|product|produto|search|busca/i.test(
+    url.pathname,
+  );
+
+  if (!contentType.includes("json") && !pathLooksStructured) return false;
+
+  const declaredLength = Number(headers["content-length"] || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    return false;
+  }
+
+  return true;
+}
+
+async function parseBoundedJsonResponse(response: HTTPResponse): Promise<unknown | null> {
+  try {
+    const textBody = await response.text();
+    if (Buffer.byteLength(textBody, "utf8") > MAX_RESPONSE_BYTES) return null;
+    if (!textBody.trim()) return null;
+    return JSON.parse(textBody) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 export interface NetworkJsonProbe {
@@ -140,45 +387,46 @@ export interface NetworkJsonProbe {
 }
 
 /**
- * Observa XHR/fetch JSON após o login e transforma listas de produtos em dados
- * estruturados. Não descobre/burla endpoints protegidos: apenas lê respostas
- * que a sessão autenticada já recebeu normalmente no navegador.
+ * Observa somente respostas XHR/fetch que a sessão autenticada já recebeu.
+ * Não cria requests, não descobre endpoints e não contorna autenticação.
  */
 export function attachNetworkJsonProductProbe(
   page: Page,
   allowedHosts: Iterable<string>,
 ): NetworkJsonProbe {
-  const hosts = new Set([...allowedHosts].map((host) => host.toLowerCase()));
+  const hosts = new Set(
+    [...allowedHosts]
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
   let collected: ProbedProduct[] = [];
   const pending = new Set<Promise<void>>();
 
-  const onResponse = (response: HTTPResponse) => {
+  const onResponse = (response: HTTPResponse): void => {
+    if (!isAllowedResponse(response, hosts)) return;
+
     const task = (async () => {
-      try {
-        const url = new URL(response.url());
-        if (hosts.size > 0 && !hosts.has(url.hostname.toLowerCase())) return;
-        const headers = response.headers();
-        const type = String(headers["content-type"] || "").toLowerCase();
-        if (!type.includes("json") && !/\/api\/|graphql|catalog|product|produto|search|busca/i.test(url.pathname)) return;
-        const declared = Number(headers["content-length"] || 0);
-        if (declared > 5 * 1024 * 1024) return;
-        const payload = await response.json().catch(() => null);
-        if (payload == null) return;
-        const found: ProbedProduct[] = [];
-        collectProducts(payload, response.url(), found, { nodes: 0 });
-        if (found.length) collected.push(...found);
-      } catch {
-        // Probe é oportunístico. DOM/structured data seguem como fallback.
-      }
+      const payload = await parseBoundedJsonResponse(response);
+      if (payload == null) return;
+
+      const found: ProbedProduct[] = [];
+      const sourceUrl = sanitizeUrl(response.url()) ?? response.url();
+      collectProducts(payload, sourceUrl, found, { nodes: 0 });
+      if (found.length > 0) collected.push(...found);
     })();
+
     pending.add(task);
     void task.finally(() => pending.delete(task));
   };
 
   page.on("response", onResponse);
 
-  const flush = async () => {
-    if (pending.size) await Promise.allSettled([...pending]);
+  const flush = async (): Promise<ProbedProduct[]> => {
+    while (pending.size > 0) {
+      await Promise.allSettled([...pending]);
+    }
+
     const result = dedupe(collected);
     collected = [];
     return result;
