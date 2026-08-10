@@ -1,15 +1,25 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { ensureCatalogKnowledgeSchema } from "./catalogKnowledgeSchema";
-import { backfillMissingCanonicalOffers, syncCanonicalPriceMirrors } from "./catalogReconciliationService";
+import { reconcileLegacyCatalog } from "./catalogReconciliationService";
 
 function firstRow(value: unknown): Record<string, unknown> {
-  return Array.isArray(value) && value.length ? value[0] as Record<string, unknown> : {};
+  return Array.isArray(value) && value.length
+    ? (value[0] as Record<string, unknown>)
+    : {};
 }
 
 export async function getCatalogIntegrityHealth() {
   const db = await getDb();
-  if (!db) return { healthy: false, database: false, checkedAt: new Date(), issues: ["Banco indisponível"] };
+  if (!db) {
+    return {
+      healthy: false,
+      database: false,
+      checkedAt: new Date(),
+      issues: ["Banco indisponível"],
+    };
+  }
+
   await ensureCatalogKnowledgeSchema();
 
   const [metricsRows] = await db.execute(sql.raw(`
@@ -19,20 +29,32 @@ export async function getCatalogIntegrityHealth() {
       (
         SELECT COUNT(*)
         FROM products p
-        LEFT JOIN product_supplier_offers o ON o.productId = p.id AND o.supplierId = p.supplierId
-        WHERE p.isActive = 'yes' AND p.deletedAt IS NULL
-          AND p.supplierId IS NOT NULL AND p.price IS NOT NULL AND o.id IS NULL
+        LEFT JOIN product_supplier_offers o
+          ON o.productId = p.id AND o.supplierId = p.supplierId
+        WHERE p.isActive = 'yes'
+          AND p.deletedAt IS NULL
+          AND p.supplierId IS NOT NULL
+          AND p.price IS NOT NULL
+          AND p.price > 0
+          AND o.id IS NULL
       ) AS missingOfferBridges,
       (
         SELECT COUNT(*)
         FROM products p
-        JOIN (
-          SELECT productId,
-            MIN(CASE
-              WHEN promoPrice IS NOT NULL AND promoPrice > 0 AND (price IS NULL OR promoPrice < price)
-                THEN promoPrice
-              ELSE price
-            END) AS bestPrice
+        LEFT JOIN (
+          SELECT
+            productId,
+            MIN(
+              CASE
+                WHEN promoPrice IS NOT NULL
+                  AND promoPrice > 0
+                  AND (price IS NULL OR promoPrice < price)
+                  THEN promoPrice
+                WHEN price IS NOT NULL AND price > 0
+                  THEN price
+                ELSE NULL
+              END
+            ) AS bestPrice
           FROM product_supplier_offers
           GROUP BY productId
         ) best ON best.productId = p.id
@@ -70,11 +92,21 @@ export async function getCatalogIntegrityHealth() {
   const nullable = String(fk.nullable ?? "UNKNOWN").toUpperCase();
 
   const issues: string[] = [];
-  if (missingOfferBridges > 0) issues.push(`${missingOfferBridges} produto(s) legado(s) ainda sem oferta canônica correspondente`);
-  if (priceMirrorMismatches > 0) issues.push(`${priceMirrorMismatches} produto(s) com espelho de preço divergente`);
+  if (missingOfferBridges > 0) {
+    issues.push(
+      `${missingOfferBridges} produto(s) legado(s) ainda sem oferta canônica correspondente`,
+    );
+  }
+  if (priceMirrorMismatches > 0) {
+    issues.push(`${priceMirrorMismatches} produto(s) com espelho de preço divergente`);
+  }
   if (!hasSupplierFk) issues.push("FK products.supplierId → suppliers.id ausente");
-  if (deleteRule === "CASCADE") issues.push("FK products.supplierId ainda usa ON DELETE CASCADE");
-  if (hasSupplierFk && deleteRule !== "SET NULL") issues.push(`FK products.supplierId usa regra ${deleteRule}, esperado SET NULL`);
+  if (deleteRule === "CASCADE") {
+    issues.push("FK products.supplierId ainda usa ON DELETE CASCADE");
+  }
+  if (hasSupplierFk && deleteRule !== "SET NULL") {
+    issues.push(`FK products.supplierId usa regra ${deleteRule}, esperado SET NULL`);
+  }
   if (nullable === "NO") issues.push("products.supplierId ainda é obrigatório no banco");
 
   return {
@@ -97,8 +129,7 @@ export async function getCatalogIntegrityHealth() {
 
 export async function repairCatalogConsistency() {
   await ensureCatalogKnowledgeSchema();
-  const offersBackfilled = await backfillMissingCanonicalOffers();
-  const pricesMirrored = await syncCanonicalPriceMirrors();
+  const reconciliation = await reconcileLegacyCatalog();
   const health = await getCatalogIntegrityHealth();
-  return { offersBackfilled, pricesMirrored, health };
+  return { ...reconciliation, health };
 }
