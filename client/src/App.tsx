@@ -20,7 +20,8 @@ const Categorias = lazy(() => import("./pages/Categorias"));
 const EquivalenciasLegado = lazy(() => import("./pages/Equivalencias"));
 const CompendioEquivalencias = lazy(() => import("./pages/CompendioEquivalencias"));
 const Fornecedores = lazy(() => import("./pages/Fornecedores"));
-const ImportarPlanilha = lazy(() => import("./pages/ImportarPlanilha"));
+const ImportarCatalogo = lazy(() => import("./pages/ImportarCatalogo"));
+const ImportarPlanilhaLegado = lazy(() => import("./pages/ImportarPlanilha"));
 const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
 const Propostas = lazy(() => import("./pages/Propostas"));
 const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
@@ -94,7 +95,7 @@ function Router() {
                 <Route path="/diagnostico"><RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor"><Diagnostico /></RequireAuth></Route>
                 <Route path="/comparacao" component={Comparacao} />
 
-                {/* Catálogo: novas rotas canônicas + rotas legadas mantidas para transição segura. */}
+                {/* Catálogo canônico. Rotas legadas permanecem apenas para rollback durante homologação. */}
                 <Route path="/produtos/legado" component={ProdutosLegado} />
                 <Route path="/produtos" component={CentralProdutos} />
                 <Route path="/equivalencias/legado" component={EquivalenciasLegado} />
@@ -103,7 +104,8 @@ function Router() {
                 <Route path="/categorias" component={Categorias} />
 
                 <Route path="/fornecedores"><RequireAuth message="Gerencie fornecedores após fazer login." minRole="editor"><Fornecedores /></RequireAuth></Route>
-                <Route path="/importar"><RequireAuth message="Importe planilhas após fazer login." minRole="editor"><ImportarPlanilha /></RequireAuth></Route>
+                <Route path="/importar/legado"><RequireAuth message="Use o importador legado após fazer login." minRole="editor"><ImportarPlanilhaLegado /></RequireAuth></Route>
+                <Route path="/importar"><RequireAuth message="Importe produtos após fazer login." minRole="editor"><ImportarCatalogo /></RequireAuth></Route>
                 <Route path="/importar-nfe"><RequireAuth message="Importe NFe após fazer login." minRole="editor"><ImportarNfe /></RequireAuth></Route>
                 <Route path="/configurador-fornecedores"><Redirect to="/scraper-fornecedores" /></Route>
                 <Route path="/seguranca"><RequireAuth message="Acesse a segurança da conta após fazer login."><SegurancaMFA /></RequireAuth></Route>
