@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { logger } from "../_core/logger";
+import { reconcileLegacyCatalog } from "./catalogReconciliationService";
 
 let ensured = false;
 let ensuring: Promise<void> | null = null;
@@ -111,10 +112,15 @@ export async function ensureCatalogKnowledgeSchema(): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `));
 
+    // Só marca o schema como garantido depois da criação das estruturas; a
+    // reconciliação é idempotente e não impede o módulo de funcionar caso uma
+    // migração estrutural opcional (como a FK) não seja possível no ambiente.
     ensured = true;
-    logger.info("[CatalogKnowledge] Estruturas do compêndio verificadas.");
+    await reconcileLegacyCatalog();
+    logger.info("[CatalogKnowledge] Estruturas do compêndio verificadas e catálogo reconciliado.");
   })().catch((error) => {
     ensuring = null;
+    ensured = false;
     logger.error("[CatalogKnowledge] Falha ao garantir schema:", error);
     throw error;
   });
