@@ -65,13 +65,16 @@ export async function getCatalogIntegrityHealth() {
   const fk = firstRow(fkRows);
   const missingOfferBridges = Number(metrics.missingOfferBridges ?? 0);
   const priceMirrorMismatches = Number(metrics.priceMirrorMismatches ?? 0);
-  const deleteRule = String(fk.deleteRule ?? "UNKNOWN").toUpperCase();
+  const hasSupplierFk = Object.keys(fk).length > 0;
+  const deleteRule = String(fk.deleteRule ?? "MISSING").toUpperCase();
   const nullable = String(fk.nullable ?? "UNKNOWN").toUpperCase();
 
   const issues: string[] = [];
   if (missingOfferBridges > 0) issues.push(`${missingOfferBridges} produto(s) legado(s) ainda sem oferta canônica correspondente`);
   if (priceMirrorMismatches > 0) issues.push(`${priceMirrorMismatches} produto(s) com espelho de preço divergente`);
+  if (!hasSupplierFk) issues.push("FK products.supplierId → suppliers.id ausente");
   if (deleteRule === "CASCADE") issues.push("FK products.supplierId ainda usa ON DELETE CASCADE");
+  if (hasSupplierFk && deleteRule !== "SET NULL") issues.push(`FK products.supplierId usa regra ${deleteRule}, esperado SET NULL`);
   if (nullable === "NO") issues.push("products.supplierId ainda é obrigatório no banco");
 
   return {
@@ -87,7 +90,7 @@ export async function getCatalogIntegrityHealth() {
       humanValidatedEntries: Number(metrics.humanValidatedEntries ?? 0),
       activeMergeEvents: Number(metrics.activeMergeEvents ?? 0),
     },
-    supplierCompatibility: { deleteRule, nullable },
+    supplierCompatibility: { hasSupplierFk, deleteRule, nullable },
     issues,
   };
 }
