@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { recordAudit } from "../services/auditService";
+import { ensureCatalogKnowledgeSchema } from "../services/catalogKnowledgeSchema";
 import {
   catalogQualitySummary,
   getCanonicalProductDetail,
@@ -44,6 +45,11 @@ const masterPatch = z.object({
   isActive: z.enum(["yes", "no"]).optional(),
 }).strict();
 
+async function initialized<T>(fn: () => Promise<T>): Promise<T> {
+  await ensureCatalogKnowledgeSchema();
+  return fn();
+}
+
 export const catalogRouter = router({
   list: protectedProcedure.input(z.object({
     search: z.string().max(256).optional(),
@@ -54,17 +60,17 @@ export const catalogRouter = router({
     offset: z.number().int().min(0).optional(),
     sort: z.enum(["name", "updatedAt"]).optional(),
     sortDir: z.enum(["asc", "desc"]).optional(),
-  }).optional()).query(({ input }) => listCanonicalCatalog(input ?? {})),
+  }).optional()).query(({ input }) => initialized(() => listCanonicalCatalog(input ?? {}))),
 
   detail: protectedProcedure
     .input(z.object({ productId: z.number().int().positive() }))
-    .query(({ input }) => getCanonicalProductDetail(input.productId)),
+    .query(({ input }) => initialized(() => getCanonicalProductDetail(input.productId))),
 
-  qualitySummary: protectedProcedure.query(() => catalogQualitySummary()),
+  qualitySummary: protectedProcedure.query(() => initialized(() => catalogQualitySummary())),
 
   update: editorProcedure
     .input(z.object({ productId: z.number().int().positive(), patch: masterPatch }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => initialized(async () => {
       const result = await updateCanonicalProduct(input.productId, input.patch, ctx.user.id);
       await recordAudit({
         userId: ctx.user.id,
@@ -75,11 +81,11 @@ export const catalogRouter = router({
         changes: input.patch,
       });
       return result;
-    }),
+    })),
 
   softDelete: editorProcedure
     .input(z.object({ productId: z.number().int().positive() }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => initialized(async () => {
       const result = await softDeleteCanonicalProduct(input.productId);
       await recordAudit({
         userId: ctx.user.id,
@@ -89,11 +95,11 @@ export const catalogRouter = router({
         summary: "Produto desativado por soft-delete",
       });
       return result;
-    }),
+    })),
 
   restore: editorProcedure
     .input(z.object({ productId: z.number().int().positive() }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => initialized(async () => {
       const result = await restoreCanonicalProduct(input.productId);
       await recordAudit({
         userId: ctx.user.id,
@@ -103,7 +109,7 @@ export const catalogRouter = router({
         summary: "Produto restaurado ao catálogo",
       });
       return result;
-    }),
+    })),
 
   saveOffer: editorProcedure
     .input(z.object({
@@ -114,7 +120,7 @@ export const catalogRouter = router({
       link: z.string().optional(),
       origin: z.string().max(64).optional(),
     }))
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => initialized(async () => {
       const result = await saveCanonicalOffer(input);
       await recordAudit({
         userId: ctx.user.id,
@@ -125,5 +131,5 @@ export const catalogRouter = router({
         changes: { supplierId: input.supplierId, price: input.price, origin: input.origin ?? "catalog_central" },
       });
       return result;
-    }),
+    })),
 });
