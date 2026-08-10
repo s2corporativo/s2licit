@@ -50,6 +50,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/produtos", icon: Package, label: "Produtos e preços" },
       { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
+      { href: "/captura-core", icon: Bot, label: "Captura e atualização", minRole: "admin" },
       { href: "/busca-global", icon: Search, label: "Busca e equivalências" },
       { href: "/enriquecimento", icon: Sparkles, label: "Qualidade do catálogo" },
     ],
