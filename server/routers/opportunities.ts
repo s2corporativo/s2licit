@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { funilEventos, funilOportunidades } from "../../drizzle/schema";
+import { deliveries, funilEventos, funilOportunidades, proposals, purchaseOrders } from "../../drizzle/schema";
 import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { createProposal, getDb } from "../db";
 import {
@@ -17,6 +17,44 @@ import {
   moveOpportunity,
   prepareOpportunityForProposal,
 } from "../services/opportunityWorkflowService";
+
+async function resolveOpportunityFromProposal(proposalId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [proposal] = await db.select().from(proposals).where(eq(proposals.id, proposalId)).limit(1);
+  if (!proposal) return null;
+
+  if (proposal.radarOpportunityId) {
+    const [opportunity] = await db
+      .select({ id: funilOportunidades.id })
+      .from(funilOportunidades)
+      .where(and(eq(funilOportunidades.origemTipo, "pncp"), eq(funilOportunidades.origemId, proposal.radarOpportunityId)))
+      .limit(1);
+    if (opportunity) return opportunity.id;
+  }
+
+  if (proposal.processNumber?.trim()) {
+    const [opportunity] = await db
+      .select({ id: funilOportunidades.id })
+      .from(funilOportunidades)
+      .where(eq(funilOportunidades.numeroProcesso, proposal.processNumber.trim()))
+      .limit(1);
+    if (opportunity) return opportunity.id;
+  }
+  return null;
+}
+
+async function resolveOrderOpportunity(orderId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [order] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).limit(1);
+  if (!order) return null;
+  if (order.funilId) return order.funilId;
+  if (!order.proposalId) return null;
+  const funilId = await resolveOpportunityFromProposal(order.proposalId);
+  if (funilId) await db.update(purchaseOrders).set({ funilId }).where(eq(purchaseOrders.id, order.id));
+  return funilId;
+}
 
 export const opportunitiesRouter = router({
   list: protectedProcedure.query(() => listCanonicalOpportunities()),
@@ -76,48 +114,34 @@ export const opportunitiesRouter = router({
     .mutation(({ input, ctx }) => ensureOpportunityFromQuotation(input.quotationId, ctx.user)),
 
   decide: editorProcedure
-    .input(
-      z.object({
-        id: z.number().int().positive(),
-        decisao: z.enum(["go", "no_go"]),
-        justificativa: z.string().trim().min(5).max(2000),
-      }),
-    )
+    .input(z.object({ id: z.number().int().positive(), decisao: z.enum(["go", "no_go"]), justificativa: z.string().trim().min(5).max(2000) }))
     .mutation(({ input, ctx }) => decideOpportunity(input.id, input.decisao, input.justificativa, ctx.user)),
 
   move: editorProcedure
-    .input(
-      z.object({
-        id: z.number().int().positive(),
-        paraEtapa: z.enum([
-          "nova", "triagem", "analise", "cotacao", "precificacao", "proposta", "enviada",
-          "disputa", "habilitacao", "vencida", "perdida", "cancelada", "contrato", "entrega",
-          "faturamento", "recebimento", "encerrada",
-        ]),
-        justificativa: z.string().max(2000).optional(),
-      }),
-    )
+    .input(z.object({
+      id: z.number().int().positive(),
+      paraEtapa: z.enum([
+        "nova", "triagem", "analise", "cotacao", "precificacao", "proposta", "enviada", "disputa",
+        "habilitacao", "vencida", "perdida", "cancelada", "contrato", "entrega", "faturamento",
+        "recebimento", "encerrada",
+      ]),
+      justificativa: z.string().max(2000).optional(),
+    }))
     .mutation(({ input, ctx }) => moveOpportunity(input.id, input.paraEtapa, input.justificativa, ctx.user)),
 
   createProposal: editorProcedure
-    .input(
-      z.object({
-        opportunityId: z.number().int().positive(),
-        title: z.string().trim().min(1).max(256).optional(),
-        validityDays: z.number().int().min(1).max(365).default(30),
-        paymentTerms: z.string().max(256).optional(),
-        deliveryTerms: z.string().max(256).optional(),
-      }),
-    )
+    .input(z.object({
+      opportunityId: z.number().int().positive(),
+      title: z.string().trim().min(1).max(256).optional(),
+      validityDays: z.number().int().min(1).max(365).default(30),
+      paymentTerms: z.string().max(256).optional(),
+      deliveryTerms: z.string().max(256).optional(),
+    }))
     .mutation(async ({ input, ctx }) => {
       await prepareOpportunityForProposal(input.opportunityId, ctx.user);
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
-      const [opportunity] = await db
-        .select()
-        .from(funilOportunidades)
-        .where(eq(funilOportunidades.id, input.opportunityId))
-        .limit(1);
+      const [opportunity] = await db.select().from(funilOportunidades).where(eq(funilOportunidades.id, input.opportunityId)).limit(1);
       if (!opportunity) throw new TRPCError({ code: "NOT_FOUND", message: "Oportunidade não encontrada." });
 
       const proposalId = await createProposal({
@@ -132,12 +156,43 @@ export const opportunitiesRouter = router({
         radarOpportunityId: opportunity.origemTipo === "pncp" ? opportunity.origemId ?? null : null,
       } as any);
 
-      await moveOpportunity(
-        input.opportunityId,
-        "proposta",
-        `Proposta #${proposalId} criada pelo fluxo canônico`,
-        ctx.user,
-      );
+      await moveOpportunity(input.opportunityId, "proposta", `Proposta #${proposalId} criada pelo fluxo canônico`, ctx.user);
       return { proposalId, opportunityId: input.opportunityId };
+    }),
+
+  updateOrderStatus: editorProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      status: z.enum(["solicitado", "confirmado", "faturado", "enviado", "recebido", "divergente", "cancelado"]),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
+      const [order] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, input.id)).limit(1);
+      if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Pedido não encontrado." });
+      const funilId = order.funilId ?? (order.proposalId ? await resolveOpportunityFromProposal(order.proposalId) : null);
+      await db.update(purchaseOrders).set({ status: input.status, ...(funilId ? { funilId } : {}) }).where(eq(purchaseOrders.id, input.id));
+      await reconcileCanonicalWorkflow();
+      return { ok: true, funilId };
+    }),
+
+  updateDeliveryStatus: editorProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      status: z.enum(["preparando", "transito", "entregue", "atrasada", "devolvida"]),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
+      const [delivery] = await db.select().from(deliveries).where(eq(deliveries.id, input.id)).limit(1);
+      if (!delivery) throw new TRPCError({ code: "NOT_FOUND", message: "Entrega não encontrada." });
+      const funilId = delivery.funilId ?? (delivery.orderId ? await resolveOrderOpportunity(delivery.orderId) : null);
+      await db.update(deliveries).set({
+        status: input.status,
+        ...(funilId ? { funilId } : {}),
+        ...(input.status === "entregue" && !delivery.entregueEm ? { entregueEm: new Date() } : {}),
+      }).where(eq(deliveries.id, input.id));
+      await reconcileCanonicalWorkflow();
+      return { ok: true, funilId };
     }),
 });
