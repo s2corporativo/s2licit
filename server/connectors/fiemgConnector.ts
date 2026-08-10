@@ -9,13 +9,13 @@ import { generateDedupeKey } from "./baseConnector";
 import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 import { classifyThrownError, IntegrationError } from "../integrations/core/integrationError";
 import { failureResult, successResult } from "../integrations/core/integrationResult";
-import type { IntegrationResult } from "../integrations/core/types";
+import type { ExternalHttpResponse, IntegrationResult } from "../integrations/core/types";
 import { getS2PortalUrl } from "../services/s2TargetPortals";
 import { parseInstitutionalPortalHtml } from "../services/s2PortalOpportunitySyncService";
 
-function normalizeOpportunity(
-  opportunity: ReturnType<typeof parseInstitutionalPortalHtml>[number],
-): NormalizedLicitacao {
+type InstitutionalOpportunity = ReturnType<typeof parseInstitutionalPortalHtml>[number];
+
+function normalizeOpportunity(opportunity: InstitutionalOpportunity): NormalizedLicitacao {
   return {
     source: "fiemg",
     sourceId: opportunity.externalId,
@@ -41,6 +41,27 @@ function normalizeOpportunity(
   };
 }
 
+function responseError<T>(response: ExternalHttpResponse<T>): IntegrationError {
+  return new IntegrationError(response.error?.message ?? "FIEMG indisponível.", {
+    type: response.error?.type ?? "UPSTREAM",
+    retryable: response.error?.retryable ?? false,
+    upstreamStatus: response.statusCode || undefined,
+    code: response.error?.code,
+  });
+}
+
+function parseFiemgContract(payload: unknown, url: string): InstitutionalOpportunity[] {
+  if (typeof payload !== "string") throw new Error("FIEMG retornou conteúdo não textual.");
+  const opportunities = parseInstitutionalPortalHtml("fiemg", payload, url);
+  const pageLooksRelevant = /licita[cç][aã]o|edital|preg[aã]o|cota[cç][aã]o|processo|contrata[cç][aã]o/i.test(payload);
+  if (opportunities.length === 0 && pageLooksRelevant) {
+    throw new Error(
+      "A página FIEMG contém sinais de licitação, mas o parser institucional não reconheceu oportunidades. Possível mudança de layout.",
+    );
+  }
+  return opportunities;
+}
+
 export async function buscarLicitacoesFiemgResult(
   inicio: Date,
   fim: Date,
@@ -48,55 +69,39 @@ export async function buscarLicitacoesFiemgResult(
   const startedAt = Date.now();
   const url = await getS2PortalUrl("fiemg");
   try {
-    const response = await externalHttpRequest<string>({
+    const response = await externalHttpRequest<InstitutionalOpportunity[]>({
       source: "fiemg",
       operation: "licitacoes.html",
       url,
       expected: "text",
       accept: "text/html,application/xhtml+xml",
       timeoutMs: 20_000,
+      deadlineMs: 45_000,
       maxRetries: 1,
       maxBodyBytes: 8 * 1024 * 1024,
+      validator: (payload) => parseFiemgContract(payload, url),
     });
     if (!response.ok || response.data == null) {
+      const error = responseError(response);
       return failureResult({
         source: "fiemg",
         operation: "licitacoes.list",
         data: [],
         startedAt,
         requestId: response.requestId,
-        error: new IntegrationError(response.error?.message ?? "FIEMG indisponível.", {
-          type: response.error?.type === "TIMEOUT" ? "TIMEOUT" : "UPSTREAM",
-          retryable: response.error?.retryable ?? true,
-          upstreamStatus: response.statusCode || undefined,
-        }),
-        metadata: { sourceUrl: url },
+        error,
+        metadata: {
+          sourceUrl: response.finalUrl ?? url,
+          schemaVersion: "institutional-html-v3",
+        },
       });
     }
 
-    const opportunities = parseInstitutionalPortalHtml("fiemg", response.data, url);
-    const pageLooksRelevant = /licita[cç][aã]o|edital|preg[aã]o|cota[cç][aã]o|processo|contrata[cç][aã]o/i.test(response.data);
-    if (opportunities.length === 0 && pageLooksRelevant) {
-      return failureResult({
-        source: "fiemg",
-        operation: "licitacoes.list",
-        data: [],
-        startedAt,
-        requestId: response.requestId,
-        error: new IntegrationError(
-          "A página FIEMG respondeu, mas o parser institucional não reconheceu oportunidades ativas. Possível mudança de layout.",
-          { type: "CONTRACT", code: "FIEMG_HTML_DRIFT" },
-        ),
-        metadata: { sourceUrl: url, schemaVersion: "institutional-html-v3" },
-      });
-    }
-
-    const data = opportunities
+    const data = response.data
       .map(normalizeOpportunity)
       .filter((opportunity) => {
         const deadline = opportunity.dataEncerramento;
         if (!deadline) return true;
-        // Não exibe no Radar uma oportunidade cujo prazo terminou antes da janela.
         return deadline.getTime() >= inicio.getTime() && deadline.getTime() <= fim.getTime() + 90 * 86_400_000;
       });
 
@@ -108,7 +113,7 @@ export async function buscarLicitacoesFiemgResult(
       requestId: response.requestId,
       metadata: {
         records: data.length,
-        sourceUrl: url,
+        sourceUrl: response.finalUrl ?? url,
         schemaVersion: "institutional-html-v3",
       },
     });
@@ -119,7 +124,7 @@ export async function buscarLicitacoesFiemgResult(
       data: [],
       startedAt,
       error: classifyThrownError(error),
-      metadata: { sourceUrl: url },
+      metadata: { sourceUrl: url, schemaVersion: "institutional-html-v3" },
     });
   }
 }
