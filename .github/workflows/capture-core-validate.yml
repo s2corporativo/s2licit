@@ -1,0 +1,140 @@
+name: Capture Core Validation
+
+on:
+  push:
+    branches:
+      - feat/capture-core-autonomo
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capture-core-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/s2_capture_ci
+      JWT_SECRET: capture-core-ci-only-secret
+      ENCRYPTION_KEY: capture-core-ci-only-encryption-key
+      NODE_ENV: test
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.4.1 --activate
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Drizzle snapshot from schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f drizzle/meta/0016_snapshot.json
+          rm -f drizzle/0016_capture_core_generated.sql
+          rm -f drizzle/0016_capture_core.sql
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'drizzle/meta/_journal.json';
+          const journal = JSON.parse(fs.readFileSync(path, 'utf8'));
+          journal.entries = journal.entries.filter((entry) => Number(entry.idx) !== 16);
+          fs.writeFileSync(path, JSON.stringify(journal, null, 2) + '\n');
+          NODE
+          pnpm exec drizzle-kit generate --name capture_core_generated
+          test -f drizzle/meta/0016_snapshot.json
+          git checkout -- drizzle/0016_capture_core.sql drizzle/meta/_journal.json
+          rm -f drizzle/0016_capture_core_generated.sql
+
+      - name: TypeScript check
+        run: pnpm check
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Create clean MySQL database
+        run: |
+          node --input-type=module <<'NODE'
+          import mysql from 'mysql2/promise';
+          const db = await mysql.createConnection({ host: '127.0.0.1', user: 'root', password: 'root' });
+          await db.query('DROP DATABASE IF EXISTS s2_capture_ci');
+          await db.query('CREATE DATABASE s2_capture_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+          await db.end();
+          NODE
+
+      - name: Apply migration chain
+        run: pnpm db:push
+
+      - name: Verify Capture Core database invariants
+        run: |
+          node --input-type=module <<'NODE'
+          import mysql from 'mysql2/promise';
+          const db = await mysql.createConnection(process.env.DATABASE_URL);
+          const requiredTables = [
+            'capture_jobs',
+            'supplier_product_observations',
+            'capture_job_events',
+            'capture_ai_feedback',
+            'capture_connector_health',
+          ];
+          for (const table of requiredTables) {
+            const [rows] = await db.query('SHOW TABLES LIKE ?', [table]);
+            if (!Array.isArray(rows) || rows.length !== 1) throw new Error(`Tabela ausente: ${table}`);
+          }
+          const [columns] = await db.query('SHOW COLUMNS FROM supplier_product_observations');
+          const names = new Set(columns.map((row) => row.Field));
+          for (const name of ['reviewStatus', 'reviewedAt', 'reviewedByUserId']) {
+            if (!names.has(name)) throw new Error(`Coluna de revisão ausente: ${name}`);
+          }
+          const [triggers] = await db.query("SHOW TRIGGERS WHERE `Table` = 'capture_jobs'");
+          if (!Array.isArray(triggers) || triggers.length < 2) throw new Error('Triggers de activeKey não foram aplicados');
+          const [indexes] = await db.query("SHOW INDEX FROM capture_jobs WHERE Key_name = 'uq_capture_jobs_active_key'");
+          if (!Array.isArray(indexes) || indexes.length < 1) throw new Error('Unique activeKey ausente');
+          await db.end();
+          console.log('Capture Core DB invariants: OK');
+          NODE
+
+      - name: Commit generated snapshot after all gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add drizzle/meta/0016_snapshot.json
+          if git diff --cached --quiet; then
+            echo 'Snapshot já está sincronizado.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(db): generate capture core drizzle snapshot'
+          git push origin HEAD:${GITHUB_REF_NAME}
