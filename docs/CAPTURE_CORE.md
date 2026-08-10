@@ -299,21 +299,89 @@ A tela reúne:
 
 `/scraper-fornecedores` permanece como fachada/configuração técnica durante a transição.
 
+## Validação gratuita na VPS
+
+GitHub Actions está deliberadamente fora do fluxo de validação deste projeto. O caminho oficial usa Docker na própria VPS.
+
+### 1. Gerar o snapshot Drizzle 0016
+
+Na branch do PR:
+
+```bash
+bash scripts/generate-capture-core-snapshot.sh
+```
+
+O helper:
+
+1. constrói o ambiente com a versão de `drizzle-kit` travada no projeto;
+2. trabalha dentro de um container temporário;
+3. remove a migration/entrada 0016 somente na cópia isolada;
+4. executa `drizzle-kit generate --name capture_core`;
+5. valida `prevId`, dialect e as cinco tabelas do Capture Core;
+6. copia somente `drizzle/meta/0016_snapshot.json` para o checkout real.
+
+O SQL manual `drizzle/0016_capture_core.sql` e o `_journal.json` reais não são reescritos pelo gerador.
+
+### 2. Executar todos os gates automatizados
+
+```bash
+bash scripts/validate-free.sh
+```
+
+O validador executa:
+
+1. preflight da migration, journal e snapshot;
+2. TypeScript, lint, Vitest e build;
+3. build da imagem de produção;
+4. MySQL 8 temporário e isolado;
+5. migrations em duas passagens;
+6. inspeção das tabelas, índices, unique constraints e triggers do Capture Core;
+7. testes `*.integration-db.test.ts`.
+
+O teste `captureCore.integration-db.test.ts` prova funcionalmente que:
+
+- `queued` e `running` recebem `activeKey` derivado do `scraperConfigId`;
+- um segundo job ativo da mesma configuração falha com `ER_DUP_ENTRY`;
+- estados terminais liberam o `activeKey`;
+- um novo job pode ser criado depois da liberação.
+
+Se o snapshot estiver ausente, a validação continua para revelar outros erros, mas termina bloqueada para impedir merge/deploy incompleto.
+
+### Sequência recomendada
+
+```bash
+git checkout feat/capture-core-autonomo
+git pull --ff-only origin feat/capture-core-autonomo
+bash scripts/generate-capture-core-snapshot.sh
+bash scripts/validate-free.sh
+git status --short
+```
+
+Depois de conferir o snapshot gerado, ele deve ser versionado na própria branch do PR.
+
+## Smoke autenticado antes de produção
+
+Depois dos gates automatizados passarem:
+
+1. executar uma captura Tambasa autenticada;
+2. confirmar login/reuso de sessão;
+3. confirmar descoberta e captura no mesmo browser;
+4. conferir `capturedItems`, quality score e eventos;
+5. confirmar atualização determinística segura;
+6. confirmar que um caso ambíguo vai para revisão sem mutação antecipada;
+7. repetir com pelo menos um conector search-only/híbrido em `search`/`refresh`;
+8. confirmar que nenhum produto mestre foi criado automaticamente.
+
 ## Checklist antes de produção
 
 O módulo não deve ser promovido apenas por revisão estática.
 
 Antes do merge/deploy, concluir:
 
-1. gerar `drizzle/meta/0016_snapshot.json` com a versão de `drizzle-kit` do projeto;
-2. executar `pnpm check`;
-3. executar `pnpm test`;
-4. executar `pnpm build`;
-5. aplicar a migration 0016 em MySQL/MariaDB limpo/de teste;
-6. validar constraint/triggers de `activeKey`;
-7. smoke autenticado de Tambasa;
-8. smoke de um conector search-only/híbrido;
-9. confirmar criação/recovery/retry de job;
-10. confirmar que uma observação ambígua não altera catálogo antes de revisão.
+1. gerar e versionar `drizzle/meta/0016_snapshot.json`;
+2. executar `bash scripts/validate-free.sh` até conclusão integral;
+3. smoke autenticado de Tambasa;
+4. smoke de um conector search-only/híbrido;
+5. confirmar que uma observação ambígua não altera catálogo antes de revisão.
 
 Enquanto esses gates não estiverem comprovados, o PR deve permanecer draft.
