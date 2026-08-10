@@ -1,10 +1,8 @@
-import { getDb, resetDb } from "./db/_client";
+import { getDb, resetDb, withDatabaseAdvisoryLock } from "./db/_client";
 
-
-
-// Conexão/pool compartilhado: getDb/resetDb vivem em ./db/_client e são
-// re-exportados aqui para preservar a API pública `from "../db"`.
-export { getDb, resetDb };
+// Conexão/pool compartilhado: getDb/resetDb e locks de coordenação vivem em
+// ./db/_client e são re-exportados para preservar uma única API de banco.
+export { getDb, resetDb, withDatabaseAdvisoryLock };
 
 // ─── Users → ./db/users ───
 export * from "./db/users";
@@ -36,7 +34,6 @@ export * from "./db/requestingOrgs";
 export * from "./db/proposals";
 // ─── Financial + Freight → ./db/financial ───
 export * from "./db/financial";
-// (getExpiringProposals → ./db/proposals)
 // ─── Base Mestre de Produtos → ./db/masterProducts ───
 export * from "./db/masterProducts";
 // ─── Fuzzy Matching → ./db/fuzzyMatching ───
