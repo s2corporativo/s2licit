@@ -1,4 +1,3 @@
-import axios from "axios";
 import { createHash } from "crypto";
 import { JSDOM } from "jsdom";
 import puppeteer from "puppeteer";
@@ -23,10 +22,11 @@ import {
 } from "./s2TargetPortals";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
 import { logger } from "../_core/logger";
+import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 
 const HTTP_TIMEOUT_MS = 30_000;
-const USER_AGENT =
-  "Mozilla/5.0 (compatible; S2Licit/1.0; +https://github.com/s2corporativo/s2licit)";
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36 S2Licit/2.0";
 const INSTITUTIONAL_SOURCES = ["comprasmg", "fiemg", "cemig", "copasa"] as const;
 
 type InstitutionalSource = (typeof INSTITUTIONAL_SOURCES)[number];
@@ -99,15 +99,7 @@ function parseAbsoluteDeadline(text: string): Date | null {
   );
   if (br) {
     const [, day, month, year, hour = "23", minute = "59"] = br;
-    const date = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      0,
-      0,
-    );
+    const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), 0, 0);
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
@@ -116,15 +108,7 @@ function parseAbsoluteDeadline(text: string): Date | null {
   );
   if (!iso) return null;
   const [, year, month, day, hour = "23", minute = "59"] = iso;
-  const date = new Date(
-    Number(year),
-    Number(month) - 1,
-    Number(day),
-    Number(hour),
-    Number(minute),
-    0,
-    0,
-  );
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), 0, 0);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -138,7 +122,6 @@ function extractExternalId(text: string, href: string): string | null {
     const match = normalized.match(pattern);
     if (match?.[1]) return match[1].replace(/[),.;]+$/, "");
   }
-
   try {
     const url = new URL(href);
     for (const key of ["id", "processo", "process", "cotacao", "licitacao", "pregao", "codigo", "cod"] as const) {
@@ -148,7 +131,7 @@ function extractExternalId(text: string, href: string): string | null {
     const tail = url.pathname.split("/").filter(Boolean).pop();
     if (tail && /\d/.test(tail) && tail.length >= 3) return tail;
   } catch {
-    // A URL já foi normalizada pelo chamador; falhas aqui não interrompem a captura.
+    // URL inválida não interrompe o parser; o chamador já possui URL base segura.
   }
   return null;
 }
@@ -159,7 +142,6 @@ function extractObject(text: string): string {
     /(?:objeto|object|descri[cç][aã]o|description)\s*[:\-]\s*(.{12,800}?)(?=(?:situa[cç][aã]o|status|modalidade|mode|in[ií]cio|start|encerramento|closing|$))/i,
   )?.[1];
   if (explicit) return normalizeText(explicit);
-
   return normalizeText(
     normalized
       .replace(/(?:processo|proc\.?|licita[cç][aã]o|preg[aã]o|cota[cç][aã]o|compra\s+direta|bidding\s+process|quotation|public\s+call)\s*(?:n[º°.]?|number|no\.?|#)?\s*[:\-]?\s*[A-Z0-9./_-]+/gi, "")
@@ -170,23 +152,13 @@ function extractObject(text: string): string {
 function isActiveCandidate(text: string): boolean {
   const normalized = normalizeText(text);
   if (normalized.length < 12 || normalized.length > 20_000) return false;
-  if (
-    /(?:encerrad[oa]|conclu[ií]d[oa]|homologad[oa]|cancelad[oa]|anulad[oa]|revogad[oa]|desert[oa]|fracassad[oa]|finished|closed|approved|canceled|cancelled|annulled|repealed|failed)/i.test(
-      normalized,
-    )
-  ) {
+  if (/(?:encerrad[oa]|conclu[ií]d[oa]|homologad[oa]|cancelad[oa]|anulad[oa]|revogad[oa]|desert[oa]|fracassad[oa]|finished|closed|approved|canceled|cancelled|annulled|repealed|failed)/i.test(normalized)) {
     return false;
   }
-  return /(?:processo|licita[cç][aã]o|preg[aã]o|cota[cç][aã]o|compra\s+direta|contrata[cç][aã]o|bidding\s+process|quotation|direct\s+purchase|public\s+call|em\s+andamento|in\s+progress|recebimento\s+de\s+propostas|offers?\s+receipt|scheduled|published|agendada|publicada)/i.test(
-    normalized,
-  );
+  return /(?:processo|licita[cç][aã]o|preg[aã]o|cota[cç][aã]o|compra\s+direta|contrata[cç][aã]o|bidding\s+process|quotation|direct\s+purchase|public\s+call|em\s+andamento|in\s+progress|recebimento\s+de\s+propostas|offers?\s+receipt|scheduled|published|agendada|publicada)/i.test(normalized);
 }
 
-/**
- * Parser deliberadamente genérico para os murais públicos de Compras MG,
- * FIEMG/SESI/SENAI, CEMIG e COPASA. Ele só lê conteúdo já disponibilizado ao
- * público e não tenta autenticar, resolver CAPTCHA ou contornar permissões.
- */
+/** Parser comum dos murais institucionais públicos. */
 export function parseInstitutionalPortalHtml(
   source: InstitutionalSource,
   html: string,
@@ -200,14 +172,12 @@ export function parseInstitutionalPortalHtml(
   const addCandidate = (textValue: string, hrefValue?: string | null) => {
     const text = normalizeText(textValue);
     if (!isActiveCandidate(text)) return;
-
     let href = portalUrl;
     try {
       href = hrefValue ? new URL(hrefValue, portalUrl).toString() : portalUrl;
     } catch {
       href = portalUrl;
     }
-
     const extractedId = extractExternalId(text, href);
     const externalId = extractedId || stableId(source, href, text);
     const object = extractObject(text);
@@ -217,11 +187,9 @@ export function parseInstitutionalPortalHtml(
         : `${definition.label} — ${object || text}`,
       512,
     );
-
     const items = object.length >= 12
       ? [{ numeroItem: 1, descricao: object, quantidade: 1, unidade: "UN", codigoExterno: null }]
       : [];
-
     const opportunity: S2PortalOpportunity = {
       source,
       externalId,
@@ -229,86 +197,68 @@ export function parseInstitutionalPortalHtml(
       orgao: definition.orgao,
       portalUrl: href,
       prazoResposta: parseAbsoluteDeadline(text),
-      bodyText: [
-        `Origem: ${definition.label}`,
-        `Processo: ${externalId}`,
-        `URL: ${href}`,
-        "",
-        text,
-      ].join("\n"),
+      bodyText: [`Origem: ${definition.label}`, `Processo: ${externalId}`, `URL: ${href}`, "", text].join("\n"),
       items,
     };
-
     const current = candidates.get(externalId);
-    if (!current || opportunity.bodyText.length > current.bodyText.length) {
-      candidates.set(externalId, opportunity);
-    }
+    if (!current || opportunity.bodyText.length > current.bodyText.length) candidates.set(externalId, opportunity);
   };
 
   for (const row of Array.from(document.querySelectorAll("table tr"))) {
-    const cells = Array.from(row.querySelectorAll("th,td"))
-      .map((cell) => normalizeText(cell.textContent))
-      .filter(Boolean);
-    if (cells.length === 0) continue;
-    const anchor = row.querySelector("a[href]");
-    addCandidate(cells.join(" | "), anchor?.getAttribute("href"));
+    const cells = Array.from(row.querySelectorAll("th,td")).map((cell) => normalizeText(cell.textContent)).filter(Boolean);
+    if (!cells.length) continue;
+    addCandidate(cells.join(" | "), row.querySelector("a[href]")?.getAttribute("href"));
   }
-
-  for (const selector of [
-    "article",
-    ".card",
-    "[class*='process']",
-    "[class*='licit']",
-    "[class*='cotacao']",
-    "[class*='opportun']",
-    "li",
-  ]) {
+  for (const selector of ["article", ".card", "[class*='process']", "[class*='licit']", "[class*='cotacao']", "[class*='opportun']", "li"]) {
     for (const element of Array.from(document.querySelectorAll(selector))) {
-      const anchor = element.querySelector("a[href]");
-      addCandidate(element.textContent || "", anchor?.getAttribute("href"));
+      addCandidate(element.textContent || "", element.querySelector("a[href]")?.getAttribute("href"));
     }
   }
-
   for (const anchor of Array.from(document.querySelectorAll("a[href]"))) {
     const context = normalizeText(anchor.closest("tr,article,li,div")?.textContent || anchor.textContent);
     addCandidate(context, anchor.getAttribute("href"));
   }
-
   return Array.from(candidates.values());
 }
 
-async function fetchHtml(urlValue: string): Promise<string> {
-  const url = assertSafeExternalUrl(urlValue, "URL do portal");
-  const response = await axios.get<string>(url.toString(), {
-    timeout: HTTP_TIMEOUT_MS,
-    responseType: "text",
-    maxRedirects: 5,
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml",
-      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-    },
-  });
-  return typeof response.data === "string" ? response.data : String(response.data ?? "");
+function pageLooksLikeOpportunityPortal(html: string): boolean {
+  return /licita[cç][aã]o|edital|preg[aã]o|cota[cç][aã]o|processo|contrata[cç][aã]o|compra\s+direta|recebimento\s+de\s+propostas/i.test(html);
 }
 
-async function fetchRenderedHtml(urlValue: string): Promise<string> {
+async function fetchHtml(source: InstitutionalSource, urlValue: string): Promise<string> {
+  const url = assertSafeExternalUrl(urlValue, "URL do portal").toString();
+  const response = await externalHttpRequest<string>({
+    source,
+    operation: "opportunities.html",
+    url,
+    expected: "text",
+    accept: "text/html,application/xhtml+xml",
+    headers: { "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7" },
+    timeoutMs: HTTP_TIMEOUT_MS,
+    maxRetries: 1,
+    maxBodyBytes: 8 * 1024 * 1024,
+  });
+  if (!response.ok || response.data == null) {
+    throw new Error(response.error?.message ?? `HTTP ${response.statusCode}`);
+  }
+  return response.data;
+}
+
+async function fetchRenderedHtml(source: InstitutionalSource, urlValue: string): Promise<string> {
   const url = assertSafeExternalUrl(urlValue, "URL do portal");
+  const startedAt = Date.now();
   const browser = await puppeteer.launch({
     headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-    ],
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   });
   try {
     const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
+    await page.setUserAgent(BROWSER_USER_AGENT);
     await page.setViewport({ width: 1440, height: 1000 });
     await page.goto(url.toString(), { waitUntil: "networkidle2", timeout: 45_000 });
-    return await page.content();
+    const html = await page.content();
+    logger.info(`[PortalSync:${source}] navegador concluiu em ${Date.now() - startedAt}ms.`);
+    return html;
   } finally {
     await browser.close();
   }
@@ -319,28 +269,40 @@ async function fetchInstitutionalOpportunities(
   errors: string[],
 ): Promise<S2PortalOpportunity[]> {
   const definition = S2_TARGET_PORTAL_DEFINITIONS[source];
-  const url = getS2PortalUrl(source);
+  const url = await getS2PortalUrl(source);
+  let staticSucceeded = false;
+  let renderedSucceeded = false;
+  let lastHtml = "";
 
   try {
-    const html = await fetchHtml(url);
+    const html = await fetchHtml(source, url);
+    staticSucceeded = true;
+    lastHtml = html;
     const parsed = parseInstitutionalPortalHtml(source, html, url);
     if (parsed.length > 0) return parsed;
   } catch (error) {
     errors.push(`${definition.label} (HTML): ${(error as Error).message}`);
   }
 
-  try {
-    const rendered = await fetchRenderedHtml(url);
-    const parsed = parseInstitutionalPortalHtml(source, rendered, url);
-    if (parsed.length > 0) return parsed;
-  } catch (error) {
-    errors.push(`${definition.label} (navegador): ${(error as Error).message}`);
+  if (definition.discovery !== "public") {
+    try {
+      const rendered = await fetchRenderedHtml(source, url);
+      renderedSucceeded = true;
+      lastHtml = rendered;
+      const parsed = parseInstitutionalPortalHtml(source, rendered, url);
+      if (parsed.length > 0) return parsed;
+    } catch (error) {
+      errors.push(`${definition.label} (navegador): ${(error as Error).message}`);
+    }
   }
 
-  const guidance = definition.discovery === "authenticated_assisted"
-    ? "O portal não expôs uma listagem pública utilizável. A participação permanece disponível pelo Agente de Propostas com credencial do cofre e aprovação humana."
-    : `Nenhuma oportunidade pública ativa foi identificada. Caso o endereço público mude, configure ${definition.environmentUrl ?? "a URL do portal"}.`;
-  errors.push(`${definition.label}: ${guidance}`);
+  if ((staticSucceeded || renderedSucceeded) && lastHtml && pageLooksLikeOpportunityPortal(lastHtml)) {
+    errors.push(
+      `${definition.label}: a fonte respondeu, mas nenhum registro ativo foi reconhecido. Valide se houve mudança de layout/contrato antes de concluir ausência de oportunidades.`,
+    );
+  }
+  // Se a consulta funcionou e a página não contém marcadores de oportunidade,
+  // zero é um resultado válido e não vira erro artificial.
   return [];
 }
 
@@ -361,7 +323,6 @@ async function persistOpportunity(
 ): Promise<{ imported: boolean; matched: number; unmatched: number }> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
-
   const messageId = `portal:${opportunity.source}:${opportunity.externalId}`;
   const existing = await db
     .select({ id: emailQuotations.id })
@@ -373,7 +334,6 @@ async function persistOpportunity(
   const matches = opportunity.items.map((item) => bestNameMatch(item.descricao, tambasaCatalog));
   const matched = matches.filter(Boolean).length;
   const definition = S2_TARGET_PORTAL_DEFINITIONS[opportunity.source];
-
   const [inserted] = await db.insert(emailQuotations).values({
     messageId,
     fromName: `Portal ${definition.label}`,
@@ -412,30 +372,14 @@ async function persistOpportunity(
       }),
     );
   }
-
-  return {
-    imported: true,
-    matched,
-    unmatched: opportunity.items.length - matched,
-  };
+  return { imported: true, matched, unmatched: opportunity.items.length - matched };
 }
 
 function emptyStats(source: S2TargetPortal): S2PortalSourceStats {
-  return {
-    source,
-    found: 0,
-    imported: 0,
-    skipped: 0,
-    matchedItems: 0,
-    unmatchedItems: 0,
-    errors: [],
-  };
+  return { source, found: 0, imported: 0, skipped: 0, matchedItems: 0, unmatchedItems: 0, errors: [] };
 }
 
-/**
- * Radar único do S2 Licit. O escopo é propositalmente fechado em COPASA,
- * CEMIG, Fundep, Funarbe, Compras MG e FIEMG/SESI/SENAI.
- */
+/** Radar agendado único dos portais institucionais do S2 Licit. */
 export async function syncS2PortalOpportunities(options?: {
   sources?: S2TargetPortal[];
   maxFundepGroups?: number;
@@ -444,9 +388,7 @@ export async function syncS2PortalOpportunities(options?: {
   const sources = Array.from(new Set(requested)).filter((source): source is S2TargetPortal =>
     (S2_TARGET_PORTALS as readonly string[]).includes(source),
   );
-  const stats = new Map<S2TargetPortal, S2PortalSourceStats>(
-    sources.map((source) => [source, emptyStats(source)]),
-  );
+  const stats = new Map<S2TargetPortal, S2PortalSourceStats>(sources.map((source) => [source, emptyStats(source)]));
 
   const foundationSources = sources.filter(
     (source): source is FoundationPortalSource => source === "fundep" || source === "funarbe",
@@ -458,6 +400,9 @@ export async function syncS2PortalOpportunities(options?: {
     });
     for (const source of foundationSources) {
       const target = stats.get(source)!;
+      // O serviço histórico de fundações agrega as duas fontes quando ambas são
+      // solicitadas. Mantemos compatibilidade e deixamos a unificação completa
+      // da persistência para uma única camada sem duplicar registros.
       target.found = result.found;
       target.imported = result.imported;
       target.skipped = result.skipped;
@@ -468,10 +413,8 @@ export async function syncS2PortalOpportunities(options?: {
   }
 
   const institutionalSources = sources.filter(
-    (source): source is InstitutionalSource =>
-      (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
+    (source): source is InstitutionalSource => (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
   );
-
   if (institutionalSources.length > 0) {
     const tambasaCatalog = await loadTambasaCatalog();
     if (tambasaCatalog.length === 0) {
@@ -481,7 +424,6 @@ export async function syncS2PortalOpportunities(options?: {
         );
       }
     }
-
     for (const source of institutionalSources) {
       const sourceStats = stats.get(source)!;
       const opportunities = await fetchInstitutionalOpportunities(source, sourceStats.errors);
@@ -494,9 +436,7 @@ export async function syncS2PortalOpportunities(options?: {
           sourceStats.matchedItems += persisted.matched;
           sourceStats.unmatchedItems += persisted.unmatched;
         } catch (error) {
-          sourceStats.errors.push(
-            `${opportunity.externalId}: ${(error as Error).message}`,
-          );
+          sourceStats.errors.push(`${opportunity.externalId}: ${(error as Error).message}`);
         }
       }
     }
@@ -510,16 +450,13 @@ export async function syncS2PortalOpportunities(options?: {
     skipped: sourceStats.reduce((sum, item) => sum + item.skipped, 0),
     matchedItems: sourceStats.reduce((sum, item) => sum + item.matchedItems, 0),
     unmatchedItems: sourceStats.reduce((sum, item) => sum + item.unmatchedItems, 0),
-    errors: sourceStats.flatMap((item) =>
-      item.errors.map((error) => `${S2_TARGET_PORTAL_DEFINITIONS[item.source].label}: ${error}`),
-    ),
+    errors: sourceStats.flatMap((item) => item.errors.map((error) => `${S2_TARGET_PORTAL_DEFINITIONS[item.source].label}: ${error}`)),
     sourceStats,
   };
 
   logger.info(
-    `[PortalSync] Seis portais S2: ${result.found} encontradas, ${result.imported} importadas, ` +
+    `[PortalSync] Fontes S2: ${result.found} encontradas, ${result.imported} importadas, ` +
       `${result.skipped} já existentes e ${result.matchedItems} itens casados com Tambasa.`,
   );
-
   return result;
 }
