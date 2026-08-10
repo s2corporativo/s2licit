@@ -131,10 +131,26 @@ export function assertTransitionAllowed(from: EtapaFunil, to: EtapaFunil): void 
   }
 }
 
+/**
+ * Regra única para eventos downstream inferidos de proposta/pedido/entrega/NF.
+ * Nunca regride, nunca reabre estágio final e nunca ultrapassa GO/NO-GO a partir da entrada.
+ */
+export function canEvidenceAdvance(from: EtapaFunil, to: EtapaFunil): boolean {
+  if (FINAL_STAGES.has(from) || from === to) return false;
+  if (to !== "perdida" && to !== "cancelada" && STAGE_RANK[to] <= STAGE_RANK[from]) return false;
+  if (
+    ENTRY_STAGES.has(from) &&
+    to !== "perdida" &&
+    to !== "cancelada" &&
+    STAGE_RANK[to] > STAGE_RANK.analise
+  ) {
+    return false;
+  }
+  return true;
+}
+
 type Database = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-type UpdateResult = { affectedRows?: number } | readonly unknown[];
 
 function affectedRows(result: unknown): number {
   if (Array.isArray(result)) {
@@ -144,7 +160,7 @@ function affectedRows(result: unknown): number {
     }
   }
   if (result && typeof result === "object" && "affectedRows" in result) {
-    return Number((result as UpdateResult & { affectedRows?: number }).affectedRows ?? 0);
+    return Number((result as { affectedRows?: number }).affectedRows ?? 0);
   }
   return 0;
 }
