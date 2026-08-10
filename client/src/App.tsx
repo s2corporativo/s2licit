@@ -115,7 +115,7 @@ function Router() {
                 <Route path="/captura-analytics"><Redirect to="/captura-inteligente" /></Route>
                 <Route path="/central-operacional"><Redirect to="/funil" /></Route>
                 <Route path="/cotacoes-recebidas"><RequireAuth message="Acesse as cotações recebidas após fazer login."><CotacoesRecebidas /></RequireAuth></Route>
-                <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login."><RadarPncp /></RequireAuth></Route>
+                <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login." minRole="editor"><RadarPncp /></RequireAuth></Route>
                 <Route path="/certidoes"><RequireAuth message="Acesse as certidões após fazer login." minRole="editor"><Certidoes /></RequireAuth></Route>
                 <Route path="/central-ia"><RequireAuth message="Acesse a Central de IA após fazer login." minRole="admin"><CentralIA /></RequireAuth></Route>
                 <Route path="/integracoes"><RequireAuth message="Acesse as integrações após fazer login." minRole="admin"><Integracoes /></RequireAuth></Route>
