@@ -1,10 +1,11 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { duplicateExceptions, products } from "../../drizzle/schema";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { findDuplicateGroups, mergeProductGroup } from "../db/duplicateMerge";
+import { findDuplicateGroups, listProductMergeEvents, mergeProductGroup, undoProductMerge } from "../db/duplicateMerge";
 import { combinedStringSimilarity } from "../matching/productMatcher";
+import { recordAudit } from "../services/auditService";
 
 function pairKey(a: number, b: number) {
   return a < b ? `${a}:${b}` : `${b}:${a}`;
@@ -32,14 +33,22 @@ export const duplicatesRouter = router({
       }));
     }),
 
-  mergeDuplicates: protectedProcedure
+  mergeDuplicates: editorProcedure
     .input(z.object({
       primaryProductId: z.number().int().positive(),
       secondaryProductId: z.number().int().positive(),
       keepFields: z.array(z.string()).optional(),
     }))
-    .mutation(async ({ input }) => {
-      const result = await mergeProductGroup(input.primaryProductId, [input.secondaryProductId]);
+    .mutation(async ({ input, ctx }) => {
+      const result = await mergeProductGroup(input.primaryProductId, [input.secondaryProductId], ctx.user.id);
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "product_merge_canonical",
+        entity: "products",
+        entityId: input.primaryProductId,
+        summary: `Produto #${input.secondaryProductId} fundido no mestre #${input.primaryProductId}`,
+        changes: { mergeEventId: result.mergeEventId, duplicateIds: [input.secondaryProductId] },
+      });
       return {
         success: true,
         primaryProductId: input.primaryProductId,
@@ -49,14 +58,41 @@ export const duplicatesRouter = router({
       };
     }),
 
-  replaceProduct: protectedProcedure
+  replaceProduct: editorProcedure
     .input(z.object({ oldProductId: z.number().int().positive(), newProductId: z.number().int().positive() }))
-    .mutation(async ({ input }) => {
-      const result = await mergeProductGroup(input.newProductId, [input.oldProductId]);
+    .mutation(async ({ input, ctx }) => {
+      const result = await mergeProductGroup(input.newProductId, [input.oldProductId], ctx.user.id);
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "product_replace_canonical",
+        entity: "products",
+        entityId: input.newProductId,
+        summary: `Produto #${input.oldProductId} substituído pelo #${input.newProductId}`,
+        changes: { mergeEventId: result.mergeEventId, oldProductId: input.oldProductId },
+      });
       return { success: true, oldProductId: input.oldProductId, newProductId: input.newProductId, message: "Produto substituído pelo merge canônico", ...result };
     }),
 
-  markAsNotDuplicate: protectedProcedure
+  mergeHistory: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(200).default(50) }).optional())
+    .query(({ input }) => listProductMergeEvents(input?.limit ?? 50)),
+
+  undoMerge: editorProcedure
+    .input(z.object({ eventId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await undoProductMerge(input.eventId, ctx.user.id);
+      await recordAudit({
+        userId: ctx.user.id,
+        action: "product_merge_undo",
+        entity: "product_merge_events",
+        entityId: input.eventId,
+        summary: `Merge #${input.eventId} desfeito`,
+        changes: result,
+      });
+      return result;
+    }),
+
+  markAsNotDuplicate: editorProcedure
     .input(z.object({ productId1: z.number().int().positive(), productId2: z.number().int().positive() }))
     .mutation(async ({ input }) => {
       if (input.productId1 === input.productId2) throw new Error("Não é possível marcar um produto como não duplicado dele mesmo");
