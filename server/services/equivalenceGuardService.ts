@@ -69,18 +69,28 @@ export async function applyPersistedEquivalenceMemory(input: {
   if (!db || input.candidates.length === 0) return input.candidates;
   await ensureCatalogKnowledgeSchema();
 
-  const ids = input.candidates.map((candidate) => candidate.id);
-  const [rows] = await db.execute(sql`
+  const ids = input.candidates
+    .map((candidate) => Number(candidate.id))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  if (!ids.length) return input.candidates;
+
+  const idList = ids.join(",");
+  const referenceProductId = input.reference.productId && Number.isInteger(input.reference.productId)
+    ? Number(input.reference.productId)
+    : null;
+  const description = input.description?.trim() || null;
+
+  const [rows] = await db.execute(sql.raw(`
     SELECT candidateProductId, decision, reason, createdAt
     FROM equivalence_compendium_feedback
-    WHERE candidateProductId IN (${sql.join(ids.map((id) => sql`${id}`), sql`,`)})
+    WHERE candidateProductId IN (${idList})
       AND (
-        (${input.reference.productId ?? null} IS NOT NULL AND referenceProductId = ${input.reference.productId ?? null})
+        ${referenceProductId ? `referenceProductId = ${referenceProductId}` : "1=0"}
         OR
-        (${input.description?.trim() || null} IS NOT NULL AND LOWER(TRIM(queryText)) = LOWER(TRIM(${input.description?.trim() || null})))
+        ${description ? "LOWER(TRIM(queryText)) = LOWER(TRIM(?))" : "1=0"}
       )
     ORDER BY createdAt DESC
-  `);
+  `), ...(description ? [description] : []) as any);
 
   const latest = new Map<number, MemoryRow>();
   for (const row of (Array.isArray(rows) ? rows : []) as MemoryRow[]) {
