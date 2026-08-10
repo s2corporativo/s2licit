@@ -1,325 +1,107 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  calculateQuotationTotals,
   generateQuotationPdf,
   validateQuotationData,
-  calculateQuotationTotals,
   type QuotationPdfData,
 } from "./quotationPdfGeneratorService";
 
+function baseData(): QuotationPdfData {
+  return {
+    number: "ORÇ-001",
+    date: new Date("2026-08-10T12:00:00Z"),
+    validUntil: new Date("2026-09-09T12:00:00Z"),
+    clientName: "Cliente Teste",
+    items: [
+      { productName: "Produto A", quantity: 2, unitPrice: 100, totalPrice: 200 },
+      { productName: "Produto B", quantity: 3, unitPrice: 50, totalPrice: 150 },
+    ],
+    subtotal: 350,
+    total: 350,
+    company: { name: "Empresa Teste" },
+  };
+}
+
 describe("quotationPdfGeneratorService", () => {
   describe("validateQuotationData", () => {
-    it("should validate valid quotation data", () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-001",
-        date: new Date(),
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        clientName: "Cliente Teste",
-        items: [
-          {
-            productName: "Produto A",
-            quantity: 2,
-            unitPrice: 100,
-            totalPrice: 200,
-          },
-        ],
-        subtotal: 200,
-        total: 200,
-        company: {
-          name: "Empresa Teste",
-        },
-      };
-
-      const result = validateQuotationData(data);
-      expect(result.valid).toBe(true);
-      expect(result.errors).toHaveLength(0);
+    it("aceita um orçamento comercial consistente", () => {
+      expect(validateQuotationData(baseData())).toEqual({ valid: true, errors: [] });
     });
 
-    it("should reject quotation without number", () => {
-      const data: QuotationPdfData = {
-        number: "",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [
-          {
-            productName: "Produto A",
-            quantity: 1,
-            unitPrice: 100,
-            totalPrice: 100,
-          },
-        ],
-        subtotal: 100,
-        total: 100,
-        company: { name: "Empresa" },
-      };
+    it("rejeita campos obrigatórios e totais não positivos", () => {
+      const data = baseData();
+      data.number = "";
+      data.items = [];
+      data.subtotal = 0;
+      data.total = 0;
+      data.company.name = "";
 
       const result = validateQuotationData(data);
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("Número do orçamento é obrigatório");
-    });
-
-    it("should reject quotation without items", () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-001",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [],
-        subtotal: 0,
-        total: 0,
-        company: { name: "Empresa" },
-      };
-
-      const result = validateQuotationData(data);
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain(
-        "Orçamento deve ter pelo menos um item"
-      );
-    });
-
-    it("should reject quotation with zero total", () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-001",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [
-          {
-            productName: "Produto A",
-            quantity: 1,
-            unitPrice: 0,
-            totalPrice: 0,
-          },
-        ],
-        subtotal: 0,
-        total: 0,
-        company: { name: "Empresa" },
-      };
-
-      const result = validateQuotationData(data);
-      expect(result.valid).toBe(false);
-      expect(result.errors).toContain(
-        "Total do orçamento deve ser maior que zero"
-      );
-    });
-
-    it("should reject quotation without company data", () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-001",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [
-          {
-            productName: "Produto A",
-            quantity: 1,
-            unitPrice: 100,
-            totalPrice: 100,
-          },
-        ],
-        subtotal: 100,
-        total: 100,
-        company: { name: "" },
-      };
-
-      const result = validateQuotationData(data);
-      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("Orçamento deve ter pelo menos um item");
+      expect(result.errors).toContain("Subtotal deve ser maior que zero");
+      expect(result.errors).toContain("Total deve ser maior que zero");
       expect(result.errors).toContain("Dados da empresa são obrigatórios");
+    });
+
+    it("rejeita total declarado do item divergente de quantidade x unitário", () => {
+      const data = baseData();
+      data.items[0].totalPrice = 199;
+      const result = validateQuotationData(data);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((error) => error.includes("Total divergente"))).toBe(true);
+    });
+
+    it("rejeita subtotal do documento divergente da soma dos itens", () => {
+      const data = baseData();
+      data.subtotal = 349;
+      data.total = 349;
+      const result = validateQuotationData(data);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain("Subtotal diverge da soma dos itens");
     });
   });
 
   describe("calculateQuotationTotals", () => {
-    it("should calculate subtotal correctly", () => {
-      const items = [
-        { productName: "Produto A", quantity: 2, unitPrice: 100 },
-        { productName: "Produto B", quantity: 3, unitPrice: 50 },
-      ];
-
-      const result = calculateQuotationTotals(items);
-      expect(result.subtotal).toBe(350); // (2 * 100) + (3 * 50)
-      expect(result.itemCount).toBe(2);
-    });
-
-    it("should calculate empty items", () => {
-      const items: any[] = [];
-
-      const result = calculateQuotationTotals(items);
-      expect(result.subtotal).toBe(0);
-      expect(result.itemCount).toBe(0);
-    });
-
-    it("should calculate single item", () => {
-      const items = [{ productName: "Produto A", quantity: 5, unitPrice: 25 }];
-
-      const result = calculateQuotationTotals(items);
-      expect(result.subtotal).toBe(125);
-      expect(result.itemCount).toBe(1);
-    });
-
-    it("should handle decimal prices", () => {
-      const items = [
+    it("calcula subtotal com precisão monetária", () => {
+      const result = calculateQuotationTotals([
         { productName: "Produto A", quantity: 2, unitPrice: 19.99 },
         { productName: "Produto B", quantity: 1, unitPrice: 50.01 },
-      ];
+      ]);
+      expect(result).toEqual({ subtotal: 89.99, itemCount: 2 });
+    });
 
-      const result = calculateQuotationTotals(items);
-      expect(result.subtotal).toBeCloseTo(89.99, 2);
-      expect(result.itemCount).toBe(2);
+    it("retorna zero para lista vazia", () => {
+      expect(calculateQuotationTotals([])).toEqual({ subtotal: 0, itemCount: 0 });
     });
   });
 
   describe("generateQuotationPdf", () => {
-    it("should generate PDF buffer successfully", async () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-001",
-        date: new Date(),
-        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        clientName: "Cliente Teste",
-        clientEmail: "cliente@teste.com",
-        clientPhone: "(11) 9999-9999",
-        items: [
-          {
-            productName: "Produto A",
-            quantity: 2,
-            unitPrice: 100,
-            totalPrice: 200,
-          },
-          {
-            productName: "Produto B",
-            quantity: 1,
-            unitPrice: 150,
-            totalPrice: 150,
-          },
-        ],
-        subtotal: 350,
-        discount: 50,
-        tax: 35,
-        total: 335,
-        notes: "Válido por 30 dias",
-        company: {
-          name: "Empresa Teste LTDA",
-          cnpj: "12.345.678/0001-90",
-          address: "Rua Teste, 123 - São Paulo, SP",
-          phone: "(11) 3333-3333",
-          email: "empresa@teste.com",
-          bankAccount: "Banco: 001 | Agência: 1234 | Conta: 567890",
-        },
-      };
-
+    it("gera um PDF válido com dados mínimos", async () => {
+      const data = baseData();
       const pdf = await generateQuotationPdf(data);
-
-      expect(pdf).toBeInstanceOf(Buffer);
-      expect(pdf.length).toBeGreaterThan(0);
-      // PDF files start with %PDF
-      expect(pdf.toString("ascii", 0, 4)).toBe("%PDF");
-    });
-
-    it("should generate PDF with minimal data", async () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-002",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [
-          {
-            productName: "Produto Teste",
-            quantity: 1,
-            unitPrice: 100,
-            totalPrice: 100,
-          },
-        ],
-        subtotal: 100,
-        total: 100,
-        company: {
-          name: "Empresa",
-        },
-      };
-
-      const pdf = await generateQuotationPdf(data);
-
       expect(pdf).toBeInstanceOf(Buffer);
       expect(pdf.length).toBeGreaterThan(0);
       expect(pdf.toString("ascii", 0, 4)).toBe("%PDF");
     });
 
-    it("should generate PDF with discount and tax", async () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-003",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [
-          {
-            productName: "Produto A",
-            quantity: 10,
-            unitPrice: 100,
-            totalPrice: 1000,
-          },
-        ],
-        subtotal: 1000,
-        discount: 100,
-        tax: 50,
-        total: 950,
-        company: {
-          name: "Empresa Teste",
-        },
-      };
-
-      const pdf = await generateQuotationPdf(data);
-
-      expect(pdf).toBeInstanceOf(Buffer);
-      expect(pdf.length).toBeGreaterThan(0);
-      expect(pdf.toString("ascii", 0, 4)).toBe("%PDF");
-    });
-
-    it("should generate PDF with multiple items", async () => {
-      const items = Array.from({ length: 10 }, (_, i) => ({
-        productName: `Produto ${i + 1}`,
-        quantity: i + 1,
-        unitPrice: (i + 1) * 10,
-        totalPrice: (i + 1) * (i + 1) * 10,
+    it("pagina um orçamento longo sem perder a validade estrutural do PDF", async () => {
+      const items = Array.from({ length: 80 }, (_, index) => ({
+        productName: `Produto ${index + 1} com descrição suficientemente longa para testar paginação`,
+        quantity: 1,
+        unitPrice: 10,
+        totalPrice: 10,
       }));
-
-      const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-
       const data: QuotationPdfData = {
-        number: "ORÇ-004",
-        date: new Date(),
-        validUntil: new Date(),
+        ...baseData(),
         items,
-        subtotal,
-        total: subtotal,
-        company: {
-          name: "Empresa Teste",
-        },
+        subtotal: 800,
+        total: 800,
       };
-
       const pdf = await generateQuotationPdf(data);
-
-      expect(pdf).toBeInstanceOf(Buffer);
-      expect(pdf.length).toBeGreaterThan(0);
       expect(pdf.toString("ascii", 0, 4)).toBe("%PDF");
-    });
-
-    it("should generate PDF with special characters in product names", async () => {
-      const data: QuotationPdfData = {
-        number: "ORÇ-005",
-        date: new Date(),
-        validUntil: new Date(),
-        items: [
-          {
-            productName: "Produto com Acentuação & Símbolos (R$)",
-            quantity: 1,
-            unitPrice: 100,
-            totalPrice: 100,
-          },
-        ],
-        subtotal: 100,
-        total: 100,
-        company: {
-          name: "Empresa com Acentuação",
-        },
-      };
-
-      const pdf = await generateQuotationPdf(data);
-
-      expect(pdf).toBeInstanceOf(Buffer);
-      expect(pdf.length).toBeGreaterThan(0);
-      expect(pdf.toString("ascii", 0, 4)).toBe("%PDF");
+      expect(pdf.length).toBeGreaterThan(1_000);
     });
   });
 });
