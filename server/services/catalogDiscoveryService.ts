@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { logger } from "../_core/logger";
 import { parsePrecoBR } from "../utils/number";
+import { safeExternalFetchText } from "../utils/safeExternalFetch";
 
 export interface CatalogPage {
   url: string;
@@ -27,30 +28,59 @@ export interface ExtractedProduct {
   confidence?: number;
 }
 
-/**
- * Descobre páginas de catálogo usando navegação
- */
+const DEFAULT_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+};
+
+function absoluteUrl(value: string | undefined | null, base: string): string | undefined {
+  if (!value) return undefined;
+  try { return new URL(value, base).toString(); } catch { return undefined; }
+}
+
+function findJsonLdProducts(document: Document): any[] {
+  const out: any[] = [];
+  const walk = (node: any) => {
+    if (!node) return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (typeof node !== "object") return;
+    const type = node["@type"];
+    if (type === "Product" || (Array.isArray(type) && type.includes("Product"))) out.push(node);
+    if (Array.isArray(node.itemListElement)) {
+      node.itemListElement.forEach((entry: any) => walk(entry?.item ?? entry));
+    }
+    if (Array.isArray(node["@graph"])) node["@graph"].forEach(walk);
+  };
+  for (const script of Array.from(document.querySelectorAll('script[type="application/ld+json"]'))) {
+    try { walk(JSON.parse(script.textContent || "null")); } catch { /* JSON-LD inválido: ignora */ }
+  }
+  return out;
+}
+
 export async function discoverCatalogPages(
   baseUrl: string,
   catalogUrl: string,
-  maxPages: number = 50,
-  pageSelector?: string
+  maxPages = 50,
+  pageSelector?: string,
 ): Promise<CatalogPage[]> {
   const pages: CatalogPage[] = [];
+  const visited = new Set<string>();
   let currentUrl = catalogUrl;
   let pageNumber = 1;
 
   try {
-    while (pageNumber <= maxPages && currentUrl) {
-      const page = await fetchAndParsePage(currentUrl, pageSelector);
+    while (pageNumber <= Math.max(1, Math.min(maxPages, 500)) && currentUrl) {
+      const normalized = new URL(currentUrl, baseUrl).toString();
+      if (visited.has(normalized)) break;
+      visited.add(normalized);
+      const page = await fetchAndParsePage(normalized, pageSelector);
       pages.push({
-        url: currentUrl,
+        url: normalized,
         pageNumber,
         productLinks: page.productLinks,
         nextPageUrl: page.nextPageUrl,
         categoryPath: page.categoryPath,
       });
-
       if (!page.nextPageUrl) break;
       currentUrl = page.nextPageUrl;
       pageNumber++;
@@ -58,103 +88,69 @@ export async function discoverCatalogPages(
   } catch (error) {
     logger.error("[catalogDiscoveryService] Erro ao descobrir páginas:", error);
   }
-
   return pages;
 }
 
-/**
- * Busca e parseia uma página de catálogo
- */
 export async function fetchAndParsePage(
   url: string,
-  pageSelector?: string
-): Promise<{
-  productLinks: string[];
-  nextPageUrl?: string;
-  categoryPath?: string[];
-}> {
+  pageSelector?: string,
+): Promise<{ productLinks: string[]; nextPageUrl?: string; categoryPath?: string[] }> {
   try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
+    const response = await safeExternalFetchText(url, {
+      headers: DEFAULT_HEADERS,
+      timeoutMs: 20_000,
+      maxBytes: 8 * 1024 * 1024,
     });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const html = await response.text();
-    const dom = new JSDOM(html);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const dom = new JSDOM(response.text, { url: response.url });
     const document = dom.window.document;
 
-    // Extrair links de produtos
-    const productLinks: string[] = [];
+    const unique = new Set<string>();
     const productElements = pageSelector
       ? document.querySelectorAll(pageSelector)
-      : document.querySelectorAll("a[href*='product'], a[href*='item']");
-
+      : document.querySelectorAll(
+          "a[href*='product'], a[href*='produto'], a[href*='/p/'], a.product-item-link, [itemtype*='Product'] a[href]",
+        );
     for (const el of Array.from(productElements)) {
       const href = el.getAttribute("href");
-      if (href) {
-        const absoluteUrl = new URL(href, url).toString();
-        if (!productLinks.includes(absoluteUrl)) {
-          productLinks.push(absoluteUrl);
-        }
-      }
+      const absolute = absoluteUrl(href, response.url);
+      if (absolute) unique.add(absolute);
     }
 
-    // Detectar próxima página. `:contains()` é seletor do jQuery/Sizzle, NÃO é
-    // CSS válido — o querySelector do jsdom lançava SyntaxError e derrubava toda
-    // a página (descartando até os links já coletados). Usamos CSS válido e,
-    // como fallback, varremos as âncoras por texto ("próxima"/"next").
-    let nextPageUrl: string | undefined;
+    // JSON-LD ItemList é mais resistente a mudanças de CSS.
+    for (const product of findJsonLdProducts(document)) {
+      const absolute = absoluteUrl(product?.url, response.url);
+      if (absolute) unique.add(absolute);
+    }
+
     let nextPageLink: Element | null = document.querySelector(
-      'a[rel="next"], a.next, a.pagination-next, .pagination-next a, .pagination__next',
+      'a[rel="next"], a.next, a.pagination-next, .pagination-next a, .pagination__next, .pages-item-next a',
     );
     if (!nextPageLink) {
-      const anchors = Array.from(document.querySelectorAll("a"));
-      nextPageLink = anchors.find((a) => {
-        const t = (a.textContent ?? "").trim().toLowerCase();
-        return t === "próxima" || t === "proxima" || t === "next" || t === "próximo" || t === "»";
+      nextPageLink = Array.from(document.querySelectorAll("a")).find((a) => {
+        const text = (a.textContent ?? "").trim().toLowerCase();
+        return ["próxima", "proxima", "next", "próximo", "proximo", "»", ">"].includes(text);
       }) ?? null;
     }
-    if (nextPageLink) {
-      const href = nextPageLink.getAttribute("href");
-      if (href) {
-        nextPageUrl = new URL(href, url).toString();
-      }
-    }
+    const nextPageUrl = absoluteUrl(nextPageLink?.getAttribute("href"), response.url);
 
-    // Extrair caminho de categoria (breadcrumb)
-    const categoryPath: string[] = [];
-    const breadcrumbs = document.querySelectorAll(
-      ".breadcrumb a, .breadcrumbs a, nav a"
-    );
-    for (const bc of Array.from(breadcrumbs)) {
-      const text = bc.textContent?.trim();
-      if (text && text !== "Home") {
-        categoryPath.push(text);
-      }
-    }
+    const categoryPath = Array.from(
+      document.querySelectorAll(".breadcrumb a, .breadcrumbs a, nav[aria-label*='breadcrumb' i] a"),
+    )
+      .map((element) => element.textContent?.trim())
+      .filter((text): text is string => Boolean(text && text.toLowerCase() !== "home"));
 
     return {
-      productLinks,
+      productLinks: [...unique],
       nextPageUrl,
-      categoryPath: categoryPath.length > 0 ? categoryPath : undefined,
+      categoryPath: categoryPath.length ? categoryPath : undefined,
     };
   } catch (error) {
     logger.error("[catalogDiscoveryService] Erro ao buscar página:", error);
-    return {
-      productLinks: [],
-    };
+    return { productLinks: [] };
   }
 }
 
-/**
- * Extrai dados estruturados de uma página de produto
- */
 export async function extractProductData(
   url: string,
   selectors?: {
@@ -166,182 +162,109 @@ export async function extractProductData(
     manufacturerSelector?: string;
     stockSelector?: string;
     eanSelector?: string;
-  }
+  },
 ): Promise<ExtractedProduct> {
   try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
+    const response = await safeExternalFetchText(url, {
+      headers: DEFAULT_HEADERS,
+      timeoutMs: 20_000,
+      maxBytes: 8 * 1024 * 1024,
     });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const html = await response.text();
-    const dom = new JSDOM(html);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const dom = new JSDOM(response.text, { url: response.url });
     const document = dom.window.document;
+    const structured = findJsonLdProducts(document)[0];
+    const offers = Array.isArray(structured?.offers) ? structured.offers[0] : structured?.offers;
+    const product: ExtractedProduct = { url: response.url, rawData: {} };
 
-    const product: ExtractedProduct = {
-      url,
-      rawData: {},
+    const selectedName = selectors?.nameSelector
+      ? document.querySelector(selectors.nameSelector)?.textContent?.trim()
+      : undefined;
+    product.name = selectedName || structured?.name ||
+      document.querySelector("h1, [itemprop='name']")?.textContent?.trim();
+
+    const selectedPrice = selectors?.priceSelector
+      ? document.querySelector(selectors.priceSelector)?.textContent?.trim()
+      : undefined;
+    const structuredPrice = offers?.price ?? offers?.lowPrice;
+    product.price = parsePrice(selectedPrice ?? (structuredPrice != null ? String(structuredPrice) : undefined) ??
+      document.querySelector("[itemprop='price'], .price, .product-price")?.textContent?.trim());
+
+    const desc = selectors?.descriptionSelector
+      ? document.querySelector(selectors.descriptionSelector)?.textContent?.trim()
+      : undefined;
+    product.description = desc || structured?.description ||
+      document.querySelector("[itemprop='description'], .description, .product-description")?.textContent?.trim();
+
+    const selectedImage = selectors?.imageSelector
+      ? document.querySelector(selectors.imageSelector)?.getAttribute("src")
+      : undefined;
+    const structuredImage = Array.isArray(structured?.image) ? structured.image[0] : structured?.image;
+    product.imageUrl = absoluteUrl(selectedImage || structuredImage ||
+      document.querySelector("[itemprop='image'], .product-image img")?.getAttribute("src"), response.url);
+
+    const skuText = selectors?.skuSelector
+      ? document.querySelector(selectors.skuSelector)?.textContent?.trim()
+      : undefined;
+    product.sku = skuText || structured?.sku || structured?.mpn ||
+      document.querySelector("[itemprop='sku'], .sku")?.textContent?.trim();
+
+    const manufacturerText = selectors?.manufacturerSelector
+      ? document.querySelector(selectors.manufacturerSelector)?.textContent?.trim()
+      : undefined;
+    const manufacturerStructured = typeof structured?.manufacturer === "string"
+      ? structured.manufacturer
+      : structured?.manufacturer?.name;
+    product.manufacturer = manufacturerText || manufacturerStructured ||
+      document.querySelector("[itemprop='manufacturer'], .manufacturer")?.textContent?.trim();
+
+    product.stockStatus = selectors?.stockSelector
+      ? document.querySelector(selectors.stockSelector)?.textContent?.trim()
+      : document.querySelector(".stock, .availability")?.textContent?.trim() || offers?.availability;
+
+    const eanText = selectors?.eanSelector
+      ? document.querySelector(selectors.eanSelector)?.textContent?.trim()
+      : undefined;
+    product.ean = eanText || structured?.gtin13 || structured?.gtin14 || structured?.gtin || structured?.ean;
+
+    product.rawData = {
+      structuredData: structured ?? null,
+      sourceUrl: response.url,
     };
 
-    // Nome
-    if (selectors?.nameSelector) {
-      const nameEl = document.querySelector(selectors.nameSelector);
-      product.name = nameEl?.textContent?.trim();
-    } else {
-      const nameEl =
-        document.querySelector("h1") ||
-        document.querySelector("[itemprop='name']");
-      product.name = nameEl?.textContent?.trim();
-    }
-
-    // Preço
-    if (selectors?.priceSelector) {
-      const priceEl = document.querySelector(selectors.priceSelector);
-      const priceText = priceEl?.textContent?.trim();
-      product.price = parsePrice(priceText);
-    } else {
-      const priceEl = document.querySelector(
-        "[itemprop='price'], .price, .product-price"
-      );
-      const priceText = priceEl?.textContent?.trim();
-      product.price = parsePrice(priceText);
-    }
-
-    // Descrição
-    if (selectors?.descriptionSelector) {
-      const descEl = document.querySelector(selectors.descriptionSelector);
-      product.description = descEl?.textContent?.trim();
-    } else {
-      const descEl = document.querySelector(
-        "[itemprop='description'], .description, .product-description"
-      );
-      product.description = descEl?.textContent?.trim();
-    }
-
-    // Imagem
-    if (selectors?.imageSelector) {
-      const imgEl = document.querySelector(selectors.imageSelector);
-      const src = imgEl?.getAttribute("src");
-      if (src) {
-        product.imageUrl = new URL(src, url).toString();
-      }
-    } else {
-      const imgEl = document.querySelector(
-        "[itemprop='image'], .product-image img"
-      );
-      const src = imgEl?.getAttribute("src");
-      if (src) {
-        product.imageUrl = new URL(src, url).toString();
-      }
-    }
-
-    // SKU
-    if (selectors?.skuSelector) {
-      const skuEl = document.querySelector(selectors.skuSelector);
-      product.sku = skuEl?.textContent?.trim();
-    } else {
-      const skuEl = document.querySelector("[itemprop='sku'], .sku");
-      product.sku = skuEl?.textContent?.trim();
-    }
-
-    // Fabricante
-    if (selectors?.manufacturerSelector) {
-      const mfgEl = document.querySelector(selectors.manufacturerSelector);
-      product.manufacturer = mfgEl?.textContent?.trim();
-    } else {
-      const mfgEl = document.querySelector(
-        "[itemprop='manufacturer'], .manufacturer"
-      );
-      product.manufacturer = mfgEl?.textContent?.trim();
-    }
-
-    // Estoque
-    if (selectors?.stockSelector) {
-      const stockEl = document.querySelector(selectors.stockSelector);
-      product.stockStatus = stockEl?.textContent?.trim();
-    } else {
-      const stockEl = document.querySelector(".stock, .availability");
-      product.stockStatus = stockEl?.textContent?.trim();
-    }
-
-    // EAN
-    if (selectors?.eanSelector) {
-      const eanEl = document.querySelector(selectors.eanSelector);
-      product.ean = eanEl?.textContent?.trim();
-    }
-
-    // Calcular confiança
-    const fieldsFound = Object.values(product).filter(
-      (v) => v && v !== url && typeof v === "string" && v.length > 0
-    ).length;
-    product.confidence = Math.min(100, (fieldsFound / 7) * 100);
-
+    const fields = [product.name, product.price, product.description, product.imageUrl, product.sku, product.manufacturer, product.ean];
+    product.confidence = Math.round((fields.filter((value) => value !== undefined && value !== null && value !== "").length / fields.length) * 100);
     return product;
   } catch (error) {
     logger.error("[catalogDiscoveryService] Erro ao extrair produto:", error);
-    return {
-      url,
-      confidence: 0,
-    };
+    return { url, confidence: 0 };
   }
 }
 
-/**
- * Normaliza e limpa preço extraído
- */
 export function parsePrice(priceText?: string): number | undefined {
   const result = parsePrecoBR(priceText ?? "");
   return result === null ? undefined : result;
 }
 
-/**
- * Normaliza nome do produto
- */
 export function normalizeProductName(name?: string): string {
   if (!name) return "";
-
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/[^a-z0-9À-ÿ\s-]/g, "");
+  return name.toLowerCase().trim().replace(/\s+/g, " ").replace(/[^a-z0-9À-ÿ\s-]/g, "");
 }
 
-
-/**
- * Detecta categoria por padrões
- */
-export function detectCategory(
-  name?: string,
-  description?: string
-): string | undefined {
+export function detectCategory(name?: string, description?: string): string | undefined {
   const text = `${name || ""} ${description || ""}`.toLowerCase();
-
   const categories: Record<string, string[]> = {
     Pneumática: ["pneumático", "compressor", "cilindro pneumático"],
     Hidráulica: ["hidráulico", "bomba", "válvula", "atuador hidráulico"],
     Medicamentos: ["comprimido", "cápsula", "injeção", "xarope", "pomada"],
     Veterinária: ["veterinário", "animal", "pet", "cão", "gato"],
   };
-
   for (const [category, keywords] of Object.entries(categories)) {
-    if (keywords.some((kw) => text.includes(kw))) {
-      return category;
-    }
+    if (keywords.some((keyword) => text.includes(keyword))) return category;
   }
-
   return undefined;
 }
 
-/**
- * Gera hash de conteúdo para detectar mudanças
- */
 export function generateContentHash(product: ExtractedProduct): string {
   const content = JSON.stringify({
     name: product.name,
@@ -350,9 +273,5 @@ export function generateContentHash(product: ExtractedProduct): string {
     sku: product.sku,
     ean: product.ean,
   });
-
-  return require("crypto")
-    .createHash("sha256")
-    .update(content)
-    .digest("hex");
+  return require("crypto").createHash("sha256").update(content).digest("hex");
 }
