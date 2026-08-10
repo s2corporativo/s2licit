@@ -2,14 +2,15 @@ import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import {
   getIntegrationView,
+  INTEGRATION_KEYS,
+  removeIntegrationSetting,
   saveIntegrationSettings,
 } from "../services/integrationSettingsService";
 import { recordAudit } from "../services/auditService";
 
 /**
- * Central de integrações: credenciais de WhatsApp e parâmetros gerais
- * configurados pela interface (IA e e-mail têm routers próprios; a tela
- * unificada monta as três seções juntas).
+ * Central administrativa de integrações. IA e e-mail mantêm formulários
+ * especializados, mas toda resolução de credenciais usa a mesma plataforma.
  */
 export const integrationsRouter = router({
   get: adminProcedure.query(() => getIntegrationView()),
@@ -22,24 +23,37 @@ export const integrationsRouter = router({
         userId: ctx.user?.id,
         action: "integration_config_save",
         entity: "integration_settings",
-        summary: `Credenciais de integração atualizadas pela interface (${Object.keys(input).filter((k) => input[k]).length} chave(s))`,
+        summary: `Credenciais de integração atualizadas pela interface (${Object.keys(input).filter((key) => input[key]).length} chave(s))`,
       });
       return { ok: true };
     }),
 
-  /** Envia uma mensagem de teste real pelo canal WhatsApp configurado. */
+  /** Remove somente o override do banco e restaura o fallback original da instalação. */
+  remove: adminProcedure
+    .input(z.object({ chave: z.string().max(64).refine((key) => key in INTEGRATION_KEYS, "Chave não permitida") }))
+    .mutation(async ({ input, ctx }) => {
+      await removeIntegrationSetting(input.chave);
+      await recordAudit({
+        userId: ctx.user?.id,
+        action: "integration_config_remove",
+        entity: "integration_settings",
+        summary: `Override de integração removido: ${input.chave}.`,
+      });
+      return { ok: true };
+    }),
+
   testarWhatsapp: adminProcedure.mutation(async () => {
     const { isWhatsappConfigured, enviarWhatsapp } = await import("../services/whatsappService");
-    if (!isWhatsappConfigured()) {
+    if (!(await isWhatsappConfigured())) {
       return {
         ok: false as const,
         detalhe:
-          "WhatsApp não configurado: preencha (ID do telefone + token + destino) para a Meta Cloud API, ou (webhook + destino) para provedor próprio, e salve antes de testar.",
+          "WhatsApp não configurado: preencha (ID do telefone + token + destino) para a Meta Cloud API, ou (webhook + destino) para provedor próprio.",
       };
     }
     try {
       const enviado = await enviarWhatsapp(
-        "✅ Teste do Sistema S2: o canal de WhatsApp está configurado e funcionando."
+        "✅ Teste do Sistema S2: o canal de WhatsApp está configurado e funcionando.",
       );
       return enviado
         ? { ok: true as const, detalhe: "Mensagem de teste enviada — confira o WhatsApp de destino." }
