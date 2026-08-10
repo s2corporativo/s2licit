@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
-import { formatDate, formatCurrency } from "../utils/formatting";
+import { formatCurrency, formatDate } from "../utils/formatting";
+import { fetchRemoteImageBuffer } from "./safeRemoteImageService";
 
 export interface QuotationItem {
   productName: string;
@@ -35,300 +36,287 @@ export interface QuotationPdfData {
   company: CompanySettings;
 }
 
-/**
- * Gera PDF de orçamento com cabeçalho da empresa, tabela de itens e totais
- */
-export async function generateQuotationPdf(data: QuotationPdfData): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: "A4",
-      margin: 40,
-    });
+const PAGE_LEFT = 40;
+const PAGE_RIGHT = 555;
+const TABLE_WIDTH = PAGE_RIGHT - PAGE_LEFT;
+const FOOTER_RESERVE = 70;
+const ROW_MIN_HEIGHT = 25;
 
-    const chunks: Buffer[] = [];
-
-    doc.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
-
-    doc.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-
-    doc.on("error", reject);
-
-    try {
-      // Cabeçalho da empresa
-      drawHeader(doc, data.company);
-
-      // Informações do orçamento
-      doc.fontSize(12).font("Helvetica-Bold").text("ORÇAMENTO", 40, 120);
-      doc.fontSize(10).font("Helvetica");
-
-      const infoY = 140;
-      doc.text(`Número: ${data.number}`, 40, infoY);
-      doc.text(`Data: ${formatDate(data.date)}`, 40, infoY + 20);
-      doc.text(`Válido até: ${formatDate(data.validUntil)}`, 40, infoY + 40);
-
-      // Dados do cliente
-      if (data.clientName || data.clientEmail || data.clientPhone) {
-        doc.fontSize(10).font("Helvetica-Bold").text("CLIENTE", 40, infoY + 70);
-        doc.fontSize(9).font("Helvetica");
-
-        if (data.clientName) {
-          doc.text(`Nome: ${data.clientName}`, 40, infoY + 90);
-        }
-        if (data.clientEmail) {
-          doc.text(`Email: ${data.clientEmail}`, 40, infoY + 110);
-        }
-        if (data.clientPhone) {
-          doc.text(`Telefone: ${data.clientPhone}`, 40, infoY + 130);
-        }
-      }
-
-      // Tabela de itens
-      drawItemsTable(doc, data.items, infoY + 160);
-
-      // Totais
-      const totalsY = doc.y + 20;
-      drawTotals(doc, data, totalsY);
-
-      // Notas
-      if (data.notes) {
-        doc.fontSize(9).font("Helvetica-Bold").text("OBSERVAÇÕES", 40, doc.y + 20);
-        doc.fontSize(8).font("Helvetica").text(data.notes, 40, doc.y + 10, {
-          width: 500,
-          align: "left",
-        });
-      }
-
-      // Rodapé
-      drawFooter(doc, data.company);
-
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
-  });
+function finitePositive(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
 }
 
-/**
- * Desenha cabeçalho com logo e dados da empresa
- */
-function drawHeader(doc: PDFKit.PDFDocument, company: CompanySettings): void {
-  const headerY = 40;
+function explicitItemTotal(item: QuotationItem): number {
+  const calculated = Number((item.quantity * item.unitPrice).toFixed(2));
+  if (!finitePositive(calculated)) throw new Error(`Total inválido para o item "${item.productName}".`);
+  if (item.totalPrice == null) return calculated;
+  if (!finitePositive(item.totalPrice)) throw new Error(`Total informado inválido para o item "${item.productName}".`);
+  const declared = Number(item.totalPrice.toFixed(2));
+  if (Math.abs(declared - calculated) > 0.01) {
+    throw new Error(`Total divergente no item "${item.productName}".`);
+  }
+  return declared;
+}
 
-  // Logo (se disponível)
-  if (company.logoUrl) {
+async function safeLogo(logoUrl?: string): Promise<Buffer | null> {
+  if (!logoUrl?.trim()) return null;
+  try {
+    return await fetchRemoteImageBuffer(logoUrl);
+  } catch {
+    return null;
+  }
+}
+
+function drawHeader(
+  doc: PDFKit.PDFDocument,
+  company: CompanySettings,
+  logo: Buffer | null,
+): void {
+  const headerY = 40;
+  if (logo) {
     try {
-      doc.image(company.logoUrl, 40, headerY, { width: 60 });
-    } catch (error) {
-      // Logo não disponível, continuar sem
+      doc.image(logo, 40, headerY, { fit: [60, 60] });
+    } catch {
+      // Documento continua sem logo; dados textuais permanecem autoritativos.
     }
   }
 
-  // Dados da empresa
-  doc.fontSize(14).font("Helvetica-Bold").text(company.name, 110, headerY);
+  doc.fontSize(14).font("Helvetica-Bold").fillColor("black").text(company.name, 110, headerY);
   doc.fontSize(9).font("Helvetica");
-
   let y = headerY + 20;
   if (company.cnpj) {
     doc.text(`CNPJ: ${company.cnpj}`, 110, y);
     y += 15;
   }
   if (company.address) {
-    doc.text(`Endereço: ${company.address}`, 110, y);
+    doc.text(`Endereço: ${company.address}`, 110, y, { width: 440 });
     y += 15;
   }
   if (company.phone) {
     doc.text(`Telefone: ${company.phone}`, 110, y);
     y += 15;
   }
-  if (company.email) {
-    doc.text(`Email: ${company.email}`, 110, y);
-  }
-
-  // Linha separadora
-  doc.moveTo(40, headerY + 80).lineTo(555, headerY + 80).stroke();
+  if (company.email) doc.text(`Email: ${company.email}`, 110, y);
+  doc.moveTo(PAGE_LEFT, 120).lineTo(PAGE_RIGHT, 120).stroke();
 }
 
-/**
- * Desenha tabela de itens do orçamento
- */
-function drawItemsTable(
-  doc: PDFKit.PDFDocument,
-  items: QuotationItem[],
-  startY: number
-): void {
-  const tableTop = startY;
-  const col1X = 40;
-  const col2X = 280;
-  const col3X = 380;
-  const col4X = 450;
-  const col5X = 520;
-
-  const rowHeight = 25;
-  let currentY = tableTop;
-
-  // Cabeçalho da tabela
-  doc.fontSize(10).font("Helvetica-Bold");
-  doc.fillColor("#0066cc");
-  doc.rect(col1X, currentY, 515, rowHeight).fill();
-
-  doc.fillColor("white");
-  doc.text("Produto", col1X + 5, currentY + 5, { width: 235 });
-  doc.text("Qtd", col2X + 5, currentY + 5, { width: 90 });
-  doc.text("Unitário", col3X + 5, currentY + 5, { width: 60 });
-  doc.text("Total", col4X + 5, currentY + 5, { width: 60 });
-
-  currentY += rowHeight;
-
-  // Linhas de itens
-  doc.fontSize(9).font("Helvetica");
-  doc.fillColor("black");
-
-  items.forEach((item, index) => {
-    const isEvenRow = index % 2 === 0;
-
-    if (isEvenRow) {
-      doc.fillColor("#f5f5f5");
-      doc.rect(col1X, currentY, 515, rowHeight).fill();
-    }
-
-    doc.fillColor("black");
-    const totalPrice = item.totalPrice || item.quantity * item.unitPrice;
-
-    doc.text(item.productName, col1X + 5, currentY + 5, { width: 235 });
-    doc.text(item.quantity.toString(), col2X + 5, currentY + 5, { width: 90 });
-    doc.text(formatCurrency(item.unitPrice), col3X + 5, currentY + 5, {
-      width: 60,
-    });
-    doc.text(formatCurrency(totalPrice), col4X + 5, currentY + 5, {
-      width: 60,
-    });
-
-    currentY += rowHeight;
-  });
-
-  // Linha final da tabela
-  doc.moveTo(col1X, currentY).lineTo(col1X + 515, currentY).stroke();
-}
-
-/**
- * Desenha seção de totais
- */
-function drawTotals(
-  doc: PDFKit.PDFDocument,
-  data: QuotationPdfData,
-  startY: number
-): void {
-  const col1X = 380;
-  const col2X = 450;
-  const rowHeight = 20;
-  let currentY = startY;
-
-  doc.fontSize(10).font("Helvetica");
-
-  // Subtotal
-  doc.text("Subtotal:", col1X, currentY);
-  doc.text(formatCurrency(data.subtotal), col2X, currentY, { align: "right" });
-  currentY += rowHeight;
-
-  // Desconto
-  if (data.discount && data.discount > 0) {
-    doc.text("Desconto:", col1X, currentY);
-    doc.text(`-${formatCurrency(data.discount)}`, col2X, currentY, {
-      align: "right",
-    });
-    currentY += rowHeight;
-  }
-
-  // Imposto
-  if (data.tax && data.tax > 0) {
-    doc.text("Imposto:", col1X, currentY);
-    doc.text(`+${formatCurrency(data.tax)}`, col2X, currentY, { align: "right" });
-    currentY += rowHeight;
-  }
-
-  // Linha separadora
-  doc.moveTo(col1X, currentY).lineTo(col2X + 80, currentY).stroke();
-  currentY += 10;
-
-  // Total
-  doc.fontSize(12).font("Helvetica-Bold");
-  doc.text("TOTAL:", col1X, currentY);
-  doc.text(formatCurrency(data.total), col2X, currentY, { align: "right" });
-}
-
-/**
- * Desenha rodapé com dados bancários
- */
 function drawFooter(doc: PDFKit.PDFDocument, company: CompanySettings): void {
   const pageHeight = doc.page.height;
   const footerY = pageHeight - 60;
-
-  doc.fontSize(8).font("Helvetica");
-  doc.moveTo(40, footerY).lineTo(555, footerY).stroke();
-
+  doc.fontSize(8).font("Helvetica").fillColor("black");
+  doc.moveTo(PAGE_LEFT, footerY).lineTo(PAGE_RIGHT, footerY).stroke();
   if (company.bankAccount) {
-    doc.text("Dados Bancários:", 40, footerY + 10);
-    doc.text(company.bankAccount, 40, footerY + 20, { width: 515 });
+    doc.text("Dados Bancários:", PAGE_LEFT, footerY + 8);
+    doc.text(company.bankAccount, PAGE_LEFT, footerY + 19, { width: TABLE_WIDTH });
   }
-
-  // Data de geração
-  doc.text(
-    `Gerado em ${new Date().toLocaleString("pt-BR")}`,
-    40,
-    pageHeight - 20,
-    { align: "center" }
-  );
+  doc.text(`Gerado em ${new Date().toLocaleString("pt-BR")}`, PAGE_LEFT, pageHeight - 20, {
+    width: TABLE_WIDTH,
+    align: "center",
+  });
 }
 
-/**
- * Valida dados do orçamento
- */
+function drawTableHeader(doc: PDFKit.PDFDocument, y: number): number {
+  const colProduct = PAGE_LEFT;
+  const colQty = 300;
+  const colUnit = 380;
+  const colTotal = 470;
+  doc.fillColor("#0066cc").rect(PAGE_LEFT, y, TABLE_WIDTH, ROW_MIN_HEIGHT).fill();
+  doc.fontSize(9).font("Helvetica-Bold").fillColor("white");
+  doc.text("Produto", colProduct + 5, y + 6, { width: 250 });
+  doc.text("Qtd", colQty + 5, y + 6, { width: 70, align: "right" });
+  doc.text("Unitário", colUnit + 5, y + 6, { width: 80, align: "right" });
+  doc.text("Total", colTotal + 5, y + 6, { width: 80, align: "right" });
+  return y + ROW_MIN_HEIGHT;
+}
+
+function rowHeightFor(doc: PDFKit.PDFDocument, name: string): number {
+  doc.fontSize(8).font("Helvetica");
+  const textHeight = doc.heightOfString(name, { width: 250 });
+  return Math.max(ROW_MIN_HEIGHT, Math.ceil(textHeight) + 10);
+}
+
+function drawItemRow(
+  doc: PDFKit.PDFDocument,
+  item: QuotationItem,
+  index: number,
+  y: number,
+): number {
+  const height = rowHeightFor(doc, item.productName);
+  if (index % 2 === 0) doc.fillColor("#f5f5f5").rect(PAGE_LEFT, y, TABLE_WIDTH, height).fill();
+  doc.fontSize(8).font("Helvetica").fillColor("black");
+  doc.text(item.productName, PAGE_LEFT + 5, y + 5, { width: 250 });
+  doc.text(String(item.quantity), 305, y + 5, { width: 65, align: "right" });
+  doc.text(formatCurrency(item.unitPrice), 385, y + 5, { width: 75, align: "right" });
+  doc.text(formatCurrency(explicitItemTotal(item)), 475, y + 5, { width: 75, align: "right" });
+  doc.moveTo(PAGE_LEFT, y + height).lineTo(PAGE_RIGHT, y + height).strokeColor("#dddddd").stroke();
+  return y + height;
+}
+
+function drawTotals(doc: PDFKit.PDFDocument, data: QuotationPdfData, startY: number): number {
+  let y = startY;
+  const labelX = 380;
+  const valueX = 465;
+  doc.fontSize(10).font("Helvetica").fillColor("black");
+  doc.text("Subtotal:", labelX, y);
+  doc.text(formatCurrency(data.subtotal), valueX, y, { width: 85, align: "right" });
+  y += 20;
+  if (data.discount && data.discount > 0) {
+    doc.text("Desconto:", labelX, y);
+    doc.text(`-${formatCurrency(data.discount)}`, valueX, y, { width: 85, align: "right" });
+    y += 20;
+  }
+  if (data.tax && data.tax > 0) {
+    doc.text("Imposto:", labelX, y);
+    doc.text(`+${formatCurrency(data.tax)}`, valueX, y, { width: 85, align: "right" });
+    y += 20;
+  }
+  doc.moveTo(labelX, y).lineTo(PAGE_RIGHT, y).stroke();
+  y += 8;
+  doc.fontSize(12).font("Helvetica-Bold").text("TOTAL:", labelX, y);
+  doc.text(formatCurrency(data.total), valueX, y, { width: 85, align: "right" });
+  return y + 22;
+}
+
+export async function generateQuotationPdf(data: QuotationPdfData): Promise<Buffer> {
+  const validation = validateQuotationData(data);
+  if (!validation.valid) {
+    throw new Error(`Orçamento inválido: ${validation.errors.join("; ")}`);
+  }
+  const logo = await safeLogo(data.company.logoUrl);
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const chunks: Buffer[] = [];
+  const completion = new Promise<Buffer>((resolve, reject) => {
+    doc.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  try {
+    drawHeader(doc, data.company, logo);
+    doc.fontSize(12).font("Helvetica-Bold").fillColor("black").text("ORÇAMENTO", PAGE_LEFT, 132);
+    doc.fontSize(9).font("Helvetica");
+    doc.text(`Número: ${data.number}`, PAGE_LEFT, 151);
+    doc.text(`Data: ${formatDate(data.date)}`, PAGE_LEFT, 166);
+    doc.text(`Válido até: ${formatDate(data.validUntil)}`, PAGE_LEFT, 181);
+
+    let y = 204;
+    if (data.clientName || data.clientEmail || data.clientPhone) {
+      doc.fontSize(9).font("Helvetica-Bold").text("CLIENTE", PAGE_LEFT, y);
+      y += 14;
+      doc.fontSize(8).font("Helvetica");
+      if (data.clientName) {
+        doc.text(`Nome: ${data.clientName}`, PAGE_LEFT, y, { width: TABLE_WIDTH });
+        y += 12;
+      }
+      if (data.clientEmail) {
+        doc.text(`Email: ${data.clientEmail}`, PAGE_LEFT, y, { width: TABLE_WIDTH });
+        y += 12;
+      }
+      if (data.clientPhone) {
+        doc.text(`Telefone: ${data.clientPhone}`, PAGE_LEFT, y, { width: TABLE_WIDTH });
+        y += 12;
+      }
+      y += 8;
+    }
+
+    y = drawTableHeader(doc, y);
+    for (let index = 0; index < data.items.length; index += 1) {
+      const item = data.items[index];
+      const needed = rowHeightFor(doc, item.productName);
+      if (y + needed > doc.page.height - FOOTER_RESERVE) {
+        drawFooter(doc, data.company);
+        doc.addPage();
+        drawHeader(doc, data.company, logo);
+        y = drawTableHeader(doc, 135);
+      }
+      y = drawItemRow(doc, item, index, y);
+    }
+
+    if (y + 120 > doc.page.height - FOOTER_RESERVE) {
+      drawFooter(doc, data.company);
+      doc.addPage();
+      drawHeader(doc, data.company, logo);
+      y = 140;
+    }
+    y = drawTotals(doc, data, y + 15);
+
+    if (data.notes) {
+      if (y + 60 > doc.page.height - FOOTER_RESERVE) {
+        drawFooter(doc, data.company);
+        doc.addPage();
+        drawHeader(doc, data.company, logo);
+        y = 140;
+      }
+      doc.fontSize(9).font("Helvetica-Bold").text("OBSERVAÇÕES", PAGE_LEFT, y + 10);
+      doc.fontSize(8).font("Helvetica").text(data.notes, PAGE_LEFT, y + 25, {
+        width: TABLE_WIDTH,
+        align: "left",
+      });
+    }
+
+    drawFooter(doc, data.company);
+    doc.end();
+  } catch (error) {
+    void completion.catch(() => undefined);
+    doc.end();
+    throw error;
+  }
+
+  return completion;
+}
+
 export function validateQuotationData(data: QuotationPdfData): {
   valid: boolean;
   errors: string[];
 } {
   const errors: string[] = [];
+  if (!data.number?.trim()) errors.push("Número do orçamento é obrigatório");
+  if (!(data.date instanceof Date) || Number.isNaN(data.date.getTime())) errors.push("Data do orçamento inválida");
+  if (!(data.validUntil instanceof Date) || Number.isNaN(data.validUntil.getTime())) errors.push("Validade do orçamento inválida");
+  if (!Array.isArray(data.items) || data.items.length === 0) errors.push("Orçamento deve ter pelo menos um item");
+  if (data.items?.length > 1000) errors.push("Orçamento excede 1.000 itens");
+  if (!finitePositive(data.subtotal)) errors.push("Subtotal deve ser maior que zero");
+  if (!finitePositive(data.total)) errors.push("Total deve ser maior que zero");
+  if (!data.company?.name?.trim()) errors.push("Dados da empresa são obrigatórios");
 
-  if (!data.number || data.number.trim() === "") {
-    errors.push("Número do orçamento é obrigatório");
+  for (let index = 0; index < (data.items?.length ?? 0); index += 1) {
+    const item = data.items[index];
+    if (!item.productName?.trim()) errors.push(`Item ${index + 1} sem descrição`);
+    if (!finitePositive(item.quantity)) errors.push(`Item ${index + 1} com quantidade inválida`);
+    if (!finitePositive(item.unitPrice)) errors.push(`Item ${index + 1} com preço unitário inválido`);
+    try {
+      explicitItemTotal(item);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : `Item ${index + 1} com total inválido`);
+    }
+    if (errors.length >= 20) break;
   }
 
-  if (!data.items || data.items.length === 0) {
-    errors.push("Orçamento deve ter pelo menos um item");
+  const expectedSubtotal = data.items?.reduce((sum, item) => {
+    try {
+      return sum + explicitItemTotal(item);
+    } catch {
+      return sum;
+    }
+  }, 0) ?? 0;
+  if (finitePositive(expectedSubtotal) && Math.abs(expectedSubtotal - data.subtotal) > 0.01) {
+    errors.push("Subtotal diverge da soma dos itens");
+  }
+  const expectedTotal = Number((data.subtotal - (data.discount ?? 0) + (data.tax ?? 0)).toFixed(2));
+  if (finitePositive(data.total) && Math.abs(expectedTotal - data.total) > 0.01) {
+    errors.push("Total diverge de subtotal, desconto e impostos");
   }
 
-  if (data.total <= 0) {
-    errors.push("Total do orçamento deve ser maior que zero");
-  }
-
-  if (!data.company || !data.company.name) {
-    errors.push("Dados da empresa são obrigatórios");
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
+  return { valid: errors.length === 0, errors };
 }
 
-/**
- * Calcula totais do orçamento
- */
 export function calculateQuotationTotals(items: QuotationItem[]): {
   subtotal: number;
   itemCount: number;
 } {
-  const subtotal = items.reduce((sum, item) => {
-    const itemTotal = item.quantity * item.unitPrice;
-    return sum + itemTotal;
-  }, 0);
-
+  const subtotal = items.reduce((sum, item) => sum + explicitItemTotal(item), 0);
   return {
-    subtotal,
+    subtotal: Number(subtotal.toFixed(2)),
     itemCount: items.length,
   };
 }
