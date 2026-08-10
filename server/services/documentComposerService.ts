@@ -4,6 +4,10 @@ import { proposalDeclarations } from "../../drizzle/schema";
 import { getCompanySettings, getDb, getProposalWithItems } from "../db";
 import { generateProposalPdf } from "../proposalPdf";
 import { buildQuotationResponse } from "./emailQuotationResponseService";
+import {
+  companyCommercialSnapshot,
+  proposalCommercialSnapshot,
+} from "./proposalDocumentSnapshotService";
 
 export type ComposedDocument = {
   filename: string;
@@ -21,26 +25,47 @@ async function pdfToBase64(build: (doc: PDFKit.PDFDocument) => void): Promise<st
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
   });
-  build(doc);
-  doc.end();
-  return (await completed).toString("base64");
+  try {
+    build(doc);
+    doc.end();
+    return (await completed).toString("base64");
+  } catch (error) {
+    void completed.catch(() => undefined);
+    doc.end();
+    throw error;
+  }
 }
 
-/**
- * Fonte canônica de geração documental. Rotas antigas podem continuar chamando
- * seus serviços durante a migração, mas novos fluxos devem entrar por aqui.
- */
+/** Fonte canônica de geração documental para o fluxo consolidado. */
 export async function composeProposalDocument(proposalId: number): Promise<ComposedDocument> {
   const proposal = await getProposalWithItems(proposalId);
   if (!proposal) throw new Error("Proposta não encontrada.");
   const company = await getCompanySettings();
-  const buffer = await generateProposalPdf(proposal as any, company as any);
-  return { filename: `proposta-${proposalId}.pdf`, mimeType: "application/pdf", base64: buffer.toString("base64"), sourceType: "proposal", sourceId: proposalId };
+  const buffer = await generateProposalPdf(
+    proposalCommercialSnapshot(proposal),
+    companyCommercialSnapshot(company),
+  );
+  return {
+    filename: `proposta-${proposalId}.pdf`,
+    mimeType: "application/pdf",
+    base64: buffer.toString("base64"),
+    sourceType: "proposal",
+    sourceId: proposalId,
+  };
 }
 
-export async function composeQuotationDocument(quotationId: number, options?: { marginPercent?: number; validDays?: number }): Promise<ComposedDocument> {
+export async function composeQuotationDocument(
+  quotationId: number,
+  options?: { marginPercent?: number; validDays?: number },
+): Promise<ComposedDocument> {
   const result = await buildQuotationResponse(quotationId, options);
-  return { filename: `cotacao-${quotationId}.pdf`, mimeType: "application/pdf", base64: result.pdfBase64, sourceType: "quotation", sourceId: quotationId };
+  return {
+    filename: `cotacao-${quotationId}.pdf`,
+    mimeType: "application/pdf",
+    base64: result.pdfBase64,
+    sourceType: "quotation",
+    sourceId: quotationId,
+  };
 }
 
 export async function composeDeclarationsDocument(proposalId: number): Promise<ComposedDocument> {
@@ -49,7 +74,11 @@ export async function composeDeclarationsDocument(proposalId: number): Promise<C
   const proposal = await getProposalWithItems(proposalId);
   if (!proposal) throw new Error("Proposta não encontrada.");
   const company = await getCompanySettings();
-  const declarations = await db.select().from(proposalDeclarations).where(eq(proposalDeclarations.proposalId, proposalId)).orderBy(asc(proposalDeclarations.sortOrder));
+  const declarations = await db
+    .select()
+    .from(proposalDeclarations)
+    .where(eq(proposalDeclarations.proposalId, proposalId))
+    .orderBy(asc(proposalDeclarations.sortOrder));
   if (!declarations.length) throw new Error("A proposta não possui declarações salvas.");
 
   const base64 = await pdfToBase64((doc) => {
@@ -67,5 +96,11 @@ export async function composeDeclarationsDocument(proposalId: number): Promise<C
     });
   });
 
-  return { filename: `declaracoes-proposta-${proposalId}.pdf`, mimeType: "application/pdf", base64, sourceType: "declarations", sourceId: proposalId };
+  return {
+    filename: `declaracoes-proposta-${proposalId}.pdf`,
+    mimeType: "application/pdf",
+    base64,
+    sourceType: "declarations",
+    sourceId: proposalId,
+  };
 }
