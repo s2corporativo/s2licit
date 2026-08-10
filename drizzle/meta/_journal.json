@@ -21,6 +21,7 @@
     { "idx": 16, "version": "5", "when": 1786359600000, "tag": "0016_canonical_workflow_indexes", "breakpoints": true },
     { "idx": 17, "version": "5", "when": 1786359660000, "tag": "0017_global_search_indexes", "breakpoints": true },
     { "idx": 18, "version": "5", "when": 1786359720000, "tag": "0018_proposal_query_indexes", "breakpoints": true },
-    { "idx": 19, "version": "5", "when": 1786360020000, "tag": "0019_edital_proposal_idempotency", "breakpoints": true }
+    { "idx": 19, "version": "5", "when": 1786360020000, "tag": "0019_edital_proposal_idempotency", "breakpoints": true },
+    { "idx": 20, "version": "5", "when": 1786360320000, "tag": "0020_proposal_email_dispatch", "breakpoints": true }
   ]
 }
