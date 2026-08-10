@@ -2,8 +2,11 @@ import { sql } from "drizzle-orm";
 import { getDb } from "../db";
 
 /**
- * Migra para a fonte canônica ofertas que ainda existem apenas no legado.
- * Idempotente pela combinação productId + supplierId já existente.
+ * Ponte operacional para instalações antigas.
+ *
+ * Preserva a relação Produto × Fornecedor ainda visível nos campos legados,
+ * mesmo quando não há preço. Depois da migração 0017, novas relações devem ser
+ * escritas diretamente em product_supplier_offers.
  */
 export async function backfillMissingCanonicalOffers(): Promise<number> {
   const db = await getDb();
@@ -24,8 +27,6 @@ export async function backfillMissingCanonicalOffers(): Promise<number> {
       ON o.productId = p.id
      AND o.supplierId = p.supplierId
     WHERE p.supplierId IS NOT NULL
-      AND p.price IS NOT NULL
-      AND p.price > 0
       AND o.id IS NULL
   `));
 
@@ -33,34 +34,63 @@ export async function backfillMissingCanonicalOffers(): Promise<number> {
 }
 
 /**
- * Mantém products.price somente como espelho de compatibilidade. A fonte de
- * verdade permanece product_supplier_offers.
+ * Mantém os dois campos legados como um ÚNICO cache coerente da melhor oferta:
+ * - products.price = menor custo efetivo atual;
+ * - products.supplierId = fornecedor daquela mesma oferta.
+ *
+ * A fonte de verdade permanece product_supplier_offers. Produtos sem oferta com
+ * preço válido ficam com ambos os caches NULL.
  */
 export async function syncCanonicalPriceMirrors(): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("Banco indisponível para sincronizar preços");
+  if (!db) throw new Error("Banco indisponível para sincronizar ofertas");
 
   const [result] = await db.execute(sql.raw(`
     UPDATE products p
     LEFT JOIN (
-      SELECT
-        productId,
-        MIN(
+      SELECT ranked.productId, ranked.supplierId, ranked.bestPrice
+      FROM (
+        SELECT
+          o.id,
+          o.productId,
+          o.supplierId,
           CASE
-            WHEN promoPrice IS NOT NULL
-              AND promoPrice > 0
-              AND (price IS NULL OR promoPrice < price)
-              THEN promoPrice
-            WHEN price IS NOT NULL AND price > 0
-              THEN price
+            WHEN o.promoPrice IS NOT NULL
+              AND o.promoPrice > 0
+              AND (o.price IS NULL OR o.promoPrice < o.price)
+              THEN o.promoPrice
+            WHEN o.price IS NOT NULL AND o.price > 0
+              THEN o.price
             ELSE NULL
-          END
-        ) AS bestPrice
-      FROM product_supplier_offers
-      GROUP BY productId
+          END AS bestPrice,
+          ROW_NUMBER() OVER (
+            PARTITION BY o.productId
+            ORDER BY
+              CASE
+                WHEN o.promoPrice IS NOT NULL
+                  AND o.promoPrice > 0
+                  AND (o.price IS NULL OR o.promoPrice < o.price)
+                  THEN o.promoPrice
+                WHEN o.price IS NOT NULL AND o.price > 0
+                  THEN o.price
+                ELSE NULL
+              END ASC,
+              o.updatedAt DESC,
+              o.id ASC
+          ) AS rn
+        FROM product_supplier_offers o
+        WHERE
+          (o.promoPrice IS NOT NULL AND o.promoPrice > 0)
+          OR (o.price IS NOT NULL AND o.price > 0)
+      ) ranked
+      WHERE ranked.rn = 1 AND ranked.bestPrice IS NOT NULL
     ) best ON best.productId = p.id
-    SET p.price = best.bestPrice
-    WHERE NOT (p.price <=> best.bestPrice)
+    SET
+      p.price = best.bestPrice,
+      p.supplierId = best.supplierId
+    WHERE
+      NOT (p.price <=> best.bestPrice)
+      OR NOT (p.supplierId <=> best.supplierId)
   `));
 
   return Number((result as any)?.affectedRows ?? 0);
@@ -96,8 +126,8 @@ export async function normalizeCatalogAliases(): Promise<number> {
 }
 
 /**
- * Reconciliação manual/operacional. Não executa DDL e não cria timers por
- * processo; por isso é segura em topologias com múltiplas réplicas.
+ * Reconciliação explícita e sem DDL. Pode ser acionada pela Central sem timer,
+ * cron ou privilégio de alteração de schema no processo web.
  */
 export async function reconcileLegacyCatalog(): Promise<{
   offersBackfilled: number;
