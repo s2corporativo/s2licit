@@ -1,83 +1,82 @@
 /**
- * Envio de mensagens por WhatsApp via API Cloud da Meta (WhatsApp Business).
- *
- * Configuração por ambiente (opcional — sem ela, o envio é desabilitado):
- *   WHATSAPP_PHONE_ID     — ID do número remetente (Meta)
- *   WHATSAPP_TOKEN        — token de acesso permanente
- *   WHATSAPP_TO           — número(s) destino (E.164, ex.: 5531999998888; vírgula p/ vários)
- *   WHATSAPP_API_VERSION  — versão da Graph API (padrão v21.0)
- *
- * Alternativa genérica (webhook próprio/Twilio/Z-API):
- *   WHATSAPP_WEBHOOK_URL  — se definido, o texto é enviado como POST {to, message}
+ * Envio de WhatsApp via Meta Cloud API ou webhook genérico.
+ * Configuração efetiva vem do CredentialResolver (banco criptografado com
+ * fallback imutável do ambiente), sem mutar process.env.
  */
 import { logger } from "../_core/logger";
+import { getWhatsappRuntimeConfig } from "../integrations/core/credentialResolver";
+import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 
-export function isWhatsappConfigured(): boolean {
+export async function isWhatsappConfigured(): Promise<boolean> {
+  const config = await getWhatsappRuntimeConfig();
   return Boolean(
-    (process.env.WHATSAPP_PHONE_ID && process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_TO) ||
-      (process.env.WHATSAPP_WEBHOOK_URL && process.env.WHATSAPP_TO),
+    config.to &&
+      ((config.phoneId && config.token) || config.webhookUrl),
   );
 }
 
-function destinos(): string[] {
-  return (process.env.WHATSAPP_TO ?? "")
+function destinos(raw: string): string[] {
+  return raw
     .split(",")
-    .map((s) => s.replace(/\D/g, ""))
+    .map((value) => value.replace(/\D/g, ""))
     .filter(Boolean);
 }
 
 /**
- * Envia uma mensagem de texto por WhatsApp. Retorna true se ao menos um
- * destino recebeu. Nunca lança — degrada com log (best-effort).
+ * Envia uma mensagem de texto por WhatsApp. Best-effort: retorna true se ao
+ * menos um destino recebeu e registra falhas pela plataforma de integrações.
  */
 export async function enviarWhatsapp(mensagem: string): Promise<boolean> {
-  if (!isWhatsappConfigured()) return false;
-  const tos = destinos();
+  const config = await getWhatsappRuntimeConfig();
+  const tos = destinos(config.to);
   if (tos.length === 0) return false;
 
-  // Modo webhook genérico
-  if (process.env.WHATSAPP_WEBHOOK_URL) {
-    try {
-      let ok = false;
-      for (const to of tos) {
-        const res = await fetch(process.env.WHATSAPP_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ to, message: mensagem }),
-        });
-        ok = ok || res.ok;
-      }
-      return ok;
-    } catch (err) {
-      logger.warn("[WhatsApp] Falha no webhook:", (err as Error).message);
-      return false;
+  if (config.webhookUrl) {
+    let ok = false;
+    for (const to of tos) {
+      const result = await externalHttpRequest({
+        source: "whatsapp",
+        operation: "send-webhook",
+        url: config.webhookUrl,
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to, message: mensagem }),
+        expected: "any",
+        timeoutMs: 20_000,
+        // Envio de mensagem não é idempotente: sem retry automático.
+        idempotent: false,
+      });
+      if (result.ok) ok = true;
+      else logger.warn(`[WhatsApp] Webhook falhou para ${to}: ${result.error?.message ?? result.statusCode}`);
     }
+    return ok;
   }
 
-  // Modo Meta Cloud API
-  const version = process.env.WHATSAPP_API_VERSION ?? "v21.0";
-  const url = `https://graph.facebook.com/${version}/${process.env.WHATSAPP_PHONE_ID}/messages`;
+  if (!config.phoneId || !config.token) return false;
+  const url = `https://graph.facebook.com/${config.apiVersion}/${config.phoneId}/messages`;
   let entregue = false;
   for (const to of tos) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to,
-          type: "text",
-          text: { body: mensagem.slice(0, 4096) },
-        }),
-      });
-      if (res.ok) entregue = true;
-      else logger.warn(`[WhatsApp] Envio para ${to} falhou (${res.status}).`);
-    } catch (err) {
-      logger.warn(`[WhatsApp] Erro ao enviar para ${to}:`, (err as Error).message);
-    }
+    const result = await externalHttpRequest({
+      source: "whatsapp",
+      operation: "send-meta-message",
+      url,
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${config.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: mensagem.slice(0, 4096) },
+      }),
+      expected: "json",
+      timeoutMs: 20_000,
+      idempotent: false,
+    });
+    if (result.ok) entregue = true;
+    else logger.warn(`[WhatsApp] Envio para ${to} falhou: ${result.error?.message ?? result.statusCode}`);
   }
   return entregue;
 }
