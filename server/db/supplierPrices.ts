@@ -86,6 +86,36 @@ function chunks<T>(items: T[], size: number): T[][] {
   return result;
 }
 
+function mirrorSyncQuery(productIds: number[]) {
+  const uniqueIds = [...new Set(productIds)].filter((id) => Number.isInteger(id) && id > 0);
+  if (uniqueIds.length === 0) return null;
+  const idList = sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `);
+  return sql`
+    UPDATE products p
+    LEFT JOIN (
+      SELECT
+        productId,
+        MIN(
+          CASE
+            WHEN promoPrice IS NOT NULL
+              AND promoPrice > 0
+              AND (price IS NULL OR promoPrice < price)
+              THEN promoPrice
+            WHEN price IS NOT NULL AND price > 0
+              THEN price
+            ELSE NULL
+          END
+        ) AS bestPrice
+      FROM product_supplier_offers
+      WHERE productId IN (${idList})
+      GROUP BY productId
+    ) best ON best.productId = p.id
+    SET p.price = best.bestPrice
+    WHERE p.id IN (${idList})
+      AND NOT (p.price <=> best.bestPrice)
+  `;
+}
+
 export async function getProductSupplierPrices(productId: number): Promise<CanonicalOfferRow[]> {
   const grouped = await getProductSupplierPricesForProducts([productId]);
   return grouped.get(productId) ?? [];
@@ -132,46 +162,12 @@ export async function getProductSupplierPricesForProducts(
   return grouped;
 }
 
-async function syncLegacyBestPrices(
-  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
-  productIds: number[],
-): Promise<void> {
-  const uniqueIds = [...new Set(productIds)].filter((id) => Number.isInteger(id) && id > 0);
-  if (uniqueIds.length === 0) return;
-
-  const idList = sql.join(uniqueIds.map((id) => sql`${id}`), sql`, `);
-  await db.execute(sql`
-    UPDATE products p
-    LEFT JOIN (
-      SELECT
-        productId,
-        MIN(
-          CASE
-            WHEN promoPrice IS NOT NULL
-              AND promoPrice > 0
-              AND (price IS NULL OR promoPrice < price)
-              THEN promoPrice
-            WHEN price IS NOT NULL AND price > 0
-              THEN price
-            ELSE NULL
-          END
-        ) AS bestPrice
-      FROM product_supplier_offers
-      WHERE productId IN (${idList})
-      GROUP BY productId
-    ) best ON best.productId = p.id
-    SET p.price = best.bestPrice
-    WHERE p.id IN (${idList})
-      AND NOT (p.price <=> best.bestPrice)
-  `);
-}
-
 /**
  * Upsert vetorizado da fonte canônica e do espelho legado.
  *
- * O custo de round-trips deixa de crescer por item: há uma leitura dos pares
- * existentes, writes em chunks bounded e um recálculo set-based dos produtos
- * afetados. Memória O(N), limitada ao lote recebido.
+ * Uma leitura prévia permite registrar histórico somente quando o preço mudou.
+ * As escritas, o histórico e o recálculo do espelho ficam na mesma transação,
+ * evitando sucesso parcial. Memória O(N), limitada ao lote recebido.
  */
 export async function batchUpsertSupplierPrices(entries: SupplierPriceWrite[]): Promise<{
   received: number;
@@ -205,21 +201,24 @@ export async function batchUpsertSupplierPrices(entries: SupplierPriceWrite[]): 
     existingRows.map((row) => [pairKey(row.productId, row.supplierId), row.price] as const),
   );
 
-  const historyRows = writes
-    .filter((entry) => {
-      const previous = previousPriceByPair.get(pairKey(entry.productId, entry.supplierId)) ?? null;
-      return entry.price != null && entry.price !== previous;
-    })
-    .map((entry) => ({
-      productId: entry.productId,
-      supplierId: entry.supplierId,
-      price: entry.price,
-      precoAnterior: previousPriceByPair.get(pairKey(entry.productId, entry.supplierId)) ?? null,
-      precoNovo: entry.price,
-      origem: entry.origem ?? "canonical_offer",
-    }));
+  const historyRows = writes.flatMap((entry) => {
+    const previous = previousPriceByPair.get(pairKey(entry.productId, entry.supplierId)) ?? null;
+    if (entry.price == null || entry.price === previous) return [];
+    return [
+      {
+        productId: entry.productId,
+        supplierId: entry.supplierId,
+        price: entry.price,
+        precoAnterior: previous,
+        precoNovo: entry.price,
+        origem: entry.origem ?? "canonical_offer",
+      },
+    ];
+  });
 
+  const mirrorQuery = mirrorSyncQuery(productIds);
   const now = new Date();
+
   await db.transaction(async (tx) => {
     for (const group of chunks(writes, WRITE_CHUNK_SIZE)) {
       const canonicalRows = group.map((entry) => sql`(
@@ -265,13 +264,11 @@ export async function batchUpsertSupplierPrices(entries: SupplierPriceWrite[]): 
     }
 
     for (const historyChunk of chunks(historyRows, WRITE_CHUNK_SIZE)) {
-      if (historyChunk.length > 0) {
-        await tx.insert(priceHistory).values(historyChunk);
-      }
+      if (historyChunk.length > 0) await tx.insert(priceHistory).values(historyChunk);
     }
-  });
 
-  await syncLegacyBestPrices(db, productIds);
+    if (mirrorQuery) await tx.execute(mirrorQuery);
+  });
 
   return {
     received: entries.length,
@@ -338,6 +335,7 @@ export async function deleteProductSupplierPrice(productId: number, supplierId: 
   }
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível ao excluir oferta");
+  const mirrorQuery = mirrorSyncQuery([productId]);
 
   await db.transaction(async (tx) => {
     await tx
@@ -356,14 +354,13 @@ export async function deleteProductSupplierPrice(productId: number, supplierId: 
           eq(productSupplierPrices.supplierId, supplierId),
         ),
       );
+    if (mirrorQuery) await tx.execute(mirrorQuery);
   });
-  await syncLegacyBestPrices(db, [productId]);
 }
 
 /**
- * Melhor esforço explícito para chamadas de compatibilidade que não devem
- * interromper fluxo de leitura. Escritas canônicas, por outro lado, propagam
- * erro ao chamador e são auditadas nos routers.
+ * Compatibilidade para consumidores de leitura que não devem derrubar a tela
+ * quando a infraestrutura de preços estiver temporariamente indisponível.
  */
 export async function safeGetProductSupplierPrices(productId: number): Promise<CanonicalOfferRow[]> {
   try {
