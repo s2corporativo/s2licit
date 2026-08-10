@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import {
-  decideCaptureObservation,
   getCaptureJobStatus,
   getConnectorHealthList,
-  listCaptureReviewQueue,
 } from "../services/captureCoreService";
+import {
+  decideSafeCaptureObservation,
+  listSafeCaptureReviewQueue,
+} from "../services/captureSafeProcessor";
 import { enqueuePriorityRefreshForTerms } from "../services/capturePriorityRefreshService";
 import { captureRunnerStatus } from "../jobs/captureJobRunner";
 
@@ -22,7 +24,7 @@ export const captureCoreRouter = router({
       supplierId: z.number().int().positive().optional(),
       limit: z.number().int().min(1).max(500).default(100),
     }).default({ limit: 100 }))
-    .query(({ input }) => listCaptureReviewQueue(input)),
+    .query(({ input }) => listSafeCaptureReviewQueue(input)),
 
   decideObservation: adminProcedure
     .input(z.object({
@@ -31,7 +33,7 @@ export const captureCoreRouter = router({
       expectedProductId: z.number().int().positive().nullable().optional(),
       notes: z.string().max(2000).nullable().optional(),
     }))
-    .mutation(({ input, ctx }) => decideCaptureObservation({
+    .mutation(({ input, ctx }) => decideSafeCaptureObservation({
       ...input,
       userId: ctx.user.id,
     })),
