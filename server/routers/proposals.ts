@@ -158,10 +158,10 @@ export const proposalsRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
-        if (!isSmtpConfigured()) {
+        if (!(await isSmtpConfigured())) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
-            message: "SMTP não configurado. Defina SMTP_HOST, SMTP_USER e SMTP_PASSWORD.",
+            message: "SMTP não configurado. Cadastre servidor, usuário e senha na Central de Integrações.",
           });
         }
 
@@ -322,15 +322,14 @@ export const proposalsRouter = router({
     // Busca similares mais baratos para um produto recém-adicionado à proposta
     findCheaperSimilar: protectedProcedure
       .input(z.object({
-        productId: z.number(),          // produto recém-adicionado
-        unitPrice: z.string(),          // preço unitário do produto adicionado
-        excludeProductId: z.number().optional().nullable(), // evitar retornar o próprio produto
+        productId: z.number(),
+        unitPrice: z.string(),
+        excludeProductId: z.number().optional().nullable(),
       }))
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return { similars: [] };
 
-        // Buscar o produto para obter o princípio ativo
         const [prod] = await db
           .select({ activeIngredient: products.activeIngredient, name: products.name })
           .from(products)
@@ -344,7 +343,6 @@ export const proposalsRouter = router({
         const currentPrice = parseFloat(input.unitPrice);
         if (isNaN(currentPrice) || currentPrice <= 0) return { similars: [] };
 
-        // Buscar produtos com mesmo princípio ativo e preço menor
         const similars = await db
           .select({
             id: products.id,
@@ -384,8 +382,6 @@ export const proposalsRouter = router({
           activeIngredient: prod.activeIngredient,
         };
       }),
-
-    // ─── Validação de Equivalência para Itens de Pregão ──────────────────────────
 
     validateEquivalenceForItems: protectedProcedure
       .input(
