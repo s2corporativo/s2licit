@@ -156,7 +156,7 @@ export const posVendaRouter = router({
         id: z.number().int().positive().optional(),
         fornecedorNome: z.string().trim().min(2).max(256),
         descricao: z.string().trim().min(3).max(512),
-        valorTotal: z.number().nonnegative(),
+        valorTotal: z.number().nonnegative().max(9_999_999_999_999.99),
         prazoEntrega: dataStr.optional(),
         vinculo: z.string().trim().max(256).optional(),
         funilId: z.number().int().positive().optional(),
@@ -283,8 +283,9 @@ export const posVendaRouter = router({
       const funilId = await resolveProposalOpportunity(input.proposalId);
 
       const orderId = await db.transaction(async (tx) => {
-        // Lock da proposta serializa duas tentativas concorrentes de gerar o mesmo pedido.
-        await tx.execute(sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${input.proposalId} FOR UPDATE`);
+        await tx.execute(
+          sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${input.proposalId} FOR UPDATE`,
+        );
 
         const [proposal] = await tx
           .select({
@@ -292,11 +293,18 @@ export const posVendaRouter = router({
             title: proposals.title,
             orgName: proposals.orgName,
             processNumber: proposals.processNumber,
+            status: proposals.status,
           })
           .from(proposals)
           .where(eq(proposals.id, input.proposalId))
           .limit(1);
         if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+        if (!["order", "in_transit", "delivered"].includes(proposal.status)) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Pedido de compra exige proposta em execução. Status atual: ${proposal.status}.`,
+          });
+        }
 
         const [existing] = await tx
           .select({ id: purchaseOrders.id })
@@ -337,12 +345,18 @@ export const posVendaRouter = router({
           return { ...item, cost, quantity };
         });
 
-        const suppliers = [...new Set(normalized.map((item) => item.supplierName?.trim()).filter((value): value is string => Boolean(value)))];
+        const supplierNames = [
+          ...new Set(
+            normalized
+              .map((item) => item.supplierName?.trim())
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ];
         const totalCost = normalized.reduce((sum, item) => sum + item.cost * item.quantity, 0);
         const result = await tx.insert(purchaseOrders).values({
           proposalId: input.proposalId,
           funilId: funilId ?? undefined,
-          fornecedorNome: suppliers.length ? suppliers.join(" / ").slice(0, 256) : "A definir",
+          fornecedorNome: supplierNames.length ? supplierNames.join(" / ").slice(0, 256) : "A definir",
           descricao: `Compra p/ atender proposta: ${proposal.title}${proposal.orgName ? ` (${proposal.orgName})` : ""}`.slice(0, 512),
           valorTotal: totalCost.toFixed(2),
           vinculo: proposal.processNumber ?? undefined,
@@ -406,14 +420,37 @@ export const posVendaRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+
       let funilId = input.funilId;
-      if (!funilId && input.orderId) {
+      if (input.orderId) {
         const [order] = await db
-          .select({ funilId: purchaseOrders.funilId })
+          .select({ funilId: purchaseOrders.funilId, status: purchaseOrders.status })
           .from(purchaseOrders)
           .where(eq(purchaseOrders.id, input.orderId))
           .limit(1);
-        funilId = order?.funilId ?? undefined;
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Pedido vinculado não encontrado." });
+        if (order.status === "cancelado") {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Pedido cancelado não pode receber entrega." });
+        }
+        if (input.funilId && order.funilId && input.funilId !== order.funilId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A oportunidade informada diverge da oportunidade vinculada ao pedido.",
+          });
+        }
+        funilId = order.funilId ?? input.funilId;
+      }
+
+      const status = input.status ?? ("preparando" as const);
+      const deliveredAt =
+        status === "entregue"
+          ? parseDia(input.entregueEm) ?? new Date()
+          : parseDia(input.entregueEm);
+      if (status !== "entregue" && input.entregueEm) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Data de entrega só pode ser informada quando o status for entregue.",
+        });
       }
 
       const values = {
@@ -421,9 +458,9 @@ export const posVendaRouter = router({
         transportadora: input.transportadora,
         rastreio: input.rastreio,
         previsao: parseDia(input.previsao),
-        entregueEm: parseDia(input.entregueEm),
+        entregueEm: deliveredAt,
         recebedor: input.recebedor,
-        status: input.status ?? ("preparando" as const),
+        status,
         orderId: input.orderId,
         funilId,
         observacoes: input.observacoes,
@@ -432,7 +469,9 @@ export const posVendaRouter = router({
       let id = input.id;
       if (id) {
         const result = await db.update(deliveries).set(values).where(eq(deliveries.id, id));
-        if (affectedRows(result) !== 1) throw new TRPCError({ code: "NOT_FOUND", message: "Entrega não encontrada." });
+        if (affectedRows(result) !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Entrega não encontrada." });
+        }
       } else {
         const result = await db.insert(deliveries).values(values);
         id = insertId(result);
@@ -469,8 +508,8 @@ export const posVendaRouter = router({
         id: z.number().int().positive().optional(),
         numero: z.string().trim().min(1).max(64),
         orgao: z.string().trim().min(2).max(256),
-        valorBruto: z.number().positive(),
-        retencoes: z.number().nonnegative().optional(),
+        valorBruto: z.number().positive().max(9_999_999_999_999.99),
+        retencoes: z.number().nonnegative().max(9_999_999_999_999.99).optional(),
         dataEmissao: dataStr,
         vencimento: dataStr.optional(),
         recebidoEm: dataStr.optional(),
@@ -482,15 +521,32 @@ export const posVendaRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      const retencoes = input.retencoes ?? 0;
+      if (retencoes > input.valorBruto) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Retenções não podem superar o valor bruto da nota.",
+        });
+      }
+      const status = input.status ?? ("emitida" as const);
+      if (status === "cancelada" && input.recebidoEm) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "NF cancelada não pode possuir data de recebimento.",
+        });
+      }
+      const receivedAt =
+        status === "paga" ? parseDia(input.recebidoEm) ?? new Date() : parseDia(input.recebidoEm);
+
       const values = {
         numero: input.numero,
         orgao: input.orgao,
         valorBruto: String(input.valorBruto),
-        retencoes: String(input.retencoes ?? 0),
+        retencoes: String(retencoes),
         dataEmissao: parseDia(input.dataEmissao)!,
         vencimento: parseDia(input.vencimento),
-        recebidoEm: parseDia(input.recebidoEm),
-        status: input.status ?? ("emitida" as const),
+        recebidoEm: receivedAt,
+        status,
         funilId: input.funilId,
         observacoes: input.observacoes,
       };
@@ -498,7 +554,9 @@ export const posVendaRouter = router({
       let id = input.id;
       if (id) {
         const result = await db.update(salesInvoices).set(values).where(eq(salesInvoices.id, id));
-        if (affectedRows(result) !== 1) throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+        if (affectedRows(result) !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Nota fiscal não encontrada." });
+        }
       } else {
         const result = await db.insert(salesInvoices).values(values);
         id = insertId(result);
@@ -512,7 +570,7 @@ export const posVendaRouter = router({
         entityId: id,
         origin: "financeiro",
         summary: `NF ${input.numero} — ${input.orgao}`,
-        changes: { valorBruto: input.valorBruto, retencoes: input.retencoes ?? 0, funilId: input.funilId ?? null },
+        changes: { valorBruto: input.valorBruto, retencoes, funilId: input.funilId ?? null },
       });
       await advanceOpportunityFromEvidence(
         input.funilId,
@@ -579,7 +637,7 @@ export const posVendaRouter = router({
         descricao: z.string().trim().min(3).max(512),
         credor: z.string().trim().max(256).optional(),
         categoria: z.enum(["fornecedor", "frete", "imposto", "taxa", "despesa"]).optional(),
-        valor: z.number().positive(),
+        valor: z.number().positive().max(9_999_999_999_999.99),
         vencimento: dataStr,
         orderId: z.number().int().positive().optional(),
         observacoes: z.string().trim().max(4000).optional(),
@@ -588,6 +646,18 @@ export const posVendaRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível" });
+      if (input.orderId) {
+        const [order] = await db
+          .select({ id: purchaseOrders.id, status: purchaseOrders.status })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.id, input.orderId))
+          .limit(1);
+        if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Pedido vinculado não encontrado." });
+        if (order.status === "cancelado") {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Pedido cancelado não pode gerar conta a pagar." });
+        }
+      }
+
       const values = {
         descricao: input.descricao,
         credor: input.credor,
@@ -601,7 +671,9 @@ export const posVendaRouter = router({
       let id = input.id;
       if (id) {
         const result = await db.update(payables).set(values).where(eq(payables.id, id));
-        if (affectedRows(result) !== 1) throw new TRPCError({ code: "NOT_FOUND", message: "Conta a pagar não encontrada." });
+        if (affectedRows(result) !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Conta a pagar não encontrada." });
+        }
       } else {
         const result = await db.insert(payables).values(values);
         id = insertId(result);
