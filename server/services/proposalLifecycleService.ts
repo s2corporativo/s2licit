@@ -1,8 +1,9 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   financialEntries,
   funilOportunidades,
+  proposalItems,
   proposalStatusHistory,
   proposals,
   type EtapaFunil,
@@ -25,6 +26,13 @@ const ALLOWED_PROPOSAL_TRANSITIONS: Readonly<
   delivered: [],
   cancelled: [],
 });
+
+const PRICING_REQUIRED_STATUSES = new Set<ProposalLifecycleStatus>([
+  "sent",
+  "order",
+  "in_transit",
+  "delivered",
+]);
 
 export type AdvanceProposalLifecycleInput = {
   id: number;
@@ -104,9 +112,43 @@ function addMonthsClamped(base: Date, months: number): Date {
 }
 
 function installmentAmounts(totalCents: number, count: number): number[] {
+  if (count > totalCents) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Número de parcelas gera parcela de valor zero.",
+    });
+  }
   const base = Math.floor(totalCents / count);
   const remainder = totalCents % count;
   return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+async function assertProposalPricingCompleteInTransaction(
+  tx: Transaction,
+  proposalId: number,
+): Promise<void> {
+  const [row] = await tx
+    .select({
+      itemCount: sql<number>`COUNT(*)`,
+      missingSalePrice: sql<number>`COALESCE(SUM(CASE WHEN ${proposalItems.suggestedPrice} IS NULL OR CAST(${proposalItems.suggestedPrice} AS DECIMAL(15,2)) <= 0 THEN 1 ELSE 0 END), 0)`,
+    })
+    .from(proposalItems)
+    .where(eq(proposalItems.proposalId, proposalId));
+
+  const itemCount = Number(row?.itemCount ?? 0);
+  const missing = Number(row?.missingSalePrice ?? 0);
+  if (itemCount <= 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "A proposta não possui itens.",
+    });
+  }
+  if (missing > 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `A proposta possui ${missing} item(ns) sem preço de venda explícito.`,
+    });
+  }
 }
 
 async function resolveOpportunityInTransaction(
@@ -195,14 +237,13 @@ async function createReceivablesInTransaction(
         eq(financialEntries.proposalId, proposal.id),
         eq(financialEntries.type, "income"),
         eq(financialEntries.category, "Proposta"),
-        isNull(financialEntries.paidAt),
       ),
     )
     .limit(1);
   if (existing.length > 0) {
     throw new TRPCError({
       code: "CONFLICT",
-      message: "A proposta já possui recebível financeiro pendente; geração duplicada bloqueada.",
+      message: "A proposta já possui recebível financeiro; geração duplicada bloqueada.",
     });
   }
 
@@ -238,7 +279,6 @@ export async function advanceProposalLifecycle(
   }
 
   return db.transaction(async (tx) => {
-    // Serializa mudanças concorrentes da mesma proposta.
     await tx.execute(
       sql`SELECT ${proposals.id} FROM ${proposals} WHERE ${proposals.id} = ${input.id} FOR UPDATE`,
     );
@@ -280,6 +320,15 @@ export async function advanceProposalLifecycle(
         code: "BAD_REQUEST",
         message: "Motivo/valor do concorrente só pode ser informado no cancelamento por perda.",
       });
+    }
+    if (PRICING_REQUIRED_STATUSES.has(input.newStatus)) {
+      await assertProposalPricingCompleteInTransaction(tx, input.id);
+      if (current.totalValue == null || centsFromDecimal(current.totalValue) <= 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "O total comercial da proposta ainda não está consolidado.",
+        });
+      }
     }
 
     const now = new Date();
