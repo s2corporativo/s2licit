@@ -59,9 +59,14 @@ import { operationalGovernanceRouter } from "./routers/operationalGovernance";
 import { productsRouter } from "./routers/productsGroup";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
+import { startCatalogMaintenanceLoop } from "./services/catalogReconciliationService";
 
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
+
+// O timer só agenda a primeira execução; não toca no banco durante a importação
+// dos módulos. Assim o boot continua respeitando a ordem das ensure*Columns().
+startCatalogMaintenanceLoop();
 
 export const appRouter = router({
   system: systemRouter,
