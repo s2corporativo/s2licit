@@ -113,14 +113,27 @@ function text(row: Record<string, string>, column?: string) {
   return trimmed || undefined;
 }
 
+/** Aceita 1.234,56, 1,234.56, 1234,56 e 1234.56. */
 function parsePrice(value?: string) {
   if (!value) return undefined;
-  const raw = value.replace(/R\$/gi, "").replace(/\s/g, "");
+  const raw = value.replace(/R\$/gi, "").replace(/\s/g, "").replace(/[^0-9,.-]/g, "");
+  if (!raw) return undefined;
+
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
   let normalized = raw;
-  if (raw.includes(",")) {
+
+  if (lastComma >= 0 && lastDot >= 0) {
+    if (lastComma > lastDot) {
+      normalized = raw.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = raw.replace(/,/g, "");
+    }
+  } else if (lastComma >= 0) {
     normalized = raw.replace(/\./g, "").replace(",", ".");
   }
-  const number = Number(normalized.replace(/[^0-9.-]/g, ""));
+
+  const number = Number(normalized);
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
@@ -448,7 +461,7 @@ export default function ImportarCatalogo() {
         <section className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4">
             <CheckCircle2 className="text-green-700" />
-            <div><div className="text-sm font-black text-green-950">Importação concluída</div><div className="mt-1 text-xs text-green-800">Casos ambíguos foram preservados para revisão; não houve fusão automática por similaridade incerta.</div></div>
+            <div><div className="text-sm font-black text-green-950">Importação concluída</div><div className="mt-1 text-xs text-green-800">Casos ambíguos ficaram sem alteração automática e estão listados abaixo para conferência.</div></div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
