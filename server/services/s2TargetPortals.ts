@@ -1,3 +1,5 @@
+import { resolveCredential } from "../integrations/core/credentialResolver";
+
 export const S2_TARGET_PORTALS = [
   "copasa",
   "cemig",
@@ -14,7 +16,8 @@ export interface S2TargetPortalDefinition {
   label: string;
   orgao: string;
   publicUrl: string;
-  environmentUrl?: string;
+  runtimeKey?: string;
+  legacyRuntimeKey?: string;
   discovery: "public" | "public_rendered" | "authenticated_assisted";
 }
 
@@ -24,7 +27,7 @@ export const S2_TARGET_PORTAL_DEFINITIONS: Record<S2TargetPortal, S2TargetPortal
     label: "COPASA",
     orgao: "COPASA MG",
     publicUrl: "https://wwwapp.copasa.com.br/servicos/RDC/Rdc/",
-    environmentUrl: "COPASA_OPPORTUNITIES_URL",
+    runtimeKey: "COPASA_OPPORTUNITIES_URL",
     discovery: "authenticated_assisted",
   },
   cemig: {
@@ -32,7 +35,7 @@ export const S2_TARGET_PORTAL_DEFINITIONS: Record<S2TargetPortal, S2TargetPortal
     label: "CEMIG",
     orgao: "CEMIG",
     publicUrl: "https://app2-compras.cemig.com.br/pesquisa",
-    environmentUrl: "CEMIG_OPPORTUNITIES_URL",
+    runtimeKey: "CEMIG_OPPORTUNITIES_URL",
     discovery: "public_rendered",
   },
   fundep: {
@@ -54,7 +57,7 @@ export const S2_TARGET_PORTAL_DEFINITIONS: Record<S2TargetPortal, S2TargetPortal
     label: "Compras MG",
     orgao: "Estado de Minas Gerais",
     publicUrl: "https://www1.compras.mg.gov.br/",
-    environmentUrl: "COMPRASMG_OPPORTUNITIES_URL",
+    runtimeKey: "COMPRASMG_OPPORTUNITIES_URL",
     discovery: "public_rendered",
   },
   fiemg: {
@@ -62,7 +65,8 @@ export const S2_TARGET_PORTAL_DEFINITIONS: Record<S2TargetPortal, S2TargetPortal
     label: "FIEMG / SESI / SENAI",
     orgao: "Sistema FIEMG",
     publicUrl: "https://compras.fiemg.com.br/portal/Mural.aspx?nNmTela=E",
-    environmentUrl: "FIEMG_OPPORTUNITIES_URL",
+    runtimeKey: "FIEMG_OPPORTUNITIES_URL",
+    legacyRuntimeKey: "FIEMG_LICITACOES_URL",
     discovery: "public_rendered",
   },
 };
@@ -71,10 +75,19 @@ export function isS2TargetPortal(value: string): value is S2TargetPortal {
   return (S2_TARGET_PORTALS as readonly string[]).includes(value);
 }
 
-export function getS2PortalUrl(portal: S2TargetPortal): string {
+/**
+ * URL única por portal para Radar manual, scheduler e diagnóstico.
+ * Overrides podem ser alterados em runtime pela Central de Integrações.
+ */
+export async function getS2PortalUrl(portal: S2TargetPortal): Promise<string> {
   const definition = S2_TARGET_PORTAL_DEFINITIONS[portal];
-  const configured = definition.environmentUrl
-    ? process.env[definition.environmentUrl]?.trim()
-    : undefined;
-  return configured || definition.publicUrl;
+  if (definition.runtimeKey) {
+    const configured = await resolveCredential(definition.runtimeKey);
+    if (configured?.trim()) return configured.trim();
+  }
+  if (definition.legacyRuntimeKey) {
+    const legacy = await resolveCredential(definition.legacyRuntimeKey);
+    if (legacy?.trim()) return legacy.trim();
+  }
+  return definition.publicUrl;
 }
