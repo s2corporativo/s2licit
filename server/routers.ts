@@ -6,6 +6,8 @@ import { declarationsRouter } from "./routers/declarations";
 import { reclassificacaoRouter } from "./routers/reclassificacao";
 import { categoriesRouter } from "./routers/categories";
 import { equivalencesRouter } from "./routers/equivalences";
+import { catalogRouter } from "./routers/catalog";
+import { equivalenceCompendiumRouter } from "./routers/equivalenceCompendium";
 import { dashboardRouter } from "./routers/dashboard";
 import { financialRouter } from "./routers/financial";
 import { proposalsRouter } from "./routers/proposals";
@@ -61,8 +63,6 @@ import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichment
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
 
-// ─── Imports ─────────────────────────────────────────────────────────────────
-
 export const appRouter = router({
   system: systemRouter,
   importSmart: importSmartRouter,
@@ -104,71 +104,35 @@ export const appRouter = router({
   operationalGovernance: operationalGovernanceRouter,
 
   auth: authRouter,
-
-  // ─── Categories ───────────────────────────────────────────────────────────
   categories: categoriesRouter,
-
-  // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: suppliersRouter,
 
-  // ─── Products ─────────────────────────────────────────────────────────────
+  // Catálogo legado permanece disponível durante a transição.
   products: productsRouter,
+  // Fonte canônica nova: produto mestre + ofertas + qualidade + proveniência.
+  catalog: catalogRouter,
 
-  // ─── Equivalences ─────────────────────────────────────────────────────────
+  // Grupos legados permanecem como compatibilidade; o compêndio é o módulo
+  // especializado e persistente para equivalência multi-produto.
   equivalences: equivalencesRouter,
+  equivalenceCompendium: equivalenceCompendiumRouter,
 
-  // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: importsRouter,
-  // ─── Dashboard ────────────────────────────────────────────────────────────
   dashboard: dashboardRouter,
-
-  // ─── Quotations ───────────────────────────────────────────────────────────
-
-  // ─── Company Settings ─────────────────────────────────────────────────────
   company: companyRouter,
-
-  // ─── Requesting Orgs ──────────────────────────────────────────────────────
   orgs: orgsRouter,
-
-  // ─── Proposals ────────────────────────────────────────────────────────────
   proposals: proposalsRouter,
-
-  // ─── Financial Entries ────────────────────────────────────────────────────
   financial: financialRouter,
-
   masterProducts: masterProductsRouter,
-
   priceIntelligence: priceIntelligenceRouter,
-
-  // ─── Catalog Enrichment ───────────────────────────────────────────────────
   enrichment: enrichmentInlineRouter,
-  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
-  // ─── Importação com Consolidação Automática ───────────────────────────────
-  // ─── Reconhecimento Inteligente de Produtos ───────────────────────────────
-  // ─── Importação com Matching Automático ───────────────────────────────────
-  // ─── Orçamentos e Propostas Comerciais ────────────────────────────────────
-  // ─── Importação de Edital (PDF/DOCX)) ─────────────────────────────────────
   edital: editalRouter,
-
-  // ─── (E) Declarações fixas (templates) ────────────────────────────────────
   declarations: declarationsRouter,
-
-  // ─── Reclassificação em Lote via IA ───────────────────────────────────────
   reclassificacao: reclassificacaoRouter,
-
-  // ─── Sinônimos para Matching ──────────────────────────────────────────────
   synonyms: synonymsRouter,
-
-  // ─── Templates de Proposta ────────────────────────────────────────────────
   proposalTemplates: proposalTemplatesRouter,
-
-  // ─── Metadados e apoio operacional ────────────────────────────────────────
-
-  // ─── Motor Universal de Equivalência e duplicidades ───────────────────────
   duplicates: duplicatesRouter,
   intelligentCapture: intelligentCaptureRouter,
-
-  // ─── Módulos complementares ───────────────────────────────────────────────
   images: imagesRouter,
 });
 export type AppRouter = typeof appRouter;
