@@ -1,96 +1,92 @@
 /**
- * Radar de oportunidades — PNCP (Portal Nacional de Contratações Públicas).
+ * Radar de oportunidades multi-fonte.
  *
- * Reaproveita o connector robusto server/connectors/pncpConnector (backoff,
- * rate limit, logging em api_logs) que estava presente mas desconectado.
- * A consulta pública do PNCP não exige autenticação (dados abertos).
- *
- * Fluxo: busca licitações de um período, filtra por palavras-chave no objeto
- * e permite abrir os itens de uma licitação específica para cruzar com o
- * catálogo de produtos.
+ * Regra de confiabilidade: NO_RESULTS significa consulta válida sem registros.
+ * Falha, timeout, rate-limit e mudança de contrato são estados distintos e
+ * aparecem explicitamente para a UI.
  */
-
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, router } from "../_core/trpc";
 import {
   buscarItensPNCP,
-  buscarLicitacoesMultiModalidade,
+  buscarLicitacoesPNCP,
   buscarResultadosItemPNCP,
   estatisticasPreco,
   normalizePncpLicitacao,
 } from "../connectors/pncpConnector";
-import { buscarLicitacoesComprasGov } from "../connectors/comprasGovConnector";
-import { buscarLicitacoesFiemg } from "../connectors/fiemgConnector";
+import { buscarLicitacoesComprasGovResult } from "../connectors/comprasGovConnector";
+import { buscarLicitacoesFiemgResult } from "../connectors/fiemgConnector";
 import type { NormalizedLicitacao } from "../connectors/baseConnector";
+import type { IntegrationResultStatus } from "../integrations/core/types";
 
-function toDateStr(d: Date): string {
-  // PNCP espera AAAAMMDD
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}${m}${day}`;
+function toDateStr(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
 }
 
-function matchesKeywords(lic: NormalizedLicitacao, keywords: string[]): boolean {
-  if (keywords.length === 0) return true;
-  const haystack = `${lic.objeto} ${lic.descricaoDetalhada}`.toLowerCase();
-  return keywords.some((k) => haystack.includes(k.toLowerCase()));
+function matchesKeywords(licitacao: NormalizedLicitacao, keywords: string[]): boolean {
+  if (!keywords.length) return true;
+  const haystack = `${licitacao.objeto} ${licitacao.descricaoDetalhada}`.toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
 }
 
-/** Fontes disponíveis no Radar. PNCP é a principal; as demais complementam. */
 const FonteEnum = z.enum(["pncp", "comprasgov", "fiemg"]);
-
 const BuscarSchema = z.object({
-  // Palavras-chave (ex.: "medicamento", "seringa", "amoxicilina"). Vazio = tudo.
   keywords: z.array(z.string().min(2)).max(20).default([]),
-  // Janela de datas; padrão: últimos 7 dias.
   diasAtras: z.number().int().min(1).max(90).default(7),
   uf: z.string().length(2).optional(),
   pagina: z.number().int().positive().default(1),
-  // Modalidades PNCP (8 = pregão eletrônico, 6 = concorrência eletrônica).
   modalidades: z.array(z.number().int()).max(6).default([8, 6]),
-  // Fontes a consultar. Padrão: todas. Fontes extras (comprasgov/fiemg) só são
-  // consultadas na página 1 — o PNCP continua paginando normalmente.
   fontes: z.array(FonteEnum).min(1).default(["pncp", "comprasgov", "fiemg"]),
 });
 
-/** Rótulos legíveis das fontes para exibição/telemetria. */
 const FONTE_LABEL: Record<string, string> = {
   pncp: "PNCP",
   comprasgov: "Compras.gov.br",
   fiemg: "Sistema S / FIEMG",
 };
 
-/** Deduplica mantendo a primeira ocorrência (PNCP tem prioridade na ordem). */
 function dedupe(licitacoes: NormalizedLicitacao[]): NormalizedLicitacao[] {
-  const vistos = new Set<string>();
-  const saida: NormalizedLicitacao[] = [];
-  for (const lic of licitacoes) {
-    const chave = lic.dedupeKey || `${lic.source}:${lic.sourceId}`;
-    if (vistos.has(chave)) continue;
-    vistos.add(chave);
-    saida.push(lic);
+  const seen = new Set<string>();
+  const output: NormalizedLicitacao[] = [];
+  for (const licitacao of licitacoes) {
+    const key = licitacao.dedupeKey || `${licitacao.source}:${licitacao.sourceId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(licitacao);
   }
-  return saida;
+  return output;
 }
 
 const ItensSchema = z.object({
-  cnpj: z.string().min(14).max(14),
+  cnpj: z.string().regex(/^\d{14}$/, "CNPJ deve conter 14 dígitos"),
   ano: z.number().int().min(2020).max(2100),
   sequencial: z.number().int().positive(),
 });
 
+type SourceStatus = {
+  fonte: string;
+  label: string;
+  status: IntegrationResultStatus;
+  encontradas: number;
+  durationMs: number;
+  detail: string | null;
+  partial: boolean;
+  requestId: string | null;
+};
+
+function detailForStatus(status: IntegrationResultStatus, error?: string): string | null {
+  if (error) return error;
+  if (status === "NO_RESULTS") return "Consulta concluída normalmente, sem oportunidades no período/filtro.";
+  if (status === "PARTIAL") return "Fonte respondeu parcialmente; parte da cobertura pode estar indisponível.";
+  if (status === "SUCCESS") return null;
+  return "A fonte não pôde ser consultada com confiabilidade.";
+}
+
 export const pncpRadarRouter = router({
-  /**
-   * Busca oportunidades em múltiplas fontes (PNCP + Compras.gov.br + FIEMG),
-   * filtradas por palavra-chave e UF, com deduplicação.
-   *
-   * Cada fonte é consultada de forma isolada (Promise.allSettled): uma fonte
-   * fora do ar ou lenta NUNCA derruba a busca — apenas contribui com zero e o
-   * erro fica registrado em api_logs. As fontes complementares (Compras.gov.br
-   * e FIEMG) só entram na página 1 para não conflitar com a paginação do PNCP.
-   */
-  buscarOportunidades: protectedProcedure
+  buscarOportunidades: editorProcedure
     .input(BuscarSchema)
     .query(async ({ input }) => {
       const now = new Date();
@@ -99,75 +95,136 @@ export const pncpRadarRouter = router({
       const uf = input.uf?.toUpperCase();
       const fontes = new Set(input.fontes);
       const primeiraPagina = input.pagina === 1;
-
-      // ── PNCP (fonte principal, paginada) ──
-      const pncpPromise = fontes.has("pncp")
-        ? buscarLicitacoesMultiModalidade(
-            toDateStr(inicio),
-            toDateStr(now),
-            input.pagina,
-            input.modalidades,
-          )
-        : Promise.resolve({ data: [], totalRegistros: 0, totalPaginas: 1 });
-
-      // ── Compras.gov.br (complementar, só na página 1) ──
-      const comprasPromise =
-        fontes.has("comprasgov") && primeiraPagina
-          ? buscarLicitacoesComprasGov(inicio, now, uf)
-          : Promise.resolve([] as NormalizedLicitacao[]);
-
-      // ── Sistema S / FIEMG (complementar, só na página 1) ──
-      const fiemgPromise =
-        fontes.has("fiemg") && primeiraPagina
-          ? buscarLicitacoesFiemg(inicio, now)
-          : Promise.resolve([] as NormalizedLicitacao[]);
-
-      const [pncpRes, comprasRes, fiemgRes] = await Promise.allSettled([
-        pncpPromise,
-        comprasPromise,
-        fiemgPromise,
-      ]);
-
-      const porFonte: Record<string, number> = {};
-      const erros: string[] = [];
-
-      // PNCP
+      const statuses: SourceStatus[] = [];
+      const all: NormalizedLicitacao[] = [];
       let totalRegistros = 0;
       let totalPaginas = 1;
-      let pncpLicitacoes: NormalizedLicitacao[] = [];
-      if (pncpRes.status === "fulfilled") {
-        totalRegistros = pncpRes.value.totalRegistros;
-        totalPaginas = pncpRes.value.totalPaginas;
-        pncpLicitacoes = pncpRes.value.data.map(normalizePncpLicitacao);
-      } else if (fontes.has("pncp")) {
-        erros.push(`PNCP: ${String(pncpRes.reason).slice(0, 120)}`);
+
+      if (fontes.has("pncp")) {
+        const startedAt = Date.now();
+        const modalityResults = await Promise.allSettled(
+          input.modalidades.map((modalidade) =>
+            buscarLicitacoesPNCP(
+              toDateStr(inicio),
+              toDateStr(now),
+              input.pagina,
+              50,
+              modalidade,
+            ),
+          ),
+        );
+        const failures = modalityResults.filter((result) => result.status === "rejected");
+        const fulfilled = modalityResults.filter(
+          (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof buscarLicitacoesPNCP>>> =>
+            result.status === "fulfilled",
+        );
+        const pncpRaw = fulfilled.flatMap((result) => result.value.data);
+        const pncpNormalized = dedupe(pncpRaw.map(normalizePncpLicitacao));
+        all.push(...pncpNormalized);
+        totalRegistros = fulfilled.reduce((sum, result) => sum + result.value.totalRegistros, 0);
+        totalPaginas = Math.max(1, ...fulfilled.map((result) => result.value.totalPaginas));
+
+        const status: IntegrationResultStatus =
+          fulfilled.length === 0
+            ? "UNAVAILABLE"
+            : failures.length > 0
+              ? "PARTIAL"
+              : pncpNormalized.length === 0
+                ? "NO_RESULTS"
+                : "SUCCESS";
+        const failureDetail = failures
+          .map((result) => (result.status === "rejected" ? String(result.reason) : ""))
+          .filter(Boolean)
+          .join(" | ")
+          .slice(0, 500);
+        statuses.push({
+          fonte: "pncp",
+          label: FONTE_LABEL.pncp,
+          status,
+          encontradas: pncpNormalized.length,
+          durationMs: Date.now() - startedAt,
+          detail: detailForStatus(status, failureDetail || undefined),
+          partial: status === "PARTIAL",
+          requestId: null,
+        });
       }
 
-      const comprasLicitacoes =
-        comprasRes.status === "fulfilled" ? comprasRes.value : [];
-      if (comprasRes.status === "rejected" && fontes.has("comprasgov")) {
-        erros.push(`Compras.gov.br: ${String(comprasRes.reason).slice(0, 120)}`);
+      if (fontes.has("comprasgov") && primeiraPagina) {
+        try {
+          const result = await buscarLicitacoesComprasGovResult(inicio, now, uf);
+          all.push(...result.data);
+          statuses.push({
+            fonte: "comprasgov",
+            label: FONTE_LABEL.comprasgov,
+            status: result.status,
+            encontradas: result.data.length,
+            durationMs: result.durationMs,
+            detail: detailForStatus(result.status, result.error?.message),
+            partial: result.status === "PARTIAL" || Boolean(result.metadata?.partial),
+            requestId: result.requestId,
+          });
+        } catch (error) {
+          statuses.push({
+            fonte: "comprasgov",
+            label: FONTE_LABEL.comprasgov,
+            status: "UNAVAILABLE",
+            encontradas: 0,
+            durationMs: 0,
+            detail: (error as Error).message,
+            partial: false,
+            requestId: null,
+          });
+        }
       }
 
-      const fiemgLicitacoes = fiemgRes.status === "fulfilled" ? fiemgRes.value : [];
-      if (fiemgRes.status === "rejected" && fontes.has("fiemg")) {
-        erros.push(`FIEMG: ${String(fiemgRes.reason).slice(0, 120)}`);
+      if (fontes.has("fiemg") && primeiraPagina) {
+        try {
+          const result = await buscarLicitacoesFiemgResult(inicio, now);
+          all.push(...result.data);
+          statuses.push({
+            fonte: "fiemg",
+            label: FONTE_LABEL.fiemg,
+            status: result.status,
+            encontradas: result.data.length,
+            durationMs: result.durationMs,
+            detail: detailForStatus(result.status, result.error?.message),
+            partial: result.status === "PARTIAL" || Boolean(result.metadata?.partial),
+            requestId: result.requestId,
+          });
+        } catch (error) {
+          statuses.push({
+            fonte: "fiemg",
+            label: FONTE_LABEL.fiemg,
+            status: "UNAVAILABLE",
+            encontradas: 0,
+            durationMs: 0,
+            detail: (error as Error).message,
+            partial: false,
+            requestId: null,
+          });
+        }
       }
 
-      // Ordem de merge define prioridade na deduplicação: PNCP primeiro.
-      const todas = [...pncpLicitacoes, ...comprasLicitacoes, ...fiemgLicitacoes]
-        .filter((lic) => matchesKeywords(lic, input.keywords))
-        .filter((lic) => (uf ? lic.uf.toUpperCase() === uf : true));
+      const oportunidades = dedupe(all)
+        .filter((licitacao) => matchesKeywords(licitacao, input.keywords))
+        .filter((licitacao) => (uf ? licitacao.uf.toUpperCase() === uf : true))
+        .sort((a, b) => {
+          const timeA = a.dataPublicacao ? a.dataPublicacao.getTime() : 0;
+          const timeB = b.dataPublicacao ? b.dataPublicacao.getTime() : 0;
+          return timeB - timeA;
+        });
 
-      const oportunidades = dedupe(todas).sort((a, b) => {
-        const ta = a.dataPublicacao ? a.dataPublicacao.getTime() : 0;
-        const tb = b.dataPublicacao ? b.dataPublicacao.getTime() : 0;
-        return tb - ta;
-      });
-
-      for (const lic of oportunidades) {
-        porFonte[lic.source] = (porFonte[lic.source] ?? 0) + 1;
+      const porFonte: Record<string, number> = {};
+      for (const licitacao of oportunidades) {
+        porFonte[licitacao.source] = (porFonte[licitacao.source] ?? 0) + 1;
       }
+
+      const erros = statuses
+        .filter((status) => !["SUCCESS", "NO_RESULTS"].includes(status.status))
+        .map((status) => `${status.label}: ${status.detail ?? status.status}`);
+      const coberturaDegradada = statuses.some((status) =>
+        ["PARTIAL", "UNAVAILABLE", "TIMEOUT", "RATE_LIMITED", "AUTH_ERROR", "CONTRACT_ERROR", "CONFIG_ERROR"].includes(status.status),
+      );
 
       return {
         totalRegistros,
@@ -175,28 +232,22 @@ export const pncpRadarRouter = router({
         pagina: input.pagina,
         encontradas: oportunidades.length,
         oportunidades,
-        // Telemetria por fonte para a UI mostrar a cobertura e sinalizar falhas.
         porFonte,
-        fontesConsultadas: Array.from(fontes).map((f) => FONTE_LABEL[f] ?? f),
+        fontesConsultadas: statuses.map((status) => status.label),
+        statusFontes: statuses,
+        coberturaDegradada,
         erros,
       };
     }),
 
-  /**
-   * Lista os itens de uma licitação específica (para cruzar com o catálogo).
-   */
-  itensDaLicitacao: protectedProcedure
+  itensDaLicitacao: editorProcedure
     .input(ItensSchema)
     .query(async ({ input }) => {
       const itens = await buscarItensPNCP(input.cnpj, input.ano, input.sequencial);
       return { total: itens.length, itens };
     }),
 
-  /**
-   * Inteligência de preço: resultados homologados de um item (quem venceu e
-   * por qual preço) + estatísticas (média, mínimo, máximo, mediana).
-   */
-  precoHomologado: protectedProcedure
+  precoHomologado: editorProcedure
     .input(ItensSchema.extend({ numeroItem: z.number().int().positive() }))
     .query(async ({ input }) => {
       const resultados = await buscarResultadosItemPNCP(
