@@ -1,0 +1,75 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+async function source(relativePath: string): Promise<string> {
+  return readFile(path.join(root, relativePath), "utf8");
+}
+
+describe("Integration Platform production readiness", () => {
+  it("does not run portal browsers with Chromium sandbox disabled", async () => {
+    const files = [
+      "server/services/portalOpportunitySyncService.ts",
+      "server/services/s2PortalOpportunitySyncService.ts",
+      "server/integrations/core/secureBrowserRenderer.ts",
+    ];
+    for (const file of files) {
+      const content = await source(file);
+      expect(content, `${file} must not contain --no-sandbox`).not.toContain("--no-sandbox");
+      expect(content, `${file} must not contain --disable-setuid-sandbox`).not.toContain("--disable-setuid-sandbox");
+    }
+  });
+
+  it("routes foundation HTTP/browser access through the integration platform", async () => {
+    const content = await source("server/services/portalOpportunitySyncService.ts");
+    expect(content).not.toMatch(/from\s+["']axios["']/);
+    expect(content).not.toMatch(/from\s+["']puppeteer["']/);
+    expect(content).toMatch(/externalHttpRequest|renderPublicHtml/);
+  });
+
+  it("never treats an async SMTP configuration check as a boolean", async () => {
+    const files = [
+      "server/routers/emailQuotations.ts",
+      "server/routers/proposals.ts",
+    ];
+    for (const file of files) {
+      const content = await source(file);
+      expect(content, `${file} must await isSmtpConfigured()`).not.toMatch(/if\s*\(\s*!\s*isSmtpConfigured\s*\(\s*\)\s*\)/);
+    }
+  });
+
+  it("does not mutate process.env as runtime integration state", async () => {
+    const files = [
+      "server/integrations/core/credentialResolver.ts",
+      "server/services/integrationSettingsService.ts",
+      "server/services/aiConfigService.ts",
+      "server/services/emailConfigService.ts",
+    ];
+    for (const file of files) {
+      const content = await source(file);
+      expect(content).not.toMatch(/process\.env\s*\[[^\]]+\]\s*=/);
+      expect(content).not.toMatch(/delete\s+process\.env/);
+    }
+  });
+
+  it("ships a real migration for integration_cache and registers it in the production journal", async () => {
+    const [migration, journal] = await Promise.all([
+      source("drizzle/0016_integration_cache.sql"),
+      source("drizzle/meta/_journal.json"),
+    ]);
+    expect(migration).toContain("CREATE TABLE `integration_cache`");
+    expect(migration).toContain("uq_integration_cache_source_operation_key");
+    expect(journal).toContain('"tag": "0016_integration_cache"');
+  });
+
+  it("does not silently acknowledge IMAP before business persistence", async () => {
+    const inbox = await source("server/services/emailInboxService.ts");
+    const sync = await source("server/services/emailQuotationSyncService.ts");
+    expect(inbox).not.toMatch(/messageFlagsAdd\([^\n]*\\Seen[^\n]*\)[\s\S]*fetchUnseenEmails/);
+    expect(sync).toContain("acknowledgeEmailsSeen");
+    expect(sync).toContain("db.transaction");
+  });
+});
