@@ -4,20 +4,14 @@
  * Em produção emite UMA linha JSON por evento ({ts, level, scope, msg, ...}),
  * pronta para ser coletada por qualquer agregador (Loki, CloudWatch, jq no
  * journalctl). Em desenvolvimento emite texto legível.
- *
- * A assinatura é compatível com console.* (varargs): strings são concatenadas
- * na mensagem e objetos/Erros viram campos estruturados — nada é descartado.
- *
- * Uso: import { logger } from "../_core/logger";
- *      logger.info("[Scraper] Execução concluída", { total: 42 });
- *      const log = logger.child("Scheduler"); log.warn("tick atrasado");
  */
 
 type Level = "debug" | "info" | "warn" | "error";
 
 const LEVEL_RANK: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
-
 const isProd = process.env.NODE_ENV === "production";
+let processHandlersInstalled = false;
+let shuttingDown = false;
 
 function minLevel(): number {
   const conf = (process.env.LOG_LEVEL ?? "").toLowerCase() as Level;
@@ -34,14 +28,14 @@ function serializeArg(arg: unknown): { text?: string; fields?: Record<string, un
   return { text: String(arg) };
 }
 
-function emit(level: Level, scope: string | null, args: unknown[]) {
+function emit(level: Level, scope: string | null, args: unknown[]): void {
   if (LEVEL_RANK[level] < minLevel()) return;
   const parts: string[] = [];
   let fields: Record<string, unknown> = {};
   for (const arg of args) {
-    const s = serializeArg(arg);
-    if (s.text !== undefined) parts.push(s.text);
-    if (s.fields) fields = { ...fields, ...s.fields };
+    const serialized = serializeArg(arg);
+    if (serialized.text !== undefined) parts.push(serialized.text);
+    if (serialized.fields) fields = { ...fields, ...serialized.fields };
   }
   const msg = parts.join(" ");
   if (isProd) {
@@ -52,14 +46,13 @@ function emit(level: Level, scope: string | null, args: unknown[]) {
       msg,
       ...fields,
     });
-    // stdout para info/debug, stderr para warn/error — padrão de coleta docker
-    if (level === "warn" || level === "error") process.stderr.write(line + "\n");
-    else process.stdout.write(line + "\n");
-  } else {
-    const prefix = scope ? `[${scope}] ` : "";
-    const extra = Object.keys(fields).length ? [fields] : [];
-    console[level === "debug" ? "log" : level](`${prefix}${msg}`, ...extra);
+    if (level === "warn" || level === "error") process.stderr.write(`${line}\n`);
+    else process.stdout.write(`${line}\n`);
+    return;
   }
+  const prefix = scope ? `[${scope}] ` : "";
+  const extra = Object.keys(fields).length ? [fields] : [];
+  console[level === "debug" ? "log" : level](`${prefix}${msg}`, ...extra);
 }
 
 export interface Logger {
@@ -82,18 +75,56 @@ function makeLogger(scope: string | null): Logger {
 
 export const logger = makeLogger(null);
 
+async function gracefulProcessShutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`[Process] ${signal} recebido — encerramento controlado.`);
+
+  const cleanup = async () => {
+    try {
+      const [{ flushIntegrationTelemetry }, { closeEmailTransports }] = await Promise.all([
+        import("../integrations/core/externalHttpClient"),
+        import("../services/emailSenderService"),
+      ]);
+      closeEmailTransports();
+      await flushIntegrationTelemetry();
+    } catch (error) {
+      logger.warn("[Process] Falha durante cleanup de shutdown.", error);
+    }
+  };
+
+  // O orquestrador precisa recuperar o processo mesmo se DB/SMTP estiverem
+  // indisponíveis. Cleanup auxiliar recebe orçamento máximo de 4 segundos.
+  await Promise.race([
+    cleanup(),
+    new Promise<void>((resolve) => setTimeout(resolve, 4_000)),
+  ]);
+  process.exit(0);
+}
+
 /**
- * Handlers de último recurso: crash e rejeição não tratada ficam registrados
- * em formato estruturado antes de derrubar/continuar o processo.
+ * Handlers de último recurso. Registrados apenas uma vez para evitar listeners
+ * duplicados em testes/hot reload.
  */
 export function installProcessErrorHandlers(): void {
+  if (processHandlersInstalled) return;
+  processHandlersInstalled = true;
+
   process.on("unhandledRejection", (reason) => {
-    logger.error("[Process] Promise rejeitada sem tratamento", reason instanceof Error ? reason : new Error(String(reason)));
+    logger.error(
+      "[Process] Promise rejeitada sem tratamento",
+      reason instanceof Error ? reason : new Error(String(reason)),
+    );
   });
-  process.on("uncaughtException", (err) => {
-    logger.error("[Process] Exceção não capturada — encerrando", err);
-    // Estado do processo é indefinido após uncaughtException: sair e deixar o
-    // orquestrador (docker restart:always) subir de novo é o caminho seguro.
+  process.on("uncaughtException", (error) => {
+    logger.error("[Process] Exceção não capturada — encerrando", error);
+    // Estado indefinido: não tentar cleanup complexo depois de uncaughtException.
     process.exit(1);
+  });
+  process.on("SIGTERM", () => {
+    void gracefulProcessShutdown("SIGTERM");
+  });
+  process.on("SIGINT", () => {
+    void gracefulProcessShutdown("SIGINT");
   });
 }
