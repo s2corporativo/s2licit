@@ -51,6 +51,7 @@ import { priceAnalysisRouter } from "./routers/priceAnalysis";
 import { priceIntelligenceRouter } from "./routers/priceIntelligence";
 import { pricingRouter } from "./routers/pricing";
 import { productsRouter } from "./routers/productsGroup";
+import { proposalEmailAdminRouter } from "./routers/proposalEmailAdmin";
 import { proposalTemplatesRouter } from "./routers/proposalTemplates";
 import { proposalsRouter } from "./routers/proposals";
 import { propostaAgentRouter } from "./routers/propostaAgentRouter";
@@ -119,6 +120,7 @@ export const appRouter = router({
   company: companyRouter,
   orgs: orgsRouter,
   proposals: proposalsRouter,
+  proposalEmailAdmin: proposalEmailAdminRouter,
   financial: financialRouter,
   masterProducts: masterProductsRouter,
   priceIntelligence: priceIntelligenceRouter,
