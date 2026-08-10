@@ -18,7 +18,8 @@ const AssistenteOperacional = lazy(() => import("./pages/AssistenteOperacional")
 const Agenda = lazy(() => import("./pages/Agenda"));
 const Propostas = lazy(() => import("./pages/Propostas"));
 const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
-const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
+const PropostasAdmin = lazy(() => import("./pages/PropostasAdmin"));
+const FinanceiroCentral = lazy(() => import("./pages/FinanceiroCentral"));
 const BuscaGlobal = lazy(() => import("./pages/BuscaGlobal"));
 const ConfiguracaoEmpresa = lazy(() => import("./pages/ConfiguracaoEmpresa"));
 const Integracoes = lazy(() => import("./pages/Integracoes"));
@@ -64,6 +65,7 @@ const MotorTributario = lazy(() => import("./pages/MotorTributario"));
 const CustoTotal = lazy(() => import("./pages/CustoTotal"));
 const IntelligentCaptureCenter = lazy(() => import("./pages/IntelligentCaptureCenter"));
 const DatabaseIntegrityCheck = lazy(() => named(import("./pages/DatabaseIntegrityCheck"), "DatabaseIntegrityCheck"));
+const CentroOperacional = lazy(() => import("./pages/CentroOperacional"));
 
 function PageLoading() {
   return <div className="min-h-[60vh] flex items-center justify-center"><div className="w-8 h-1 bg-blue-800 animate-pulse rounded" /></div>;
@@ -84,9 +86,10 @@ function Router() {
                 <Route path="/oportunidades"><RequireAuth minRole="editor"><Oportunidades /></RequireAuth></Route>
                 <Route path="/propostas"><Propostas /></Route>
                 <Route path="/propostas/:id"><PropostaEditor /></Route>
+                <Route path="/propostas-admin"><PropostasAdmin /></Route>
                 <Route path="/execucao"><RequireAuth minRole="editor"><Execucao /></RequireAuth></Route>
                 <Route path="/catalogo"><Catalogo /></Route>
-                <Route path="/financeiro"><ControleFinanceiro /></Route>
+                <Route path="/financeiro"><FinanceiroCentral /></Route>
                 <Route path="/agenda" component={Agenda} />
                 <Route path="/assistente"><AssistenteOperacional /></Route>
                 <Route path="/busca-global" component={BuscaGlobal} />
@@ -96,6 +99,7 @@ function Router() {
                 <Route path="/integracoes"><RequireAuth minRole="admin"><Integracoes /></RequireAuth></Route>
                 <Route path="/usuarios"><RequireAuth minRole="admin"><Usuarios /></RequireAuth></Route>
                 <Route path="/diagnostico"><RequireAuth minRole="editor"><Diagnostico /></RequireAuth></Route>
+                <Route path="/admin/operacional"><RequireAuth minRole="admin"><CentroOperacional /></RequireAuth></Route>
                 <Route path="/manual" component={Manual} />
                 <Route path="/seguranca"><SegurancaMFA /></Route>
                 <Route path="/logs"><RequireAuth minRole="admin"><Logs /></RequireAuth></Route>
@@ -150,7 +154,6 @@ function Router() {
                 <Route path="/agente"><Redirect to="/assistente" /></Route>
                 <Route path="/busca"><Redirect to="/busca-global?modo=precos" /></Route>
                 <Route path="/proposta-rapida"><Redirect to="/propostas" /></Route>
-                <Route path="/propostas-admin"><Redirect to="/propostas" /></Route>
                 <Route path="/analisador-edital"><Redirect to="/edital" /></Route>
                 <Route path="/proposta-automatica"><Redirect to="/edital" /></Route>
                 <Route path="/configurador-fornecedores"><Redirect to="/scraper-fornecedores" /></Route>
