@@ -31,14 +31,89 @@ export async function backfillMissingCanonicalOffers(): Promise<number> {
   return Number((insertResult as any)?.affectedRows ?? 0);
 }
 
+async function ensureOfferPriceMirrorTriggers(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const [triggerRows] = await db.execute(sql`
+      SELECT TRIGGER_NAME AS triggerName
+      FROM information_schema.TRIGGERS
+      WHERE TRIGGER_SCHEMA = DATABASE()
+        AND EVENT_OBJECT_TABLE = 'product_supplier_offers'
+    `);
+    const existing = new Set(rowsOf(triggerRows).map((row) => String(row.triggerName)));
+
+    const priceExpression = `(
+      SELECT MIN(CASE
+        WHEN o.promoPrice IS NOT NULL AND o.promoPrice > 0
+          AND (o.price IS NULL OR o.promoPrice < o.price)
+          THEN o.promoPrice
+        ELSE o.price
+      END)
+      FROM product_supplier_offers o
+      WHERE o.productId = `;
+
+    if (!existing.has("trg_offer_price_ai")) {
+      await db.execute(sql.raw(`
+        CREATE TRIGGER trg_offer_price_ai
+        AFTER INSERT ON product_supplier_offers
+        FOR EACH ROW
+        UPDATE products
+        SET price = ${priceExpression}NEW.productId)
+        WHERE id = NEW.productId
+      `));
+    }
+    if (!existing.has("trg_offer_price_au")) {
+      await db.execute(sql.raw(`
+        CREATE TRIGGER trg_offer_price_au
+        AFTER UPDATE ON product_supplier_offers
+        FOR EACH ROW
+        UPDATE products
+        SET price = ${priceExpression}NEW.productId)
+        WHERE id = NEW.productId
+      `));
+    }
+    if (!existing.has("trg_offer_price_ad")) {
+      await db.execute(sql.raw(`
+        CREATE TRIGGER trg_offer_price_ad
+        AFTER DELETE ON product_supplier_offers
+        FOR EACH ROW
+        UPDATE products
+        SET price = ${priceExpression}OLD.productId)
+        WHERE id = OLD.productId
+      `));
+    }
+
+    // Reconcilia o espelho imediatamente para ofertas já existentes antes dos triggers.
+    await db.execute(sql.raw(`
+      UPDATE products p
+      JOIN (
+        SELECT productId,
+          MIN(CASE
+            WHEN promoPrice IS NOT NULL AND promoPrice > 0
+              AND (price IS NULL OR promoPrice < price)
+              THEN promoPrice
+            ELSE price
+          END) AS bestPrice
+        FROM product_supplier_offers
+        GROUP BY productId
+      ) x ON x.productId = p.id
+      SET p.price = x.bestPrice
+    `));
+  } catch (error) {
+    // O serviço de aplicação já sincroniza o espelho; triggers são uma defesa
+    // adicional para writers legados. Falha de privilégio não derruba o módulo.
+    logger.warn("[CatalogReconcile] Triggers de espelho de preço não puderam ser garantidos:", (error as Error).message);
+  }
+}
+
 /**
  * Reconciliação idempotente do catálogo legado.
  * - cria ofertas canônicas faltantes a partir de products.price + supplierId;
  * - normaliza aliases EAN/GTIN/barcode apenas quando o destino está vazio;
+ * - protege o espelho de preço inclusive para writers legados;
  * - remove o risco de ON DELETE CASCADE do supplierId legado, tornando a FK
  *   nullable/SET NULL de forma dinâmica (o nome da constraint varia por banco).
- *
- * Não apaga dados e pode ser executada repetidamente.
  */
 export async function reconcileLegacyCatalog(): Promise<{
   offersBackfilled: number;
@@ -52,6 +127,7 @@ export async function reconcileLegacyCatalog(): Promise<{
     if (!db) throw new Error("Banco indisponível para reconciliar catálogo");
 
     const offersBackfilled = await backfillMissingCanonicalOffers();
+    await ensureOfferPriceMirrorTriggers();
 
     const [aliasResult] = await db.execute(sql.raw(`
       UPDATE products
