@@ -4,7 +4,7 @@ import {
   getCaptureJobStatus,
   getConnectorHealthList,
 } from "../services/captureCoreService";
-import { listSafeCaptureReviewQueue } from "../services/captureSafeProcessor";
+import { listCaptureReviewObservations } from "../services/captureObservationService";
 import { decideCaptureObservationTransactional } from "../services/captureReviewService";
 import { enqueuePriorityRefreshForTerms } from "../services/capturePriorityRefreshService";
 import { captureRunnerStatus } from "../jobs/captureJobRunner";
@@ -31,7 +31,7 @@ export const captureCoreRouter = router({
 
   reviewQueue: adminProcedure
     .input(reviewQueueInput)
-    .query(({ input }) => listSafeCaptureReviewQueue(input)),
+    .query(({ input }) => listCaptureReviewObservations(input)),
 
   decideObservation: adminProcedure
     .input(decisionInput)
@@ -42,7 +42,6 @@ export const captureCoreRouter = router({
       }),
     ),
 
-  /** Atualização prioritária para itens de edital/proposta/cotação. */
   refreshTerms: adminProcedure
     .input(z.object({
       terms: z.array(z.string().trim().min(1).max(512)).min(1).max(500),
