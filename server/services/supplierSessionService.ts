@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { supplierSessions, type SupplierSession } from "../../drizzle/schema";
 import { credentialEncryptionService } from "./credentialEncryptionService";
+import { cookieRecordToHeader } from "./sessionCookies";
 
 export interface SessionData {
   cookies?: Record<string, string>;
@@ -161,9 +162,7 @@ export class SupplierSessionService {
   }
 
   formatCookieHeader(cookies: Record<string, string>): string {
-    return Object.entries(cookies)
-      .map(([key, value]) => `${key}=${value}`)
-      .join("; ");
+    return cookieRecordToHeader(cookies);
   }
 
   async invalidateSession(supplierId: number): Promise<void> {
