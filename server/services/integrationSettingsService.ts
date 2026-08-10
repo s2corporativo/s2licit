@@ -49,6 +49,14 @@ export const INTEGRATION_KEYS = {
 
 export type IntegrationKey = keyof typeof INTEGRATION_KEYS;
 
+const OFFICIAL_SOURCE_DOMAINS: Partial<Record<IntegrationKey, readonly string[]>> = {
+  FIEMG_OPPORTUNITIES_URL: ["fiemg.com.br"],
+  FIEMG_LICITACOES_URL: ["fiemg.com.br"],
+  COMPRASMG_OPPORTUNITIES_URL: ["compras.mg.gov.br"],
+  CEMIG_OPPORTUNITIES_URL: ["cemig.com.br"],
+  COPASA_OPPORTUNITIES_URL: ["copasa.com.br"],
+};
+
 export type IntegrationView = Array<{
   chave: IntegrationKey;
   label: string;
@@ -61,6 +69,11 @@ export type IntegrationView = Array<{
 
 function isIntegrationKey(value: string): value is IntegrationKey {
   return Object.prototype.hasOwnProperty.call(INTEGRATION_KEYS, value);
+}
+
+function hostnameMatchesRoot(hostname: string, root: string): boolean {
+  const normalizedRoot = root.toLowerCase().replace(/^\.+|\.+$/g, "");
+  return hostname === normalizedRoot || hostname.endsWith(`.${normalizedRoot}`);
 }
 
 function validateHttpUrl(chave: IntegrationKey, valor: string): void {
@@ -76,9 +89,16 @@ function validateHttpUrl(chave: IntegrationKey, valor: string): void {
   if (parsed.username || parsed.password) {
     throw new Error(`${chave}: credenciais embutidas na URL não são permitidas.`);
   }
-  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
     throw new Error(`${chave}: destinos locais não são permitidos.`);
+  }
+
+  const allowedRoots = OFFICIAL_SOURCE_DOMAINS[chave];
+  if (allowedRoots && !allowedRoots.some((root) => hostnameMatchesRoot(hostname, root))) {
+    throw new Error(
+      `${chave}: domínio ${hostname} não pertence à fonte oficial permitida (${allowedRoots.join(", ")}).`,
+    );
   }
 }
 
