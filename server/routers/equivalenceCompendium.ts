@@ -11,6 +11,7 @@ import {
   validateCompendiumEntry,
 } from "../services/equivalenceCompendiumService";
 import { applyPersistedEquivalenceMemory, enforceCriticalTechnicalGuards } from "../services/equivalenceGuardService";
+import { assessCandidatesWithCompendiumKnowledge } from "../services/equivalenceKnowledgeAiService";
 
 export const equivalenceCompendiumRouter = router({
   stats: protectedProcedure.query(() => compendiumStats()),
@@ -36,13 +37,23 @@ export const equivalenceCompendiumRouter = router({
       message: "Informe productId ou description",
     }))
     .mutation(async ({ input }) => {
-      const result = await analyzeEquivalences(input);
-      const guarded = enforceCriticalTechnicalGuards(result.reference, result.candidates);
+      // O motor determinístico sempre roda primeiro. Isso garante operação mesmo
+      // sem provedor de IA e impede que a LLM seja usada como filtro primário.
+      const base = await analyzeEquivalences({ ...input, useAI: false });
+      const guarded = enforceCriticalTechnicalGuards(base.reference, base.candidates);
+
+      const aiResult = input.useAI === false
+        ? { candidates: guarded, knowledgeCount: 0, precedentCount: 0, aiUsed: false }
+        : await assessCandidatesWithCompendiumKnowledge({ reference: base.reference, candidates: guarded });
+
+      // Decisão humana persistida é aplicada por último e prevalece quando o
+      // contexto técnico coincide; nunca sobrepõe um bloqueio técnico crítico.
       const learned = await applyPersistedEquivalenceMemory({
-        reference: result.reference,
+        reference: base.reference,
         description: input.description,
-        candidates: guarded,
+        candidates: aiResult.candidates,
       });
+
       const rank = (candidate: (typeof learned)[number]) =>
         candidate.aiAssessment?.decision === "approved" ? 0 :
         candidate.aiAssessment?.decision === "needs_review" ? 1 : 2;
@@ -54,7 +65,14 @@ export const equivalenceCompendiumRouter = router({
         const bPrice = Number(b.bestOffer?.effectivePrice ?? Number.POSITIVE_INFINITY);
         return aPrice - bPrice;
       });
-      return { ...result, candidates: learned };
+
+      return {
+        ...base,
+        candidates: learned,
+        engine: input.useAI === false ? "deterministic_memory" : aiResult.aiUsed ? "compendium_grounded_ai" : "deterministic_memory_fallback",
+        compendiumKnowledgeCount: aiResult.knowledgeCount,
+        feedbackMemoryCount: aiResult.precedentCount,
+      };
     }),
 
   bootstrap: editorProcedure
