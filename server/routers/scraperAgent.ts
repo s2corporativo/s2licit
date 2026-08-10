@@ -1,27 +1,31 @@
 /**
  * scraperAgent.ts
- * Router do Agente de Scraping — gerencia fornecedores com login,
- * executa raspagem, testa credenciais e agenda atualizações automáticas.
+ *
+ * Fachada compatível da Central de Captura. A UI antiga continua usando os
+ * mesmos endpoints principais, mas execução/status/histórico agora vêm do
+ * Capture Core persistente em vez de Maps em memória.
  */
 
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { scraperConfigs, scraperLogs } from "../../drizzle/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { captureConnectorHealth, captureJobs } from "../../drizzle/captureCoreSchema";
 import { encryptPassword, decryptPassword } from "../utils/encryption";
-import { executarScraper, testarLoginFornecedor, FORNECEDOR_CONFIGS } from "../services/scraperEngine";
-import { expandAndSyncTambasaCatalog } from "../services/tambasaCatalogService";
+import { FORNECEDOR_CONFIGS, testarLoginFornecedor } from "../services/scraperEngine";
+import { getConnectorCapabilities } from "../services/captureConnectorCapabilities";
+import {
+  decideCaptureObservation,
+  enqueueCaptureJob,
+  getCaptureJobStatus,
+  getConnectorHealthList,
+  listCaptureJobHistory,
+  listCaptureReviewQueue,
+} from "../services/captureCoreService";
+import { captureRunnerStatus } from "../jobs/captureJobRunner";
 import { logger } from "../_core/logger";
 
-// Jobs em execução (em memória — suficiente para UI de progresso)
-const runningJobs = new Map<number, { status: string; log: string[]; startedAt: Date }>();
-
-// ─── Schemas ──────────────────────────────────────────────────────────────
-
-// Seletores CSS/URLs para um fornecedor sem config embutida em
-// FORNECEDOR_CONFIGS. Preenchido quando o usuário escolhe "Fornecedor
-// personalizado" na tela de cadastro.
 const customSelectorsSchema = z.object({
   loginUrl: z.string().url().optional(),
   loginTrigger: z.string().optional(),
@@ -31,7 +35,9 @@ const customSelectorsSchema = z.object({
   loginSuccessUrl: z.string().optional(),
   loginSuccessText: z.string().optional(),
   loginSuccessSelector: z.string().optional(),
-  categoryUrls: z.array(z.string().url()).min(1),
+  categoryUrls: z.array(z.string().url()).default([]),
+  searchUrlTemplate: z.string().url().optional(),
+  useStructuredData: z.boolean().optional(),
   productItem: z.string().min(1),
   productName: z.string().min(1),
   productPrice: z.string().min(1),
@@ -41,24 +47,25 @@ const customSelectorsSchema = z.object({
   productLink: z.string().optional(),
   nextPage: z.string().optional(),
   waitForSelector: z.string().optional(),
-  navigationWait: z.number().optional(),
-});
+  navigationWait: z.number().int().min(0).max(60_000).optional(),
+}).refine(
+  (value) => value.categoryUrls.length > 0 || Boolean(value.searchUrlTemplate),
+  { message: "Informe ao menos uma URL de categoria ou uma URL de busca." },
+);
 
 const cadastrarSchema = z.object({
-  supplierId: z.number(),
-  scraperType: z.string().min(1),
+  supplierId: z.number().int().positive(),
+  scraperType: z.string().min(1).max(64),
   email: z.string().email(),
   password: z.string().min(4),
   scheduleTime: z.string().regex(/^\d{2}:\d{2}$/).default("02:00"),
   enabled: z.enum(["yes", "no"]).default("yes"),
   customSelectors: customSelectorsSchema.optional(),
-  // Governança: o operador confirma que os termos de uso do site foram
-  // revisados e a coleta está autorizada. Sem isso a captura não roda.
   tosAprovado: z.boolean().default(false),
 });
 
 const atualizarCredenciaisSchema = z.object({
-  id: z.number(),
+  id: z.number().int().positive(),
   email: z.string().email().optional(),
   password: z.string().min(4).optional(),
   scheduleTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
@@ -74,32 +81,19 @@ const testarConexaoSchema = z.object({
   customSelectors: customSelectorsSchema.optional(),
 });
 
-// A atualização manual SEMPRE pede a confirmação do login do fornecedor:
-// o operador confirma o e-mail e digita a senha (ou reutiliza a salva).
-// Credenciais enviadas aqui substituem as armazenadas antes da execução.
 const executarSchema = z.object({
-  scraperConfigId: z.number(),
+  scraperConfigId: z.number().int().positive(),
   email: z.string().email().optional(),
   password: z.string().min(4).optional(),
   usarSenhaSalva: z.boolean().default(true),
 });
 
-const statusSchema = z.object({ scraperConfigId: z.number() });
-
-const historicoSchema = z.object({ scraperConfigId: z.number(), limit: z.number().default(20) });
-
-const verEmailSchema = z.object({ id: z.number() });
-
-// ─── Router ───────────────────────────────────────────────────────────────
-
 export const scraperAgentRouter = router({
-
-  /** Lista fornecedores configurados para scraping */
   listar: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
     try {
-      return await db.select({
+      const configs = await db.select({
         id: scraperConfigs.id,
         supplierId: scraperConfigs.supplierId,
         scraperType: scraperConfigs.scraperType,
@@ -111,255 +105,238 @@ export const scraperAgentRouter = router({
         lastRunErrorMessage: scraperConfigs.lastRunErrorMessage,
         productsScrapedCount: scraperConfigs.productsScrapedCount,
         productsUpdatedCount: scraperConfigs.productsUpdatedCount,
+        customSelectors: scraperConfigs.customSelectors,
       }).from(scraperConfigs).orderBy(desc(scraperConfigs.updatedAt));
+
+      const active = await db.select({
+        scraperConfigId: captureJobs.scraperConfigId,
+        status: captureJobs.status,
+        stage: captureJobs.progressStage,
+        message: captureJobs.progressMessage,
+      }).from(captureJobs)
+        .where(inArray(captureJobs.status, ["queued", "running"]));
+      const activeByConfig = new Map(active.map((job) => [job.scraperConfigId, job]));
+
+      const healthRows = await db.select().from(captureConnectorHealth);
+      const healthByConfig = new Map(healthRows.map((row) => [row.scraperConfigId, row]));
+
+      return configs.map((config) => {
+        const activeJob = activeByConfig.get(config.id);
+        const health = healthByConfig.get(config.id);
+        const capabilities = getConnectorCapabilities(config.scraperType, config.customSelectors as any);
+        return {
+          ...config,
+          // Compatibilidade com o frontend atual: ele já sabe renderizar running.
+          lastRunStatus: activeJob ? "running" : config.lastRunStatus,
+          captureStage: activeJob?.stage ?? null,
+          captureMessage: activeJob?.message ?? null,
+          healthStatus: health?.status ?? "unknown",
+          healthScore: health?.score != null ? Number(health.score) : null,
+          capabilities,
+        };
+      });
     } catch (error) {
-      logger.error('[ScraperAgent] Erro ao listar configs:', error);
+      logger.error("[ScraperAgent] Erro ao listar configs:", error);
       return [];
     }
   }),
 
-  /** Tipos de scrapers disponíveis (fornecedores suportados) */
-  tiposDisponiveis: protectedProcedure.query(() => {
-    return Object.entries(FORNECEDOR_CONFIGS).map(([key, cfg]) => ({
-      tipo: key,
-      categorias: cfg.categoryUrls,
-      suporta: {
-        paginacao: !!cfg.nextPage,
-        ean: !!cfg.productEan,
-        codigo: !!cfg.productCode,
-        imagem: !!cfg.productImage,
-      },
-    }));
-  }),
+  tiposDisponiveis: protectedProcedure.query(() =>
+    Object.entries(FORNECEDOR_CONFIGS)
+      .filter(([key]) => key !== "generico")
+      .map(([key, cfg]) => ({
+        tipo: key,
+        categorias: cfg.categoryUrls,
+        capacidades: getConnectorCapabilities(key, cfg),
+        suporta: {
+          paginacao: Boolean(cfg.nextPage),
+          busca: Boolean(cfg.searchUrlTemplate),
+          ean: Boolean(cfg.productEan || cfg.useStructuredData),
+          codigo: Boolean(cfg.productCode || cfg.useStructuredData),
+          imagem: Boolean(cfg.productImage || cfg.useStructuredData),
+        },
+      })),
+  ),
 
-  /** Cadastrar novo fornecedor para scraping */
-  cadastrar: adminProcedure
-    .input(cadastrarSchema)
-    .mutation(async ({ input }: { input: z.infer<typeof cadastrarSchema> }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-
-      const [result] = await db.insert(scraperConfigs).values({
-        supplierId: input.supplierId,
-        scraperType: input.scraperType,
-        email: input.email,
-        passwordHash: encryptPassword(input.password),
-        scheduleTime: input.scheduleTime,
-        enabled: input.enabled,
-        customSelectors: input.customSelectors ?? null,
-        tosAprovado: input.tosAprovado ?? false,
-      });
-
-      return { id: (result as any).insertId, message: "Fornecedor configurado com sucesso" };
-    }),
-
-  /** Atualizar credenciais de um scraper */
-  atualizarCredenciais: adminProcedure
-    .input(atualizarCredenciaisSchema)
-    .mutation(async ({ input }: { input: z.infer<typeof atualizarCredenciaisSchema> }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-
-      const updates: Record<string, any> = {};
-      if (input.email) updates.email = input.email; // e-mail em texto puro
-      if (input.password) updates.passwordHash = encryptPassword(input.password);
-      if (input.scheduleTime) updates.scheduleTime = input.scheduleTime;
-      if (input.enabled) updates.enabled = input.enabled;
-      if (input.customSelectors) updates.customSelectors = input.customSelectors;
-      if (input.tosAprovado !== undefined) updates.tosAprovado = input.tosAprovado;
-
-      await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, input.id));
-      return { message: "Credenciais atualizadas com sucesso" };
-    }),
-
-  /** Testa login no site do fornecedor (sem raspar nem salvar nada) */
-  testarConexao: adminProcedure
-    .input(testarConexaoSchema)
-    .mutation(async ({ input }: { input: z.infer<typeof testarConexaoSchema> }) => {
-      return testarLoginFornecedor(input.scraperType, input.email, input.password, input.customSelectors);
-    }),
-
-  /** Deletar configuração de um scraper */
-  deletar: adminProcedure
-    .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }: { input: { id: number } }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      await db.delete(scraperConfigs).where(eq(scraperConfigs.id, input.id));
-      return { message: "Configuração deletada com sucesso" };
-    }),
-
-  /** Executar scraping de um fornecedor específico (dispara em background) */
-  executar: adminProcedure
-    .input(executarSchema)
-    .mutation(async ({ input }: { input: z.infer<typeof executarSchema> }) => {
-      const { scraperConfigId } = input;
-      let scraperType = "";
-
-      // Governança: captura só roda com os termos de uso do fornecedor
-      // revisados e aprovados por um humano (checkbox na tela de captura).
-      {
-        const db = await getDb();
-        if (!db) throw new Error("Banco indisponível");
-        const [cfg] = await db
-          .select({
-            tosAprovado: scraperConfigs.tosAprovado,
-            scraperType: scraperConfigs.scraperType,
-          })
-          .from(scraperConfigs)
-          .where(eq(scraperConfigs.id, scraperConfigId))
-          .limit(1);
-        if (!cfg) throw new Error("Configuração de captura não encontrada.");
-        if (!cfg.tosAprovado) {
-          throw new Error(
-            "Captura bloqueada: confirme na configuração do fornecedor que os termos de uso do site foram revisados e a coleta está autorizada."
-          );
-        }
-        scraperType = cfg.scraperType.toLowerCase();
-      }
-
-      // Confirmação de login: se o operador digitou credenciais novas, elas
-      // são gravadas (senha criptografada) antes de iniciar a captura. Sem
-      // senha nova, exige explicitamente o uso da senha salva.
-      if (input.password || input.email) {
-        const db = await getDb();
-        if (!db) throw new Error("Banco indisponível");
-        const updates: Record<string, any> = {};
-        if (input.email) updates.email = input.email;
-        if (input.password) updates.passwordHash = encryptPassword(input.password);
-        await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, scraperConfigId));
-      } else if (!input.usarSenhaSalva) {
-        throw new Error("Informe a senha do fornecedor ou marque 'usar senha salva'.");
-      }
-
-      if (runningJobs.has(scraperConfigId)) {
-        const job = runningJobs.get(scraperConfigId)!;
-        if (job.status === "running") {
-          throw new Error("Scraper já está em execução para este fornecedor");
-        }
-      }
-
-      runningJobs.set(scraperConfigId, {
-        status: "running",
-        log: [scraperType === "tambasa" ? "Descobrindo todo o catálogo Tambasa..." : "Job iniciado..."],
-        startedAt: new Date(),
-      });
-
-      const runPromise = scraperType === "tambasa"
-        ? expandAndSyncTambasaCatalog(scraperConfigId).then((result) => result.scraper)
-        : executarScraper(scraperConfigId);
-
-      runPromise
-        .then((r) => {
-          runningJobs.set(scraperConfigId, {
-            status: r.success ? "success" : "failed",
-            log: r.log,
-            startedAt: runningJobs.get(scraperConfigId)?.startedAt ?? new Date(),
-          });
-        })
-        .catch((err) => {
-          runningJobs.set(scraperConfigId, {
-            status: "failed",
-            log: [`Erro: ${err?.message}`],
-            startedAt: runningJobs.get(scraperConfigId)?.startedAt ?? new Date(),
-          });
-        });
-
-      return {
-        message: scraperType === "tambasa"
-          ? "Descoberta e sincronização completa da Tambasa iniciadas em background"
-          : "Scraper iniciado em background",
-      };
-    }),
-
-  /** Consultar status de um job em execução */
-  status: protectedProcedure
-    .input(statusSchema)
-    .query(({ input }: { input: z.infer<typeof statusSchema> }) => {
-      const job = runningJobs.get(input.scraperConfigId);
-      if (!job) return { status: "idle", log: [], startedAt: null };
-      return job;
-    }),
-
-  /** Histórico de execuções de um scraper */
-  historico: protectedProcedure
-    .input(historicoSchema)
-    .query(async ({ input }: { input: z.infer<typeof historicoSchema> }) => {
-      const db = await getDb();
-      if (!db) return [];
-      return db.select().from(scraperLogs)
-        .where(eq(scraperLogs.scraperConfigId, input.scraperConfigId))
-        .orderBy(desc(scraperLogs.startedAt))
-        .limit(input.limit);
-    }),
-
-  /** Executar scraping de TODOS os fornecedores habilitados */
-  executarTodos: adminProcedure.mutation(async () => {
+  cadastrar: adminProcedure.input(cadastrarSchema).mutation(async ({ input }) => {
     const db = await getDb();
     if (!db) throw new Error("Banco indisponível");
 
-    // Só fornecedores habilitados E com termos de uso aprovados (governança)
-    const ativos = await db.select({
-      id: scraperConfigs.id,
-      scraperType: scraperConfigs.scraperType,
-    })
+    const [existing] = await db.select({ id: scraperConfigs.id })
       .from(scraperConfigs)
-      .where(and(eq(scraperConfigs.enabled, "yes"), eq(scraperConfigs.tosAprovado, true)));
-
-    let iniciados = 0;
-    for (const { id, scraperType } of ativos) {
-      if (!runningJobs.has(id) || runningJobs.get(id)?.status !== "running") {
-        const isTambasa = scraperType.toLowerCase() === "tambasa";
-        runningJobs.set(id, {
-          status: "running",
-          log: [isTambasa ? "Descobrindo todo o catálogo Tambasa..." : "Job iniciado..."],
-          startedAt: new Date(),
-        });
-
-        const runPromise = isTambasa
-          ? expandAndSyncTambasaCatalog(id).then((result) => result.scraper)
-          : executarScraper(id);
-
-        runPromise
-          .then((r) => {
-            runningJobs.set(id, {
-              status: r.success ? "success" : "failed",
-              log: r.log,
-              startedAt: runningJobs.get(id)?.startedAt ?? new Date(),
-            });
-          })
-          .catch((err) => {
-            runningJobs.set(id, {
-              status: "failed",
-              log: [`Erro: ${err?.message}`],
-              startedAt: runningJobs.get(id)?.startedAt ?? new Date(),
-            });
-          });
-        iniciados++;
-        // Pequeno delay entre scrapers para não sobrecarregar
-        await new Promise(r => setTimeout(r, 2000));
-      }
+      .where(eq(scraperConfigs.supplierId, input.supplierId))
+      .limit(1);
+    if (existing) {
+      throw new Error("Este fornecedor já possui uma configuração de captura. Edite a existente para evitar jobs duplicados.");
     }
 
-    return { message: `${iniciados} scrapers iniciados`, total: ativos.length };
+    const [result] = await db.insert(scraperConfigs).values({
+      supplierId: input.supplierId,
+      scraperType: input.scraperType,
+      email: input.email,
+      passwordHash: encryptPassword(input.password),
+      scheduleTime: input.scheduleTime,
+      enabled: input.enabled,
+      customSelectors: input.customSelectors ?? null,
+      tosAprovado: input.tosAprovado,
+    });
+    return { id: Number((result as any).insertId), message: "Fornecedor configurado com sucesso" };
   }),
 
-  /** Verificar email exibível de uma configuração (sem senha) */
-  verEmail: adminProcedure
-    .input(verEmailSchema)
-    .query(async ({ input }: { input: z.infer<typeof verEmailSchema> }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Banco indisponível");
-      const rows = await db.select({ email: scraperConfigs.email })
-        .from(scraperConfigs).where(eq(scraperConfigs.id, input.id)).limit(1);
-      if (!rows[0]) return { email: null };
-      // E-mail é texto puro; tolera registros antigos criptografados.
-      const raw = rows[0].email ?? "";
-      if (raw.includes("@")) return { email: raw };
+  atualizarCredenciais: adminProcedure.input(atualizarCredenciaisSchema).mutation(async ({ input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Banco indisponível");
+    const updates: Record<string, unknown> = {};
+    if (input.email) updates.email = input.email;
+    if (input.password) updates.passwordHash = encryptPassword(input.password);
+    if (input.scheduleTime) updates.scheduleTime = input.scheduleTime;
+    if (input.enabled) updates.enabled = input.enabled;
+    if (input.customSelectors) updates.customSelectors = input.customSelectors;
+    if (input.tosAprovado !== undefined) updates.tosAprovado = input.tosAprovado;
+    await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, input.id));
+    return { message: "Configuração atualizada com sucesso" };
+  }),
+
+  testarConexao: adminProcedure.input(testarConexaoSchema).mutation(async ({ input }) => {
+    const custom = input.customSelectors
+      ? ({ ...input.customSelectors, categoryUrls: input.customSelectors.categoryUrls ?? [] } as any)
+      : undefined;
+    return testarLoginFornecedor(input.scraperType, input.email, input.password, custom);
+  }),
+
+  deletar: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Banco indisponível");
+    const [active] = await db.select({ id: captureJobs.id }).from(captureJobs)
+      .where(and(eq(captureJobs.scraperConfigId, input.id), inArray(captureJobs.status, ["queued", "running"])))
+      .limit(1);
+    if (active) throw new Error("Não é possível remover a configuração enquanto há captura ativa.");
+    await db.delete(scraperConfigs).where(eq(scraperConfigs.id, input.id));
+    return { message: "Configuração removida com sucesso" };
+  }),
+
+  executar: adminProcedure.input(executarSchema).mutation(async ({ input, ctx }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Banco indisponível");
+
+    if (input.password || input.email) {
+      const updates: Record<string, unknown> = {};
+      if (input.email) updates.email = input.email;
+      if (input.password) updates.passwordHash = encryptPassword(input.password);
+      await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, input.scraperConfigId));
+    } else if (!input.usarSenhaSalva) {
+      throw new Error("Informe a senha do fornecedor ou marque 'usar senha salva'.");
+    }
+
+    const job = await enqueueCaptureJob({
+      scraperConfigId: input.scraperConfigId,
+      mode: "full",
+      trigger: "manual",
+      priority: 80,
+      createdByUserId: ctx.user.id,
+    });
+    return {
+      message: job.reused
+        ? `Já existe uma captura ${job.status} para este fornecedor.`
+        : `Captura ${job.mode} enfileirada com sucesso.`,
+      jobId: job.id,
+      mode: job.mode,
+    };
+  }),
+
+  buscarAgora: adminProcedure.input(z.object({
+    scraperConfigId: z.number().int().positive(),
+    termo: z.string().min(1).max(512),
+  })).mutation(async ({ input, ctx }) => {
+    const job = await enqueueCaptureJob({
+      scraperConfigId: input.scraperConfigId,
+      mode: "search",
+      trigger: "api",
+      query: input.termo,
+      priority: 100,
+      createdByUserId: ctx.user.id,
+    });
+    return { jobId: job.id, status: job.status, reused: job.reused };
+  }),
+
+  status: protectedProcedure.input(z.object({ scraperConfigId: z.number().int().positive() }))
+    .query(({ input }) => getCaptureJobStatus(input.scraperConfigId)),
+
+  historico: protectedProcedure.input(z.object({
+    scraperConfigId: z.number().int().positive(),
+    limit: z.number().int().min(1).max(100).default(20),
+  })).query(async ({ input }) => {
+    const current = await listCaptureJobHistory(input.scraperConfigId, input.limit);
+    if (current.length > 0) return current;
+    // Compatibilidade histórica durante a transição.
+    const db = await getDb();
+    if (!db) return [];
+    return db.select().from(scraperLogs)
+      .where(eq(scraperLogs.scraperConfigId, input.scraperConfigId))
+      .orderBy(desc(scraperLogs.startedAt)).limit(input.limit);
+  }),
+
+  executarTodos: adminProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Banco indisponível");
+    const ativos = await db.select({ id: scraperConfigs.id })
+      .from(scraperConfigs)
+      .where(and(eq(scraperConfigs.enabled, "yes"), eq(scraperConfigs.tosAprovado, true)));
+    let iniciados = 0;
+    let reutilizados = 0;
+    const jobs: number[] = [];
+    for (const config of ativos) {
       try {
-        return { email: decryptPassword(raw) };
-      } catch {
-        return { email: raw };
+        const job = await enqueueCaptureJob({
+          scraperConfigId: config.id,
+          mode: "full",
+          trigger: "bulk",
+          priority: 60,
+          createdByUserId: ctx.user.id,
+        });
+        jobs.push(job.id);
+        if (job.reused) reutilizados++;
+        else iniciados++;
+      } catch (error) {
+        logger.warn(`[ScraperAgent] Config #${config.id} não enfileirada: ${(error as Error).message}`);
       }
-    }),
+    }
+    return {
+      message: `${iniciados} captura(s) enfileirada(s); ${reutilizados} já estavam em andamento.`,
+      total: ativos.length,
+      jobs,
+    };
+  }),
+
+  reviewQueue: adminProcedure.input(z.object({
+    scraperConfigId: z.number().int().positive().optional(),
+    supplierId: z.number().int().positive().optional(),
+    limit: z.number().int().min(1).max(500).default(100),
+  }).default({ limit: 100 })).query(({ input }) => listCaptureReviewQueue(input)),
+
+  decideObservation: adminProcedure.input(z.object({
+    observationId: z.number().int().positive(),
+    decision: z.enum(["approve", "reject"]),
+    expectedProductId: z.number().int().positive().nullable().optional(),
+    notes: z.string().max(2000).nullable().optional(),
+  })).mutation(({ input, ctx }) => decideCaptureObservation({
+    ...input,
+    userId: ctx.user.id,
+  })),
+
+  health: protectedProcedure.query(() => getConnectorHealthList()),
+
+  runnerStatus: adminProcedure.query(() => captureRunnerStatus()),
+
+  verEmail: adminProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("Banco indisponível");
+    const [row] = await db.select({ email: scraperConfigs.email })
+      .from(scraperConfigs).where(eq(scraperConfigs.id, input.id)).limit(1);
+    if (!row) return { email: null };
+    const raw = row.email ?? "";
+    if (raw.includes("@")) return { email: raw };
+    try { return { email: decryptPassword(raw) }; }
+    catch { return { email: raw }; }
+  }),
 });
