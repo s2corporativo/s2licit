@@ -8,6 +8,7 @@ import {
   type InsertProposalItem,
 } from "../../drizzle/schema";
 import { getDb } from "./_client";
+import { proposalEmailDispatches } from "./proposalEmailDispatches";
 
 export type ProposalStatus = typeof proposals.$inferSelect["status"];
 const PROPOSAL_STATUSES = new Set<ProposalStatus>([
@@ -82,6 +83,21 @@ async function lockDraftProposal(tx: Transaction, proposalId: number): Promise<v
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
       message: "A proposta já saiu do rascunho. O conteúdo comercial está congelado.",
+    });
+  }
+
+  const [dispatch] = await tx
+    .select({ state: proposalEmailDispatches.state })
+    .from(proposalEmailDispatches)
+    .where(eq(proposalEmailDispatches.proposalId, proposalId))
+    .limit(1);
+  if (dispatch) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message:
+        dispatch.state === "ambiguous"
+          ? "O envio desta proposta está em estado ambíguo. O conteúdo permanece congelado até a conferência do despacho."
+          : "Existe um despacho de e-mail reservado para esta proposta. O conteúdo comercial está congelado.",
     });
   }
 }
