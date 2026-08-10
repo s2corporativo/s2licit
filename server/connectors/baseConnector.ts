@@ -1,16 +1,16 @@
 /**
- * Base Connector — camada de compatibilidade dos connectors legados.
+ * Base Connector — contratos de domínio e compatibilidade dos connectors legados.
  *
  * Toda comunicação HTTP deve passar por `externalHttpRequest`. Este arquivo
- * mantém os contratos antigos enquanto os conectores são migrados, evitando
- * duplicar retry/timeout/logging em cada fonte.
+ * mantém apenas o wrapper temporário necessário para consumidores ainda não
+ * migrados e o histórico genérico de sync_runs.
  */
-
-import { getDb } from "../db";
-import { apiLogs, syncRuns } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
+import { syncRuns } from "../../drizzle/schema";
 import { externalHttpRequest } from "../integrations/core/externalHttpClient";
+import { getDb } from "../db";
 
-export interface ConnectorFetchResult {
+export interface ConnectorFetchResult<T = unknown> {
   source: string;
   sourceId?: string;
   requestUrl: string;
@@ -18,7 +18,7 @@ export interface ConnectorFetchResult {
   statusCode: number;
   contentType: string;
   rawSample: string;
-  payload: any;
+  payload: T | null;
   success: boolean;
   errorMessage?: string;
   durationMs: number;
@@ -48,17 +48,15 @@ export interface NormalizedLicitacao {
 
 /**
  * Wrapper temporário para consumidores antigos. Retry, timeout, redaction,
- * circuit breaker e api_logs são responsabilidade do cliente HTTP central.
+ * circuit breaker e telemetria são responsabilidade do cliente HTTP central.
  */
-export async function robustFetch(
+export async function robustFetch<T = unknown>(
   url: string,
   source: string,
   options?: RequestInit,
-): Promise<ConnectorFetchResult> {
-  const headers = Object.fromEntries(
-    Array.from(new Headers(options?.headers).entries()),
-  );
-  const result = await externalHttpRequest<any>({
+): Promise<ConnectorFetchResult<T>> {
+  const headers = Object.fromEntries(Array.from(new Headers(options?.headers).entries()));
+  const result = await externalHttpRequest<T>({
     source,
     operation: "legacy-fetch",
     url,
@@ -75,7 +73,7 @@ export async function robustFetch(
     fetchedAt: result.fetchedAt,
     statusCode: result.statusCode,
     contentType: result.contentType,
-    rawSample: result.text.slice(0, 2000),
+    rawSample: result.text.slice(0, 2_000),
     payload: result.data,
     success: result.ok,
     errorMessage: result.error?.message,
@@ -85,52 +83,15 @@ export async function robustFetch(
   };
 }
 
-/**
- * Registro manual para integrações que não usam HTTP JSON (ex.: parser HTML).
- * Novos conectores devem preferir `externalHttpRequest`, que já registra a
- * chamada com redaction automática.
- */
-export async function logApiCall(params: {
-  source: string;
-  endpoint: string;
-  requestUrl: string;
-  statusCode: number;
-  contentType: string;
-  errorMessage?: string;
-  rawSample: string;
-  durationMs: number;
-  success: boolean;
-}): Promise<void> {
-  try {
-    const db = await getDb();
-    if (!db) return;
-    const safeUrl = params.requestUrl.replace(
-      /([?&](?:token|key|secret|password|senha|api[_-]?key)=)[^&]+/gi,
-      "$1[REDACTED]",
-    );
-    const sanitize = (value: string) =>
-      value
-        .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,"'}]+/gi, "$1[REDACTED]")
-        .replace(/((?:api[_-]?key|token|password|senha|secret)\s*["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi, "$1[REDACTED]");
-    await db.insert(apiLogs).values({
-      source: params.source,
-      endpoint: params.endpoint.slice(0, 512),
-      requestUrl: safeUrl,
-      statusCode: params.statusCode,
-      contentType: params.contentType.slice(0, 128),
-      errorMessage: params.errorMessage ? sanitize(params.errorMessage).slice(0, 2000) : undefined,
-      rawSample: sanitize(params.rawSample).slice(0, 2000),
-      durationMs: params.durationMs,
-      success: params.success,
-    });
-  } catch {
-    // Logging nunca interrompe o fluxo principal.
-  }
+function insertIdFromResult(result: unknown): number | null {
+  if (!result || typeof result !== "object" || !("insertId" in result)) return null;
+  const parsed = Number((result as { insertId?: unknown }).insertId);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 /**
- * Histórico genérico de execução. A tabela mantém o nome legado `sync_runs`
- * por compatibilidade de banco, mas passa a ser utilizada por qualquer fonte.
+ * Histórico genérico de execução. A tabela mantém o nome legado `syncRuns` por
+ * compatibilidade de banco, mas registra jobs e integrações de qualquer fonte.
  */
 export async function startSyncRun(source: string, windowSync?: string): Promise<number | null> {
   try {
@@ -141,7 +102,7 @@ export async function startSyncRun(source: string, windowSync?: string): Promise
       windowSync,
       status: "running",
     });
-    return (result as any).insertId ?? null;
+    return insertIdFromResult(result);
   } catch {
     return null;
   }
@@ -162,7 +123,6 @@ export async function finishSyncRun(
   try {
     const db = await getDb();
     if (!db) return;
-    const { eq } = await import("drizzle-orm");
     await db
       .update(syncRuns)
       .set({
@@ -172,33 +132,29 @@ export async function finishSyncRun(
         skippedCount: stats.skippedCount,
         errorCount: stats.errorCount,
         status: stats.status,
-        errorDetails: stats.errorDetails?.slice(0, 2000),
-        lastSuccessfulSyncAt: stats.status !== "error" ? new Date() : undefined,
+        errorDetails: stats.errorDetails?.slice(0, 2_000),
+        lastSuccessfulSyncAt: stats.status === "success" ? new Date() : undefined,
       })
       .where(eq(syncRuns.id, runId));
   } catch {
-    // Auditoria não derruba o processamento.
+    // Auditoria não derruba o processamento principal.
   }
 }
 
 export function parseDate(dateStr?: string | null): Date | null {
   if (!dateStr) return null;
-  try {
-    const d = new Date(dateStr);
-    return Number.isNaN(d.getTime()) ? null : d;
-  } catch {
-    return null;
-  }
+  const date = new Date(dateStr);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function generateDedupeKey(orgao: string, objeto: string, dataAbertura: Date | null): string {
-  const normalize = (s: string) =>
-    s
+  const normalize = (value: string) =>
+    value
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]/g, "")
       .slice(0, 100);
-  const dateStr = dataAbertura ? dataAbertura.toISOString().slice(0, 10) : "nodate";
-  return `${normalize(orgao)}_${normalize(objeto)}_${dateStr}`;
+  const date = dataAbertura ? dataAbertura.toISOString().slice(0, 10) : "nodate";
+  return `${normalize(orgao)}_${normalize(objeto)}_${date}`;
 }
