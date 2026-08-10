@@ -51,6 +51,14 @@ export type ProductMasterPatch = Partial<{
   isActive: "yes" | "no";
 }>;
 
+export type CreateCanonicalProductInput = ProductMasterPatch & {
+  name: string;
+  supplierId?: number | null;
+  initialPrice?: string | null;
+  supplierCode?: string | null;
+  supplierLink?: string | null;
+};
+
 function qualityConditions(filter: CatalogQualityFilter | undefined) {
   switch (filter) {
     case "incomplete":
@@ -97,6 +105,59 @@ function selectBestOffer(offers: any[]) {
     .map(normalizeOffer)
     .filter((offer) => offer.effectivePrice != null && offer.effectivePrice > 0)
     .sort((a, b) => a.effectivePrice - b.effectivePrice)[0] ?? null;
+}
+
+async function recordFieldProvenance(
+  productId: number,
+  patch: ProductMasterPatch,
+  userId?: number,
+  sourceType = "manual",
+) {
+  const db = await getDb();
+  if (!db) return;
+  await ensureCatalogKnowledgeSchema();
+  for (const [fieldName, value] of Object.entries(patch)) {
+    const serialized = value == null ? "null" : String(value);
+    const hash = createHash("sha256").update(serialized).digest("hex");
+    await db.execute(sql`
+      INSERT INTO product_field_provenance
+        (productId, fieldName, fieldValueHash, sourceType, confidence, validatedByUserId, validatedAt, metadata)
+      VALUES
+        (${productId}, ${fieldName}, ${hash}, ${sourceType}, 100, ${userId ?? null}, NOW(), ${JSON.stringify({ value })})
+    `);
+  }
+}
+
+export async function createCanonicalProduct(input: CreateCanonicalProductInput, userId?: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  await ensureCatalogKnowledgeSchema();
+
+  const { supplierId, initialPrice, supplierCode, supplierLink, ...masterInput } = input;
+  const masterFields = Object.fromEntries(
+    Object.entries(masterInput).filter(([, value]) => value !== undefined),
+  );
+
+  const [result] = await db.insert(products).values({
+    ...masterFields,
+    name: input.name.trim(),
+    supplierId: supplierId ?? null,
+    price: null,
+    isActive: input.isActive ?? "yes",
+  } as any);
+  const productId = Number((result as any)?.insertId ?? 0);
+  if (!productId) throw new Error("Produto criado, mas o banco não retornou o identificador");
+
+  await recordFieldProvenance(productId, masterFields as ProductMasterPatch, userId, "manual_create");
+  if (supplierId) {
+    await upsertProductSupplierPrice(productId, supplierId, initialPrice ?? null, {
+      codigoFornecedor: supplierCode ?? undefined,
+      linkProduto: supplierLink ?? undefined,
+      origem: "canonical_product_create",
+    });
+  }
+
+  return { productId };
 }
 
 export async function listCanonicalCatalog(input: CatalogListInput) {
@@ -188,27 +249,6 @@ export async function getCanonicalProductDetail(productId: number) {
     priceHistory: history,
     provenance: provenanceRows,
   };
-}
-
-async function recordFieldProvenance(
-  productId: number,
-  patch: ProductMasterPatch,
-  userId?: number,
-  sourceType = "manual",
-) {
-  const db = await getDb();
-  if (!db) return;
-  await ensureCatalogKnowledgeSchema();
-  for (const [fieldName, value] of Object.entries(patch)) {
-    const serialized = value == null ? "null" : String(value);
-    const hash = createHash("sha256").update(serialized).digest("hex");
-    await db.execute(sql`
-      INSERT INTO product_field_provenance
-        (productId, fieldName, fieldValueHash, sourceType, confidence, validatedByUserId, validatedAt, metadata)
-      VALUES
-        (${productId}, ${fieldName}, ${hash}, ${sourceType}, 100, ${userId ?? null}, NOW(), ${JSON.stringify({ value })})
-    `);
-  }
 }
 
 export async function updateCanonicalProduct(productId: number, patch: ProductMasterPatch, userId?: number) {
