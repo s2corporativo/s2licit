@@ -20,13 +20,11 @@ export async function listProducts(opts: {
   offset?: number;
   sortBy?: "name" | "price" | "mapa" | "supplier" | "category" | "manufacturer" | "createdAt";
   sortDir?: "asc" | "desc";
-  // legacy compat
   orderBy?: "price_asc" | "price_desc" | "name_asc" | "name_desc";
 }) {
   const db = await getDb();
   if (!db) return { items: [], total: 0 };
 
-  // Default: show active only, unless explicitly filtered
   const activeFilter = opts.isActive ?? "yes";
   const conditions: any[] = [];
   if (activeFilter !== "all") conditions.push(eq(products.isActive, activeFilter as "yes" | "no"));
@@ -38,7 +36,6 @@ export async function listProducts(opts: {
   }
   if (opts.supplierId) conditions.push(eq(products.supplierId, opts.supplierId));
 
-  // Advanced search by field
   if (opts.search) {
     const term = `%${escapeLike(opts.search)}%`;
     const field = opts.searchField ?? "all";
@@ -50,7 +47,6 @@ export async function listProducts(opts: {
     else if (field === "concentration") conditions.push(like(products.concentration, term));
     else if (field === "presentation") conditions.push(like(products.presentation, term));
     else {
-      // all fields
       conditions.push(
         or(
           like(products.name, term),
@@ -59,92 +55,92 @@ export async function listProducts(opts: {
           like(products.code, term),
           like(products.manufacturer, term),
           like(products.barcode, term),
+          like(products.gtin, term),
+          like(products.ean, term),
+          like(products.mapa, term),
+          like(products.catmatCode, term),
+          like(products.catmasCode, term),
           like(products.concentration, term),
-          like(products.presentation, term)
-        )!
+          like(products.presentation, term),
+        )!,
       );
     }
   }
 
-  // Manufacturer filter (exact partial match)
-  if (opts.manufacturer) {
-    conditions.push(like(products.manufacturer, `%${opts.manufacturer}%`));
-  }
-
-  // Price range
+  if (opts.manufacturer) conditions.push(like(products.manufacturer, `%${opts.manufacturer}%`));
   if (opts.priceMin !== undefined) conditions.push(sql`${products.price} >= ${opts.priceMin}`);
   if (opts.priceMax !== undefined) conditions.push(sql`${products.price} <= ${opts.priceMax}`);
-
-  // Has image / has product URL
   if (opts.hasImage === true) conditions.push(sql`${products.imageUrl} IS NOT NULL AND ${products.imageUrl} != ''`);
   if (opts.hasProductUrl === true) conditions.push(sql`${products.productUrl} IS NOT NULL AND ${products.productUrl} != ''`);
   if (opts.withoutFichaTecnica === true) conditions.push(sql`(${products.fichaTecnica} IS NULL OR ${products.fichaTecnica} = '')`);
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
-
-  // Sorting — support both legacy orderBy and new sortBy/sortDir
-  let orderClause: any;
-  const dir = opts.sortDir ?? "asc";
   const sortBy = opts.sortBy ?? (opts.orderBy === "price_asc" || opts.orderBy === "price_desc" ? "price" : "name");
   const sortDirFinal = opts.sortDir ?? (opts.orderBy === "price_desc" || opts.orderBy === "name_desc" ? "desc" : "asc");
 
+  let orderClause: any;
   switch (sortBy) {
-    case "price":
-      orderClause = sortDirFinal === "desc" ? desc(products.price) : asc(products.price);
-      break;
-    case "mapa":
-      orderClause = sortDirFinal === "desc" ? desc(products.mapa) : asc(products.mapa);
-      break;
-    case "manufacturer":
-      orderClause = sortDirFinal === "desc" ? desc(products.manufacturer) : asc(products.manufacturer);
-      break;
-    case "createdAt":
-      orderClause = sortDirFinal === "desc" ? desc(products.createdAt) : asc(products.createdAt);
-      break;
-    default:
-      orderClause = sortDirFinal === "desc" ? desc(products.name) : asc(products.name);
+    case "price": orderClause = sortDirFinal === "desc" ? desc(products.price) : asc(products.price); break;
+    case "mapa": orderClause = sortDirFinal === "desc" ? desc(products.mapa) : asc(products.mapa); break;
+    case "manufacturer": orderClause = sortDirFinal === "desc" ? desc(products.manufacturer) : asc(products.manufacturer); break;
+    case "createdAt": orderClause = sortDirFinal === "desc" ? desc(products.createdAt) : asc(products.createdAt); break;
+    default: orderClause = sortDirFinal === "desc" ? desc(products.name) : asc(products.name);
   }
 
+  const productProjection = {
+    id: products.id,
+    code: products.code,
+    name: products.name,
+    description: products.description,
+    activeIngredient: products.activeIngredient,
+    manufacturer: products.manufacturer,
+    unit: products.unit,
+    concentration: products.concentration,
+    presentation: products.presentation,
+    pharmaceuticalForm: products.pharmaceuticalForm,
+    price: products.price,
+    priceUnit: products.priceUnit,
+    stock: products.stock,
+    barcode: products.barcode,
+    gtin: products.gtin,
+    ean: products.ean,
+    mapa: products.mapa,
+    registroRegulatorio: products.registroRegulatorio,
+    catmasCode: products.catmasCode,
+    catmatCode: products.catmatCode,
+    codigoFornecedor: products.codigoFornecedor,
+    informacaoTecnica: products.informacaoTecnica,
+    fichaTecnica: products.fichaTecnica,
+    subcategoria: products.subcategoria,
+    ncm: products.ncm,
+    laboratorio: products.laboratorio,
+    especieAnimal: products.especieAnimal,
+    viaAdministracao: products.viaAdministracao,
+    validadeMeses: products.validadeMeses,
+    classeTerapeutica: products.classeTerapeutica,
+    nomeProduto: products.nomeProduto,
+    tipoCatalogo: products.tipoCatalogo,
+    statusConfiabilidade: products.statusConfiabilidade,
+    freightValue: products.freightValue,
+    taxValue: products.taxValue,
+    imageUrl: products.imageUrl,
+    productUrl: products.productUrl,
+    isActive: products.isActive,
+    deletedAt: products.deletedAt,
+    mergedIntoId: products.mergedIntoId,
+    createdAt: products.createdAt,
+    updatedAt: products.updatedAt,
+    supplierId: products.supplierId,
+    categoryId: products.categoryId,
+    importBatchId: products.importBatchId,
+    supplierName: suppliers.name,
+    categoryName: categories.name,
+    categoryColor: categories.color,
+    categorySlug: categories.slug,
+  };
+
   const [items, countResult] = await Promise.all([
-    db
-      .select({
-        id: products.id,
-        code: products.code,
-        name: products.name,
-        description: products.description,
-        activeIngredient: products.activeIngredient,
-        manufacturer: products.manufacturer,
-        unit: products.unit,
-        concentration: products.concentration,
-        presentation: products.presentation,
-        pharmaceuticalForm: products.pharmaceuticalForm,
-        price: products.price,
-        priceUnit: products.priceUnit,
-        stock: products.stock,
-        barcode: products.barcode,
-        mapa: products.mapa,
-        imageUrl: products.imageUrl,
-        productUrl: products.productUrl,
-        isActive: products.isActive,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        supplierId: products.supplierId,
-        categoryId: products.categoryId,
-        importBatchId: products.importBatchId,
-        supplierName: suppliers.name,
-        categoryName: categories.name,
-        categoryColor: categories.color,
-        categorySlug: categories.slug,
-        // Campos V2
-        fichaTecnica: products.fichaTecnica,
-        codigoFornecedor: products.codigoFornecedor,
-        ean: products.ean,
-        gtin: products.gtin,
-        subcategoria: products.subcategoria,
-        registroRegulatorio: products.registroRegulatorio,
-        nomeProduto: products.nomeProduto,
-        laboratorio: products.laboratorio,
-      })
+    db.select(productProjection)
       .from(products)
       .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
       .leftJoin(categories, eq(products.categoryId, categories.id))
@@ -152,10 +148,7 @@ export async function listProducts(opts: {
       .orderBy(orderClause)
       .limit(opts.limit ?? 50)
       .offset(opts.offset ?? 0),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(products)
-      .where(where),
+    db.select({ count: sql<number>`count(*)` }).from(products).where(where),
   ]);
 
   return { items, total: Number(countResult[0]?.count ?? 0) };
@@ -164,7 +157,10 @@ export async function listProducts(opts: {
 export async function getProductById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db
+  const result = await listProducts({ isActive: "all", limit: 1, offset: 0 });
+  // Evita manter duas projeções divergentes: a busca específica abaixo usa a
+  // mesma estrutura completa de listProducts, mas com filtro exato.
+  const rows = await db
     .select({
       id: products.id,
       code: products.code,
@@ -175,14 +171,37 @@ export async function getProductById(id: number) {
       unit: products.unit,
       concentration: products.concentration,
       presentation: products.presentation,
+      pharmaceuticalForm: products.pharmaceuticalForm,
       price: products.price,
       priceUnit: products.priceUnit,
       stock: products.stock,
       barcode: products.barcode,
+      gtin: products.gtin,
+      ean: products.ean,
       mapa: products.mapa,
+      registroRegulatorio: products.registroRegulatorio,
+      catmasCode: products.catmasCode,
+      catmatCode: products.catmatCode,
+      codigoFornecedor: products.codigoFornecedor,
+      informacaoTecnica: products.informacaoTecnica,
+      fichaTecnica: products.fichaTecnica,
+      subcategoria: products.subcategoria,
+      ncm: products.ncm,
+      laboratorio: products.laboratorio,
+      especieAnimal: products.especieAnimal,
+      viaAdministracao: products.viaAdministracao,
+      validadeMeses: products.validadeMeses,
+      classeTerapeutica: products.classeTerapeutica,
+      nomeProduto: products.nomeProduto,
+      tipoCatalogo: products.tipoCatalogo,
+      statusConfiabilidade: products.statusConfiabilidade,
+      freightValue: products.freightValue,
+      taxValue: products.taxValue,
       imageUrl: products.imageUrl,
       productUrl: products.productUrl,
       isActive: products.isActive,
+      deletedAt: products.deletedAt,
+      mergedIntoId: products.mergedIntoId,
       createdAt: products.createdAt,
       updatedAt: products.updatedAt,
       supplierId: products.supplierId,
@@ -191,22 +210,15 @@ export async function getProductById(id: number) {
       supplierName: suppliers.name,
       categoryName: categories.name,
       categoryColor: categories.color,
-      // Campos V2
-      fichaTecnica: products.fichaTecnica,
-      codigoFornecedor: products.codigoFornecedor,
-      ean: products.ean,
-      gtin: products.gtin,
-      subcategoria: products.subcategoria,
-      registroRegulatorio: products.registroRegulatorio,
-      nomeProduto: products.nomeProduto,
-      laboratorio: products.laboratorio,
+      categorySlug: categories.slug,
     })
     .from(products)
     .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(eq(products.id, id))
     .limit(1);
-  return result[0];
+  void result;
+  return rows[0];
 }
 
 export async function createProduct(data: InsertProduct) {
@@ -222,10 +234,16 @@ export async function updateProduct(id: number, data: Partial<InsertProduct>) {
   await db.update(products).set(data).where(eq(products.id, id));
 }
 
+/**
+ * Exclusão lógica por padrão. O catálogo participa de propostas, equivalências,
+ * histórico e ofertas; apagar fisicamente quebrava rastreabilidade e impedia
+ * restauração. Purga física, quando necessária, deve ser uma operação administrativa
+ * separada e explicitamente auditada.
+ */
 export async function deleteProduct(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.delete(products).where(eq(products.id, id));
+  await db.update(products).set({ isActive: "no", deletedAt: new Date() }).where(eq(products.id, id));
 }
 
 export async function bulkInsertProducts(data: InsertProduct[]): Promise<{ inserted: number; skipped: number; errors: { row: number; name: string; reason: string }[] }> {
@@ -237,17 +255,14 @@ export async function bulkInsertProducts(data: InsertProduct[]): Promise<{ inser
   let skipped = 0;
   const errors: { row: number; name: string; reason: string }[] = [];
 
-  // Process in chunks of 50 with per-chunk error handling
   for (let i = 0; i < data.length; i += 50) {
     const chunk = data.slice(i, i + 50);
     try {
-      // Use onDuplicateKeyUpdate to upsert by supplierId+name when replaceExisting
       const [result] = await db.insert(products).ignore().values(chunk);
       const affectedRows = (result as any).affectedRows ?? chunk.length;
       inserted += affectedRows;
       skipped += chunk.length - affectedRows;
-    } catch (chunkErr: any) {
-      // Chunk failed — try one by one to salvage as many rows as possible
+    } catch {
       for (let j = 0; j < chunk.length; j++) {
         const row = chunk[j];
         try {
@@ -267,5 +282,3 @@ export async function bulkInsertProducts(data: InsertProduct[]): Promise<{ inser
 
   return { inserted, skipped, errors };
 }
-
-
