@@ -1,11 +1,17 @@
 import { and, asc, eq, like, or } from "drizzle-orm";
-import { categories, products, suppliers } from "../../drizzle/schema";
+import { categories, products } from "../../drizzle/schema";
+import {
+  bestOfferPriceSql,
+  bestOfferSupplierIdSql,
+  bestOfferSupplierNameSql,
+} from "./catalogOfferExpressions";
 import { escapeLike } from "./_helpers";
 import { getDb } from "./_client";
 
 export async function smartSearch(query: string, categoryId?: number) {
   const db = await getDb();
   if (!db) return [];
+
   const term = `%${escapeLike(query)}%`;
   const conditions = [
     eq(products.isActive, "yes"),
@@ -13,7 +19,11 @@ export async function smartSearch(query: string, categoryId?: number) {
       like(products.name, term),
       like(products.activeIngredient, term),
       like(products.description, term),
-      like(products.code, term)
+      like(products.code, term),
+      like(products.ean, term),
+      like(products.gtin, term),
+      like(products.barcode, term),
+      like(products.mapa, term),
     )!,
   ];
   if (categoryId) conditions.push(eq(products.categoryId, categoryId));
@@ -27,12 +37,12 @@ export async function smartSearch(query: string, categoryId?: number) {
       manufacturer: products.manufacturer,
       concentration: products.concentration,
       presentation: products.presentation,
-      price: products.price,
+      price: bestOfferPriceSql,
       priceUnit: products.priceUnit,
       unit: products.unit,
-      supplierId: products.supplierId,
+      supplierId: bestOfferSupplierIdSql,
       categoryId: products.categoryId,
-      supplierName: suppliers.name,
+      supplierName: bestOfferSupplierNameSql,
       categoryName: categories.name,
       categoryColor: categories.color,
       categorySlug: categories.slug,
@@ -40,9 +50,8 @@ export async function smartSearch(query: string, categoryId?: number) {
       productUrl: products.productUrl,
     })
     .from(products)
-    .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
     .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(and(...conditions))
-    .orderBy(asc(products.price))
+    .orderBy(asc(bestOfferPriceSql), asc(products.name))
     .limit(100);
 }
