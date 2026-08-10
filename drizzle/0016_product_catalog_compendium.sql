@@ -93,3 +93,20 @@ CREATE TABLE IF NOT EXISTS `product_field_provenance` (
   INDEX `idx_pfp_field` (`fieldName`),
   INDEX `idx_pfp_source` (`sourceType`)
 );
+--> statement-breakpoint
+
+CREATE TABLE IF NOT EXISTS `product_merge_events` (
+  `id` int AUTO_INCREMENT NOT NULL,
+  `masterProductId` int NOT NULL,
+  `duplicateProductIds` json NOT NULL,
+  `snapshot` json NOT NULL,
+  `status` enum('applied','reverted') NOT NULL DEFAULT 'applied',
+  `createdByUserId` int,
+  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `revertedAt` timestamp NULL,
+  `revertedByUserId` int,
+  CONSTRAINT `product_merge_events_id` PRIMARY KEY (`id`),
+  INDEX `idx_pme_master` (`masterProductId`),
+  INDEX `idx_pme_status` (`status`),
+  INDEX `idx_pme_created` (`createdAt`)
+);
