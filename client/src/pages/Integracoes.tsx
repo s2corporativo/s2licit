@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Clock3,
   SlidersHorizontal,
+  Globe2,
 } from "lucide-react";
 
 /**
@@ -31,7 +32,7 @@ export default function Integracoes() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Central de Integrações</h1>
           <p className="text-sm text-gray-500">
-            Configure APIs, comunicação e automações diretamente no S2. As alterações passam a valer
+            Configure APIs, comunicação, fontes públicas e automações diretamente no S2. As alterações passam a valer
             em runtime, sem editar o repositório nem reiniciar o servidor.
           </p>
         </div>
@@ -114,6 +115,7 @@ function RuntimeIntegrationsSection() {
         return next;
       });
       utils.integrations.get.invalidate();
+      utils.diagnostico.verificar.invalidate();
     },
     onError: (error) => toast.error("Não foi possível salvar.", { description: error.message }),
   });
@@ -127,6 +129,7 @@ function RuntimeIntegrationsSection() {
         return next;
       });
       utils.integrations.get.invalidate();
+      utils.diagnostico.verificar.invalidate();
     },
     onError: (error) => toast.error("Não foi possível restaurar o padrão.", { description: error.message }),
   });
@@ -142,6 +145,7 @@ function RuntimeIntegrationsSection() {
   const data = configQuery.data;
   const grupoWhatsapp = (data ?? []).filter((item) => item.grupo === "whatsapp");
   const grupoGeral = (data ?? []).filter((item) => item.grupo === "geral");
+  const grupoFontes = (data ?? []).filter((item) => item.grupo === "fontes");
   const grupoAutomacao = (data ?? []).filter((item) => item.grupo === "automacao");
 
   const origemLabel = (origem: string) =>
@@ -149,7 +153,7 @@ function RuntimeIntegrationsSection() {
       ? "override do S2"
       : origem === "ambiente"
         ? "padrão da instalação"
-        : "não configurado";
+        : "padrão interno";
 
   const campo = (item: NonNullable<typeof data>[number]) => (
     <div key={item.chave} className="rounded-lg border border-gray-100 p-3 bg-white">
@@ -222,7 +226,7 @@ function RuntimeIntegrationsSection() {
             type="button"
             onClick={() => testar.mutate()}
             disabled={testar.isPending}
-            className="flex items-center gap-2 border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="flex items-center gap-2 border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 rounded-lg"
           >
             {testar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
             Testar WhatsApp
@@ -231,13 +235,39 @@ function RuntimeIntegrationsSection() {
             type="button"
             onClick={() => salvar.mutate(form)}
             disabled={salvar.isPending}
-            className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50"
+            className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50 rounded-lg"
           >
             {salvar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Salvar
           </button>
         </div>
       </div>
+
+      {grupoFontes.length > 0 && (
+        <div className="border border-gray-200 p-4 mb-4 rounded-xl">
+          <div className="flex items-center gap-2 mb-1">
+            <Globe2 className="w-4 h-4 text-indigo-600" />
+            <div className="text-xs font-bold uppercase tracking-wider text-gray-500">
+              Fontes públicas institucionais
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 mb-4">
+            Uma única URL por fonte é reutilizada pelo Radar manual e pela captura automática. Altere apenas se o portal oficial mudar de endereço.
+          </p>
+          <div className="grid md:grid-cols-2 gap-3">{grupoFontes.map(campo)}</div>
+          <div className="flex justify-end mt-5">
+            <button
+              type="button"
+              onClick={() => salvar.mutate(form)}
+              disabled={salvar.isPending}
+              className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50 rounded-lg"
+            >
+              {salvar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Aplicar fontes
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="border border-gray-200 p-4 mb-4 rounded-xl">
         <div className="flex items-center gap-2 mb-1">
@@ -256,7 +286,7 @@ function RuntimeIntegrationsSection() {
             type="button"
             onClick={() => salvar.mutate(form)}
             disabled={salvar.isPending}
-            className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50"
+            className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-bold hover:bg-blue-800 disabled:opacity-50 rounded-lg"
           >
             {salvar.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Aplicar agendamentos
