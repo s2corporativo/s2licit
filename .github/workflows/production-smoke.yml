@@ -60,20 +60,25 @@ jobs:
           echo "Nenhum Chrome/Chromium disponível no runner" >&2
           exit 1
 
-      - name: Validar secrets obrigatórios
+      - name: Validar configuração do smoke
+        id: config
+        shell: bash
         run: |
           if [ -z "$SMOKE_USER_EMAIL" ] || [ -z "$SMOKE_USER_PASSWORD" ]; then
-            echo "::error::Configure SMOKE_USER_EMAIL e SMOKE_USER_PASSWORD com uma conta dedicada de papel editor."
-            exit 1
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SMOKE_USER_EMAIL e/ou SMOKE_USER_PASSWORD não estão configurados. O smoke autenticado não foi executado."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Executar smoke autenticado
         id: smoke
+        if: steps.config.outputs.configured == 'true'
         continue-on-error: true
         run: node scripts/production-smoke.mjs
 
       - name: Publicar evidências
-        if: always()
+        if: always() && steps.config.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: production-smoke-${{ github.run_id }}
@@ -81,15 +86,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Abrir, atualizar ou encerrar incidente
+      - name: Registrar resultado do smoke
         if: always()
         uses: actions/github-script@v7
         env:
+          CONFIGURED: ${{ steps.config.outputs.configured }}
           OUTCOME: ${{ steps.smoke.outcome }}
           BASE_URL: ${{ env.SMOKE_BASE_URL }}
         with:
           script: |
-            const title = "🚨 Smoke de produção do S2 Licit falhou";
+            const productionTitle = "🚨 Smoke de produção do S2 Licit falhou";
+            const configTitle = "⚙️ Smoke de produção sem credenciais configuradas";
             const { owner, repo } = context.repo;
             const issues = await github.paginate(github.rest.issues.listForRepo, {
               owner,
@@ -97,14 +104,46 @@ jobs:
               state: "open",
               per_page: 100,
             });
-            const incident = issues.find((issue) => !issue.pull_request && issue.title === title);
-            const failed = process.env.OUTCOME !== "success";
+            const productionIncident = issues.find((issue) => !issue.pull_request && issue.title === productionTitle);
+            const configIncident = issues.find((issue) => !issue.pull_request && issue.title === configTitle);
+            const configured = process.env.CONFIGURED === "true";
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             const checkedAt = new Date().toISOString();
 
+            if (!configured) {
+              const body = [
+                "O smoke autenticado não foi executado porque faltam credenciais de teste.",
+                "",
+                `- URL alvo: ${process.env.BASE_URL}`,
+                `- Verificado em: ${checkedAt}`,
+                `- Workflow: ${runUrl}`,
+                "",
+                "Configure `SMOKE_USER_EMAIL` e `SMOKE_USER_PASSWORD` com uma conta dedicada de papel editor.",
+                "Este evento é uma falha de configuração de observabilidade e não deve ser classificado como indisponibilidade da produção.",
+              ].join("\n");
+
+              if (configIncident) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: configIncident.number, body });
+              } else {
+                await github.rest.issues.create({ owner, repo, title: configTitle, body });
+              }
+              return;
+            }
+
+            if (configIncident) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: configIncident.number,
+                body: `✅ Credenciais do smoke detectadas em ${checkedAt}. O teste autenticado voltou a ser executado.`,
+              });
+              await github.rest.issues.update({ owner, repo, issue_number: configIncident.number, state: "closed", state_reason: "completed" });
+            }
+
+            const failed = process.env.OUTCOME !== "success";
             if (failed) {
               const body = [
-                "O smoke autenticado falhou ao validar a produção.",
+                "O smoke autenticado foi executado e falhou ao validar a produção.",
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
@@ -114,35 +153,30 @@ jobs:
                 "Verificar login, permissões da conta de smoke, erros do navegador, backend, banco e rotas críticas.",
               ].join("\n");
 
-              if (incident) {
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: incident.number,
-                  body,
-                });
+              if (productionIncident) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: productionIncident.number, body });
               } else {
-                await github.rest.issues.create({ owner, repo, title, body });
+                await github.rest.issues.create({ owner, repo, title: productionTitle, body });
               }
               return;
             }
 
-            if (incident) {
+            if (productionIncident) {
               await github.rest.issues.createComment({
                 owner,
                 repo,
-                issue_number: incident.number,
+                issue_number: productionIncident.number,
                 body: `✅ Smoke de produção voltou a passar em ${checkedAt}. Evidências: ${runUrl}`,
               });
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: incident.number,
-                state: "closed",
-                state_reason: "completed",
-              });
+              await github.rest.issues.update({ owner, repo, issue_number: productionIncident.number, state: "closed", state_reason: "completed" });
             }
 
-      - name: Falhar o workflow quando o smoke falhar
-        if: steps.smoke.outcome != 'success'
+      - name: Falhar por configuração ausente
+        if: steps.config.outputs.configured != 'true'
+        run: |
+          echo "Smoke autenticado não executado: configure SMOKE_USER_EMAIL e SMOKE_USER_PASSWORD." >&2
+          exit 1
+
+      - name: Falhar quando o smoke real falhar
+        if: steps.config.outputs.configured == 'true' && steps.smoke.outcome != 'success'
         run: exit 1
