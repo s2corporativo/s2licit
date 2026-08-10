@@ -32,8 +32,15 @@ export async function updateSupplier(id: number, data: Partial<InsertSupplier>) 
   await db.update(suppliers).set(data).where(eq(suppliers.id, id));
 }
 
+/**
+ * Fornecedor não é mais uma entidade descartável: produtos legados ainda têm
+ * FK com ON DELETE CASCADE. Portanto "excluir" significa desativar. Isso evita
+ * que uma operação administrativa remova produtos, propostas e histórico por
+ * efeito cascata. Uma futura migração poderá tornar products.supplierId opcional
+ * e remover definitivamente o acoplamento legado.
+ */
 export async function deleteSupplier(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.delete(suppliers).where(eq(suppliers.id, id));
+  await db.update(suppliers).set({ isActive: "no" }).where(eq(suppliers.id, id));
 }
