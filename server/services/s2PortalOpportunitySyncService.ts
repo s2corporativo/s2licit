@@ -1,15 +1,22 @@
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import { JSDOM } from "jsdom";
-import puppeteer from "puppeteer";
 import { and, eq, like } from "drizzle-orm";
-import { getDb } from "../db";
 import {
   emailQuotationItems,
   emailQuotations,
   products,
   suppliers,
 } from "../../drizzle/schema";
-import { bestNameMatch } from "./emailQuotationMatchingService";
+import { logger } from "../_core/logger";
+import { getDb } from "../db";
+import { externalHttpRequest } from "../integrations/core/externalHttpClient";
+import { renderPublicHtml } from "../integrations/core/secureBrowserRenderer";
+import {
+  bestNameMatchFromIndex,
+  buildNameMatchIndex,
+  type CatalogProduct,
+  type NameMatchIndex,
+} from "./emailQuotationMatchingService";
 import {
   syncPortalOpportunities as syncFoundationOpportunities,
   type PortalOpportunitySource as FoundationPortalSource,
@@ -20,13 +27,12 @@ import {
   getS2PortalUrl,
   type S2TargetPortal,
 } from "./s2TargetPortals";
-import { assertSafeExternalUrl } from "../utils/urlGuard";
-import { logger } from "../_core/logger";
-import { externalHttpRequest } from "../integrations/core/externalHttpClient";
 
 const HTTP_TIMEOUT_MS = 30_000;
+const MAX_HTML_BYTES = 8 * 1024 * 1024;
+const INSTITUTIONAL_CONCURRENCY = 2;
 const BROWSER_USER_AGENT =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36 S2Licit/2.0";
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36 S2Licit/2.0";
 const INSTITUTIONAL_SOURCES = ["comprasmg", "fiemg", "cemig", "copasa"] as const;
 
 type InstitutionalSource = (typeof INSTITUTIONAL_SOURCES)[number];
@@ -71,18 +77,12 @@ export interface S2PortalSyncResult {
   sourceStats: S2PortalSourceStats[];
 }
 
-interface TambasaCatalogProduct {
-  id: number;
-  name: string;
-  price: string | null;
-}
-
 function normalizeText(value: string | null | undefined): string {
   return (value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function truncate(value: string, max = 512): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
 function stableId(source: InstitutionalSource, url: string, text: string): string {
@@ -131,7 +131,7 @@ function extractExternalId(text: string, href: string): string | null {
     const tail = url.pathname.split("/").filter(Boolean).pop();
     if (tail && /\d/.test(tail) && tail.length >= 3) return tail;
   } catch {
-    // URL inválida não interrompe o parser; o chamador já possui URL base segura.
+    // URL inválida não interrompe o parser.
   }
   return null;
 }
@@ -205,9 +205,10 @@ export function parseInstitutionalPortalHtml(
   };
 
   for (const row of Array.from(document.querySelectorAll("table tr"))) {
-    const cells = Array.from(row.querySelectorAll("th,td")).map((cell) => normalizeText(cell.textContent)).filter(Boolean);
-    if (!cells.length) continue;
-    addCandidate(cells.join(" | "), row.querySelector("a[href]")?.getAttribute("href"));
+    const cells = Array.from(row.querySelectorAll("th,td"))
+      .map((cell) => normalizeText(cell.textContent))
+      .filter(Boolean);
+    if (cells.length) addCandidate(cells.join(" | "), row.querySelector("a[href]")?.getAttribute("href"));
   }
   for (const selector of ["article", ".card", "[class*='process']", "[class*='licit']", "[class*='cotacao']", "[class*='opportun']", "li"]) {
     for (const element of Array.from(document.querySelectorAll(selector))) {
@@ -225,8 +226,7 @@ function pageLooksLikeOpportunityPortal(html: string): boolean {
   return /licita[cç][aã]o|edital|preg[aã]o|cota[cç][aã]o|processo|contrata[cç][aã]o|compra\s+direta|recebimento\s+de\s+propostas/i.test(html);
 }
 
-async function fetchHtml(source: InstitutionalSource, urlValue: string): Promise<string> {
-  const url = assertSafeExternalUrl(urlValue, "URL do portal").toString();
+async function fetchHtml(source: InstitutionalSource, url: string): Promise<string> {
   const response = await externalHttpRequest<string>({
     source,
     operation: "opportunities.html",
@@ -235,33 +235,26 @@ async function fetchHtml(source: InstitutionalSource, urlValue: string): Promise
     accept: "text/html,application/xhtml+xml",
     headers: { "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7" },
     timeoutMs: HTTP_TIMEOUT_MS,
-    maxRetries: 1,
-    maxBodyBytes: 8 * 1024 * 1024,
+    deadlineMs: HTTP_TIMEOUT_MS * 2,
+    maxRetries: 2,
+    maxBodyBytes: MAX_HTML_BYTES,
+    validator: (payload) => {
+      if (typeof payload !== "string") throw new Error("Portal retornou conteúdo não textual.");
+      return payload;
+    },
   });
-  if (!response.ok || response.data == null) {
-    throw new Error(response.error?.message ?? `HTTP ${response.statusCode}`);
-  }
+  if (!response.ok || response.data == null) throw new Error(response.error?.message ?? `HTTP ${response.statusCode}`);
   return response.data;
 }
 
-async function fetchRenderedHtml(source: InstitutionalSource, urlValue: string): Promise<string> {
-  const url = assertSafeExternalUrl(urlValue, "URL do portal");
-  const startedAt = Date.now();
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+async function fetchRenderedHtml(source: InstitutionalSource, url: string): Promise<string> {
+  return renderPublicHtml({
+    source,
+    url,
+    userAgent: BROWSER_USER_AGENT,
+    navigationTimeoutMs: 45_000,
+    maxHtmlBytes: MAX_HTML_BYTES,
   });
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(BROWSER_USER_AGENT);
-    await page.setViewport({ width: 1440, height: 1000 });
-    await page.goto(url.toString(), { waitUntil: "networkidle2", timeout: 45_000 });
-    const html = await page.content();
-    logger.info(`[PortalSync:${source}] navegador concluiu em ${Date.now() - startedAt}ms.`);
-    return html;
-  } finally {
-    await browser.close();
-  }
 }
 
 async function fetchInstitutionalOpportunities(
@@ -281,7 +274,7 @@ async function fetchInstitutionalOpportunities(
     const parsed = parseInstitutionalPortalHtml(source, html, url);
     if (parsed.length > 0) return parsed;
   } catch (error) {
-    errors.push(`${definition.label} (HTML): ${(error as Error).message}`);
+    errors.push(`${definition.label} (HTML): ${error instanceof Error ? error.message : String(error)}`);
   }
 
   if (definition.discovery !== "public") {
@@ -292,21 +285,19 @@ async function fetchInstitutionalOpportunities(
       const parsed = parseInstitutionalPortalHtml(source, rendered, url);
       if (parsed.length > 0) return parsed;
     } catch (error) {
-      errors.push(`${definition.label} (navegador): ${(error as Error).message}`);
+      errors.push(`${definition.label} (browser seguro): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   if ((staticSucceeded || renderedSucceeded) && lastHtml && pageLooksLikeOpportunityPortal(lastHtml)) {
     errors.push(
-      `${definition.label}: a fonte respondeu, mas nenhum registro ativo foi reconhecido. Valide se houve mudança de layout/contrato antes de concluir ausência de oportunidades.`,
+      `${definition.label}: a fonte respondeu, mas nenhum registro ativo foi reconhecido. Valide possível mudança de layout/contrato antes de concluir ausência de oportunidades.`,
     );
   }
-  // Se a consulta funcionou e a página não contém marcadores de oportunidade,
-  // zero é um resultado válido e não vira erro artificial.
   return [];
 }
 
-async function loadTambasaCatalog(): Promise<TambasaCatalogProduct[]> {
+async function loadTambasaCatalog(): Promise<CatalogProduct[]> {
   const db = await getDb();
   if (!db) return [];
   return db
@@ -317,66 +308,126 @@ async function loadTambasaCatalog(): Promise<TambasaCatalogProduct[]> {
     .limit(50_000);
 }
 
+function insertIdFromResult(result: unknown): number {
+  const header = Array.isArray(result) ? result[0] : result;
+  if (!header || typeof header !== "object" || !("insertId" in header)) {
+    throw new Error("Banco não retornou o ID da oportunidade inserida.");
+  }
+  const id = Number((header as { insertId?: unknown }).insertId);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error("ID inválido retornado ao inserir oportunidade.");
+  return id;
+}
+
 async function persistOpportunity(
   opportunity: S2PortalOpportunity,
-  tambasaCatalog: TambasaCatalogProduct[],
+  matchIndex: NameMatchIndex,
 ): Promise<{ imported: boolean; matched: number; unmatched: number }> {
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
   const messageId = `portal:${opportunity.source}:${opportunity.externalId}`;
-  const existing = await db
+  const [existing] = await db
     .select({ id: emailQuotations.id })
     .from(emailQuotations)
     .where(eq(emailQuotations.messageId, messageId))
     .limit(1);
-  if (existing.length > 0) return { imported: false, matched: 0, unmatched: 0 };
+  if (existing) return { imported: false, matched: 0, unmatched: 0 };
 
-  const matches = opportunity.items.map((item) => bestNameMatch(item.descricao, tambasaCatalog));
+  const matches = opportunity.items.map((item) => bestNameMatchFromIndex(item.descricao, matchIndex));
   const matched = matches.filter(Boolean).length;
   const definition = S2_TARGET_PORTAL_DEFINITIONS[opportunity.source];
-  const [inserted] = await db.insert(emailQuotations).values({
-    messageId,
-    fromName: `Portal ${definition.label}`,
-    fromAddress: null,
-    subject: truncate(opportunity.subject, 512),
-    orgao: opportunity.orgao,
-    bodyText: truncate(opportunity.bodyText, 65_000),
-    receivedAt: new Date(),
-    prazoResposta: opportunity.prazoResposta,
-    sourceType: "body",
-    sourceFilename: null,
-    status: opportunity.items.length > 0 ? "revisao" : "nova",
-    totalItems: opportunity.items.length,
-    matchedItems: matched,
-  });
-  const quotationId = (inserted as { insertId?: number }).insertId;
-  if (!quotationId) throw new Error(`Não foi possível identificar a cotação criada (${messageId}).`);
 
-  if (opportunity.items.length > 0) {
-    await db.insert(emailQuotationItems).values(
-      opportunity.items.map((item, index) => {
-        const match = matches[index];
-        return {
-          quotationId,
-          numeroItem: item.numeroItem,
-          descricao: truncate(item.descricao, 65_000),
-          quantidade: item.quantidade != null ? String(item.quantidade) : null,
-          unidade: item.unidade,
-          codigoCatalogo: null,
-          produtoMatchId: match?.product.id ?? null,
-          matchScore: match ? String(Number(match.score.toFixed(4))) : null,
-          matchMethod: match ? ("nome" as const) : ("nenhum" as const),
-          matchConfirmado: false,
-          precoSugerido: match?.product.price ?? null,
-        };
-      }),
-    );
-  }
-  return { imported: true, matched, unmatched: opportunity.items.length - matched };
+  return db.transaction(async (tx) => {
+    const [duplicate] = await tx
+      .select({ id: emailQuotations.id })
+      .from(emailQuotations)
+      .where(eq(emailQuotations.messageId, messageId))
+      .limit(1);
+    if (duplicate) return { imported: false, matched: 0, unmatched: 0 };
+
+    const insertResult = await tx.insert(emailQuotations).values({
+      messageId,
+      fromName: `Portal ${definition.label}`,
+      fromAddress: null,
+      subject: truncate(opportunity.subject, 512),
+      orgao: opportunity.orgao,
+      bodyText: truncate(opportunity.bodyText, 65_000),
+      receivedAt: new Date(),
+      prazoResposta: opportunity.prazoResposta,
+      sourceType: "body",
+      sourceFilename: null,
+      status: opportunity.items.length > 0 ? "revisao" : "nova",
+      totalItems: opportunity.items.length,
+      matchedItems: matched,
+    });
+    const quotationId = insertIdFromResult(insertResult);
+
+    if (opportunity.items.length > 0) {
+      await tx.insert(emailQuotationItems).values(
+        opportunity.items.map((item, index) => {
+          const match = matches[index];
+          return {
+            quotationId,
+            numeroItem: item.numeroItem,
+            descricao: truncate(item.descricao, 65_000),
+            quantidade: item.quantidade != null ? String(item.quantidade) : null,
+            unidade: item.unidade,
+            codigoCatalogo: item.codigoExterno ?? null,
+            produtoMatchId: match?.product.id ?? null,
+            matchScore: match ? String(Number(match.score.toFixed(4))) : null,
+            matchMethod: match ? ("nome" as const) : ("nenhum" as const),
+            matchConfirmado: false,
+            precoSugerido: match?.product.price ?? null,
+          };
+        }),
+      );
+    }
+    return { imported: true, matched, unmatched: opportunity.items.length - matched };
+  });
 }
 
 function emptyStats(source: S2TargetPortal): S2PortalSourceStats {
   return { source, found: 0, imported: 0, skipped: 0, matchedItems: 0, unmatchedItems: 0, errors: [] };
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T) => Promise<R>,
+): Promise<R[]> {
+  if (!values.length) return [];
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= values.length) return;
+      results[index] = await mapper(values[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function syncInstitutionalSource(
+  source: InstitutionalSource,
+  matchIndex: NameMatchIndex,
+): Promise<S2PortalSourceStats> {
+  const stats = emptyStats(source);
+  const opportunities = await fetchInstitutionalOpportunities(source, stats.errors);
+  stats.found = opportunities.length;
+  for (const opportunity of opportunities) {
+    try {
+      const persisted = await persistOpportunity(opportunity, matchIndex);
+      if (persisted.imported) stats.imported += 1;
+      else stats.skipped += 1;
+      stats.matchedItems += persisted.matched;
+      stats.unmatchedItems += persisted.unmatched;
+    } catch (error) {
+      stats.errors.push(`${opportunity.externalId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return stats;
 }
 
 /** Radar agendado único dos portais institucionais do S2 Licit. */
@@ -393,54 +444,47 @@ export async function syncS2PortalOpportunities(options?: {
   const foundationSources = sources.filter(
     (source): source is FoundationPortalSource => source === "fundep" || source === "funarbe",
   );
-  if (foundationSources.length > 0) {
-    const result = await syncFoundationOpportunities({
-      sources: foundationSources,
-      maxFundepGroups: options?.maxFundepGroups,
-    });
-    for (const source of foundationSources) {
-      const target = stats.get(source)!;
-      // O serviço histórico de fundações agrega as duas fontes quando ambas são
-      // solicitadas. Mantemos compatibilidade e deixamos a unificação completa
-      // da persistência para uma única camada sem duplicar registros.
+  const institutionalSources = sources.filter(
+    (source): source is InstitutionalSource => (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
+  );
+
+  const foundationTasks = foundationSources.map(async (source) => {
+    const target = stats.get(source)!;
+    try {
+      const result = await syncFoundationOpportunities({
+        sources: [source],
+        maxFundepGroups: options?.maxFundepGroups,
+      });
       target.found = result.found;
       target.imported = result.imported;
       target.skipped = result.skipped;
       target.matchedItems = result.matchedItems;
       target.unmatchedItems = result.unmatchedItems;
       target.errors.push(...result.errors);
+    } catch (error) {
+      target.errors.push(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  const catalog = institutionalSources.length > 0 ? await loadTambasaCatalog() : [];
+  const matchIndex = buildNameMatchIndex(catalog);
+  if (institutionalSources.length > 0 && catalog.length === 0) {
+    for (const source of institutionalSources) {
+      stats.get(source)!.errors.push(
+        "Catálogo Tambasa vazio: configure o fornecedor Tambasa e execute a sincronização completa antes do matching.",
+      );
     }
   }
 
-  const institutionalSources = sources.filter(
-    (source): source is InstitutionalSource => (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
-  );
-  if (institutionalSources.length > 0) {
-    const tambasaCatalog = await loadTambasaCatalog();
-    if (tambasaCatalog.length === 0) {
-      for (const source of institutionalSources) {
-        stats.get(source)!.errors.push(
-          "Catálogo Tambasa vazio: configure o fornecedor Tambasa e execute a sincronização completa antes do matching.",
-        );
-      }
-    }
-    for (const source of institutionalSources) {
-      const sourceStats = stats.get(source)!;
-      const opportunities = await fetchInstitutionalOpportunities(source, sourceStats.errors);
-      sourceStats.found = opportunities.length;
-      for (const opportunity of opportunities) {
-        try {
-          const persisted = await persistOpportunity(opportunity, tambasaCatalog);
-          if (persisted.imported) sourceStats.imported++;
-          else sourceStats.skipped++;
-          sourceStats.matchedItems += persisted.matched;
-          sourceStats.unmatchedItems += persisted.unmatched;
-        } catch (error) {
-          sourceStats.errors.push(`${opportunity.externalId}: ${(error as Error).message}`);
-        }
-      }
-    }
-  }
+  const institutionalTask = mapWithConcurrency(
+    institutionalSources,
+    INSTITUTIONAL_CONCURRENCY,
+    async (source) => syncInstitutionalSource(source, matchIndex),
+  ).then((results) => {
+    for (const result of results) stats.set(result.source, result);
+  });
+
+  await Promise.all([...foundationTasks, institutionalTask]);
 
   const sourceStats = sources.map((source) => stats.get(source)!);
   const result: S2PortalSyncResult = {
@@ -450,13 +494,15 @@ export async function syncS2PortalOpportunities(options?: {
     skipped: sourceStats.reduce((sum, item) => sum + item.skipped, 0),
     matchedItems: sourceStats.reduce((sum, item) => sum + item.matchedItems, 0),
     unmatchedItems: sourceStats.reduce((sum, item) => sum + item.unmatchedItems, 0),
-    errors: sourceStats.flatMap((item) => item.errors.map((error) => `${S2_TARGET_PORTAL_DEFINITIONS[item.source].label}: ${error}`)),
+    errors: sourceStats.flatMap((item) =>
+      item.errors.map((error) => `${S2_TARGET_PORTAL_DEFINITIONS[item.source].label}: ${error}`),
+    ),
     sourceStats,
   };
 
   logger.info(
     `[PortalSync] Fontes S2: ${result.found} encontradas, ${result.imported} importadas, ` +
-      `${result.skipped} já existentes e ${result.matchedItems} itens casados com Tambasa.`,
+      `${result.skipped} já existentes, ${result.matchedItems} itens casados, ${result.errors.length} erro(s).`,
   );
   return result;
 }
