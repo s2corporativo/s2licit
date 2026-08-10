@@ -8,6 +8,11 @@ import {
 } from "../services/integrationSettingsService";
 import { recordAudit } from "../services/auditService";
 
+async function refreshSchedules(): Promise<void> {
+  const { refreshRuntimeSchedules } = await import("../services/scheduledJobs");
+  await refreshRuntimeSchedules();
+}
+
 /**
  * Central administrativa de integrações. IA e e-mail mantêm formulários
  * especializados, mas toda resolução de credenciais usa a mesma plataforma.
@@ -19,11 +24,12 @@ export const integrationsRouter = router({
     .input(z.record(z.string().max(64), z.string().max(2048)))
     .mutation(async ({ input, ctx }) => {
       await saveIntegrationSettings(input);
+      await refreshSchedules();
       await recordAudit({
         userId: ctx.user?.id,
         action: "integration_config_save",
         entity: "integration_settings",
-        summary: `Credenciais de integração atualizadas pela interface (${Object.keys(input).filter((key) => input[key]).length} chave(s))`,
+        summary: `Credenciais/parâmetros de integração atualizados pela interface (${Object.keys(input).filter((key) => input[key]).length} chave(s))`,
       });
       return { ok: true };
     }),
@@ -33,6 +39,7 @@ export const integrationsRouter = router({
     .input(z.object({ chave: z.string().max(64).refine((key) => key in INTEGRATION_KEYS, "Chave não permitida") }))
     .mutation(async ({ input, ctx }) => {
       await removeIntegrationSetting(input.chave);
+      await refreshSchedules();
       await recordAudit({
         userId: ctx.user?.id,
         action: "integration_config_remove",
