@@ -95,11 +95,45 @@ function ocrTimeoutMs(): number {
   return envInteger("DOCUMENT_OCR_TIMEOUT_MS", DEFAULT_OCR_TIMEOUT_MS, 30_000, 600_000);
 }
 
-function approximateDecodedBytes(base64: string): number {
-  const sanitizedLength = base64.replace(/\s/g, "").length;
-  if (sanitizedLength === 0) return 0;
-  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((sanitizedLength * 3) / 4) - padding);
+/**
+ * Mede o payload base64 sem criar uma segunda string sanitizada em memória.
+ * Também rejeita padding no meio e caracteres incompatíveis antes do decode.
+ */
+export function approximateDecodedBytes(base64: string): number {
+  let significantLength = 0;
+  let padding = 0;
+  let sawPadding = false;
+
+  for (let index = 0; index < base64.length; index += 1) {
+    const code = base64.charCodeAt(index);
+    const isWhitespace = code === 9 || code === 10 || code === 13 || code === 32;
+    if (isWhitespace) continue;
+
+    significantLength += 1;
+    if (code === 61) {
+      sawPadding = true;
+      padding += 1;
+      if (padding > 2) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Conteúdo base64 inválido." });
+      }
+      continue;
+    }
+
+    const isAlphaNumeric =
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122);
+    const isBase64Symbol = code === 43 || code === 47 || code === 45 || code === 95;
+    if (!isAlphaNumeric || !isBase64Symbol && !isAlphaNumeric || sawPadding) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Conteúdo base64 inválido." });
+    }
+  }
+
+  if (significantLength === 0) return 0;
+  if (significantLength % 4 === 1 || (padding > 0 && significantLength % 4 !== 0)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Conteúdo base64 inválido." });
+  }
+  return Math.max(0, Math.floor((significantLength * 3) / 4) - padding);
 }
 
 function assertInputSize(fileBase64: string): void {
