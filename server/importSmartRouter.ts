@@ -3,7 +3,10 @@ import { z } from "zod";
 import { products } from "../drizzle/schema";
 import { editorProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { upsertProductSupplierPrice } from "./db/supplierPrices";
+import {
+  getProductSupplierPrices,
+  upsertProductSupplierPrice,
+} from "./db/supplierPrices";
 import { recordAudit } from "./services/auditService";
 import { ensureCatalogKnowledgeSchema } from "./services/catalogKnowledgeSchema";
 import {
@@ -180,7 +183,7 @@ export const importSmartRouter = router({
                     ctx.user.id,
                   );
 
-                  // Oferta sem preço ainda representa uma relação comercial útil.
+                  // Mesmo sem preço, registra a relação Produto × Fornecedor.
                   if (product.supplierId && product.price == null) {
                     await upsertProductSupplierPrice(
                       created.productId,
@@ -213,22 +216,26 @@ export const importSmartRouter = router({
                 }
 
                 const productId = identity.matchedProductId;
+                const db = await getDb();
+                if (!db) throw new Error("Database unavailable");
+                const [existing] = await db
+                  .select()
+                  .from(products)
+                  .where(eq(products.id, productId))
+                  .limit(1);
+                if (!existing) throw new Error("Produto canônico não encontrado");
+
+                // Importação nunca sobrescreve dado técnico já preenchido.
+                const patch = fillOnlyBlank(
+                  existing as Record<string, unknown>,
+                  masterPatch(product),
+                );
+                if (Object.keys(patch).length > 0) {
+                  await updateCanonicalProduct(productId, patch, ctx.user.id);
+                  results.updated += 1;
+                }
 
                 if (identity.action === "atualizar_existente") {
-                  const db = await getDb();
-                  if (!db) throw new Error("Database unavailable");
-                  const [existing] = await db
-                    .select()
-                    .from(products)
-                    .where(eq(products.id, productId))
-                    .limit(1);
-                  if (!existing) throw new Error("Produto canônico não encontrado");
-
-                  const patch = fillOnlyBlank(existing as Record<string, unknown>, masterPatch(product));
-                  if (Object.keys(patch).length > 0) {
-                    await updateCanonicalProduct(productId, patch, ctx.user.id);
-                  }
-                  results.updated += 1;
                   pushDetail({
                     action: identity.action,
                     name: product.name,
@@ -243,19 +250,44 @@ export const importSmartRouter = router({
                   throw new Error("Ação comercial sem fornecedor informado");
                 }
 
-                await upsertProductSupplierPrice(
-                  productId,
-                  product.supplierId,
-                  product.price == null ? null : String(product.price),
-                  {
-                    codigoFornecedor: product.supplierCode ?? product.code,
-                    linkProduto: product.productUrl,
-                    origem: "catalog_import",
-                  },
-                );
+                const hasCommercialPayload =
+                  product.price != null ||
+                  Boolean(product.supplierCode ?? product.code ?? product.productUrl);
 
-                if (identity.action === "novo_fornecedor") results.newSupplier += 1;
-                if (identity.action === "atualizar_preco") results.priceUpdated += 1;
+                if (identity.action === "novo_fornecedor") {
+                  await upsertProductSupplierPrice(
+                    productId,
+                    product.supplierId,
+                    product.price == null ? null : String(product.price),
+                    {
+                      codigoFornecedor: product.supplierCode ?? product.code,
+                      linkProduto: product.productUrl,
+                      origem: "catalog_import",
+                    },
+                  );
+                  results.newSupplier += 1;
+                } else if (hasCommercialPayload) {
+                  // Ausência de preço em uma atualização NÃO significa apagar o
+                  // preço existente. Preserva o valor e atualiza apenas metadados.
+                  let preservedPrice: string | null = null;
+                  if (product.price == null) {
+                    const offers = await getProductSupplierPrices(productId);
+                    preservedPrice =
+                      offers.find((offer) => offer.supplierId === product.supplierId)?.price ?? null;
+                  }
+
+                  await upsertProductSupplierPrice(
+                    productId,
+                    product.supplierId,
+                    product.price == null ? preservedPrice : String(product.price),
+                    {
+                      codigoFornecedor: product.supplierCode ?? product.code,
+                      linkProduto: product.productUrl,
+                      origem: "catalog_import",
+                    },
+                  );
+                  if (product.price != null) results.priceUpdated += 1;
+                }
 
                 pushDetail({
                   action: identity.action,
