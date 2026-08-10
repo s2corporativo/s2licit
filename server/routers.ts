@@ -1,69 +1,68 @@
-import { authRouter } from "./routers/auth";
-import { masterProductsRouter } from "./routers/masterProducts";
-import { priceIntelligenceRouter } from "./routers/priceIntelligence";
-import { editalRouter } from "./routers/edital";
-import { declarationsRouter } from "./routers/declarations";
-import { reclassificacaoRouter } from "./routers/reclassificacao";
-import { categoriesRouter } from "./routers/categories";
-import { equivalencesRouter } from "./routers/equivalences";
-import { dashboardRouter } from "./routers/dashboard";
-import { financialRouter } from "./routers/financial";
-import { proposalsRouter } from "./routers/proposals";
-import { suppliersRouter } from "./routers/suppliers";
-import { companyRouter } from "./routers/company";
-import { orgsRouter } from "./routers/orgs";
-import { synonymsRouter } from "./routers/synonyms";
-import { proposalTemplatesRouter } from "./routers/proposalTemplates";
-import { duplicatesRouter } from "./routers/duplicates";
-import { imagesRouter } from "./routers/images";
-import { importSmartRouter } from "./importSmartRouter";
-import { nfeImportRouter } from "./routers/nfeImport";
-import { priceAnalysisRouter } from "./routers/priceAnalysis";
-import { pricingRouter } from "./routers/pricing";
-import { categoryPricingRouter } from "./routers/categoryPricing";
-import { bulkPricingRouter } from "./routers/bulkPricing";
-import { agenteRouter } from "./routers/agente";
-import { scraperAgentRouter } from "./routers/scraperAgent";
-import { tambasaCatalogRouter } from "./routers/tambasaCatalog";
-import { propostaAgentRouter } from "./routers/propostaAgentRouter";
-import { captureReviewRouter } from "./routers/captureReview";
-import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
-import { enrichmentHistoryRouter } from "./routers/enrichmentHistoryRouter";
-import { documentGovernanceRouter } from "./routers/documentGovernanceRouter";
-import { documentComposerRouter } from "./routers/documentComposer";
-import { workflowRouter } from "./routers/workflowRouter";
-import { auditRouter } from "./routers/auditRouter";
-import { mfaRouter } from "./routers/mfaRouter";
-import { usersRouter } from "./routers/usersRouter";
-import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
-import { pncpRadarRouter } from "./routers/pncpRadar";
-import { emailQuotationsRouter } from "./routers/emailQuotations";
-import { certidoesRouter } from "./routers/certidoes";
-import { aiRouter } from "./routers/ai";
-import { emailConfigRouter } from "./routers/emailConfig";
-import { legalAnalysisRouter } from "./routers/legalAnalysis";
-import { integrationsRouter } from "./routers/integrations";
-import { precificacaoRouter } from "./routers/precificacao";
-import { portalCredentialsRouter } from "./routers/portalCredentials";
-import { portalOpportunitySyncRouter } from "./routers/portalOpportunitySync";
-import { agendaRouter } from "./routers/agenda";
-import { desempenhoRouter } from "./routers/desempenho";
-import { funilRouter } from "./routers/funil";
-import { taxRulesRouter } from "./routers/taxRules";
-import { fretesRouter } from "./routers/fretes";
-import { posVendaRouter } from "./routers/posVenda";
-import { buscaGlobalRouter } from "./routers/buscaGlobal";
-import { diagnosticoRouter } from "./routers/diagnostico";
-import { operationalGovernanceRouter } from "./routers/operationalGovernance";
-import { productsRouter } from "./routers/productsGroup";
-import { importsRouter } from "./routers/importsGroup";
-import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
-import { opportunitiesRouter } from "./routers/opportunities";
-import { licitacaoAgentRouter } from "./routers/licitacaoAgent";
-import { initCanonicalAutonomy } from "./services/canonicalAutonomy";
-
 import { systemRouter } from "./_core/systemRouter";
 import { router } from "./_core/trpc";
+import { importSmartRouter } from "./importSmartRouter";
+import { agenteRouter } from "./routers/agente";
+import { agendaRouter } from "./routers/agenda";
+import { aiRouter } from "./routers/ai";
+import { auditRouter } from "./routers/auditRouter";
+import { authRouter } from "./routers/auth";
+import { bulkPricingRouter } from "./routers/bulkPricing";
+import { buscaGlobalRouter } from "./routers/buscaGlobal";
+import { captureReviewRouter } from "./routers/captureReview";
+import { categoriesRouter } from "./routers/categories";
+import { categoryPricingRouter } from "./routers/categoryPricing";
+import { certidoesRouter } from "./routers/certidoes";
+import { companyRouter } from "./routers/company";
+import { dashboardRouter } from "./routers/dashboard";
+import { declarationsRouter } from "./routers/declarations";
+import { desempenhoRouter } from "./routers/desempenho";
+import { diagnosticoRouter } from "./routers/diagnostico";
+import { documentComposerRouter } from "./routers/documentComposer";
+import { documentGovernanceRouter } from "./routers/documentGovernanceRouter";
+import { duplicatesRouter } from "./routers/duplicates";
+import { editalCanonicalRouter } from "./routers/editalCanonical";
+import { emailConfigRouter } from "./routers/emailConfig";
+import { emailQuotationsRouter } from "./routers/emailQuotations";
+import { enrichmentHistoryRouter } from "./routers/enrichmentHistoryRouter";
+import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
+import { equivalencesRouter } from "./routers/equivalences";
+import { financialRouter } from "./routers/financial";
+import { fretesRouter } from "./routers/fretes";
+import { funilRouter } from "./routers/funil";
+import { imagesRouter } from "./routers/images";
+import { importsRouter } from "./routers/importsGroup";
+import { integrationsRouter } from "./routers/integrations";
+import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
+import { legalAnalysisRouter } from "./routers/legalAnalysis";
+import { licitacaoAgentRouter } from "./routers/licitacaoAgent";
+import { masterProductsRouter } from "./routers/masterProducts";
+import { mfaRouter } from "./routers/mfaRouter";
+import { nfeEnrichmentPipelineRouter } from "./routers/nfeEnrichmentPipeline";
+import { nfeImportRouter } from "./routers/nfeImport";
+import { operationalGovernanceRouter } from "./routers/operationalGovernance";
+import { opportunitiesRouter } from "./routers/opportunities";
+import { orgsRouter } from "./routers/orgs";
+import { pncpRadarRouter } from "./routers/pncpRadar";
+import { portalCredentialsRouter } from "./routers/portalCredentials";
+import { portalOpportunitySyncRouter } from "./routers/portalOpportunitySync";
+import { posVendaRouter } from "./routers/posVenda";
+import { precificacaoRouter } from "./routers/precificacao";
+import { priceAnalysisRouter } from "./routers/priceAnalysis";
+import { priceIntelligenceRouter } from "./routers/priceIntelligence";
+import { pricingRouter } from "./routers/pricing";
+import { productsRouter } from "./routers/productsGroup";
+import { proposalTemplatesRouter } from "./routers/proposalTemplates";
+import { proposalsRouter } from "./routers/proposals";
+import { propostaAgentRouter } from "./routers/propostaAgentRouter";
+import { reclassificacaoRouter } from "./routers/reclassificacao";
+import { scraperAgentRouter } from "./routers/scraperAgent";
+import { suppliersRouter } from "./routers/suppliers";
+import { synonymsRouter } from "./routers/synonyms";
+import { tambasaCatalogRouter } from "./routers/tambasaCatalog";
+import { taxRulesRouter } from "./routers/taxRules";
+import { usersRouter } from "./routers/usersRouter";
+import { workflowRouter } from "./routers/workflowRouter";
+import { initCanonicalAutonomy } from "./services/canonicalAutonomy";
 
 initCanonicalAutonomy();
 
@@ -124,7 +123,7 @@ export const appRouter = router({
   masterProducts: masterProductsRouter,
   priceIntelligence: priceIntelligenceRouter,
   enrichment: enrichmentInlineRouter,
-  edital: editalRouter,
+  edital: editalCanonicalRouter,
   declarations: declarationsRouter,
   reclassificacao: reclassificacaoRouter,
   synonyms: synonymsRouter,
@@ -133,4 +132,5 @@ export const appRouter = router({
   intelligentCapture: intelligentCaptureRouter,
   images: imagesRouter,
 });
+
 export type AppRouter = typeof appRouter;
