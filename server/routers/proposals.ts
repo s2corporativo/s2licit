@@ -12,7 +12,6 @@ import {
   getDb,
   getProposalStatusHistory,
   getProposalWithItems,
-  getRequestingOrgById,
   listProposals,
   listProposalsAdmin,
   removeProposalItem,
@@ -25,6 +24,14 @@ import { generateProposalPdf } from "../proposalPdf";
 import { recordAudit } from "../services/auditService";
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 import { validateEquivalenceForMultipleItems } from "../services/equivalenceValidationService";
+import {
+  getProposalEmailDispatch,
+  markProposalEmailDispatchAmbiguous,
+  markProposalEmailDispatchCompleted,
+  markProposalSmtpAccepted,
+  releaseProposalEmailDispatchReservation,
+  reserveProposalEmailDispatch,
+} from "../services/proposalEmailDispatchService";
 import { advanceProposalLifecycle } from "../services/proposalLifecycleService";
 
 const proposalStatusSchema = z.enum([
@@ -185,6 +192,10 @@ export const proposalsRouter = router({
     .input(z.object({ id: z.number().int().positive() }))
     .query(({ input }) => getProposalWithItems(input.id)),
 
+  emailDispatch: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(({ input }) => getProposalEmailDispatch(input.id)),
+
   create: editorProcedure
     .input(proposalCreateSchema)
     .mutation(async ({ input, ctx }) => {
@@ -317,9 +328,8 @@ export const proposalsRouter = router({
     .query(({ input }) => listProposalsAdmin(input)),
 
   /**
-   * SMTP ainda é um efeito externo não transacional com MySQL. Até a migração
-   * para outbox, somente rascunhos podem entrar nesta rota e o lifecycle faz a
-   * validação autoritativa de preços antes de registrar o envio.
+   * Despacho transacionalmente rastreado. SMTP não oferece exactly-once com
+   * MySQL; por isso qualquer resultado ambíguo bloqueia repetição automática.
    */
   sendByEmail: editorProcedure
     .input(
@@ -335,46 +345,131 @@ export const proposalsRouter = router({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "SMTP não configurado." });
       }
 
-      const proposal = await getProposalWithItems(input.id);
-      if (!proposal) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
-      if (proposal.status !== "draft") {
+      const actor = actorLabel(ctx.user);
+      const reservation = await reserveProposalEmailDispatch({
+        proposalId: input.id,
+        recipient: input.to,
+        subject: input.subject,
+        actor,
+      });
+
+      if (reservation.mode === "already_sent") {
+        return {
+          success: true as const,
+          alreadySent: true as const,
+          to: reservation.recipient,
+          messageId: reservation.messageId,
+        };
+      }
+
+      if (reservation.mode === "resume") {
+        const lifecycle = await advanceProposalLifecycle({
+          id: input.id,
+          newStatus: "sent",
+          notes: `Envio SMTP já confirmado para ${reservation.recipient}; retomada do estado interno sem reenvio`,
+          actor,
+        });
+        await markProposalEmailDispatchCompleted({
+          proposalId: input.id,
+          token: reservation.token,
+        });
+        await recordAudit({
+          userId: ctx.user.id,
+          action: "proposal_send_email_recovered",
+          entity: "proposals",
+          entityId: input.id,
+          origin: "email",
+          summary: `Estado interno recuperado sem novo envio para ${reservation.recipient}`,
+          changes: { messageId: reservation.messageId, opportunityId: lifecycle.opportunityId },
+        });
+        return {
+          success: true as const,
+          alreadySent: true as const,
+          recovered: true as const,
+          to: reservation.recipient,
+          messageId: reservation.messageId,
+        };
+      }
+
+      let proposal: NonNullable<Awaited<ReturnType<typeof getProposalWithItems>>>;
+      let pdfBuffer: Buffer;
+      try {
+        const current = await getProposalWithItems(input.id);
+        if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Proposta não encontrada." });
+        proposal = current;
+        const company = await getCompanySettings();
+        pdfBuffer = await generateProposalPdf(
+          proposalPdfInput(proposal),
+          companyPdfInput(company),
+        );
+      } catch (error) {
+        await releaseProposalEmailDispatchReservation({
+          proposalId: input.id,
+          token: reservation.token,
+        });
+        throw error;
+      }
+
+      let acceptedMessageId = reservation.messageId;
+      try {
+        const sent = await sendEmail({
+          to: reservation.recipient,
+          subject: reservation.subject,
+          text:
+            input.mensagem ??
+            "Prezados,\n\nSegue em anexo nossa proposta comercial.\n\nAtenciosamente.",
+          messageId: reservation.messageId,
+          attachments: [
+            {
+              filename: `proposta-${input.id}.pdf`,
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ],
+        });
+        acceptedMessageId = sent.messageId || reservation.messageId;
+      } catch (error) {
+        await markProposalEmailDispatchAmbiguous({
+          proposalId: input.id,
+          token: reservation.token,
+          error,
+        });
+        await recordAudit({
+          userId: ctx.user.id,
+          action: "proposal_send_email_ambiguous",
+          entity: "proposals",
+          entityId: input.id,
+          origin: "email",
+          summary: `Resultado SMTP ambíguo para ${reservation.recipient}; reenvio automático bloqueado`,
+          changes: { messageId: reservation.messageId },
+        });
         throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: `Envio bloqueado: proposta está em ${proposal.status}.`,
+          code: "CONFLICT",
+          message:
+            "O SMTP não confirmou o resultado de forma segura. O reenvio automático foi bloqueado; confira a caixa de enviados antes de tentar novamente.",
+          cause: error,
         });
       }
 
-      const org = proposal.orgId ? await getRequestingOrgById(proposal.orgId) : null;
-      const recipient = input.to ?? org?.email ?? undefined;
-      if (!recipient) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Informe o e-mail do destinatário." });
-      }
-
-      const company = await getCompanySettings();
-      const pdfBuffer = await generateProposalPdf(
-        proposalPdfInput(proposal),
-        companyPdfInput(company),
-      );
-      await sendEmail({
-        to: recipient,
-        subject: input.subject ?? `Proposta comercial - ${proposal.title}`,
-        text:
-          input.mensagem ??
-          "Prezados,\n\nSegue em anexo nossa proposta comercial.\n\nAtenciosamente.",
-        attachments: [
-          {
-            filename: `proposta-${input.id}.pdf`,
-            content: pdfBuffer,
-            contentType: "application/pdf",
-          },
-        ],
+      // Se o processo cair depois de o SMTP aceitar e antes deste registro, a
+      // reserva permanece "sending" e bloqueia reenvio cego. É deliberadamente
+      // conservador porque SMTP não oferece transação distribuída com MySQL.
+      await markProposalSmtpAccepted({
+        proposalId: input.id,
+        token: reservation.token,
+        messageId: acceptedMessageId,
       });
 
-      await advanceProposalLifecycle({
+      const lifecycle = await advanceProposalLifecycle({
         id: input.id,
         newStatus: "sent",
-        notes: `Enviada por e-mail para ${recipient}`,
-        actor: actorLabel(ctx.user),
+        notes: `Enviada por e-mail para ${reservation.recipient}`,
+        actor,
+      });
+
+      await markProposalEmailDispatchCompleted({
+        proposalId: input.id,
+        token: reservation.token,
       });
       await recordAudit({
         userId: ctx.user.id,
@@ -382,9 +477,18 @@ export const proposalsRouter = router({
         entity: "proposals",
         entityId: input.id,
         origin: "email",
-        summary: `Proposta enviada por e-mail para ${recipient}`,
+        summary: `Proposta enviada por e-mail para ${reservation.recipient}`,
+        changes: {
+          messageId: acceptedMessageId,
+          opportunityId: lifecycle.opportunityId,
+        },
       });
-      return { success: true as const, to: recipient };
+      return {
+        success: true as const,
+        alreadySent: false as const,
+        to: reservation.recipient,
+        messageId: acceptedMessageId,
+      };
     }),
 
   advanceStatus: editorProcedure
