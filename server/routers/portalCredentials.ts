@@ -6,16 +6,22 @@ import { getDb } from "../db";
 import { portalCredentials } from "../../drizzle/schema";
 import { credentialEncryptionService } from "../services/credentialEncryptionService";
 import { PORTAL_CONFIGS, type PortalType } from "../services/propostaAgent";
+import { checkPortalLoginHealth } from "../services/portalAuthenticatedDiscoveryService";
+import { S2_TARGET_PORTALS, type S2TargetPortal } from "../services/s2TargetPortals";
 
 /**
  * Cofre de credenciais dos portais de licitação (uso interno).
  * A senha é guardada criptografada (AES-256-GCM) e nunca retornada em texto.
  */
 
-const PORTAIS = Object.keys(PORTAL_CONFIGS) as PortalType[];
+// A operação S2 está deliberadamente restrita aos seis portais institucionais
+// homologados no radar. Não derive a lista de PORTAL_CONFIGS: esse objeto ainda
+// contém tipos legados usados pelo agente e pode mudar por extensão em runtime.
+const PORTAIS = [...S2_TARGET_PORTALS] as [S2TargetPortal, ...S2TargetPortal[]];
+const PortalSchema = z.enum(PORTAIS);
 
 const CredencialInput = z.object({
-  portal: z.enum(PORTAIS as [string, ...string[]]),
+  portal: PortalSchema,
   apelido: z.string().max(128).optional(),
   loginUrl: z.string().max(1000).optional(),
   usuario: z.string().min(1).max(256),
@@ -24,7 +30,7 @@ const CredencialInput = z.object({
 });
 
 export const portalCredentialsRouter = router({
-  /** Lista os portais suportados (com URL e notas). */
+  /** Lista os seis portais suportados pela operação S2 (com URL e notas). */
   portais: editorProcedure.query(() =>
     PORTAIS.map((p) => ({
       portal: p,
@@ -65,6 +71,15 @@ export const portalCredentialsRouter = router({
     });
     return { id: (res as any).insertId as number };
   }),
+
+  /**
+   * Testa somente o login do portal usando a mesma credencial ativa que o
+   * radar autenticado utiliza. Não coleta oportunidades nem preenche proposta.
+   * CAPTCHA/MFA continuam sendo tratados como intervenção humana.
+   */
+  testarAcesso: adminProcedure
+    .input(z.object({ portal: PortalSchema }))
+    .mutation(async ({ input }) => checkPortalLoginHealth(input.portal)),
 
   /** Remove (desativa) uma credencial. */
   remover: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
