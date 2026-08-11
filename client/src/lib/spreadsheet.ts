@@ -1,4 +1,5 @@
 import type ExcelJS from "exceljs";
+import { cellToText } from "@shared/cellText";
 
 /**
  * Leitura de planilhas no cliente via ExcelJS (substitui a lib `xlsx`,
@@ -63,4 +64,20 @@ export async function readObjects(
     out.push(obj);
   }
   return out;
+}
+
+/**
+ * Lê a primeira aba como objetos com todos os valores em texto.
+ *
+ * Os fluxos de importação enviam as colunas como texto; sem esta conversão,
+ * células numéricas (preço, EAN) e de data chegariam ao servidor com o tipo
+ * original e seriam rejeitadas na validação.
+ */
+export async function readTextObjects(buffer: ArrayBuffer): Promise<Record<string, string>[]> {
+  const rows = await readObjects(buffer, { defval: "" });
+  return rows.map((row) => {
+    const texto: Record<string, string> = {};
+    for (const [header, value] of Object.entries(row)) texto[header] = cellToText(value);
+    return texto;
+  });
 }
