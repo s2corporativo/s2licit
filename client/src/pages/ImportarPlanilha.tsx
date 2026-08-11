@@ -3,7 +3,7 @@ import { AlertCircle, AlertTriangle, CheckCircle2, FileSpreadsheet, GitMerge, Im
 import Papa from "papaparse";
 import { useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { readObjects } from "@/lib/spreadsheet";
+import { readTextObjects } from "@/lib/spreadsheet";
 import { formatBRL } from "@/lib/format";
 import { ImportDuplicatesReviewModal } from "@/components/ImportDuplicatesReviewModal";
 
@@ -364,7 +364,7 @@ export default function ImportarPlanilha() {
         rows = result.data;
       } else {
         const buffer = await file.arrayBuffer();
-        rows = (await readObjects(buffer, { defval: "" })) as Record<string, string>[];
+        rows = await readTextObjects(buffer);
       }
 
       if (rows.length === 0) {

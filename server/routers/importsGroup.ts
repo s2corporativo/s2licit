@@ -18,6 +18,33 @@ import {
 import { sql, eq } from "drizzle-orm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { logger } from "../_core/logger";
+import { cellToText } from "@shared/cellText";
+
+// ── Colunas de planilha chegam tipadas (preço como número, data como Date).
+// A importação trata tudo como texto, então a conversão acontece na validação
+// em vez de rejeitar a linha inteira.
+const coerceCellText = (v: unknown) =>
+  typeof v === "string" || v === undefined ? v : v === null ? undefined : cellToText(v);
+const textCell = z.preprocess(coerceCellText, z.string());
+const optionalTextCell = z.preprocess(coerceCellText, z.string().optional());
+
+/** Linha de produto vinda da planilha, com colunas normalizadas para texto. */
+export const importRowSchema = z.object({
+  ean: optionalTextCell,                // Código EAN / GTIN
+  codigoMapa: optionalTextCell,         // Código MAPA/ANVISA/FORN
+  codigoFornecedor: optionalTextCell,   // Código do fornecedor
+  nome: textCell,                       // Nome do produto
+  categoria: optionalTextCell,          // Categoria (se já preenchida)
+  subcategoria: optionalTextCell,       // Subcategoria (se já preenchida)
+  fichaTecnica: optionalTextCell,       // Ficha técnica / bula
+  apresentacao: optionalTextCell,       // Apresentação
+  fabricante: optionalTextCell,         // Fabricante
+  preco: optionalTextCell,              // Preço de referência
+  linkProduto: optionalTextCell,        // Link do produto
+  urlImagem: optionalTextCell,          // URL da imagem
+  // Preços por fornecedor: chave = nome do fornecedor, valor = preço
+  precosFornecedor: z.record(z.string(), textCell).optional(),
+});
 
 export const importsRouter = router({
     list: protectedProcedure
@@ -30,24 +57,7 @@ export const importsRouter = router({
         z.object({
           fileName: z.string(),
           fileUrl: z.string().optional(),
-          rows: z.array(
-            z.object({
-              ean: z.string().optional(),           // Código EAN / GTIN
-              codigoMapa: z.string().optional(),    // Código MAPA/ANVISA/FORN
-              codigoFornecedor: z.string().optional(), // Código do fornecedor
-              nome: z.string(),                     // Nome do produto
-              categoria: z.string().optional(),     // Categoria (se já preenchida)
-              subcategoria: z.string().optional(),  // Subcategoria (se já preenchida)
-              fichaTecnica: z.string().optional(),  // Ficha técnica / bula
-              apresentacao: z.string().optional(),  // Apresentação
-              fabricante: z.string().optional(),    // Fabricante
-              preco: z.string().optional(),         // Preço de referência
-              linkProduto: z.string().optional(),   // Link do produto
-              urlImagem: z.string().optional(),     // URL da imagem
-              // Preços por fornecedor: chave = nome do fornecedor, valor = preço
-              precosFornecedor: z.record(z.string(), z.string()).optional(),
-            })
-          ).max(3000),
+          rows: z.array(importRowSchema).max(3000),
           supplierId: z.number().optional().nullable(),
           replaceExisting: z.boolean().optional(),
           rowActions: z.record(z.string(), z.enum(["update", "skip", "replace", "insert"])).optional(),
@@ -392,12 +402,12 @@ export const importsRouter = router({
       .input(z.object({
         rows: z.array(z.object({
           rowIndex: z.number(),
-          nome: z.string().optional(),
-          principioAtivo: z.string().optional(),
-          fabricante: z.string().optional(),
-          apresentacao: z.string().optional(),
-          categoria: z.string().optional(),
-          subcategoria: z.string().optional(),
+          nome: optionalTextCell,
+          principioAtivo: optionalTextCell,
+          fabricante: optionalTextCell,
+          apresentacao: optionalTextCell,
+          categoria: optionalTextCell,
+          subcategoria: optionalTextCell,
         })),
       }))
       .mutation(async ({ input }) => {
@@ -610,7 +620,7 @@ Responda APENAS com JSON array no formato:
     // ── startBatchImport: inicia importação em lote com progresso em tempo real ──
     startBatchImport: protectedProcedure
       .input(z.object({
-        rows: z.array(z.record(z.string(), z.string())).max(3000),
+        rows: z.array(z.record(z.string(), textCell)).max(3000),
         supplierId: z.number(),
       }))
       .mutation(async ({ input, ctx }) => {
