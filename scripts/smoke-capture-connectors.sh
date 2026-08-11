@@ -91,6 +91,26 @@ read_app_secret() {
   fi
 }
 
+assert_single_line() {
+  local key="$1"
+  local value="$2"
+
+  case "$value" in
+    *$'\n'*|*$'\r'*)
+      echo "[capture-smoke] $key contém quebra de linha e não pode entrar no env-file temporário." >&2
+      return 1
+      ;;
+  esac
+}
+
+append_env() {
+  local key="$1"
+  local value="$2"
+
+  assert_single_line "$key" "$value"
+  printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+}
+
 DATABASE_URL_VALUE="$(read_app_secret DATABASE_URL)"
 ENCRYPTION_KEY_VALUE="$(read_app_secret ENCRYPTION_KEY)"
 JWT_SECRET_VALUE="$(read_app_secret JWT_SECRET)"
@@ -108,15 +128,15 @@ fi
 
 umask 077
 ENV_FILE="$(mktemp)"
-printf 'DATABASE_URL=%s\n' "$DATABASE_URL_VALUE" >> "$ENV_FILE"
+append_env DATABASE_URL "$DATABASE_URL_VALUE"
 if [ -n "$ENCRYPTION_KEY_VALUE" ]; then
-  printf 'ENCRYPTION_KEY=%s\n' "$ENCRYPTION_KEY_VALUE" >> "$ENV_FILE"
+  append_env ENCRYPTION_KEY "$ENCRYPTION_KEY_VALUE"
 fi
 if [ -n "$JWT_SECRET_VALUE" ]; then
-  printf 'JWT_SECRET=%s\n' "$JWT_SECRET_VALUE" >> "$ENV_FILE"
+  append_env JWT_SECRET "$JWT_SECRET_VALUE"
 fi
-printf 'NODE_ENV=production\n' >> "$ENV_FILE"
-printf 'PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium\n' >> "$ENV_FILE"
+append_env NODE_ENV production
+append_env PUPPETEER_EXECUTABLE_PATH /usr/bin/chromium
 
 for optional_key in \
   CAPTURE_SMOKE_TAMBASA_CONFIG_ID \
@@ -124,11 +144,7 @@ for optional_key in \
   CAPTURE_SMOKE_SEARCH_QUERY; do
   optional_value="${!optional_key:-}"
   if [ -n "$optional_value" ]; then
-    if printf '%s' "$optional_value" | grep -q $'[\r\n]'; then
-      echo "[capture-smoke] $optional_key contém quebra de linha e foi rejeitada." >&2
-      exit 1
-    fi
-    printf '%s=%s\n' "$optional_key" "$optional_value" >> "$ENV_FILE"
+    append_env "$optional_key" "$optional_value"
   fi
 done
 
