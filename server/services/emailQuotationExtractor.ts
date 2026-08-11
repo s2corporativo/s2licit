@@ -193,9 +193,12 @@ const PROCESSABLE_EXTENSION = /\.(xlsx|xls|csv|pdf|docx|png|jpe?g|webp|gif)$/i;
  */
 export function isProcessableQuotationAttachment(filename: string, mimeType: string): boolean {
   if (PROCESSABLE_EXTENSION.test(filename)) return true;
-  if (mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType === "text/csv") return true;
-  if (mimeType === "application/pdf" || mimeType.includes("wordprocessingml")) return true;
-  return isOcrSupportedMime(mimeType, filename);
+  // Content-Type de e-mail pode vir com variação de maiúsculas e parâmetros
+  // (ex.: "Text/CSV; charset=UTF-8") — normaliza antes de comparar.
+  const normalized = mimeType.split(";", 1)[0].trim().toLowerCase();
+  if (normalized.includes("spreadsheet") || normalized.includes("excel") || normalized === "text/csv") return true;
+  if (normalized === "application/pdf" || normalized.includes("wordprocessingml")) return true;
+  return isOcrSupportedMime(normalized, filename);
 }
 
 /**

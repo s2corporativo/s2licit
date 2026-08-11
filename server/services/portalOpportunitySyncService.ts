@@ -513,13 +513,24 @@ export async function syncPortalOpportunities(options?: {
   );
   const opportunities: PortalOpportunity[] = [];
 
+  // Cada fonte é isolada: uma rejeição na busca da Fundep (ex.: página de
+  // grupos fora do ar) não pode derrubar a sincronização inteira e impedir a
+  // Funarbe de rodar — o erro fica registrado na própria fonte.
   if (sources.includes("fundep")) {
-    opportunities.push(
-      ...(await fetchFundepOpportunities(maxFundepGroups, bySource.get("fundep")!.errors)),
-    );
+    const stats = bySource.get("fundep")!;
+    try {
+      opportunities.push(...(await fetchFundepOpportunities(maxFundepGroups, stats.errors)));
+    } catch (error) {
+      stats.errors.push(`Fundep: ${(error as Error).message}`);
+    }
   }
   if (sources.includes("funarbe")) {
-    opportunities.push(...(await fetchFunarbeOpportunities(bySource.get("funarbe")!.errors)));
+    const stats = bySource.get("funarbe")!;
+    try {
+      opportunities.push(...(await fetchFunarbeOpportunities(stats.errors)));
+    } catch (error) {
+      stats.errors.push(`Funarbe: ${(error as Error).message}`);
+    }
   }
 
   const tambasaCatalog = options?.tambasaCatalog ?? (await loadTambasaCatalog());
