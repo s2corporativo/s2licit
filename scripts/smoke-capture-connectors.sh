@@ -51,17 +51,57 @@ read_app_env() {
   printf '%s\n' "$APP_ENV" | sed -n "s/^${key}=//p" | head -n 1
 }
 
-DATABASE_URL_VALUE="$(read_app_env DATABASE_URL)"
-ENCRYPTION_KEY_VALUE="$(read_app_env ENCRYPTION_KEY)"
-JWT_SECRET_VALUE="$(read_app_env JWT_SECRET)"
+read_container_file() {
+  local path="$1"
+  if [ -z "$path" ]; then
+    return 0
+  fi
+
+  docker exec "$APP_CONTAINER" sh -c '
+    set -eu
+    target="$1"
+    if [ ! -f "$target" ]; then
+      exit 2
+    fi
+    cat "$target"
+  ' _ "$path"
+}
+
+read_app_secret() {
+  local key="$1"
+  local direct
+  local file_var
+  local file_path
+
+  direct="$(read_app_env "$key")"
+  if [ -n "$direct" ]; then
+    printf '%s' "$direct"
+    return 0
+  fi
+
+  file_var="${key}_FILE"
+  file_path="$(read_app_env "$file_var")"
+  if [ -z "$file_path" ]; then
+    return 0
+  fi
+
+  if ! read_container_file "$file_path"; then
+    echo "[capture-smoke] Não foi possível ler $file_var dentro do container." >&2
+    return 1
+  fi
+}
+
+DATABASE_URL_VALUE="$(read_app_secret DATABASE_URL)"
+ENCRYPTION_KEY_VALUE="$(read_app_secret ENCRYPTION_KEY)"
+JWT_SECRET_VALUE="$(read_app_secret JWT_SECRET)"
 
 if [ -z "$DATABASE_URL_VALUE" ]; then
-  echo "[capture-smoke] DATABASE_URL não está disponível no container da aplicação." >&2
+  echo "[capture-smoke] DATABASE_URL/DATABASE_URL_FILE não estão disponíveis no container." >&2
   exit 1
 fi
 
 if [ -z "$ENCRYPTION_KEY_VALUE" ] && [ -z "$JWT_SECRET_VALUE" ]; then
-  echo "[capture-smoke] ENCRYPTION_KEY/JWT_SECRET não estão disponíveis no container." >&2
+  echo "[capture-smoke] ENCRYPTION_KEY/JWT_SECRET (diretos ou *_FILE) não estão disponíveis." >&2
   echo "[capture-smoke] Não é possível descriptografar credenciais do fornecedor com segurança." >&2
   exit 1
 fi
@@ -84,6 +124,10 @@ for optional_key in \
   CAPTURE_SMOKE_SEARCH_QUERY; do
   optional_value="${!optional_key:-}"
   if [ -n "$optional_value" ]; then
+    if printf '%s' "$optional_value" | grep -q $'[\r\n]'; then
+      echo "[capture-smoke] $optional_key contém quebra de linha e foi rejeitada." >&2
+      exit 1
+    fi
     printf '%s=%s\n' "$optional_key" "$optional_value" >> "$ENV_FILE"
   fi
 done
