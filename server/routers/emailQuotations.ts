@@ -13,7 +13,6 @@ import {
 import { buildQuotationResponse } from "../services/emailQuotationResponseService";
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 import { ensureOpportunityFromQuotation } from "../services/opportunityWorkflowService";
-import { recordAudit } from "../services/auditService";
 import { prepareProposalFromQuotation } from "../services/quotationPortalHandoffService";
 import {
   autoConfirmThreshold,
@@ -169,36 +168,50 @@ export const emailQuotationsRouter = router({
         .limit(1);
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Item de cotação não encontrado." });
 
-      await db
-        .update(emailQuotationItems)
-        .set({
-          produtoMatchId: input.produtoMatchId,
-          matchMethod: "manual",
-          matchConfirmado: input.produtoMatchId != null,
-          // Uma correção manual encerra a trilha de "auto": mesmo que o
-          // operador reconfirme o MESMO produto, a decisão passou a ser
-          // humana — não conta mais como acerto nem erro da automação.
-          matchAuto: false,
-          // undefined omitiria a coluna do UPDATE (Drizzle a ignora) — só
-          // preserva o preço atual quando o campo nem foi enviado; um null
-          // explícito deve limpar o preço, não ficar sem efeito.
-          ...(input.precoSugerido !== undefined ? { precoSugerido: input.precoSugerido } : {}),
-        })
-        .where(eq(emailQuotationItems.id, input.itemId));
+      // Update do item + registro de AUTO_MATCH_CORRECTED na MESMA transação:
+      // se o insert da auditoria falhar, o update também desfaz — senão o
+      // item já perde matchAuto e uma repetição da chamada nunca mais vê
+      // current.matchAuto=true para tentar registrar a correção de novo
+      // (o sinal de erro da automação seria perdido, inflando taxaAcerto).
+      // recordAudit() continua "best effort" (nunca lança) nos DEMAIS pontos
+      // do sistema — aqui, excepcionalmente, o insert é feito à parte, direto
+      // na transação, porque este é o único evento de auditoria de que a
+      // métrica de acerto depende.
+      const registrarCorrecao = current.matchAuto && current.produtoMatchId !== input.produtoMatchId;
+      await db.transaction(async (tx) => {
+        await tx
+          .update(emailQuotationItems)
+          .set({
+            produtoMatchId: input.produtoMatchId,
+            matchMethod: "manual",
+            matchConfirmado: input.produtoMatchId != null,
+            // Uma correção manual encerra a trilha de "auto": mesmo que o
+            // operador reconfirme o MESMO produto, a decisão passou a ser
+            // humana — não conta mais como acerto nem erro da automação.
+            matchAuto: false,
+            // undefined omitiria a coluna do UPDATE (Drizzle a ignora) — só
+            // preserva o preço atual quando o campo nem foi enviado; um null
+            // explícito deve limpar o preço, não ficar sem efeito.
+            ...(input.precoSugerido !== undefined ? { precoSugerido: input.precoSugerido } : {}),
+          })
+          .where(eq(emailQuotationItems.id, input.itemId));
 
-      // Calibração do limiar (§ auto-confirmação): registra quando o operador
-      // substitui um match que a automação havia confirmado sozinha por um
-      // produto DIFERENTE — é a correção que importa para medir acerto/erro.
-      if (current.matchAuto && current.produtoMatchId !== input.produtoMatchId) {
-        await recordAudit({
-          userId: ctx.user?.id ?? null,
-          action: "AUTO_MATCH_CORRECTED",
-          entity: "email_quotation_items",
-          entityId: input.itemId,
-          summary: `Match automático corrigido pelo operador (produto ${current.produtoMatchId} → ${input.produtoMatchId})`,
-          changes: { de: current.produtoMatchId, para: input.produtoMatchId },
-        });
-      }
+        // Calibração do limiar (§ auto-confirmação): registra quando o
+        // operador substitui um match que a automação havia confirmado
+        // sozinha por um produto DIFERENTE — é a correção que importa para
+        // medir acerto/erro.
+        if (registrarCorrecao) {
+          await tx.insert(auditLogs).values({
+            userId: ctx.user?.id ?? null,
+            action: "AUTO_MATCH_CORRECTED",
+            entity: "email_quotation_items",
+            entityId: input.itemId,
+            origin: "system",
+            summary: `Match automático corrigido pelo operador (produto ${current.produtoMatchId} → ${input.produtoMatchId})`,
+            changes: { de: current.produtoMatchId, para: input.produtoMatchId } as any,
+          });
+        }
+      });
 
       return { success: true };
     }),

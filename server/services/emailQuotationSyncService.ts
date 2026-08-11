@@ -5,6 +5,7 @@ import { fetchUnseenEmails, isImapConfigured } from "./emailInboxService";
 import {
   extractItemsFromAttachment,
   extractItemsFromText,
+  isProcessableQuotationAttachment,
   type ExtractedItem,
 } from "./emailQuotationExtractor";
 import { matchQuotationItems } from "./emailQuotationMatchingService";
@@ -14,10 +15,6 @@ import { matchQuotationItems } from "./emailQuotationMatchingService";
  * busca não lidos → extrai itens (anexo ou corpo) → cruza com o catálogo →
  * persiste como cotação em revisão. Deduplica por Message-ID.
  */
-
-// Inclui imagens (foto/scan do pedido de cotação) — passam por OCR antes da
-// extração de itens, mesmo tratamento dado a anexos PDF/DOCX.
-const PROCESSABLE_ATTACHMENT = /\.(xlsx|xls|csv|pdf|docx|png|jpe?g|webp|gif)$/i;
 
 export interface SyncResult {
   imapConfigured: boolean;
@@ -71,7 +68,9 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
       let sourceType: "spreadsheet" | "pdf" | "docx" | "image" | "body" = "body";
       let sourceFilename: string | null = null;
 
-      const candidatos = email.attachments.filter((a) => PROCESSABLE_ATTACHMENT.test(a.filename));
+      const candidatos = email.attachments.filter((a) =>
+        isProcessableQuotationAttachment(a.filename, a.contentType),
+      );
       for (const attachment of candidatos) {
         try {
           const extracted = await extractItemsFromAttachment(

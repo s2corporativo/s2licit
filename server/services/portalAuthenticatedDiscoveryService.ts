@@ -1,9 +1,10 @@
-import { desc, and, eq } from "drizzle-orm";
+import { desc, and, eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { portalCredentials } from "../../drizzle/schema";
 import { credentialEncryptionService } from "./credentialEncryptionService";
 import {
   CaptchaRequerIntervencaoError,
+  CredencialInvalidaError,
   PORTAL_CONFIGS,
   PropostaAgente,
   type PortalSessionCookie,
@@ -66,6 +67,23 @@ export function portalTypeForSource(source: S2TargetPortal): PortalType | null {
   }
 }
 
+/**
+ * Valida a forma do valor decifrado antes de confiar nele como sessão
+ * restaurável — um JSON válido mas com formato errado (registro antigo,
+ * corrupção parcial) não pode virar cookies aplicados ao navegador sem
+ * checagem: `restaurarSessao` só recebe candidatos já validados aqui.
+ */
+function isValidCookieArray(value: unknown): value is PortalSessionCookie[] {
+  if (!Array.isArray(value)) return false;
+  return value.every(
+    (c) =>
+      c && typeof c === "object" &&
+      typeof (c as Record<string, unknown>).name === "string" &&
+      typeof (c as Record<string, unknown>).value === "string" &&
+      typeof (c as Record<string, unknown>).domain === "string",
+  );
+}
+
 export interface DecryptedPortalCredential {
   id: number;
   portal: PortalType;
@@ -95,7 +113,8 @@ export async function getPortalCredentialForPortal(
   let sessaoCookies: PortalSessionCookie[] | null = null;
   if (row.sessaoCookies) {
     try {
-      sessaoCookies = JSON.parse(credentialEncryptionService.decrypt(row.sessaoCookies));
+      const parsed = JSON.parse(credentialEncryptionService.decrypt(row.sessaoCookies));
+      sessaoCookies = isValidCookieArray(parsed) ? parsed : null;
     } catch {
       sessaoCookies = null; // sessão corrompida/formato antigo — cai no login completo
     }
@@ -139,18 +158,29 @@ async function resetLoginFailures(credentialId: number): Promise<void> {
   await db.update(portalCredentials).set({ loginFailCount: 0 }).where(eq(portalCredentials.id, credentialId));
 }
 
-/** Incrementa o contador de falhas consecutivas de login da credencial. */
+/**
+ * Incrementa atomicamente (no próprio banco, sem ler-then-escrever) o
+ * contador de falhas CONSECUTIVAS de login rejeitado da credencial. Chamadas
+ * concorrentes não perdem incrementos nem atrasam o bloqueio.
+ */
 async function recordLoginFailure(credentialId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
+  await db
+    .update(portalCredentials)
+    .set({ loginFailCount: sql`${portalCredentials.loginFailCount} + 1` })
+    .where(eq(portalCredentials.id, credentialId));
   const [row] = await db
     .select({ loginFailCount: portalCredentials.loginFailCount })
     .from(portalCredentials)
     .where(eq(portalCredentials.id, credentialId))
     .limit(1);
-  const next = (row?.loginFailCount ?? 0) + 1;
-  await db.update(portalCredentials).set({ loginFailCount: next }).where(eq(portalCredentials.id, credentialId));
-  return next;
+  return row?.loginFailCount ?? 0;
+}
+
+/** Só a rejeição CONFIRMADA de credencial deve contar para o bloqueio — CAPTCHA, timeout e mudança de seletor não provam senha errada. */
+function isFalhaDeCredencial(err: unknown): boolean {
+  return err instanceof CredencialInvalidaError;
 }
 
 /**
@@ -211,8 +241,12 @@ export async function fetchAuthenticatedPortalHtml(
           cnpj: credential.cnpj,
         });
       } catch (err) {
-        const falhas = await recordLoginFailure(credential.id);
-        logger.warn(`[PortalAuthDiscovery] ${source}: falha de login (${falhas}/${LOGIN_FAIL_THRESHOLD}).`);
+        if (isFalhaDeCredencial(err)) {
+          const falhas = await recordLoginFailure(credential.id);
+          logger.warn(`[PortalAuthDiscovery] ${source}: falha de login (${falhas}/${LOGIN_FAIL_THRESHOLD}).`);
+        } else {
+          logger.warn(`[PortalAuthDiscovery] ${source}: falha operacional de login (não conta para bloqueio): ${(err as Error).message}`);
+        }
         throw err;
       }
       const cookies = await agente.exportarCookies();
@@ -257,6 +291,17 @@ export async function checkPortalLoginHealth(source: S2TargetPortal): Promise<Po
     return { source, hasCredential: false, ok: false, detail: "Sem credencial cadastrada no cofre." };
   }
 
+  // Mesma política de bloqueio da descoberta: uma credencial já bloqueada não
+  // pode receber mais tentativas de login pelo teste de fumaça semanal.
+  if (credential.loginFailCount >= LOGIN_FAIL_THRESHOLD) {
+    return {
+      source,
+      hasCredential: true,
+      ok: false,
+      detail: `Credencial bloqueada após ${credential.loginFailCount} falha(s) de login consecutivas — recadastre no cofre para testar novamente.`,
+    };
+  }
+
   const agente = new PropostaAgente();
   try {
     await agente.init();
@@ -270,7 +315,7 @@ export async function checkPortalLoginHealth(source: S2TargetPortal): Promise<Po
     await resetLoginFailures(credential.id);
     return { source, hasCredential: true, ok: true, detail: "Login confirmado." };
   } catch (err) {
-    await recordLoginFailure(credential.id);
+    if (isFalhaDeCredencial(err)) await recordLoginFailure(credential.id);
     const detail = err instanceof CaptchaRequerIntervencaoError
       ? "CAPTCHA exigiu intervenção humana (não é necessariamente quebra de seletor)."
       : (err as Error).message;

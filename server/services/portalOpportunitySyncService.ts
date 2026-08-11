@@ -49,6 +49,8 @@ export interface PortalSourceSyncStats {
   skipped: number;
   matchedItems: number;
   unmatchedItems: number;
+  /** Erros específicos desta fonte — não inclui erros de outra fonte da mesma rodada. */
+  errors: string[];
 }
 
 export interface PortalSyncResult {
@@ -493,6 +495,8 @@ async function persistOpportunity(
 export async function syncPortalOpportunities(options?: {
   sources?: PortalOpportunitySource[];
   maxFundepGroups?: number;
+  /** Catálogo já carregado pelo chamador — evita recarregar quando o chamador já fez o load (ex.: syncS2PortalOpportunities). */
+  tambasaCatalog?: TambasaCatalogProduct[];
 }): Promise<PortalSyncResult> {
   const sources = options?.sources?.length
     ? Array.from(new Set(options.sources))
@@ -501,30 +505,36 @@ export async function syncPortalOpportunities(options?: {
     Math.max(options?.maxFundepGroups ?? DEFAULT_MAX_FUNDEP_GROUPS, 1),
     200,
   );
-  const errors: string[] = [];
+  const bySource = new Map<PortalOpportunitySource, PortalSourceSyncStats>(
+    sources.map((source) => [
+      source,
+      { source, found: 0, imported: 0, skipped: 0, matchedItems: 0, unmatchedItems: 0, errors: [] },
+    ]),
+  );
   const opportunities: PortalOpportunity[] = [];
 
   if (sources.includes("fundep")) {
-    opportunities.push(...(await fetchFundepOpportunities(maxFundepGroups, errors)));
+    opportunities.push(
+      ...(await fetchFundepOpportunities(maxFundepGroups, bySource.get("fundep")!.errors)),
+    );
   }
   if (sources.includes("funarbe")) {
-    opportunities.push(...(await fetchFunarbeOpportunities(errors)));
+    opportunities.push(...(await fetchFunarbeOpportunities(bySource.get("funarbe")!.errors)));
   }
 
-  const tambasaCatalog = await loadTambasaCatalog();
+  const tambasaCatalog = options?.tambasaCatalog ?? (await loadTambasaCatalog());
   if (tambasaCatalog.length === 0) {
-    errors.push(
-      "Catálogo Tambasa vazio: configure o fornecedor Tambasa e execute a sincronização completa antes do matching.",
-    );
+    for (const source of sources) {
+      bySource.get(source)!.errors.push(
+        "Catálogo Tambasa vazio: configure o fornecedor Tambasa e execute a sincronização completa antes do matching.",
+      );
+    }
   }
 
   let imported = 0;
   let skipped = 0;
   let matchedItems = 0;
   let unmatchedItems = 0;
-  const bySource = new Map<PortalOpportunitySource, PortalSourceSyncStats>(
-    sources.map((source) => [source, { source, found: 0, imported: 0, skipped: 0, matchedItems: 0, unmatchedItems: 0 }]),
-  );
 
   for (const opportunity of opportunities) {
     const sourceStats = bySource.get(opportunity.source);
@@ -540,9 +550,8 @@ export async function syncPortalOpportunities(options?: {
         sourceStats.unmatchedItems += persisted.unmatched;
       }
     } catch (error) {
-      errors.push(
-        `${opportunity.source.toUpperCase()} ${opportunity.externalId}: ${(error as Error).message}`,
-      );
+      const message = `${opportunity.source.toUpperCase()} ${opportunity.externalId}: ${(error as Error).message}`;
+      sourceStats ? sourceStats.errors.push(message) : void 0;
     }
   }
 
@@ -551,6 +560,7 @@ export async function syncPortalOpportunities(options?: {
       `${skipped} já existentes, ${matchedItems} itens casados com Tambasa.`,
   );
 
+  const sourceStats = Array.from(bySource.values());
   return {
     sources,
     found: opportunities.length,
@@ -558,7 +568,7 @@ export async function syncPortalOpportunities(options?: {
     skipped,
     matchedItems,
     unmatchedItems,
-    errors,
-    sourceStats: Array.from(bySource.values()),
+    errors: sourceStats.flatMap((s) => s.errors),
+    sourceStats,
   };
 }

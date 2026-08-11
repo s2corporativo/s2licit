@@ -60,6 +60,20 @@ export class CaptchaRequerIntervencaoError extends Error {
   }
 }
 
+/**
+ * Rejeição CONFIRMADA de credencial (usuário/senha incorretos) — distinta de
+ * falha operacional (timeout, seletor não encontrado, CAPTCHA, portal fora do
+ * ar). Só este erro deve contar para o contador de bloqueio de login: um
+ * timeout ou CAPTCHA não prova que a senha está errada, e bloquear a
+ * credencial por isso derrubaria uma credencial válida.
+ */
+export class CredencialInvalidaError extends Error {
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = "CredencialInvalidaError";
+  }
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "fiemg" | "cemig" | "agrega" | "generico";
@@ -621,7 +635,7 @@ export class PropostaAgente {
 
     if (temErro) {
       await this.capturarTela("Falha no login");
-      throw new Error(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
+      throw new CredencialInvalidaError(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
     }
 
     // Confirmação positiva: indicador de sucesso na página (E sem o campo de

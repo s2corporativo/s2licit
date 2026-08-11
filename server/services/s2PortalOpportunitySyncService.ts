@@ -496,10 +496,13 @@ export async function syncS2PortalOpportunities(options?: {
     const result = await syncFoundationOpportunities({
       sources: foundationSources,
       maxFundepGroups: options?.maxFundepGroups,
+      tambasaCatalog,
     });
     // Contagem POR FONTE (não o agregado de Fundep+Funarbe combinados) —
     // senão Funarbe herda o resultado de Fundep (e vice-versa) e o fallback
     // autenticado abaixo nunca roda quando só uma das duas tem resultado.
+    // Erros também são só os da própria fonte — senão um erro do Fundep
+    // apareceria (duplicado) no relatório da Funarbe, e vice-versa.
     for (const source of foundationSources) {
       const target = stats.get(source)!;
       const perSource = result.sourceStats.find((s) => s.source === source);
@@ -508,7 +511,7 @@ export async function syncS2PortalOpportunities(options?: {
       target.skipped = perSource?.skipped ?? 0;
       target.matchedItems = perSource?.matchedItems ?? 0;
       target.unmatchedItems = perSource?.unmatchedItems ?? 0;
-      target.errors.push(...result.errors);
+      target.errors.push(...(perSource?.errors ?? []));
     }
 
     // Fallback autenticado das fundações: se o mural público não trouxe nada e

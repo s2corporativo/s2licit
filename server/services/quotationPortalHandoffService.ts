@@ -92,34 +92,40 @@ async function insertProposalFromPriced(
   });
   const total = Number(normalizedItems.reduce((sum, item) => sum + item.totalPrice, 0).toFixed(2));
 
-  const [inserted] = await db.insert(proposals).values({
-    title: priced.quotation.subject?.slice(0, 256) || `Cotação ${quotationId}`,
-    orgName: priced.quotation.orgao ?? undefined,
-    origem: "cotacao",
-    emailQuotationId: quotationId,
-    totalValue: String(total.toFixed(2)),
-    notes: priced.quotation.subject
-      ? `Gerada a partir da cotação recebida: ${priced.quotation.subject}`
-      : `Gerada a partir da cotação #${quotationId}`,
-  });
-  const proposalId = (inserted as { insertId?: number }).insertId;
-  if (!proposalId) throw new Error("Não foi possível criar a proposta a partir da cotação.");
+  // Cabeçalho + itens na MESMA transação: se a inserção dos itens falhar, o
+  // cabeçalho não fica órfão no banco (o índice único em emailQuotationId
+  // impediria uma nova tentativa de recriar a proposta completa depois).
+  const proposalId = await db.transaction(async (tx) => {
+    const [inserted] = await tx.insert(proposals).values({
+      title: priced.quotation.subject?.slice(0, 256) || `Cotação ${quotationId}`,
+      orgName: priced.quotation.orgao ?? undefined,
+      origem: "cotacao",
+      emailQuotationId: quotationId,
+      totalValue: String(total.toFixed(2)),
+      notes: priced.quotation.subject
+        ? `Gerada a partir da cotação recebida: ${priced.quotation.subject}`
+        : `Gerada a partir da cotação #${quotationId}`,
+    });
+    const id = (inserted as { insertId?: number }).insertId;
+    if (!id) throw new Error("Não foi possível criar a proposta a partir da cotação.");
 
-  await db.insert(proposalItems).values(
-    normalizedItems.map((item, index) => ({
-      proposalId,
-      productId: item.produtoMatchId,
-      itemNumber: index + 1,
-      productName: item.descricao,
-      unit: item.unidade ?? "UN",
-      unitPrice: String(item.custoUnitario.toFixed(2)),
-      costPrice: String(item.custoUnitario.toFixed(2)),
-      suggestedPrice: String(item.unitPrice.toFixed(2)),
-      quantity: item.quantity,
-      totalPrice: String(item.totalPrice.toFixed(2)),
-      sortOrder: index + 1,
-    })),
-  );
+    await tx.insert(proposalItems).values(
+      normalizedItems.map((item, index) => ({
+        proposalId: id,
+        productId: item.produtoMatchId,
+        itemNumber: index + 1,
+        productName: item.descricao,
+        unit: item.unidade ?? "UN",
+        unitPrice: String(item.custoUnitario.toFixed(2)),
+        costPrice: String(item.custoUnitario.toFixed(2)),
+        suggestedPrice: String(item.unitPrice.toFixed(2)),
+        quantity: item.quantity,
+        totalPrice: String(item.totalPrice.toFixed(2)),
+        sortOrder: index + 1,
+      })),
+    );
+    return id;
+  });
 
   return {
     proposalId,

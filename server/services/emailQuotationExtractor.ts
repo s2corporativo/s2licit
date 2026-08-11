@@ -183,6 +183,21 @@ export async function extractItemsFromText(text: string): Promise<ExtractedItem[
   }
 }
 
+const PROCESSABLE_EXTENSION = /\.(xlsx|xls|csv|pdf|docx|png|jpe?g|webp|gif)$/i;
+
+/**
+ * Elegibilidade de anexo por NOME e por MIME — mesmo critério usado dentro de
+ * `extractItemsFromAttachment`. Um anexo sem extensão reconhecível (ex.:
+ * `image001` renomeado pelo cliente de e-mail) ainda é aceito quando o
+ * Content-Type declara um tipo suportado (planilha, PDF, DOCX ou imagem OCR).
+ */
+export function isProcessableQuotationAttachment(filename: string, mimeType: string): boolean {
+  if (PROCESSABLE_EXTENSION.test(filename)) return true;
+  if (mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType === "text/csv") return true;
+  if (mimeType === "application/pdf" || mimeType.includes("wordprocessingml")) return true;
+  return isOcrSupportedMime(mimeType, filename);
+}
+
 /**
  * Extrai itens de um anexo genérico: planilha estruturada (determinístico),
  * PDF/DOCX (texto + IA), ou imagem fotografada/escaneada de um pedido
