@@ -11,6 +11,7 @@ CONTAINER="s2licit-capture-snapshot-${REVISION}-$$"
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  docker image rm "$IMAGE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -81,12 +82,14 @@ NODE
     pnpm exec drizzle-kit generate --name capture_core
 
     test -f drizzle/meta/0016_snapshot.json
+    test -f drizzle/0016_capture_core.sql
 
     node --input-type=module <<"NODE"
 import { readFile } from "node:fs/promises";
 
 const previous = JSON.parse(await readFile("drizzle/meta/0015_snapshot.json", "utf8"));
 const generated = JSON.parse(await readFile("drizzle/meta/0016_snapshot.json", "utf8"));
+const generatedSql = await readFile("drizzle/0016_capture_core.sql", "utf8");
 
 if (generated.version !== previous.version) {
   throw new Error(`Versão do snapshot mudou inesperadamente: ${previous.version} -> ${generated.version}`);
@@ -98,17 +101,43 @@ if (generated.prevId !== previous.id) {
   throw new Error(`prevId inválido: esperado ${previous.id}, recebido ${generated.prevId}`);
 }
 
-const expectedTables = [
+const expectedTables = new Set([
   "capture_jobs",
   "supplier_product_observations",
   "capture_job_events",
   "capture_ai_feedback",
   "capture_connector_health",
-];
+]);
 
 for (const table of expectedTables) {
   if (!generated.tables?.[table]) {
     throw new Error(`Tabela ${table} ausente no snapshot gerado.`);
+  }
+}
+
+const statements = generatedSql
+  .split("--> statement-breakpoint")
+  .map((statement) => statement.trim())
+  .filter(Boolean);
+
+for (const statement of statements) {
+  const normalized = statement.replace(/\s+/g, " ").trim();
+  const createTable = normalized.match(/^CREATE TABLE `([^`]+)`/i);
+  const alterTable = normalized.match(/^ALTER TABLE `([^`]+)`/i);
+  const createIndex = normalized.match(/^CREATE (?:UNIQUE )?INDEX `[^`]+` ON `([^`]+)`/i);
+  const dropTable = normalized.match(/^DROP TABLE `([^`]+)`/i);
+
+  const mutatedTable =
+    createTable?.[1] ?? alterTable?.[1] ?? createIndex?.[1] ?? dropTable?.[1] ?? null;
+
+  if (mutatedTable && !expectedTables.has(mutatedTable)) {
+    throw new Error(
+      `Drift de schema fora do Capture Core detectado na geração: ${mutatedTable}. SQL: ${normalized.slice(0, 220)}`,
+    );
+  }
+
+  if (/^DROP\s+(?:TABLE|INDEX)/i.test(normalized)) {
+    throw new Error(`Operação destrutiva inesperada na migration gerada: ${normalized.slice(0, 220)}`);
   }
 }
 NODE
@@ -150,6 +179,7 @@ printf '%s\n' \
   "SNAPSHOT DO CAPTURE CORE GERADO" \
   "Arquivo: ${TARGET}" \
   "Origem: drizzle-kit do próprio projeto, executado em Docker isolado" \
+  "Drift de tabelas antigas: não detectado" \
   "A migration SQL e o journal reais não foram alterados pelo gerador." \
   "Próximo comando: bash scripts/validate-free.sh" \
   "============================================================"
