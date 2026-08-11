@@ -1,5 +1,6 @@
 import { readAllSheetsAsRows } from "../utils/spreadsheet";
 import { extractTextFromBinaryDocument } from "./intelligentCaptureIngestionService";
+import { isOcrSupportedMime } from "./ocrService";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
 import { logger } from "../_core/logger";
 import { parsePrice } from "./catalogDiscoveryService";
@@ -182,19 +183,45 @@ export async function extractItemsFromText(text: string): Promise<ExtractedItem[
   }
 }
 
+const PROCESSABLE_EXTENSION = /\.(xlsx|xls|csv|pdf|docx|png|jpe?g|webp|gif)$/i;
+
 /**
- * Extrai itens de um anexo genérico (planilha estruturada, ou PDF/DOCX via IA).
+ * Elegibilidade de anexo por NOME e por MIME — mesmo critério usado dentro de
+ * `extractItemsFromAttachment`. Um anexo sem extensão reconhecível (ex.:
+ * `image001` renomeado pelo cliente de e-mail) ainda é aceito quando o
+ * Content-Type declara um tipo suportado (planilha, PDF, DOCX ou imagem OCR).
+ */
+export function isProcessableQuotationAttachment(filename: string, mimeType: string): boolean {
+  if (PROCESSABLE_EXTENSION.test(filename)) return true;
+  // Content-Type de e-mail pode vir com variação de maiúsculas e parâmetros
+  // (ex.: "Text/CSV; charset=UTF-8") — normaliza antes de comparar.
+  const normalized = mimeType.split(";", 1)[0].trim().toLowerCase();
+  if (normalized.includes("spreadsheet") || normalized.includes("excel") || normalized === "text/csv") return true;
+  if (normalized === "application/pdf" || normalized.includes("wordprocessingml")) return true;
+  return isOcrSupportedMime(normalized, filename);
+}
+
+/**
+ * Extrai itens de um anexo genérico: planilha estruturada (determinístico),
+ * PDF/DOCX (texto + IA), ou imagem fotografada/escaneada de um pedido
+ * (OCR por IA de visão + IA de extração) — mesmo pipeline usado na captura
+ * inteligente, aqui aplicado a anexos de e-mail de cotação.
  */
 export async function extractItemsFromAttachment(
   buffer: Buffer,
   filename: string,
   mimeType: string,
-): Promise<{ items: ExtractedItem[]; sourceType: "spreadsheet" | "pdf" | "docx" }> {
+): Promise<{ items: ExtractedItem[]; sourceType: "spreadsheet" | "pdf" | "docx" | "image" }> {
   const lower = filename.toLowerCase();
 
   if (lower.endsWith(".xlsx") || lower.endsWith(".xls") || lower.endsWith(".csv") ||
       mimeType.includes("spreadsheet") || mimeType.includes("excel") || mimeType === "text/csv") {
     return { items: await extractItemsFromSpreadsheet(buffer), sourceType: "spreadsheet" };
+  }
+
+  if (isOcrSupportedMime(mimeType, filename)) {
+    const text = await extractTextFromBinaryDocument(buffer, filename, mimeType);
+    return { items: await extractItemsFromText(text), sourceType: "image" };
   }
 
   const text = await extractTextFromBinaryDocument(buffer, filename, mimeType);

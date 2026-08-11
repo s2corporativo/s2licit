@@ -5,6 +5,7 @@ import { fetchUnseenEmails, isImapConfigured } from "./emailInboxService";
 import {
   extractItemsFromAttachment,
   extractItemsFromText,
+  isProcessableQuotationAttachment,
   type ExtractedItem,
 } from "./emailQuotationExtractor";
 import { matchQuotationItems } from "./emailQuotationMatchingService";
@@ -14,8 +15,6 @@ import { matchQuotationItems } from "./emailQuotationMatchingService";
  * busca não lidos → extrai itens (anexo ou corpo) → cruza com o catálogo →
  * persiste como cotação em revisão. Deduplica por Message-ID.
  */
-
-const PROCESSABLE_ATTACHMENT = /\.(xlsx|xls|csv|pdf|docx)$/i;
 
 export interface SyncResult {
   imapConfigured: boolean;
@@ -61,21 +60,32 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
         continue;
       }
 
-      // Extrai itens: prioriza anexos processáveis; senão, o corpo.
+      // Extrai itens: tenta cada anexo processável, na ordem em que veio no
+      // e-mail, até um render itens (uma imagem sem itens não pode "roubar"
+      // a vez de um PDF/planilha válido que venha depois); sem nenhum anexo
+      // com itens, cai para o corpo do e-mail.
       let items: ExtractedItem[] = [];
-      let sourceType: "spreadsheet" | "pdf" | "docx" | "body" = "body";
+      let sourceType: "spreadsheet" | "pdf" | "docx" | "image" | "body" = "body";
       let sourceFilename: string | null = null;
 
-      const attachment = email.attachments.find((a) => PROCESSABLE_ATTACHMENT.test(a.filename));
-      if (attachment) {
-        const extracted = await extractItemsFromAttachment(
-          attachment.content,
-          attachment.filename,
-          attachment.contentType,
-        );
-        items = extracted.items;
-        sourceType = extracted.sourceType;
-        sourceFilename = attachment.filename;
+      const candidatos = email.attachments.filter((a) =>
+        isProcessableQuotationAttachment(a.filename, a.contentType),
+      );
+      for (const attachment of candidatos) {
+        try {
+          const extracted = await extractItemsFromAttachment(
+            attachment.content,
+            attachment.filename,
+            attachment.contentType,
+          );
+          if (extracted.items.length === 0) continue;
+          items = extracted.items;
+          sourceType = extracted.sourceType;
+          sourceFilename = attachment.filename;
+          break;
+        } catch {
+          continue; // anexo corrompido/formato inesperado — tenta o próximo
+        }
       }
       if (items.length === 0) {
         items = await extractItemsFromText(email.text);

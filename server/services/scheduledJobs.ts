@@ -1,10 +1,16 @@
 import cron from "node-cron";
-import { and, eq, isNotNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { certidoes, emailQuotations, scraperConfigs } from "../../drizzle/schema";
 import { isImapConfigured } from "./emailInboxService";
 import { syncEmailQuotations } from "./emailQuotationSyncService";
+import {
+  isAutoPipelineEnabled,
+  runAutoPipelineForPending,
+} from "./quotationAutoPipelineService";
 import { syncS2PortalOpportunitiesSafely } from "./s2PortalOpportunityOrchestrator";
+import { checkPortalLoginHealth } from "./portalAuthenticatedDiscoveryService";
+import { S2_TARGET_PORTALS } from "./s2TargetPortals";
 import { classificarValidade } from "../routers/certidoes";
 import { notifyOwner } from "../_core/notification";
 import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
@@ -29,6 +35,7 @@ const DEFAULT_ALERTS_CRON = "0 8 * * *"; // todo dia às 8h
 const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
 const DEFAULT_BACKUP_CRON = "0 3 * * *"; // backup diário às 3h
 const DEFAULT_BACKUP_KEEP_DAYS = 14;
+const DEFAULT_PORTAL_LOGIN_SMOKETEST_CRON = "0 6 * * 1"; // segunda-feira às 6h
 const SCRAPER_TIMEZONE = "America/Sao_Paulo";
 const TAMBASA_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // catálogo completo: semanal
 const ALERT_DAYS = 30; // certidões
@@ -62,6 +69,99 @@ async function notifyJobFailure(title: string, detail: string): Promise<void> {
 
 let emailSyncRunning = false;
 let portalOpportunitySyncRunning = false;
+let autoPipelineRunning = false;
+
+/**
+ * Pipeline automático cotação→proposta: auto-confirma matches de alta
+ * confiança e gera o PDF da proposta das cotações completas. Roda após cada
+ * sincronização (e-mail e portais). O envio automático segue regido pela
+ * chave QUOTATION_AUTO_SEND_ENABLED (padrão desligado — aprovação humana).
+ */
+export async function runQuotationAutoPipeline(): Promise<void> {
+  if (!isAutoPipelineEnabled()) return;
+  if (autoPipelineRunning) {
+    logger.warn("[Scheduler] Pipeline de proposta automática ainda em andamento — pulando este ciclo.");
+    return;
+  }
+  autoPipelineRunning = true;
+  try {
+    const result = await runAutoPipelineForPending({ limit: 50 });
+    if (result.proposalsGenerated > 0) {
+      const enviadas = result.sent > 0 ? ` (${result.sent} enviada(s) automaticamente)` : "";
+      await notifyOwner({
+        title: "Propostas geradas automaticamente — Sistema S2",
+        content:
+          `${result.proposalsGenerated} proposta(s) geradas a partir de cotações recebidas${enviadas}. ` +
+          `Acesse a fila de cotações para revisar e enviar.`,
+      });
+    }
+    if (result.errors.length > 0) {
+      logger.warn(
+        `[Scheduler] Pipeline de proposta automática com ${result.errors.length} erro(s): ` +
+          result.errors.slice(0, 5).join("; "),
+      );
+    }
+    await alertaCotacoesTravadasComPrazoCurto(result);
+  } catch (err) {
+    logger.error("[Scheduler] Falha no pipeline de proposta automática:", (err as Error).message);
+  } finally {
+    autoPipelineRunning = false;
+  }
+}
+
+const URGENT_BLOCKED_ALERT_DAYS = 2;
+// Evita reenviar o mesmo alerta a cada ciclo enquanto a cotação continuar
+// travada — reseta só quando o processo reinicia (aceitável: o alerta diário
+// genérico de runDailyAlerts cobre a persistência entre reinícios).
+const cotacoesJaAlertadas = new Set<number>();
+
+/**
+ * Alerta imediato (fora do resumo diário) para cotações que o pipeline
+ * automático não conseguiu concluir (item pendente de revisão, preço vencido
+ * etc.) E cujo prazo de resposta está a ≤2 dias — o caso em que esperar até o
+ * alerta diário das 8h pode significar perder o prazo.
+ */
+async function alertaCotacoesTravadasComPrazoCurto(
+  result: Pick<Awaited<ReturnType<typeof runAutoPipelineForPending>>, "quotations">,
+): Promise<void> {
+  const bloqueadas = result.quotations.filter((q) => q.blockedReason && !q.proposalGenerated);
+  if (bloqueadas.length === 0) return;
+
+  const db = await getDb();
+  if (!db) return;
+
+  const ids = bloqueadas.map((q) => q.quotationId);
+  const rows = await db
+    .select({
+      id: emailQuotations.id,
+      subject: emailQuotations.subject,
+      orgao: emailQuotations.orgao,
+      prazoResposta: emailQuotations.prazoResposta,
+    })
+    .from(emailQuotations)
+    .where(inArray(emailQuotations.id, ids));
+
+  const hoje = Date.now();
+  const msPorDia = 24 * 60 * 60 * 1000;
+  const urgentes: string[] = [];
+  for (const row of rows) {
+    if (!row.prazoResposta || cotacoesJaAlertadas.has(row.id)) continue;
+    const dias = Math.floor((new Date(row.prazoResposta).getTime() - hoje) / msPorDia);
+    if (dias > URGENT_BLOCKED_ALERT_DAYS) continue;
+    const motivo = bloqueadas.find((q) => q.quotationId === row.id)?.blockedReason;
+    const prazoTexto = dias < 0 ? "prazo VENCIDO" : dias === 0 ? "prazo é hoje" : `prazo em ${dias}d`;
+    urgentes.push(`${row.orgao ?? row.subject ?? `Cotação ${row.id}`} — ${prazoTexto} — ${motivo}`);
+    cotacoesJaAlertadas.add(row.id);
+  }
+  if (urgentes.length === 0) return;
+
+  const mensagem =
+    `🚨 Cotação(ões) travada(s) na revisão com prazo curto:\n\n${urgentes.join("\n")}\n\n` +
+    "Acesse a fila de cotações para confirmar o item pendente ou revalidar o preço.";
+  await notifyOwner({ title: "Cotações travadas — prazo curto", content: mensagem });
+  if (isWhatsappConfigured()) await enviarWhatsapp(mensagem);
+  logger.warn(`[Scheduler] ${urgentes.length} cotação(ões) travada(s) com prazo curto — alerta enviado.`);
+}
 
 /** Roda a sincronização de e-mail uma vez, com log resumido e guarda de sobreposição. */
 async function runEmailSync(): Promise<void> {
@@ -77,6 +177,11 @@ async function runEmailSync(): Promise<void> {
         `[Scheduler] Cotações e-mail: ${result.imported} importadas, ${result.skipped} já existentes, ${result.errors.length} avisos.`,
       );
     }
+    // Cada ciclo reavalia a fila: cotações bloqueadas por preço vencido ou
+    // item pendente de revisão voltam a ser tentadas depois da correção
+    // (não só quando um novo e-mail chega). O pipeline já retorna rápido
+    // quando não há nada pendente.
+    await runQuotationAutoPipeline();
   } catch (err) {
     logger.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
   } finally {
@@ -106,6 +211,8 @@ export async function runPortalOpportunitySync(): Promise<void> {
       const detail = result.errors.slice(0, 8).join("; ");
       logger.warn(`[Scheduler] Radar dos seis portais com ${result.errors.length} aviso(s): ${detail}`);
     }
+    // Reavalia a fila neste ciclo também (mesmo motivo do sync de e-mail).
+    await runQuotationAutoPipeline();
   } catch (err) {
     const detail = (err as Error).message;
     logger.error("[Scheduler] Falha no radar dos seis portais:", detail);
@@ -281,6 +388,46 @@ export async function runBackupJob(): Promise<void> {
   }
 }
 
+/**
+ * Teste de fumaça semanal dos seletores de login: para cada portal com
+ * credencial ativa no cofre, tenta SÓ logar (sem coletar nem preencher nada)
+ * e avisa se algum quebrou — para descobrir um layout novo antes de uma
+ * cotação real ficar de fora por falha silenciosa de login.
+ */
+export async function runPortalLoginSmokeTest(): Promise<void> {
+  const falhas: string[] = [];
+  let testados = 0;
+  for (const source of S2_TARGET_PORTALS) {
+    let health;
+    try {
+      health = await checkPortalLoginHealth(source);
+    } catch (err) {
+      falhas.push(`${source}: erro inesperado (${(err as Error).message})`);
+      continue;
+    }
+    if (!health.hasCredential) continue; // nada a testar sem credencial cadastrada
+    testados++;
+    if (!health.ok) falhas.push(`${source}: ${health.detail}`);
+  }
+
+  if (testados === 0) {
+    logger.info("[Scheduler] Teste de fumaça de login: nenhuma credencial de portal cadastrada — nada a testar.");
+    return;
+  }
+
+  if (falhas.length === 0) {
+    logger.info(`[Scheduler] Teste de fumaça de login: ${testados} portal(is) com login confirmado.`);
+    return;
+  }
+
+  const mensagem =
+    `⚠️ ${falhas.length} de ${testados} portal(is) com login falhando:\n\n${falhas.join("\n")}\n\n` +
+    "Provável mudança de layout/seletor — confira o portal e, se preciso, atualize a credencial.";
+  logger.warn(`[Scheduler] Teste de fumaça de login: ${falhas.length} falha(s).`);
+  await notifyOwner({ title: "Login de portal falhando — Sistema S2", content: mensagem });
+  if (isWhatsappConfigured()) await enviarWhatsapp(mensagem);
+}
+
 /** Registra os jobs recorrentes. Chamado uma vez no boot. */
 export function initScheduledJobs(): void {
   // 0a. Config de e-mail salva pela interface tem precedência sobre o .env —
@@ -370,6 +517,17 @@ export function initScheduledJobs(): void {
       logger.info(`[Scheduler] Backup automático do banco agendado (${expr}).`);
     } else {
       logger.warn(`[Scheduler] BACKUP_CRON inválido: "${expr}" — backup automático desativado.`);
+    }
+  }
+
+  // 6. Teste de fumaça semanal dos seletores de login dos portais
+  if (enabled(process.env.PORTAL_LOGIN_SMOKETEST_ENABLED, true)) {
+    const expr = process.env.PORTAL_LOGIN_SMOKETEST_CRON || DEFAULT_PORTAL_LOGIN_SMOKETEST_CRON;
+    if (cron.validate(expr)) {
+      cron.schedule(expr, () => { void runPortalLoginSmokeTest(); }, { timezone: SCRAPER_TIMEZONE });
+      logger.info(`[Scheduler] Teste de fumaça de login dos portais agendado (${expr}, horário de Brasília).`);
+    } else {
+      logger.warn(`[Scheduler] PORTAL_LOGIN_SMOKETEST_CRON inválido: "${expr}" — teste de fumaça desativado.`);
     }
   }
 }

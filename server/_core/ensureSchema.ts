@@ -98,6 +98,92 @@ export async function ensureScraperColumns(): Promise<void> {
 }
 
 /**
+ * Colunas do pipeline automático de cotação→proposta: PDF gerado, carimbo de
+ * geração, margem aplicada e trilha de confirmação automática de match.
+ */
+export async function ensureQuotationAutomationColumns(): Promise<void> {
+  try {
+    await ensureColumn("email_quotations", "propostaPdfUrl", "TEXT NULL");
+    await ensureColumn("email_quotations", "propostaGeradaEm", "TIMESTAMP NULL");
+    await ensureColumn("email_quotations", "propostaMargemPercent", "DECIMAL(5,2) NULL");
+    await ensureColumn("email_quotation_items", "matchAuto", "BOOLEAN NOT NULL DEFAULT FALSE");
+  } catch (err) {
+    logger.error("[Schema] Falha ao garantir colunas do pipeline de proposta automática:", err);
+  }
+}
+
+/**
+ * Inclui "image" no enum sourceType de email_quotations (anexo fotografado/
+ * escaneado de um pedido de cotação passa por OCR, como já ocorre na captura
+ * inteligente). Idempotente: só altera se o valor ainda não existe.
+ */
+export async function ensureEmailQuotationImageSourceType(): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const [rows] = await db.execute(
+      sql`SELECT COLUMN_TYPE as t FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'email_quotations' AND COLUMN_NAME = 'sourceType'`,
+    );
+    const tipo = String((rows as any)[0]?.t ?? "");
+    if (!tipo || tipo.includes("'image'")) return;
+    await db.execute(
+      sql.raw(
+        "ALTER TABLE `email_quotations` MODIFY COLUMN `sourceType` " +
+          "ENUM('spreadsheet','pdf','docx','image','body','manual') NOT NULL DEFAULT 'body'",
+      ),
+    );
+    logger.info("[Schema] Enum email_quotations.sourceType estendido com 'image'.");
+  } catch (err) {
+    logger.error("[Schema] Falha ao estender email_quotations.sourceType:", err);
+  }
+}
+
+/**
+ * Reuso de sessão autenticada nos portais (cookies criptografados + validade)
+ * e vínculo proposta↔cotação (idempotência do "preencher no portal").
+ */
+export async function ensurePortalSessionColumns(): Promise<void> {
+  try {
+    await ensureColumn("portal_credentials", "sessaoCookies", "TEXT NULL");
+    await ensureColumn("portal_credentials", "sessaoExpiraEm", "TIMESTAMP NULL");
+    await ensureColumn("portal_credentials", "loginFailCount", "INT NOT NULL DEFAULT 0");
+    await ensureColumn("proposals", "emailQuotationId", "INT NULL");
+    await ensureUniqueIndex("proposals", "emailQuotationId", "uq_proposals_email_quotation");
+  } catch (err) {
+    logger.error("[Schema] Falha ao garantir colunas de sessão de portal:", err);
+  }
+}
+
+/**
+ * Garante um índice único de coluna única, idempotente. Não fatal: se já
+ * existirem propostas duplicadas para o mesmo valor (corrida antes desta
+ * correção), a criação falha e fica só registrada — não trava o boot.
+ */
+async function ensureUniqueIndex(table: string, column: string, indexName: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const [rows] = await db.execute(
+    sql`SELECT COUNT(*) as total FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table} AND INDEX_NAME = ${indexName}`,
+  );
+  const total = Number((rows as any)[0]?.total ?? 0);
+  if (total > 0) return;
+  try {
+    await db.execute(
+      sql.raw(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${indexName}\` (\`${column}\`)`),
+    );
+    logger.info(`[Schema] Índice único ${indexName} criado em ${table}.${column}.`);
+  } catch (err) {
+    logger.error(
+      `[Schema] Não foi possível criar índice único ${indexName} em ${table}.${column} ` +
+        `(provável duplicata pré-existente — revisar manualmente):`,
+      err,
+    );
+  }
+}
+
+/**
  * IPI/PIS/COFINS como tipos de 1ª classe no Motor Tributário (§9). Estende o
  * enum tax_rules.tipo de forma idempotente (só altera se ainda não os inclui).
  */

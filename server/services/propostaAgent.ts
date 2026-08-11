@@ -12,7 +12,7 @@
  * Fluxo: Login → Localizar licitação → Ler itens → Buscar preços S2 → Preencher → Screenshot → Aguardar aprovação → Enviar
  */
 
-import puppeteer, { Browser, Page } from "puppeteer";
+import puppeteer, { Browser, Page, type CookieSameSite } from "puppeteer";
 import { getDb } from "../db";
 import { proposals, proposalItems } from "../../drizzle/schema";
 import { eq, asc } from "drizzle-orm";
@@ -60,9 +60,23 @@ export class CaptchaRequerIntervencaoError extends Error {
   }
 }
 
+/**
+ * Rejeição CONFIRMADA de credencial (usuário/senha incorretos) — distinta de
+ * falha operacional (timeout, seletor não encontrado, CAPTCHA, portal fora do
+ * ar). Só este erro deve contar para o contador de bloqueio de login: um
+ * timeout ou CAPTCHA não prova que a senha está errada, e bloquear a
+ * credencial por isso derrubaria uma credencial válida.
+ */
+export class CredencialInvalidaError extends Error {
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = "CredencialInvalidaError";
+  }
+}
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "agrega" | "generico";
+export type PortalType = "comprasnet" | "comprasmg" | "fundep" | "funarbe" | "copasa" | "fiemg" | "cemig" | "agrega" | "generico";
 
 export interface PortalConfig {
   nome: string;
@@ -93,6 +107,23 @@ export interface PortalCredential {
   password: string;
   cpf?: string;
   cnpj?: string;
+}
+
+/**
+ * Descritor completo de cookie para reuso de sessão (domínio/path/flags
+ * preservados) — diferente do formato nome=valor usado pelo reuso de sessão
+ * do scraper de fornecedores (sessionCookies.ts), que é um recurso
+ * independente e não deve ser afetado por esta mudança.
+ */
+export interface PortalSessionCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: CookieSameSite;
+  expires?: number;
 }
 
 export interface ItemProposta {
@@ -293,6 +324,68 @@ export const PORTAL_CONFIGS: Record<PortalType, PortalConfig> = {
     },
   },
 
+  // ── FIEMG / SESI / SENAI (Sistema FIEMG) ──────────────────────────────────
+  // Portal: compras.fiemg.com.br — mural público + área do fornecedor (ASP.NET).
+  // Login do fornecedor cadastrado no portal de compras do Sistema FIEMG.
+  fiemg: {
+    nome: "FIEMG / SESI / SENAI (Sistema FIEMG)",
+    loginUrl: "https://compras.fiemg.com.br/portal/",
+    notasImportantes:
+      "Portal de compras do Sistema FIEMG (FIEMG, SESI, SENAI, IEL, CIEMG). " +
+      "O mural de processos é público; a participação exige login do fornecedor. " +
+      "Portal ASP.NET — confira os seletores na primeira execução. " +
+      "O robô loga e pré-preenche; você revisa e envia.",
+    estrategia: "form_padrao",
+    seletores: {
+      loginCpfCnpj: 'input[name*="Login"], input[name*="Usuario"], input[id*="Login"], input[id*="Usuario"], input[name*="cnpj"], input[placeholder*="CNPJ"], input[placeholder*="usu"]',
+      loginSenha: 'input[type="password"], input[name*="Senha"], input[id*="Senha"]',
+      loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"], input[value="Acessar"], input[id*="btnLogin"], #btnEntrar',
+      loginSucesso: "fornecedor",
+      buscaProcesso: 'input[id*="Processo"], input[name*="processo"], input[id*="Numero"], input[name*="numero"]',
+      buscaBotao: 'input[value="Pesquisar"], button[id*="pesquisar"], input[id*="btnPesquisar"]',
+      tabelaItens: 'table[id*="grd"] tr, table tbody tr, tr[class*="Grid"], [class*="item"]',
+      inputPreco: 'input[id*="Preco"], input[name*="preco"], input[id*="Valor"], input[name*="valor"], input[type="number"]',
+      inputMarca: 'input[id*="Marca"], input[name*="marca"], input[name*="fabricante"]',
+      inputValidade: 'input[id*="Validade"], input[name*="validade"], input[name*="prazo"]',
+      botaoSalvar: 'input[value*="Salvar"], button[id*="salvar"], button[type="submit"]',
+      botaoEnviar: 'input[value*="Enviar"], button[id*="enviar"]',
+      confirmacaoEnvio: 'input[value="Confirmar"], button[id*="confirmar"], input[value="OK"]',
+    },
+  },
+
+  // ── CEMIG (Portal de Compras) ──────────────────────────────────────────────
+  // Configuração base; a instância real usada em runtime é a de
+  // s2PortalAgentExtension.ts (importada por efeito colateral pelos serviços
+  // que precisam dela), mantida aqui apenas para tipagem completa e testes.
+  cemig: {
+    nome: "CEMIG / Portal de Compras",
+    loginUrl: "https://minhaconta-compras.cemig.com.br/",
+    notasImportantes:
+      "A pesquisa pública ocorre em app2-compras.cemig.com.br/pesquisa. " +
+      "Para participar, utilize o login cadastrado no Portal de Compras da CEMIG. " +
+      "O agente apenas pré-preenche e interrompe diante de CAPTCHA, 2FA ou confirmação final.",
+    estrategia: "spa",
+    seletores: {
+      loginCpfCnpj:
+        'input[name*="login"], input[name*="usuario"], input[name*="cnpj"], input[id*="login"], input[id*="usuario"], input[placeholder*="CNPJ"]',
+      loginSenha:
+        'input[type="password"], input[name*="senha"], input[name*="password"], input[id*="senha"]',
+      loginBotao:
+        'button[type="submit"], button[id*="entrar"], button[id*="login"], input[type="submit"], input[value*="Entrar"]',
+      loginSucesso: "fornecedor",
+      buscaProcesso:
+        'input[name*="processo"], input[id*="processo"], input[placeholder*="processo"], input[placeholder*="licitação"]',
+      buscaBotao: 'button[id*="buscar"], button[id*="pesquisar"], button[type="submit"]',
+      tabelaItens: 'table tbody tr, [role="row"], [class*="item"], [class*="lote"]',
+      inputPreco: 'input[name*="preco"], input[name*="valor"], input[id*="preco"], input[id*="valor"], input[type="number"]',
+      inputMarca: 'input[name*="marca"], input[id*="marca"], input[name*="fabricante"]',
+      inputValidade: 'input[name*="validade"], input[id*="validade"], input[name*="prazo"]',
+      botaoSalvar: 'button[id*="salvar"], button[type="submit"], input[value*="Salvar"]',
+      botaoEnviar: 'button[id*="enviar"], button[id*="submeter"], input[value*="Enviar"]',
+      confirmacaoEnvio: 'button[id*="confirmar"], input[value="Confirmar"], button[id*="confirmarEnvio"]',
+    },
+  },
+
   // ── Agrega (sistema de cotações eletrônicas) ──────────────────────────────
   // Plataforma usada por múltiplos órgãos públicos para cotações via web
   // Login: CNPJ + senha da empresa cadastrada
@@ -439,6 +532,23 @@ export class PropostaAgente {
     return false;
   }
 
+  /**
+   * Verificação pontual (sem espera) de presença de um elemento — usada para
+   * reforçar a confirmação de login: um indicador de texto sozinho pode
+   * coincidir com a própria tela de login; a ausência do campo de senha é um
+   * segundo sinal independente de que a navegação saiu da tela de login.
+   */
+  private async campoPresente(seletor: string): Promise<boolean> {
+    if (!this.page) return false;
+    const lista = seletor.split(",").map(s => s.trim()).filter(Boolean);
+    for (const sel of lista) {
+      try {
+        if (await this.page.$(sel)) return true;
+      } catch {}
+    }
+    return false;
+  }
+
   private async preencherCampo(seletor: string, valor: string): Promise<boolean> {
     if (!this.page) return false;
     const lista = seletor.split(",").map(s => s.trim()).filter(Boolean);
@@ -525,13 +635,16 @@ export class PropostaAgente {
 
     if (temErro) {
       await this.capturarTela("Falha no login");
-      throw new Error(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
+      throw new CredencialInvalidaError(`Login falhou: credenciais incorretas no portal ${cfg.nome}`);
     }
 
-    // Confirmação positiva: indicador de sucesso na página OU URL mudou.
-    // Sem isso, CAPTCHA/manutenção/layout novo passavam como "login ok".
+    // Confirmação positiva: indicador de sucesso na página (E sem o campo de
+    // senha mais visível — só o texto pode coincidir com a própria tela de
+    // login) OU a URL mudou. Sem isso, CAPTCHA/manutenção/layout novo
+    // passavam como "login ok".
     const indicador = cfg.seletores.loginSucesso?.toLowerCase();
-    const sucessoIndicado = indicador ? textoPage.toLowerCase().includes(indicador) : false;
+    const senhaAindaVisivel = await this.campoPresente(cfg.seletores.loginSenha);
+    const sucessoIndicado = indicador ? textoPage.toLowerCase().includes(indicador) && !senhaAindaVisivel : false;
     const urlMudou = urlAtual !== url;
     if (!sucessoIndicado && !urlMudou) {
       await this.capturarTela("Login não confirmado");
@@ -543,6 +656,104 @@ export class PropostaAgente {
 
     this.addLog(`✅ Login realizado. URL: ${urlAtual}`);
     await this.capturarTela("Após login");
+  }
+
+  /**
+   * Após o login, navega até uma URL do portal e devolve o HTML renderizado.
+   * Usado pela descoberta autenticada de cotações (radar com credencial do
+   * cofre): o HTML retornado passa pelos mesmos parsers do radar público.
+   * Mantém a conformidade do agente — se um CAPTCHA aparecer na navegação,
+   * o fluxo é interrompido e exige intervenção humana.
+   */
+  async coletarHtml(urlAlvo: string): Promise<string> {
+    if (!this.page) throw new Error("Não autenticado: faça login antes de coletar páginas.");
+    assertSafeExternalUrl(urlAlvo, "URL do portal");
+    this.addLog(`📄 Coletando página autenticada: ${urlAlvo}`);
+    await this.page.goto(urlAlvo, { waitUntil: "networkidle2", timeout: 45000 });
+    await new Promise(r => setTimeout(r, 1500));
+    await this.verificarCaptcha(urlAlvo);
+    return this.page.content();
+  }
+
+  /**
+   * Exporta os cookies completos (nome, valor, domínio, path, flags) da
+   * sessão atual, para reuso em uma execução futura sem repetir o login.
+   * Guarda o descritor inteiro — não só nome=valor — porque um portal que
+   * separa host de login e host de aplicação perderia domínio/path num
+   * formato reduzido, e a sessão restaurada nunca autenticaria de fato.
+   */
+  async exportarCookies(): Promise<PortalSessionCookie[]> {
+    if (!this.page) return [];
+    try {
+      const cookies = await this.page.browserContext().cookies();
+      return cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
+        sameSite: c.sameSite,
+        expires: c.expires,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Tenta restaurar uma sessão salva (cookies) em vez de logar de novo:
+   * abre a página, aplica os cookies e navega até `url`. Retorna true se o
+   * indicador de sucesso do portal aparecer (e o campo de senha não estiver
+   * mais visível) — nesse caso, `login()` pode ser pulado. Retorna false
+   * (sem lançar) em qualquer falha, para que o chamador caia no login
+   * completo normalmente; a página aberta aqui é sempre fechada antes de
+   * devolver false, para que ela — e seus cookies — não sobrevivam para o
+   * login() seguinte.
+   */
+  async restaurarSessao(
+    cred: PortalCredential,
+    cookies: PortalSessionCookie[],
+    url: string,
+  ): Promise<boolean> {
+    if (cookies.length === 0) return false;
+    try {
+      if (!this.browser) await this.init();
+      this.page = await this.browser!.newPage();
+      await this.page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      );
+      await this.page.setViewport({ width: 1366, height: 768 });
+
+      assertSafeExternalUrl(url, "URL do portal");
+      await this.page.browserContext().setCookie(...cookies);
+      await this.page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
+      await new Promise((r) => setTimeout(r, 1200));
+
+      const cfg = PORTAL_CONFIGS[cred.portal];
+      const textoPage = await this.page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      const indicador = cfg.seletores.loginSucesso?.toLowerCase();
+      const senhaAindaVisivel = await this.campoPresente(cfg.seletores.loginSenha);
+      const restaurada = indicador
+        ? textoPage.toLowerCase().includes(indicador) && !senhaAindaVisivel
+        : false;
+
+      if (restaurada) {
+        this.addLog(`♻️ Sessão restaurada sem novo login (${cfg.nome}).`);
+        return true;
+      }
+      // Sessão não confirmada: fecha esta página agora — se ela ficar aberta,
+      // seus cookies (de uma sessão inválida/expirada) continuam no mesmo
+      // contexto de navegador e podem contaminar a página de login seguinte.
+      await this.page.close().catch(() => {});
+      this.page = null;
+      return false;
+    } catch (err) {
+      logger.warn(`[PropostaAgente] Falha ao restaurar sessão: ${(err as Error).message}`);
+      await this.page?.close().catch(() => {});
+      this.page = null;
+      return false;
+    }
   }
 
   async navegarParaLicitacao(numeroProcesso: string, urlDireta?: string): Promise<void> {

@@ -113,6 +113,27 @@
       "when": 1785853954790,
       "tag": "0015_proposal_outcome_and_order_link",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1786401247635,
+      "tag": "0016_public_gamma_corps",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1786403169929,
+      "tag": "0017_fine_black_bolt",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1786404899126,
+      "tag": "0018_motionless_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }
