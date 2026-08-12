@@ -146,7 +146,11 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
     loginUrl: "https://tambasa.com/",
     // O modal de login é injetado ao clicar no atalho de conta no cabeçalho.
     loginTrigger:
-      '.js-modal-login-open, [data-target=".js-modal-login"], a[href="#modal-login"], .header-account__login, .js-open-login',
+      // O gatilho real da plataforma F1 Soluções é `a.js-client-login` (atalho
+      // "Entrar" no cabeçalho e nos produtos sem preço), que abre o modal
+      // f1-modal-login já presente no HTML inicial. Outros gatilhos ficam como
+      // fallback (confirmado no HTML de tambasa.com em 13/08/2026).
+      '.js-client-login, .js-modal-login-open, [data-target=".js-modal-login"], a[href="#modal-login"], .header-account__login, .js-open-login',
     loginEmail: '#username, input[name="username"]',
     loginPassword: '#password, input[name="password"]',
     loginSubmit: '.f1-modal-login__submit, #formLogin button[type="submit"]',
@@ -582,11 +586,43 @@ export class ScraperEngine {
       }
     }
 
-    // Aguardar campo de email/usuário aparecer
+    // Aguardar campo de email/usuário aparecer (visível).
     try {
       await this.page.waitForSelector(cfg.loginEmail, { timeout: 10000, visible: true });
     } catch {
-      throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail}`);
+      // Fallback para sites que renderizam o formulário por JS (SPAs) ou o
+      // mantêm oculto até evento de scroll/foco: espera mais tempo sem exigir
+      // visibilidade, rola até o elemento e aguarda estabilização. Confirmado
+      // como necessário na Bartofil B2B (SPA React) e Magazine Médica (13/08/2026).
+      this.addLog("Campo não visível — aguardando renderização JS...");
+      try {
+        await this.page.waitForSelector(cfg.loginEmail, { timeout: 20000 });
+        const el = await this.page.$(cfg.loginEmail);
+        if (el) {
+          try {
+            await el.evaluate(e => {
+              const t = e as HTMLElement;
+              t.scrollIntoView({ block: "center", inline: "center" });
+              // Força a visibilidade quando o formulário está dentro de
+              // container oculto por CSS (display:none / overflow:hidden).
+              let c: HTMLElement | null = t;
+              while (c && c !== document.body) {
+                const cs = getComputedStyle(c);
+                if (cs.display === "none" || cs.visibility === "hidden") {
+                  (c as HTMLElement).style.setProperty("display", "", "important");
+                  (c as HTMLElement).style.setProperty("visibility", "visible", "important");
+                }
+                c = c.parentElement;
+              }
+            });
+          } catch { /* segue tentando o preenchimento */ }
+          await new Promise(r => setTimeout(r, 1000));
+        } else {
+          throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail}`);
+        }
+      } catch {
+        throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail}`);
+      }
     }
 
     // Preencher formulário com delay humano
