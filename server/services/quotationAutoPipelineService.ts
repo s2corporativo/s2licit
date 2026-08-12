@@ -29,12 +29,24 @@ import { logger } from "../_core/logger";
  * Tudo idempotente: cotações com proposta já gerada são puladas.
  */
 
-const DEFAULT_AUTO_CONFIRM_THRESHOLD = 0.92;
+const DEFAULT_AUTO_CONFIRM_THRESHOLD = 0.82;
 
 export function autoConfirmThreshold(): number {
   const raw = Number(process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD);
   if (Number.isFinite(raw) && raw >= 0.5 && raw <= 1) return raw;
   return DEFAULT_AUTO_CONFIRM_THRESHOLD;
+}
+
+/**
+ * Limiar MÍNIMO de similaridade de nome para o match por nome sequer entrar
+ * no catálogo de candidatos da revisão (abaixo disso, o item não recebe match
+ * algum). Deve ficar abaixo do limiar de auto-confirmação — itens entre os
+ * dois limiares aparecem na fila com o melhor candidato para confirmação humana.
+ */
+export function nameMatchThreshold(): number {
+  const raw = Number(process.env.QUOTATION_NAME_MATCH_THRESHOLD);
+  if (Number.isFinite(raw) && raw >= 0.4 && raw <= 0.9) return raw;
+  return 0.68;
 }
 
 export function isAutoPipelineEnabled(): boolean {

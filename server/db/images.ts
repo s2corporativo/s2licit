@@ -1,4 +1,4 @@
-import { asc, eq, like } from "drizzle-orm";
+import { and, asc, eq, gt, like } from "drizzle-orm";
 import { products } from "../../drizzle/schema";
 import { getDb } from "./_client";
 
@@ -45,16 +45,35 @@ export async function findProductByCatmat(code: string) {
   return rows[0] ?? null;
 }
 
-/** Retorna id/nome/preço de todos os produtos ativos (para matching por nome). */
-export async function listProductsForMatching(limit = 20000) {
+/**
+ * Retorna id/nome/preço de TODOS os produtos ativos (para matching por nome).
+ *
+ * Paginação em vez de limit arbitrário: o corte fixo de 20.000 registros
+ * excluía silenciosamente milhares de produtos ativos do cruzamento de
+ * cotações (catálogo real: 32.318 ativos em ago/2026). A paginação em
+ * blocos de 5.000 evita sobrecarregar a memória e garante cobertura total,
+ * com ordenação por id para não depender de ordem implícita.
+ */
+export async function listProductsForMatching(): Promise<
+  Array<{ id: number; name: string; price: string | null }>
+> {
   const db = await getDb();
-  if (!db) return [] as Array<{ id: number; name: string; price: string | null }>;
-  const rows = await db
-    .select({ id: products.id, name: products.name, price: products.price })
-    .from(products)
-    .where(eq(products.isActive, "yes"))
-    .limit(limit);
-  return rows;
+  if (!db) return [];
+  const PAGE = 5000;
+  const all: Array<{ id: number; name: string; price: string | null }> = [];
+  let lastId = 0;
+  for (;;) {
+    const rows = await db
+      .select({ id: products.id, name: products.name, price: products.price })
+      .from(products)
+      .where(and(eq(products.isActive, "yes"), gt(products.id, lastId)))
+      .orderBy(asc(products.id))
+      .limit(PAGE);
+    all.push(...rows);
+    if (rows.length < PAGE) break; // última página
+    lastId = rows[rows.length - 1].id;
+  }
+  return all;
 }
 
 /** Apply an imageUrl to all products whose name contains nameTerm */

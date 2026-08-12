@@ -29,44 +29,22 @@ concurrency:
 
 jobs:
   rollback:
-    runs-on: ubuntu-latest
+    # Executa DENTRO da VPS Contabo (runner self-hosted s2-contabo),
+    # eliminando a necessidade de SSH externo, sshpass e secrets de senha.
+    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 15
     permissions:
       contents: read
       packages: read
     steps:
-      - name: Preparar ferramentas SSH
-        env:
-          VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+      - name: Executar rollback na própria VPS
         run: |
           if [ -n "${{ inputs.password }}" ]; then echo "::add-mask::${{ inputs.password }}"; fi
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass
-          mkdir -p ~/.ssh
-          if [ -n "$VPS_HOST_KEY" ]; then
-            printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
-            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-          else
-            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-            echo "::warning::Secret VPS_HOST_KEY ausente — conexão SSH sem verificação de host."
-          fi
-
-      - name: Executar rollback na VPS
-        env:
-          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ -z "$SSHPASS" ]; then
-            echo "::error::Configure o secret VPS_PASSWORD ou informe a senha no Run workflow."
+          if [ ! -x /opt/s2licit/scripts/vps-rollback.sh ]; then
+            echo "::error::Script /opt/s2licit/scripts/vps-rollback.sh ausente na VPS."
             exit 1
           fi
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null || true"
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "bash /opt/s2licit/scripts/vps-rollback.sh '${{ inputs.image }}'"
-
-      - name: Resumo
-        run: |
+          bash /opt/s2licit/scripts/vps-rollback.sh '${{ inputs.image }}'
           echo "### Rollback concluído ✅" >> "$GITHUB_STEP_SUMMARY"
           echo "- Alvo: ${{ inputs.image || 'imagem anterior registrada na VPS (S2_IMAGE_PREVIOUS)' }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Readiness validada em /readyz" >> "$GITHUB_STEP_SUMMARY"

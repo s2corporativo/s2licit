@@ -34,9 +34,10 @@ describe("shouldAutoConfirm", () => {
   });
 
   it("confirma match por nome somente acima do limiar de alta confiança", () => {
-    expect(shouldAutoConfirm(item({ matchScore: "0.95" }), 0.92)).toBe(true);
-    expect(shouldAutoConfirm(item({ matchScore: "0.90" }), 0.92)).toBe(false);
-    // O limiar padrão (0.92) é mais exigente que o de sugestão (0.68):
+    expect(shouldAutoConfirm(item({ matchScore: "0.95" }), 0.82)).toBe(true);
+    expect(shouldAutoConfirm(item({ matchScore: "0.90" }), 0.82)).toBe(true);
+    expect(shouldAutoConfirm(item({ matchScore: "0.80" }), 0.82)).toBe(false);
+    // O limiar padrão (0.82) é mais exigente que o de entrada na revisão (0.68):
     // sugestões medianas ficam para revisão humana.
     expect(shouldAutoConfirm(item({ matchScore: "0.70" }))).toBe(false);
   });
@@ -59,14 +60,14 @@ describe("shouldAutoConfirm", () => {
 });
 
 describe("configuração por ambiente", () => {
-  it("limiar padrão 0.92; valores fora de [0.5, 1] são ignorados", () => {
-    expect(autoConfirmThreshold()).toBe(0.92);
-    process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "0.85";
-    expect(autoConfirmThreshold()).toBe(0.85);
+  it("limiar padrão 0.82; valores fora de [0.5, 1] são ignorados", () => {
+    expect(autoConfirmThreshold()).toBe(0.82);
+    process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "0.90";
+    expect(autoConfirmThreshold()).toBe(0.90);
     process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "0.2";
-    expect(autoConfirmThreshold()).toBe(0.92);
+    expect(autoConfirmThreshold()).toBe(0.82);
     process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "abc";
-    expect(autoConfirmThreshold()).toBe(0.92);
+    expect(autoConfirmThreshold()).toBe(0.82);
   });
 
   it("pipeline ligado por padrão; desligável com false/0", () => {
