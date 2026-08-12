@@ -5,13 +5,12 @@
 # /readyz. Nenhum valor sensível é escrito nos logs.
 name: Deploy VPS
 
-# O deploy automático só dispara depois que o workflow de CI conclui COM
-# SUCESSO no main — código com tipos/testes/build quebrados nunca chega à VPS.
+# O deploy automático dispara em push no main. A validação de código
+# (lint, tipos, testes e build) é feita localmente antes do merge, pois o
+# workflow de CI referenciado anteriormente foi removido do repositório.
 # O disparo manual (workflow_dispatch) continua disponível para emergências.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -47,7 +46,7 @@ jobs:
   # testado, o build não compete por CPU/RAM com o app na VPS e a imagem
   # anterior fica disponível para rollback em 1 comando.
   build-image:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     # Executa na própria VPS (runner self-hosted s2-contabo), que já tem
     # Docker instalado — o build não consome runner hospedado do GitHub.
     runs-on: [self-hosted, Linux, X64, s2licit, contabo]
@@ -58,16 +57,11 @@ jobs:
     outputs:
       image: ${{ steps.meta.outputs.image }}
     steps:
-      - name: Resolver referência alvo (workflow_run ou manual)
+      - name: Resolver referência alvo (push ou manual)
         if: always()
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            echo "TARGET_REF=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_ENV"
-            echo "TARGET_SHA=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_ENV"
-          else
-            echo "TARGET_REF=${{ github.ref }}" >> "$GITHUB_ENV"
-            echo "TARGET_SHA=${{ github.sha }}" >> "$GITHUB_ENV"
-          fi
+          echo "TARGET_REF=${{ github.ref }}" >> "$GITHUB_ENV"
+          echo "TARGET_SHA=${{ github.sha }}" >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,9 +88,9 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
 
   deploy:
-    # Em disparo por workflow_run, exige CI verde; disparo manual sempre roda.
+    # Em push no main roda automaticamente; disparo manual sempre roda.
     # Executa na própria VPS (runner self-hosted) — não precisa mais de SSH.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: build-image
     runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 40
@@ -107,7 +101,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # No disparo via workflow_run, faz deploy exatamente do commit que o CI validou.
           ref: ${{ env.TARGET_REF }}
 
       - name: Sincronizar código na própria VPS
