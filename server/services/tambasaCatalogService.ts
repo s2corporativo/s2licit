@@ -101,10 +101,67 @@ async function pageHasProducts(page: Page): Promise<boolean> {
   });
 }
 
+async function waitForLoginField(page: Page, selector: string, timeoutMs: number): Promise<void> {
+  try {
+    await page.waitForSelector(selector, { visible: true, timeout: timeoutMs });
+    return;
+  } catch {
+    // Sites que renderizam/ocultam o formulário por CSS (F1 Soluções): aguarda sem
+    // exigir visibilidade e força a exibição da cadeia do elemento.
+    try {
+      await page.waitForSelector(selector, { timeout: Math.min(timeoutMs * 2, 20_000) });
+      await page.evaluate((sel) => {
+        const t = document.querySelector(sel) as HTMLElement | null;
+        if (!t) return;
+        let c: HTMLElement | null = t;
+        while (c && c !== document.body) {
+          const cs = getComputedStyle(c);
+          if (cs.display === "none" || cs.visibility === "hidden") {
+            c.style.setProperty("display", "", "important");
+            c.style.setProperty("visibility", "visible", "important");
+          }
+          c = c.parentElement;
+        }
+        t.scrollIntoView({ block: "center" });
+      }, selector);
+      await sleep(1000);
+      if (!(await page.$(selector))) {
+        throw new Error(`Campo de login não encontrado: ${selector}`);
+      }
+    } catch {
+      throw new Error(`Campo de login não encontrado: ${selector}`);
+    }
+  }
+}
+
 async function openLoginModalIfNeeded(page: Page, cfg: SelectorConfig): Promise<void> {
   if (await page.$(cfg.loginEmail)) return;
-  if (!cfg.loginTrigger) return;
 
+  // Na plataforma F1 Soluções o modal de login (.f1-modal-login__back / .modal-login__back)
+  // já existe no DOM inicial, mas o gatilho de abertura (.js-client-login) costuma estar
+  // oculto no headless e o clique falha silenciosamente — por isso o modal nunca aparece.
+  // Ativa o modal diretamente via evaluate quando o gatilho não resolve.
+  await page.evaluate(() => {
+    const back = document.querySelector(
+      ".f1-modal-login__back, .modal-login__back",
+    ) as HTMLElement | null;
+    if (!back) return false;
+    back.style.setProperty("display", "block", "important");
+    back.style.setProperty("visibility", "visible", "important");
+    const container = back.querySelector(
+      ".f1-modal-login__container, .modal-login__container",
+    ) as HTMLElement | null;
+    if (container) {
+      container.style.setProperty("display", "block", "important");
+      container.style.setProperty("visibility", "visible", "important");
+    }
+    return true;
+  });
+  await sleep(1200);
+  if (await page.$(cfg.loginEmail)) return;
+
+  // Fallback: tenta o gatilho configurado (header/atalhos).
+  if (!cfg.loginTrigger) return;
   const trigger = await page.$(cfg.loginTrigger);
   if (!trigger) return;
 
@@ -124,8 +181,8 @@ async function loginTambasa(
   });
 
   await openLoginModalIfNeeded(page, cfg);
-  await page.waitForSelector(cfg.loginEmail, { visible: true, timeout: 12_000 });
-  await page.waitForSelector(cfg.loginPassword, { visible: true, timeout: 12_000 });
+  await waitForLoginField(page, cfg.loginEmail, 12_000);
+  await waitForLoginField(page, cfg.loginPassword, 12_000);
 
   await page.click(cfg.loginEmail);
   await page.type(cfg.loginEmail, email, { delay: 50 });
