@@ -1,8 +1,11 @@
 name: Monitor de disponibilidade
 
+# AGENDADO PAUSADO em 12/08/2026: runners da conta em limitação GitHub
+# (startup_failure em todos os runs desde 10/08). Manter ativo só gera runs
+# falsos que nunca executam. Reativar após a limitação ser liberada.
 on:
-  schedule:
-    - cron: "*/10 * * * *"
+  # schedule:
+  #   - cron: "*/10 * * * *"
   workflow_dispatch:
 
 permissions:
