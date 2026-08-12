@@ -187,22 +187,26 @@ export async function generateProposalPdf(
     const WHITE = "#FFFFFF";
 
     // ── Helper: draw page footer ─────────────────────────────────────────────
+    // Rodapé integralmente dentro da área imprimível (margem inferior 70pt):
+    // A4 = 842pt → textos até y=772pt. Antes o retângulo começava em 782pt e os
+    // textos em 790-828pt, o que fazia o PDFKit criar uma nova página para cada
+    // linha do rodapé (páginas quase em branco — BUG crítico corrigido).
     function drawFooter() {
-      const footerY = doc.page.height - 60;
-      doc.rect(0, footerY, doc.page.width, 60).fill(BLUE);
+      const footerY = doc.page.height - 70 - 50; // área imprimível termina em 772pt (bottom margin 70)
+      doc.rect(50, footerY, pageWidth, 50).fill(BLUE);
 
       // Left: company name + CNPJ + address
       doc
         .font("Helvetica-Bold")
         .fontSize(7)
         .fillColor(WHITE)
-        .text(co.name, 50, footerY + 8, { width: pageWidth / 2 });
+        .text(co.name, 50, footerY + 6, { width: pageWidth / 2 });
 
       doc
         .font("Helvetica")
         .fontSize(6.5)
         .fillColor("#BFD0F0")
-        .text(`CNPJ ${co.cnpj}`, 50, footerY + 18, {
+        .text(`CNPJ ${co.cnpj}`, 50, footerY + 16, {
           width: pageWidth / 2,
         });
 
@@ -213,7 +217,7 @@ export async function generateProposalPdf(
         .text(
           `${co.address}, ${co.city} ${co.state} — ${co.zipCode}`,
           50,
-          footerY + 28,
+          footerY + 26,
           { width: pageWidth / 2 }
         );
 
@@ -225,7 +229,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(6.5)
         .fillColor(WHITE)
-        .text(`Tel/WhatsApp: ${co.phone}`, rightX, footerY + 8, {
+        .text(`Tel/WhatsApp: ${co.phone}`, rightX, footerY + 6, {
           width: rightW,
         });
 
@@ -233,7 +237,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(6.5)
         .fillColor("#BFD0F0")
-        .text(`E-mail: ${co.email}`, rightX, footerY + 18, {
+        .text(`E-mail: ${co.email}`, rightX, footerY + 16, {
           width: rightW,
         });
 
@@ -244,7 +248,7 @@ export async function generateProposalPdf(
         .text(
           `${co.bankName}  Ag ${co.bankAgency}  CC ${co.bankAccount}`,
           rightX,
-          footerY + 28,
+          footerY + 26,
           { width: rightW }
         );
 
@@ -253,7 +257,7 @@ export async function generateProposalPdf(
         .font("Helvetica")
         .fontSize(6)
         .fillColor("#BFD0F0")
-        .text(`Gerado em ${formatDate(new Date())}`, 50, footerY + 46, {
+        .text(`Gerado em ${formatDate(new Date())}`, 50, footerY + 36, {
           width: pageWidth,
           align: "center",
         });

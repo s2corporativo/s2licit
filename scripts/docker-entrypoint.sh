@@ -7,4 +7,8 @@ set -e
 
 chown -R node:node /app/uploads /app/backups 2>/dev/null || true
 
+# Corrige o bug do PDFKit 0.17.2 em ESM (__dirname indefinido → PDFs em branco).
+# Idempotente: se já patcheado, não altera nada.
+node /app/scripts/patch-pdfkit-esm.mjs 2>/dev/null || true
+
 exec runuser -u node -- sh -c "node scripts/migrate-production.mjs && exec node dist/index.js"
