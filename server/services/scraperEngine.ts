@@ -618,10 +618,12 @@ export class ScraperEngine {
           } catch { /* segue tentando o preenchimento */ }
           await new Promise(r => setTimeout(r, 1000));
         } else {
-          throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail}`);
+          const currentUrl = await this.page.url().catch(() => "(indisponível)");
+          throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail} | URL atual: ${currentUrl}`);
         }
       } catch {
-        throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail}`);
+        const currentUrl = await this.page.url().catch(() => "(indisponível)");
+        throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail} | URL atual: ${currentUrl}`);
       }
     }
 
