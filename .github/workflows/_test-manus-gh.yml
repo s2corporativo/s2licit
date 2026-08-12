@@ -1,0 +1,10 @@
+name: Teste CI Manus GH
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "hello from github-hosted runner"
