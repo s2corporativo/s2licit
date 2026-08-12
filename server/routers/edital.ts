@@ -146,6 +146,22 @@ export const editalRouter = router({
         })
       )
       .mutation(async ({ input }) => {
+        // 0. Verificar se a IA está configurada ANTES de extrair o texto — sem
+        // provedor a chamada falharia depois com mensagem genérica, voltando a
+        // tela ao estado inicial sem orientação clara ao usuário.
+        // Verificação de custo zero: quando nenhum provedor de IA estiver
+        // configurado, a chamada falharia depois com mensagem genérica e a
+        // tela voltaria ao estado inicial sem orientação clara ao usuário.
+        const { listConfiguredProviders } = await import("../_core/llm");
+        const configured = listConfiguredProviders();
+        if (configured.length === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "A IA de análise de editais não está configurada. Acesse Administração → Central de IA e configure ao menos uma chave de provedor (Groq ou Anthropic) antes de extrair editais.",
+          });
+        }
+
         // 1. Extrair texto do arquivo (serviço compartilhado com a análise jurídica)
         const { extractDocumentText } = await import("../services/documentTextService");
         const { text: rawText } = await extractDocumentText(input);
