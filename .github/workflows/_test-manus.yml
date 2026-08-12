@@ -1,0 +1,10 @@
+name: Teste CI Manus
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hello:
+    runs-on: self-hosted
+    steps:
+      - run: echo "hello from ${{ runner.name }}"
