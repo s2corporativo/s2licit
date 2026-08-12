@@ -62,6 +62,169 @@ function slugFornecedor(nome: string): string {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Modal de Recadastro em Lote (Camada 1 — §recadastro-lote) ──────────────
+function ModalRecadastroLote({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  // Cartões: configuração falhada (senha cifrada com chave antiga) ou sem senha gravada.
+  const { data: configs = [] } = trpc.scraperAgent.listar.useQuery();
+  const [falhadas] = useState(() => (configs as any[]).filter(
+    (c: any) => c.lastRunStatus === "failed" || !c.lastRunAt
+  ));
+  // itens: id, email (mostrado), senha nova (em claro, enviada via HTTPS), termos
+  const [itens, setItens] = useState<Record<number, { email: string; password: string; tos: boolean }>>({});
+  const [testando, setTestando] = useState<number | null>(null);
+  const [testados, setTestados] = useState<Record<number, boolean>>({});
+  const [senhaVisivel, setSenhaVisivel] = useState<Record<number, boolean>>({});
+
+  const recarregar = trpc.scraperAgent.recarregarCredenciais.useMutation({
+    onSuccess: (r) => {
+      if (r.falhos.length) toast.error(`${r.falhos.length} fornecedor(es) falharam ao recadastrar`);
+      toast.success(`${r.ok.length} credencial(is) recadastrada(s) com a chave atual`);
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const testarConexao = trpc.scraperAgent.testarConexao.useMutation({
+    onSuccess: (r, vars) => {
+      setTestados(v => ({ ...v, [vars.scraperConfigId ?? 0]: r.success }));
+      r.success ? toast.success(`${r.message}`) : toast.error(`${r.message}`);
+      setTestando(null);
+    },
+    onError: (e, vars) => {
+      setTestados(v => ({ ...v, [vars.scraperConfigId ?? 0]: false }));
+      toast.error(e.message);
+      setTestando(null);
+    },
+  });
+
+  function setSenha(id: number, email: string, password: string) {
+    setItens(prev => ({
+      ...prev,
+      [id]: { email, password, tos: prev[id]?.tos ?? false },
+    }));
+  }
+
+  function setTos(id: number, tos: boolean) {
+    setItens(prev => ({ ...prev, [id]: { ...prev[id], tos } }));
+  }
+
+  function temAlteracoes(): boolean {
+    return Object.values(itens).some(i => i.password.length >= 4 || i.tos);
+  }
+
+  function handleSalvar() {
+    const payload = Object.entries(itens)
+      .map(([id, item]) => ({ id: parseInt(id), email: item.email || undefined, password: item.password || undefined, tosAprovado: item.tos }))
+      .filter(i => i.password || i.tosAprovado);
+    if (payload.length === 0) { toast.error("Preencha ao menos uma senha nova ou aprove os termos de um fornecedor"); return; }
+    recarregar.mutate({ itens: payload });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white w-full max-w-2xl rounded-xl shadow-2xl border border-gray-200 overflow-hidden max-h-[88vh] flex flex-col">
+        <div className="bg-gray-900 px-6 py-4 flex items-center gap-3 flex-shrink-0">
+          <Key size={20} className="text-emerald-400" />
+          <div>
+            <h2 className="text-white font-bold text-sm">Recadastrar credenciais dos fornecedores falhados</h2>
+            <p className="text-gray-400 text-[10px] mt-0.5">
+              A senha nova é criptografada com a chave atual (AES-256) — resolve o erro de descriptografia. Os termos de uso devem ser revisados item a item.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-6 space-y-5 overflow-y-auto">
+          {falhadas.length === 0 && (
+            <p className="text-sm text-gray-500 text-center py-6">Não há fornecedores com falha registrada. Todos os cadastros estão operando normalmente.</p>
+          )}
+          {falhadas.map((cfg: any) => {
+            const item = itens[cfg.id] ?? { email: "", password: "", tos: false };
+            return (
+              <div key={cfg.id} className="border border-gray-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-sm text-gray-900 capitalize">{cfg.scraperType}</div>
+                    <div className="text-[10px] text-gray-400">ID {cfg.id} • {cfg.lastRunStatus === "failed" ? "Última falha: " + (cfg.lastRunAt ? new Date(cfg.lastRunAt).toLocaleString("pt-BR") : "nunca executado") : "Aguardando primeira execução"}</div>
+                  </div>
+                  <StatusBadge status={cfg.lastRunStatus} />
+                </div>
+                {cfg.lastRunErrorMessage && (
+                  <div className="p-2 bg-red-50 border border-red-100 rounded-lg text-[10px] text-red-700 flex gap-1">
+                    <AlertTriangle size={10} className="flex-shrink-0 mt-0.5" />{cfg.lastRunErrorMessage}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">E-mail / usuário do portal (em branco mantém o atual)</label>
+                  <input
+                    type="email"
+                    value={item.email}
+                    onChange={e => setSenha(cfg.id, e.target.value, item.password)}
+                    placeholder="email@fornecedor.com.br"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Senha nova do portal</label>
+                  <div className="relative">
+                    <input
+                      type={senhaVisivel[cfg.id] ? "text" : "password"}
+                      value={item.password}
+                      onChange={e => setSenha(cfg.id, item.email, e.target.value)}
+                      placeholder="•••••••• (digite a senha nova para re-cifrar com a chave atual)"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    />
+                    <button type="button" onClick={() => setSenhaVisivel(v => ({ ...v, [cfg.id]: !v[cfg.id] }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                      {senhaVisivel[cfg.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    {testados[cfg.id] === true && <span className="text-emerald-600 font-semibold">✓ Conexão testada com sucesso</span>}
+                    {testados[cfg.id] === false && <span className="text-red-600 font-semibold">✗ Conexão falhou — revise credenciais</span>}
+                    {testados[cfg.id] === undefined && <span>Teste a conexão antes de salvar (recomendado)</span>}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (!item.password || item.password.length < 4) { toast.error("Digite a senha nova para testar"); return; }
+                      setTestando(cfg.id);
+                      setTestados(v => ({ ...v, [cfg.id]: false }));
+                      testarConexao.mutate({ scraperConfigId: cfg.id, email: item.email, password: item.password });
+                    }}
+                    disabled={testando === cfg.id || item.password.length < 4}
+                    className="flex items-center gap-2 border border-gray-300 px-3 py-2 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    {testando === cfg.id ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />}
+                    Testar Conexão
+                  </button>
+                  <label className="flex items-center gap-2 ml-auto border border-gray-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-50">
+                    <input type="checkbox" checked={item.tos} onChange={e => setTos(cfg.id, e.target.checked)} className="accent-gray-900 w-4 h-4" />
+                    <span className="text-[11px] font-semibold text-gray-700">Revisei os termos de uso</span>
+                  </label>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-gray-100 px-6 py-4 flex items-center gap-3 bg-gray-50 flex-shrink-0">
+          <span className="text-[10px] text-gray-500">A senha fica criptografada (AES-256) e nunca é exibida na tela após salvar.</span>
+          <div className="flex gap-2 ml-auto">
+            <button onClick={onClose} className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-white">Cancelar</button>
+            <button
+              onClick={handleSalvar}
+              disabled={recarregar.isPending || !temAlteracoes()}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-40 flex items-center gap-2"
+            >
+              {recarregar.isPending ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+              Recadastrar ({Object.keys(itens).filter(k => itens[parseInt(k)].password || itens[parseInt(k)].tos).length} item(ns))
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string | null }) {
   if (!status || status === "pending")
     return <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full font-semibold"><Clock size={9} />Aguardando</span>;
@@ -669,11 +832,16 @@ function CardFornecedor({ config, onRefresh }: { config: any; onRefresh: () => v
 export default function ScraperFornecedores() {
   const [showModal, setShowModal] = useState(false);
 
+  const [showRecadastro, setShowRecadastro] = useState(false);
+
   const { data: configs = [], refetch, isLoading } = trpc.scraperAgent.listar.useQuery();
   const executarTodos = trpc.scraperAgent.executarTodos.useMutation({
     onSuccess: (r) => { toast.success(r.message); refetch(); },
     onError: (e) => toast.error(e.message),
   });
+
+  // Banner + botão de recadastro quando há fornecedor falhado
+  const temFalha = (configs as any[]).some((c: any) => c.lastRunStatus === "failed" || !c.lastRunAt);
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -692,6 +860,15 @@ export default function ScraperFornecedores() {
           </p>
         </div>
         <div className="flex gap-2">
+          {temFalha && (
+            <button
+              onClick={() => setShowRecadastro(true)}
+              className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600"
+              title="Recadastrar senhas cifradas com a chave antiga e reaprovar termos"
+            >
+              <Key size={14} /> Recadastrar Credenciais
+            </button>
+          )}
           {configs.length > 0 && (
             <button
               onClick={() => executarTodos.mutate()}
@@ -753,7 +930,19 @@ export default function ScraperFornecedores() {
         </div>
       )}
 
+      {temFalha && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 flex items-center gap-3">
+          <AlertTriangle size={15} className="text-amber-600 flex-shrink-0" />
+          <p className="text-xs text-amber-800">
+            Há fornecedor(es) com falha registrada — as senhas foram gravadas com a chave de criptografia antiga
+            ou os seletores de login precisam de revisão. Clique em <strong>Recadastrar Credenciais</strong> para re-cifrar
+            com a chave atual e reaprovar os termos de uso em lote.
+          </p>
+        </div>
+      )}
+
       {showModal && <ModalCadastro onClose={() => setShowModal(false)} onSaved={refetch} />}
+      {showRecadastro && <ModalRecadastroLote onClose={() => setShowRecadastro(false)} onSaved={refetch} />}
     </div>
   );
 }
