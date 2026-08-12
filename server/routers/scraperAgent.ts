@@ -67,9 +67,24 @@ const atualizarCredenciaisSchema = z.object({
   tosAprovado: z.boolean().optional(),
 });
 
+// Recadastro em lote das credenciais dos fornecedores falhados.
+// A aprovação de termos é exigida item a item (governança): os termos de
+// uso do site devem ser revisados antes de autorizar a coleta automática.
+const recarregarCredenciaisSchema = z.object({
+  itens: z.array(z.object({
+    id: z.number(),
+    email: z.string().email().optional(),
+    password: z.string().min(4).optional(),
+    tosAprovado: z.boolean(),
+  })).min(1).max(50),
+});
+
 const testarConexaoSchema = z.object({
-  scraperType: z.string().min(1),
-  email: z.string().email(),
+  // Ou se identifica pela configuração existente (resolve scraperType do banco)
+  // ou pelo preset + credenciais livres (modal de cadastro).
+  scraperConfigId: z.number().optional(),
+  scraperType: z.string().min(1).optional(),
+  email: z.string().email().optional(),
   password: z.string().min(1),
   customSelectors: customSelectorsSchema.optional(),
 });
@@ -176,7 +191,26 @@ export const scraperAgentRouter = router({
   testarConexao: adminProcedure
     .input(testarConexaoSchema)
     .mutation(async ({ input }: { input: z.infer<typeof testarConexaoSchema> }) => {
-      return testarLoginFornecedor(input.scraperType, input.email, input.password, input.customSelectors);
+      let scraperType = input.scraperType ?? "";
+      let email = input.email ?? "";
+      // Se veio o ID da configuração, resolve o tipo e o e-mail do banco
+      if (input.scraperConfigId) {
+        const db = await getDb();
+        if (!db) throw new Error("Banco indisponível");
+        const [cfg] = await db.select({
+          scraperType: scraperConfigs.scraperType,
+          email: scraperConfigs.email,
+        })
+          .from(scraperConfigs)
+          .where(eq(scraperConfigs.id, input.scraperConfigId))
+          .limit(1);
+        if (!cfg) throw new Error("Configuração de captura não encontrada.");
+        scraperType = cfg.scraperType;
+        email = email || cfg.email || "";
+      }
+      if (!scraperType) throw new Error("Fornecedor não identificado para o teste de conexão.");
+      if (!email) throw new Error("Informe o e-mail/usuário do portal.");
+      return testarLoginFornecedor(scraperType, email, input.password, input.customSelectors);
     }),
 
   /** Deletar configuração de um scraper */
@@ -343,6 +377,48 @@ export const scraperAgentRouter = router({
 
     return { message: `${iniciados} scrapers iniciados`, total: ativos.length };
   }),
+
+  /**
+   * Recadastro em lote das credenciais dos fornecedores falhados.
+   * Aplica tosAprovado em lote, cifra as novas senhas com a ENCRYPTION_KEY
+   * vigente e marca lastRunStatus='pending' para eliminar o ruído de falhas
+   * antigas (senha cifrada com chave antiga) — a próxima execução agendada
+   * usa as novas credenciais recadastradas.
+   */
+  recarregarCredenciais: adminProcedure
+    .input(recarregarCredenciaisSchema)
+    .mutation(async ({ input }: { input: z.infer<typeof recarregarCredenciaisSchema> }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Banco indisponível");
+
+      const ok: { id: number; scraperType: string; atualizouSenha: boolean }[] = [];
+      const falhos: { id: number; erro: string }[] = [];
+
+      for (const item of input.itens) {
+        try {
+          // Governança: sem aprovação de termos o item é rejeitado
+          if (!item.tosAprovado) throw new Error("Termos de uso não aprovados");
+
+          const updates: Record<string, any> = {
+            tosAprovado: true,
+            lastRunStatus: "pending",
+            lastRunErrorMessage: null,
+          };
+          if (item.email) updates.email = item.email; // e-mail em texto puro
+          if (item.password) updates.passwordHash = encryptPassword(item.password);
+
+          await db.update(scraperConfigs).set(updates).where(eq(scraperConfigs.id, item.id));
+
+          const [cfg] = await db.select({ scraperType: scraperConfigs.scraperType })
+            .from(scraperConfigs).where(eq(scraperConfigs.id, item.id)).limit(1);
+          ok.push({ id: item.id, scraperType: cfg?.scraperType ?? "", atualizouSenha: !!item.password });
+        } catch (err: any) {
+          falhos.push({ id: item.id, erro: err?.message ?? String(err) });
+        }
+      }
+
+      return { ok, falhos, message: `${ok.length} credencial(is) recadastrada(s); ${falhos.length} falha(s).` };
+    }),
 
   /** Verificar email exibível de uma configuração (sem senha) */
   verEmail: adminProcedure
