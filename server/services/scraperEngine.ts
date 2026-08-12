@@ -618,11 +618,21 @@ export class ScraperEngine {
           } catch { /* segue tentando o preenchimento */ }
           await new Promise(r => setTimeout(r, 1000));
         } else {
-          const currentUrl = await this.page.url().catch(() => "(indisponível)");
+          let currentUrl = "(indisponível)";
+          try {
+            currentUrl = this.page.url();
+          } catch {
+            /* página indisponível */
+          }
           throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail} | URL atual: ${currentUrl}`);
         }
       } catch {
-        const currentUrl = await this.page.url().catch(() => "(indisponível)");
+        let currentUrl = "(indisponível)";
+        try {
+          currentUrl = this.page.url();
+        } catch {
+          /* página indisponível */
+        }
         throw new Error(`Campo de login não encontrado com seletor: ${cfg.loginEmail} | URL atual: ${currentUrl}`);
       }
     }
