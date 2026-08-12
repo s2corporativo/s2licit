@@ -48,7 +48,9 @@ jobs:
   # anterior fica disponível para rollback em 1 comando.
   build-image:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    # Executa na própria VPS (runner self-hosted s2-contabo), que já tem
+    # Docker instalado — o build não consome runner hospedado do GitHub.
+    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 30
     permissions:
       contents: read
@@ -82,9 +84,10 @@ jobs:
 
   deploy:
     # Em disparo por workflow_run, exige CI verde; disparo manual sempre roda.
+    # Executa na própria VPS (runner self-hosted) — não precisa mais de SSH.
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     needs: build-image
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 40
     permissions:
       contents: read
@@ -96,60 +99,30 @@ jobs:
           # No disparo via workflow_run, faz deploy exatamente do commit que o CI validou.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
-      - name: Preparar ferramentas SSH
-        env:
-          VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+      - name: Sincronizar código na própria VPS
         run: |
-          if [ -n "${{ inputs.password }}" ]; then echo "::add-mask::${{ inputs.password }}"; fi
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass rsync
-          # Fixação da chave do host: configure o secret VPS_HOST_KEY com a saída
-          # de `ssh-keyscan <IP-da-VPS>` para bloquear MITM. Sem o secret, o
-          # workflow mantém o comportamento antigo (sem verificação) e avisa.
-          mkdir -p ~/.ssh
-          if [ -n "$VPS_HOST_KEY" ]; then
-            printf '%s\n' "$VPS_HOST_KEY" > ~/.ssh/known_hosts
-            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-            echo "Chave do host fixada (StrictHostKeyChecking=yes)."
-          else
-            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-            echo "::warning::Secret VPS_HOST_KEY ausente — conexão SSH sem verificação de host (vulnerável a MITM). Configure-o com a saída de: ssh-keyscan $DEPLOY_HOST"
-          fi
-
-      - name: Enviar código para a VPS
-        env:
-          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
-        run: |
-          if [ -z "$SSHPASS" ]; then
-            echo "::error::Configure o secret VPS_PASSWORD ou informe a senha no Run workflow."
+          if [ ! -d /opt/s2licit ]; then
+            echo "::error::Diretório /opt/s2licit ausente na VPS — instalação manual necessária." >&2
             exit 1
           fi
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/s2licit"
           rsync -az --delete \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
             --exclude .env \
-            -e "sshpass -e ssh $SSH_OPTS" \
-            ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/s2licit/"
+            ./ /opt/s2licit/
 
       - name: Instalar, migrar e subir
         env:
-          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           S2_IMAGE: ${{ needs.build-image.outputs.image }}
         run: |
           # Login temporário no ghcr para o pull da imagem publicada por SHA.
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "DOMAIN='${DEPLOY_DOMAIN}' S2_IMAGE='${S2_IMAGE}' bash /opt/s2licit/scripts/vps-bootstrap.sh"
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
+          DOMAIN='${DEPLOY_DOMAIN}' S2_IMAGE='${S2_IMAGE}' bash /opt/s2licit/scripts/vps-bootstrap.sh
 
       - name: Validar aplicação e MySQL
-        env:
-          SSHPASS: ${{ inputs.password || secrets.VPS_PASSWORD }}
         run: |
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
@@ -165,7 +138,6 @@ jobs:
           docker compose ps >&2 || true
           docker compose logs --tail=80 app db >&2 || true
           exit 1
-          REMOTE
 
       # Secrets aceitos. Valores ausentes são ignorados e nunca apagam o .env:
       # Segurança/login: ADMIN_PASSWORD
@@ -310,7 +282,8 @@ jobs:
           exit 1
           REMOTE
 
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < /tmp/remote-config.sh
+          # Runner self-hosted já executa na própria VPS: roda o script localmente.
+          bash /tmp/remote-config.sh
 
       - name: Resumo
         run: |

@@ -21,7 +21,9 @@ env:
 
 jobs:
   uptime:
-    runs-on: ubuntu-latest
+    # Runner auto-hospedado na VPS Contabo (labels: self-hosted, Linux, X64,
+    # s2licit, contabo). Não depende mais dos runners hospedados do GitHub.
+    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 5
     steps:
       - name: Verificar health e readiness
