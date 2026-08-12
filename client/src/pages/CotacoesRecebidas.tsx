@@ -52,6 +52,19 @@ export default function CotacoesRecebidas() {
     { enabled: selectedId != null },
   );
 
+  const pipelineMutation = trpc.emailQuotations.autoPipeline.useMutation({
+    onSuccess: (res) => {
+      toast.success(
+        `Pipeline: ${res.proposalsGenerated} proposta(s) gerada(s), ${res.autoConfirmedItems} match(es) confirmados, ${res.blocked} aguardando revisão.`,
+      );
+      if (res.errors.length > 0) toast.warning(`${res.errors.length} erro(s) no pipeline.`);
+      utils.emailQuotations.list.invalidate();
+      utils.emailQuotations.status.invalidate();
+      if (selectedId) utils.emailQuotations.get.invalidate({ id: selectedId });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const syncMutation = trpc.emailQuotations.sync.useMutation({
     onSuccess: (res) => {
       if (!res.imapConfigured) {
@@ -116,6 +129,15 @@ export default function CotacoesRecebidas() {
             >
               {syncMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
               Sincronizar e-mail
+            </button>
+            <button
+              onClick={() => pipelineMutation.mutate()}
+              disabled={pipelineMutation.isPending || statusQuery.data?.autoPipelineEnabled === false}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-sm font-semibold disabled:opacity-60"
+              title="Executa agora a auto-confirmação e a geração de propostas das cotações em revisão"
+            >
+              {pipelineMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Executar pipeline
             </button>
           </div>
         )}
@@ -367,7 +389,7 @@ function QuotationDetail({
           <button
             onClick={() => funnelMutation.mutate({ quotationId: quotation.id })}
             disabled={funnelMutation.isPending}
-            className="flex items-center gap-1 text-xs font-semibold text-white bg-gray-900 hover:bg-blue-700 px-3 py-1 disabled:opacity-60"
+            className="flex items-center gap-1 text-xs font-semibold text-white bg-gray-900 hover:bg-gray-700 px-3 py-1 disabled:opacity-60"
           >
             {funnelMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <KanbanSquare className="w-3 h-3" />}
             Abrir no Funil

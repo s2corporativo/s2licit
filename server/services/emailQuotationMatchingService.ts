@@ -1,6 +1,7 @@
 import { calculateStringSimilarity } from "./productMatchingService";
 import { findProductByCatmas, findProductByCatmat, listProductsForMatching } from "../db";
 import type { ExtractedItem } from "./emailQuotationExtractor";
+import { nameMatchThreshold } from "./quotationAutoPipelineService";
 
 /**
  * Cruzamento de itens de cotação com o catálogo de produtos.
@@ -20,8 +21,6 @@ export interface ItemMatch {
   precoSugerido: string | null;
 }
 
-const NAME_MATCH_THRESHOLD = 0.68;
-
 interface CatalogProduct {
   id: number;
   name: string;
@@ -35,7 +34,7 @@ interface CatalogProduct {
 export function bestNameMatch(
   descricao: string,
   catalog: CatalogProduct[],
-  threshold = NAME_MATCH_THRESHOLD,
+  threshold = 0.68,
 ): { product: CatalogProduct; score: number } | null {
   let best: { product: CatalogProduct; score: number } | null = null;
   for (const product of catalog) {
@@ -45,6 +44,15 @@ export function bestNameMatch(
     }
   }
   return best;
+}
+
+/**
+ * Limiar efetivo de match por nome: definido pela configuração central
+ * (QUOTATION_NAME_MATCH_THRESHOLD) para que o limiar de entrada na revisão
+ * e o limiar de auto-confirmação sejam calibrados no mesmo lugar.
+ */
+export function effectiveNameMatchThreshold(): number {
+  return nameMatchThreshold();
 }
 
 function isCatmasCode(code: string): boolean {
@@ -81,7 +89,7 @@ export async function matchQuotationItem(
     }
   }
 
-  const nameHit = bestNameMatch(item.descricao, catalog);
+  const nameHit = bestNameMatch(item.descricao, catalog, effectiveNameMatchThreshold());
   if (nameHit) {
     return {
       produtoMatchId: nameHit.product.id,
