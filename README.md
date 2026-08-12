@@ -138,3 +138,4 @@ gate usado pelo deploy).
 
 O workflow em `.github/workflows/ci.yml` roda verificação de tipos, testes e
 build de produção a cada push e pull request.
+> [TESTE CI] Validação de runner self-hosted — 2026-08-12 20:23 UTC. Remover em revert do commit de validação.
