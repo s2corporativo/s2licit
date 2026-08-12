@@ -26,8 +26,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SMOKE_BASE_URL: ${{ inputs.base_url || vars.S2_BASE_URL || 'https://s2.s2corporativo.com.br' }}
-  SMOKE_ROUTES: ${{ inputs.routes || vars.SMOKE_ROUTES }}
+  SMOKE_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || vars.S2_BASE_URL }}
+  SMOKE_ROUTES: ${{ inputs.routes != '' && inputs.routes || vars.SMOKE_ROUTES }}
   SMOKE_USER_EMAIL: ${{ secrets.SMOKE_USER_EMAIL }}
   SMOKE_USER_PASSWORD: ${{ secrets.SMOKE_USER_PASSWORD }}
   SMOKE_MFA_TOKEN: ${{ secrets.SMOKE_MFA_TOKEN }}

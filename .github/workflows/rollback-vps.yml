@@ -20,8 +20,8 @@ on:
         default: ""
 
 env:
-  DEPLOY_HOST: ${{ inputs.host || vars.VPS_HOST || '13.140.167.153' }}
-  DEPLOY_USER: ${{ vars.VPS_SSH_USER || 'root' }}
+  DEPLOY_HOST: ${{ inputs.host != '' && inputs.host || vars.VPS_HOST }}
+  DEPLOY_USER: ${{ vars.VPS_SSH_USER }}
 
 concurrency:
   group: deploy-vps
@@ -46,5 +46,5 @@ jobs:
           fi
           bash /opt/s2licit/scripts/vps-rollback.sh '${{ inputs.image }}'
           echo "### Rollback concluído ✅" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Alvo: ${{ inputs.image || 'imagem anterior registrada na VPS (S2_IMAGE_PREVIOUS)' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Alvo: ${{ inputs.image != '' && inputs.image || 'imagem anterior registrada na VPS (S2_IMAGE_PREVIOUS)' }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Readiness validada em /readyz" >> "$GITHUB_STEP_SUMMARY"
