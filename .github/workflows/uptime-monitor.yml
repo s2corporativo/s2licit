@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  S2_BASE_URL: ${{ vars.S2_BASE_URL || 'https://s2.s2corporativo.com.br' }}
+  S2_BASE_URL: ${{ vars.S2_BASE_URL }}
 
 jobs:
   uptime:
