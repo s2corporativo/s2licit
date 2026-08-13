@@ -1,15 +1,16 @@
 import dotenv from "dotenv";
 dotenv.config({ path: "/opt/s2licit/.env" });
 import { drizzle } from "drizzle-orm/mysql2";
+// imports de terceiros não mudam
 import mysql from "mysql2/promise";
 import * as schema from "../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import {
   extractItemsFromAttachment,
   isProcessableQuotationAttachment,
-} from "../server/services/emailQuotationExtractor";
-import { matchQuotationItems } from "../server/services/emailQuotationMatchingService";
-import { fetchEmailByMessageId } from "../server/services/emailInboxService";
+} from "../server/services/emailQuotationExtractor.ts";
+import { matchQuotationItems } from "../server/services/emailQuotationMatchingService.ts";
+import { fetchEmailByMessageId } from "../server/services/emailInboxService.ts";
 
 const mysqlUrl =
   process.env.DATABASE_URL ??
