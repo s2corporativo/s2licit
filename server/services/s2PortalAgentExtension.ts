@@ -80,6 +80,34 @@ const fiemgConfig: PortalConfig = {
   },
 };
 
+const funarbeFornecedorConfig: PortalConfig = {
+  nome: "FUNARBE / Portal do Fornecedor (Agrega)",
+  loginUrl: "https://fornecedor.funarbe.org.br/",
+  notasImportantes:
+    "Portal do fornecedor da Fundação Arthur Bernardes (plataforma Agrega/Yii2). " +
+    "Login: campo 'Email ou Login' (#loginform-email) + senha (#loginform-senha) + botão 'Entrar'. " +
+    "Seletores validados diretamente no portal em 13/08/2026 — sem CAPTCHA identificado na data. " +
+    "Após o login, a descoberta de cotações percorre as listagens da área autenticada " +
+    "(/compra-produtos-diversos, /pedidos-compra, /cotacao-aguardando-confirmacao). " +
+    "O robô é somente de leitura: nunca preenche, envia ou altera propostas.",
+  estrategia: "form_padrao",
+  seletores: {
+    loginCpfCnpj: "#loginform-email, input[placeholder*='Email ou Login'], input[placeholder*='usu']",
+    loginSenha: "#loginform-senha, input[name*='senha'], input[type='password']",
+    loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"]',
+    loginSucesso: "boa tarde",
+    buscaProcesso: "",
+    buscaBotao: "",
+    tabelaItens: "table tbody tr",
+    inputPreco: "",
+    inputMarca: "",
+    inputValidade: "",
+    botaoSalvar: "",
+    botaoEnviar: "",
+    confirmacaoEnvio: "",
+  },
+};
+
 const copasaConfig: PortalConfig = {
   ...PORTAL_CONFIGS.copasa,
   nome: "COPASA / Portal do Fornecedor",
@@ -94,7 +122,10 @@ export const S2_PORTAL_CONFIGS: Record<S2TargetPortal, PortalConfig> = {
   copasa: copasaConfig,
   cemig: cemigConfig,
   fundep: PORTAL_CONFIGS.fundep,
-  funarbe: PORTAL_CONFIGS.funarbe,
+  // O radar público continua usando compras.funarbe.org.br (mural da Funarbe);
+  // a descoberta AUTENTICADA usa o portal do fornecedor (Agrega) definido
+  // aqui, com os seletores de login validados em 13/08/2026.
+  funarbe: funarbeFornecedorConfig,
   comprasmg: PORTAL_CONFIGS.comprasmg,
   fiemg: fiemgConfig,
 };

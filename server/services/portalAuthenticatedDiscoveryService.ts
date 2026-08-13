@@ -14,7 +14,15 @@ import {
 // configurações reais de login usadas pela operação S2 em PORTAL_CONFIGS
 // (o mapa base em propostaAgent.ts é só um fallback tipado).
 import "./s2PortalAgentExtension";
-import { getS2PortalUrl, type S2TargetPortal } from "./s2TargetPortals";
+import {
+  FUNARBE_PROVIDER_LIST_URLS,
+  getS2PortalUrl,
+  type S2TargetPortal,
+} from "./s2TargetPortals";
+import {
+  combineAgregaListHtmls,
+  isFunarbeProviderPortal,
+} from "./funarbeProviderPortal";
 import { logger } from "../_core/logger";
 
 /**
@@ -36,6 +44,30 @@ import { logger } from "../_core/logger";
  */
 
 const DEFAULT_SESSION_TTL_HOURS = 6;
+
+/** Executa uma operação assíncrona por item, limitando o paralelismo. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  operation: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const limited = Math.max(Math.min(Math.floor(concurrency), 8), 1);
+  const results: R[] = new Array(items.length);
+  const batches: T[] = [];
+  let batchIndex = -1;
+  for (const item of items) {
+    if (batches.length % limited === 0) batches.push([] as unknown as T);
+    batches[batches.length - 1] = item;
+  }
+  const promises = batches.map(async (batch, index) => {
+    const batchResults = await Promise.all((batch as unknown as T[]).map((item) => operation(item)));
+    batchResults.forEach((result, resultIndex) => {
+      results[index * limited + resultIndex] = result;
+    });
+  });
+  await Promise.all(promises);
+  return results;
+}
 // Depois de N falhas de login CONSECUTIVAS, para de tentar — a maioria dos
 // portais de fornecedor bloqueia a conta após um pequeno número de
 // tentativas, e uma conta bloqueada também impede o operador humano.
@@ -222,6 +254,13 @@ export async function fetchAuthenticatedPortalHtml(
   try {
     await agente.init();
 
+    // Funarbe: o mural público (compras.funarbe.org.br) e o portal do
+    // fornecedor (fornecedor.funarbe.org.br) são sistemas distintos. A
+    // descoberta autenticada percorre as listagens da área logada do
+    // fornecedor (Agrega/Yii2) e combina os HTMLs em um único documento
+    // com marcadores de origem, para o parser de cotações do Agrega.
+    const listUrls = isFunarbeProviderPortal(source) ? FUNARBE_PROVIDER_LIST_URLS : [url];
+
     let autenticado = false;
     if (sessaoValida) {
       autenticado = await agente.restaurarSessao(
@@ -254,7 +293,22 @@ export async function fetchAuthenticatedPortalHtml(
       else await resetLoginFailures(credential.id);
     }
 
-    return await agente.coletarHtml(url);
+    const pages = await mapWithConcurrency(listUrls, 2, async (targetUrl) => {
+      try {
+        const html = await agente.coletarHtml(targetUrl);
+        return { url: targetUrl, html };
+      } catch (error) {
+        logger.warn(
+          `[PortalAuthDiscovery] ${source}: falha ao coletar ${targetUrl} — ${(error as Error).message}`,
+        );
+        return { url: targetUrl, html: "" };
+      }
+    });
+
+    const combined = combineAgregaListHtmls(
+      pages.filter((page) => page.html.trim() !== ""),
+    );
+    return combined.length > 0 ? combined : null;
   } catch (err) {
     if (err instanceof CaptchaRequerIntervencaoError) {
       logger.warn(

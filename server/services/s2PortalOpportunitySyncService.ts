@@ -25,6 +25,10 @@ import {
   fetchAuthenticatedPortalHtml,
   isPortalAuthDiscoveryEnabled,
 } from "./portalAuthenticatedDiscoveryService";
+import {
+  isFunarbeProviderPortal,
+  parseAgregaCombinedHtml,
+} from "./funarbeProviderPortal";
 import { assertSafeExternalUrl } from "../utils/urlGuard";
 import { logger } from "../_core/logger";
 
@@ -368,6 +372,17 @@ async function fetchAuthenticatedOpportunities(
   try {
     const html = await fetchAuthenticatedPortalHtml(source);
     if (!html) return [];
+    // Funarbe: o HTML autenticado vem do portal do fornecedor (Agrega/Yii2),
+    // que não é uma listagem institucional comum — usa o parser dedicado das
+    // GridView do Agrega, que preserva prazos, quantidades e valores.
+    if (isFunarbeProviderPortal(source)) {
+      // As oportunidades do Agrega são devolvidas no formato estrutural do
+      // radar (source externo fica fixo em "funarbe" para o fallback autenticado).
+      return parseAgregaCombinedHtml(html).map((opportunity) => ({
+        ...opportunity,
+        source,
+      })) as S2PortalOpportunity[];
+    }
     return parseInstitutionalPortalHtml(source, html, getS2PortalUrl(source));
   } catch (error) {
     errors.push(`${definition.label} (autenticado): ${(error as Error).message}`);
