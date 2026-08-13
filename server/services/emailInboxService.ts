@@ -52,6 +52,50 @@ function imapConfig() {
 const MAILBOX = process.env.IMAP_MAILBOX ?? "INBOX";
 
 /**
+ * Busca uma única mensagem da caixa pelo Message-ID (não altera flags —
+ * usado pelo reprocessamento de cotações já importadas).
+ */
+export async function fetchEmailByMessageId(
+  messageId: string,
+): Promise<FetchedEmail | null> {
+  if (!isImapConfigured()) return null;
+  const client = new ImapFlow(imapConfig());
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock(MAILBOX);
+    try {
+      const uids = await client.search(
+        { header: { "message-id": messageId } },
+        { uid: true },
+      );
+      const uidArr = Array.isArray(uids) ? uids : [];
+      const uid = uidArr[uidArr.length - 1];
+      if (!uid) return null;
+      const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+      if (!msg || !msg.source) return null;
+      const parsed = await simpleParser(msg.source);
+      const fromValue = parsed.from?.value?.[0];
+      return {
+        messageId: parsed.messageId ?? `uid-${uid}@${process.env.IMAP_HOST}`,
+        from: { address: fromValue?.address, name: fromValue?.name },
+        subject: parsed.subject ?? "(sem assunto)",
+        date: parsed.date ?? null,
+        text: parsed.text ?? "",
+        attachments: (parsed.attachments ?? []).map((a) => ({
+          filename: a.filename ?? "anexo",
+          contentType: a.contentType ?? "application/octet-stream",
+          content: a.content as Buffer,
+        })),
+      };
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
+}
+
+/**
  * Busca e-mails não lidos da caixa de entrada. Por padrão marca como lidos
  * para não reprocessar (a deduplicação também é feita por Message-ID no banco).
  */
