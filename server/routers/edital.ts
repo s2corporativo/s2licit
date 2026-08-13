@@ -474,6 +474,7 @@ export const editalRouter = router({
               productPresentation: z.string().nullable(),
               itemPrecoUnitario: z.number().nullable().optional(),
               itemPrecoTotal: z.number().nullable().optional(),
+              itemSalePriceManual: z.string().nullable().optional(),
             })
           ).min(1),
         })
@@ -580,13 +581,25 @@ export const editalRouter = router({
               message: `Item ${item.itemNumero} ficou sem custo durante a criação.`,
             });
           }
-          const salePrice = calculateSalePrice({
-            cost: costPrice,
-            marginPercent: input.marginPercent,
-          });
+          // Valor de venda manual do item (definido pelo usuário na revisão).
+          // Quando informado e válido, substitui o cálculo automático de margem.
+          const rawManual = (item.itemSalePriceManual ?? "").trim();
+          const manualPrice = rawManual ? parseFloat(rawManual.replace(",", ".")) : null;
+          if (manualPrice !== null && (!Number.isFinite(manualPrice) || manualPrice <= 0)) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Item ${item.itemNumero}: valor de venda manual inválido.`,
+            });
+          }
+          const salePrice = manualPrice !== null
+            ? manualPrice
+            : calculateSalePrice({
+                cost: costPrice,
+                marginPercent: input.marginPercent,
+              });
           // Preço de referência do edital (extraído pela IA ou null)
           const editalRefPrice = item.itemPrecoUnitario ?? null;
-          // Preço sugerido inicial = margem sobre a receita (editável depois)
+          // Preço sugerido inicial = valor manual do usuário ou margem sobre a receita (editável depois)
           const suggestedPrice = salePrice;
           await addProposalItem({
             proposalId,

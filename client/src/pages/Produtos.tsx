@@ -1068,6 +1068,32 @@ export default function Produtos() {
     },
     onError: (e) => toast.error(e.message),
   });
+  // Resolver duplicados dos selecionados (ação em massa)
+  const bulkResolveDuplicatesMutation = trpc.products.bulkResolveDuplicates.useMutation({
+    onSuccess: (res) => {
+      utils.products.list.invalidate();
+      setSelectedIds(new Set());
+      if (res.groups > 0) {
+        toast.success(
+          `${res.groups} grupo${res.groups !== 1 ? "s" : ""} de duplicados resolvido${res.groups !== 1 ? "s" : ""}: ${res.merged} produto${res.merged !== 1 ? "s" : ""} mesclado${res.merged !== 1 ? "s" : ""}${res.redirected > 0 ? ` e ${res.redirected} referência${res.redirected !== 1 ? "s" : ""} redirecionada${res.redirected !== 1 ? "s" : ""}` : ""}.`
+        );
+      } else {
+        toast.info("Nenhum grupo de duplicados foi encontrado entre os produtos selecionados.");
+      }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const handleBulkResolveDuplicates = async () => {
+    const count = selectedIds.size;
+    const ok = await confirm({
+      title: `Resolver duplicados entre ${count} produto${count !== 1 ? "s" : ""}?`,
+      description:
+        `O sistema vai analisar os ${count} produtos selecionados. Quando TODOS os membros de um grupo de duplicidade estiverem na seleção, o produto com mais dados preenchidos será mantido e os demais serão mesclados nele (propostas, ofertas e preços são preservados). Grupos incompletos na seleção não são alterados.`,
+      confirmLabel: "Resolver duplicados",
+    });
+    if (!ok) return;
+    bulkResolveDuplicatesMutation.mutate({ ids: Array.from(selectedIds) });
+  };
   // Enriquecimento de Ficha Técnica com IA — suporte a 30k produtos via loop paginado
   const [showEnrichModal, setShowEnrichModal] = useState(false);
   const [enrichScope, setEnrichScope] = useState<"withoutFicha" | "selected" | "all">("withoutFicha");
@@ -1330,6 +1356,16 @@ export default function Produtos() {
               >
                 <Layers size={12} />
                 Editar em Lote ({selectedIds.size})
+              </button>
+              <button
+                onClick={handleBulkResolveDuplicates}
+                disabled={bulkResolveDuplicatesMutation.isPending}
+                className="flex items-center gap-2 border-2 border-orange-700 text-orange-700 px-3 py-2 text-xs font-bold hover:bg-orange-700 hover:text-white transition-colors disabled:opacity-50"
+              >
+                <GitMerge size={12} />
+                {bulkResolveDuplicatesMutation.isPending
+                  ? "Resolvendo..."
+                  : `Resolver Duplicados (${selectedIds.size})`}
               </button>
               <button
                 onClick={handleBulkDelete}
