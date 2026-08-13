@@ -3,19 +3,18 @@
  * Implementa Jaro-Winkler distance, normalização e matching inteligente.
  */
 import { jaroSimilarity } from "./matching/productMatcher";
+import { normalizeText } from "../shared/normalize";
 
-/**
- * Normaliza string para comparação: maiúsculas, sem acentos, sem espaços extras.
- */
+// ── Normalização ─────────────────────────────────────────────────────────────
+// A normalização canônica vive em shared/normalize (Fonte Única). Este módulo
+// reexporta o engine e mantém aliases para os consumidores existentes.
+// Obs.: o normalizeStr histórico comparava em MAIÚSCULAS; como todas as
+// comparações aqui são simétricas (ambos os lados normalizados do mesmo jeito),
+// minúsculas do engine canônico produzem o mesmo resultado booleano/numérico.
+export { normalizeText, normalizeProductKey } from "../shared/normalize";
+
 export function normalizeStr(s: string | null | undefined): string {
-  if (!s) return "";
-  return s
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeText(s);
 }
 
 /**

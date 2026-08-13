@@ -176,9 +176,59 @@ export const equivalenceGroups = mysqlTable("equivalence_groups", {
     onDelete: "set null",
   }),
   notes: text("notes"),
+  // Metadados de relação (ontologia canônica — spec §3):
+  // relationType = EQUIVALENT | COMPATIBLE | SUBSTITUTE | SIMILAR;
+  // confidence  = score 0–1 da evidência que sustentou o grupo;
+  // confirmedBy/confirmedAt = auditoria de quem validou e quando.
+  relationType: varchar("relationType", { length: 64 }).default("EQUIVALENT").notNull(),
+  reason: text("reason"),
+  confidence: decimal("confidence", { precision: 5, scale: 4 }),
+  confirmedBy: int("confirmedBy").references(() => users.id, { onDelete: "set null" }),
+  confirmedAt: timestamp("confirmedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
+
+// ── Relações entre produtos (§3 — RelationType) ─────────────────────────────
+// Registro auditável de qualquer relação decidida entre dois produtos:
+// duplicidade detectada, equivalência manual, substituto aceito...
+// O par é armazenado com productIdA < productIdB para unicidade simples.
+export const productRelations = mysqlTable(
+  "product_relations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    productIdA: int("productIdA")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    productIdB: int("productIdB")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    // EXACT_DUPLICATE | SAME_PRODUCT_DIFFERENT_SOURCE | EQUIVALENT |
+    // COMPATIBLE | SUBSTITUTE | SIMILAR | NOT_EQUIVALENT
+    relationType: varchar("relationType", { length: 64 }).notNull(),
+    // pending | confirmed | rejected
+    status: varchar("status", { length: 32 }).default("pending").notNull(),
+    // Score do motor que sugeriu a relação (0–1), null quando decisão manual.
+    score: decimal("score", { precision: 5, scale: 4 }),
+    // Evidência canônica: { reason, matchingFields, conflictingFields }
+    evidence: json("evidence"),
+    decidedBy: varchar("decidedBy", { length: 32 }).default("system").notNull(), // system | user
+    createdBy: int("createdBy").references(() => users.id, { onDelete: "set null" }),
+    confirmedBy: int("confirmedBy").references(() => users.id, { onDelete: "set null" }),
+    confirmedAt: timestamp("confirmedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    unique("uq_relation_pair").on(table.productIdA, table.productIdB),
+    index("idx_relations_product_a").on(table.productIdA),
+    index("idx_relations_product_b").on(table.productIdB),
+    index("idx_relations_type").on(table.relationType),
+    index("idx_relations_status").on(table.status),
+  ]
+);
+export type ProductRelation = typeof productRelations.$inferSelect;
+export type InsertProductRelation = typeof productRelations.$inferInsert;
 
 export type EquivalenceGroup = typeof equivalenceGroups.$inferSelect;
 export type InsertEquivalenceGroup = typeof equivalenceGroups.$inferInsert;

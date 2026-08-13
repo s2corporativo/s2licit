@@ -27,15 +27,15 @@ export function simplifyDbError(msg: string): string {
   return msg.length > 120 ? msg.slice(0, 120) + "..." : msg;
 }
 
-/** Normaliza para comparação: maiúsculas, sem acento, espaços colapsados. */
+// Normalização canônica: Fonte Única em shared/normalize (6ª implementação
+// divergente consolidada — a comparação é simétrica, então minúsculas do
+// engine canônico produzem o mesmo resultado booleano/numérico das
+// implementações históricas em maiúsculas/minúsculas).
+import { normalizeText } from "../../shared/normalize";
+
+/** Normaliza para comparação: minúsculas, sem acento, espaços colapsados. */
 export function normalize(s: string | null | undefined): string {
-  if (!s) return "";
-  return s
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeText(s);
 }
 
 /** Verifica se dois valores normalizados são iguais e não-vazios. */
@@ -47,13 +47,7 @@ export function matches(a: string | null | undefined, b: string | null | undefin
 
 /** Normaliza nome para similaridade: minúsculas, sem acento, só alfanumérico. */
 export function normalizeName(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return normalizeText(s);
 }
 
 /**

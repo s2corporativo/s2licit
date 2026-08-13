@@ -568,6 +568,8 @@ export default function ImportarEdital() {
   const [matches, setMatches] = useState<MatchedItem[]>([]);
   const [marginPercent, setMarginPercent] = useState(30);
   const [expandedItem, setExpandedItem] = useState<number | null>(null);
+  // Valor de venda manual por item (definido pelo usuário na revisão)
+  const [manualPrices, setManualPrices] = useState<Record<number, string>>({});
   const [createdProposalId, setCreatedProposalId] = useState<number | null>(null);
   const [createdItemCount, setCreatedItemCount] = useState(0);
   const [reviewConfirmed, setReviewConfirmed] = useState(false);
@@ -805,6 +807,7 @@ export default function ImportarEdital() {
           productPresentation: m.productPresentation,
           itemPrecoUnitario: m.itemPrecoUnitario ?? null,
           itemPrecoTotal: m.itemPrecoTotal ?? null,
+          itemSalePriceManual: (manualPrices[m.itemNumero] ?? "").trim() || null,
         })),
         marginPercent,
         reviewConfirmed: true,
@@ -1107,9 +1110,14 @@ export default function ImportarEdital() {
             {matches.map((m, idx) => {
               // Usar chave composta para garantir unicidade: itemNumero + productId + índice
               const isExpanded = expandedItem === m.itemNumero;
-              const salePrice = m.productPrice
-                ? parseFloat(m.productPrice) / (1 - Math.min(marginPercent, 99.99) / 100)
-                : null;
+              // Valor de venda manual por item tem precedência sobre o cálculo de margem
+              const manualPriceRaw = (manualPrices[m.itemNumero] ?? "").trim();
+              const manualPrice = manualPriceRaw ? parseFloat(manualPriceRaw.replace(",", ".")) : null;
+              const salePrice = manualPrice !== null && Number.isFinite(manualPrice) && manualPrice > 0
+                ? manualPrice
+                : (m.productPrice
+                    ? parseFloat(m.productPrice) / (1 - Math.min(marginPercent, 99.99) / 100)
+                    : null);
               const lineTotal = salePrice ? salePrice * m.itemQuantidade : null;
 
               const rowBg =
@@ -1179,6 +1187,9 @@ export default function ImportarEdital() {
                           </p>
                           <p className="text-[10px] text-gray-400">
                             {m.itemQuantidade} × R$ {salePrice!.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {manualPrice !== null && manualPrice > 0 && (
+                              <span className="ml-1 font-bold text-purple-700">(manual)</span>
+                            )}
                           </p>
                         </div>
                       ) : (
@@ -1204,6 +1215,26 @@ export default function ImportarEdital() {
                               Ref. Edital: R$ {m.itemPrecoUnitario.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                             </p>
                           )}
+                          {/* Valor de venda manual por produto */}
+                          <div className="mt-2">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1">
+                              Valor de Venda Manual (R$) — substitui a margem
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="ex: 45,90"
+                              className="w-36 border px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500 bg-white"
+                              value={manualPrices[m.itemNumero] ?? ""}
+                              onChange={(e) => setManualPrices((prev) => ({ ...prev, [m.itemNumero]: e.target.value }))}
+                            />
+                            {manualPrice !== null && manualPrice > 0 && (
+                              <p className="text-[10px] text-purple-700 mt-0.5 font-semibold">
+                                Usará R$ {manualPrice.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} como preço de venda deste item
+                              </p>
+                            )}
+                          </div>
                         </div>
                         <div>
                           <p className="font-bold text-gray-500 uppercase tracking-widest text-[10px] mb-1">Produto do Catálogo</p>

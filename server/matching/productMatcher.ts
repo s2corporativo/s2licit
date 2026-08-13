@@ -25,53 +25,18 @@
  */
 
 import { classificarCompatibilidade, LIMIAR_AUTO, LIMIAR_SEM_VALIDACAO } from "../services/matchClassification";
-
-// ─── Stopwords para normalização ─────────────────────────────────────────────
-const STOPWORDS = new Set([
-  "de", "da", "do", "das", "dos", "e", "em", "com", "para", "por",
-  "a", "o", "as", "os", "um", "uma", "uns", "umas", "ao", "aos",
-  "na", "no", "nas", "nos", "se", "que", "ou", "mg", "ml", "mcg",
-  "ui", "iu", "g", "kg", "l", "comprimido", "comprimidos", "capsula",
-  "capsulas", "ampola", "ampolas", "frasco", "frascos", "bisnaga",
-  "bisnagas", "sache", "sachê", "sachês", "bolsa", "bolsas", "caixa",
-  "caixas", "unidade", "unidades", "cx", "un", "cp", "cps", "amp",
-  "fr", "bs", "sol", "susp", "inj", "oral", "topico", "topica",
-  "veterinario", "veterinaria", "humano", "humana",
-]);
-
-// ─── Normalização de texto ────────────────────────────────────────────────────
-
-/**
- * Normaliza um texto para comparação:
- * 1. Converte para minúsculas
- * 2. Remove acentos (NFD + regex)
- * 3. Remove marcas registradas (®, ™, ©)
- * 4. Remove pontuação e caracteres especiais
- * 5. Normaliza espaços
- * 6. Remove stopwords
- */
-export function normalizeText(text: string | null | undefined): string {
-  if (!text) return "";
-
-  return text
-    .toLowerCase()
-    // Remove acentos
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    // Remove marcas registradas
-    .replace(/[®™©]/g, "")
-    // Remove pontuação e caracteres especiais (mantém letras, números, espaços)
-    .replace(/[^a-z0-9\s]/g, " ")
-    // Normaliza múltiplos espaços
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Normalização e stopwords: Fonte Única em shared/normalize. A quinta
+// implementação divergente (cópia local de normalizeText + STOPWORDS neste
+// arquivo) foi removida; o engine canônico é superset funcional do antigo
+// (inclui as mesmas stopwords farmacêuticas e ainda remove acentos).
+import { normalizeText as canonicalNormalizeText, STOPWORDS } from "../../shared/normalize";
+export { normalizeText } from "../../shared/normalize";
 
 /**
  * Tokeniza e remove stopwords de um texto normalizado.
  */
 export function tokenize(text: string): string[] {
-  return normalizeText(text)
+  return canonicalNormalizeText(text)
     .split(" ")
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
 }
@@ -210,8 +175,8 @@ export function combinedStringSimilarity(a: string, b: string): number {
   if (!a && !b) return 1;
   if (!a || !b) return 0;
 
-  const na = normalizeText(a);
-  const nb = normalizeText(b);
+  const na = canonicalNormalizeText(a);
+  const nb = canonicalNormalizeText(b);
 
   if (na === nb) return 1;
 
@@ -239,6 +204,12 @@ export interface ProductCandidate {
   synonyms?: string[];           // sinônimos aprovados
   metadata?: Record<string, string>; // metadados extraídos (key → value)
   ean?: string | null;           // EAN/GTIN padronizado
+  // Campos comerciais (opcional) — usados pelos retornos de matching que expõem
+  // preço, fornecedor e links sem obrigar todos os chamadores a preenchê-los.
+  price?: string | null;
+  supplierName?: string | null;
+  imageUrl?: string | null;
+  productUrl?: string | null;
 }
 
 export interface EditalItem {
@@ -392,20 +363,20 @@ export function preFilterCandidates(
 
   // Pré-filtro por princípio ativo (se disponível)
   if (editalItem.principioAtivo) {
-    const normPA = normalizeText(editalItem.principioAtivo);
+    const normPA = canonicalNormalizeText(editalItem.principioAtivo);
     const byPA = filtered.filter((p) => {
       if (!p.activeIngredient) return false;
-      return normalizeText(p.activeIngredient).includes(normPA.split(" ")[0]);
+      return canonicalNormalizeText(p.activeIngredient).includes(normPA.split(" ")[0]);
     });
     if (byPA.length >= 3) filtered = byPA;
   }
 
   // Pré-filtro por unidade (se disponível)
   if (editalItem.unidade && filtered.length > 100) {
-    const normUnit = normalizeText(editalItem.unidade);
+    const normUnit = canonicalNormalizeText(editalItem.unidade);
     const byUnit = filtered.filter((p) => {
       if (!p.unit) return false;
-      return normalizeText(p.unit).includes(normUnit.split(" ")[0]);
+      return canonicalNormalizeText(p.unit).includes(normUnit.split(" ")[0]);
     });
     if (byUnit.length >= 3) filtered = byUnit;
   }
@@ -449,7 +420,7 @@ export function matchEditalItem(
  * → { nome: "Propofol", concentracao: "10mg/ml", apresentacao: "ampola 20ml", fabricante: "Cristália" }
  */
 export function parseEditalItemText(text: string): EditalItem {
-  const normalized = normalizeText(text);
+  const normalized = canonicalNormalizeText(text);
   const tokens = normalized.split(" ");
 
   // Padrão de concentração: número + unidade (ex: 10mg, 500mcg, 10mg/ml)

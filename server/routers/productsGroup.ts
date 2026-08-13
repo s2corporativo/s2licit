@@ -215,6 +215,47 @@ export const productsRouter = router({
         return { deleted: input.ids.length };
       }),
 
+    /**
+     * Resolve duplicados dos produtos selecionados (ação em massa).
+     * Usa a detecção canônica (db/duplicateMerge — nome normalizado ≥0.82
+     * ou mesmo princípio ativo + nome ≥0.65) e processa apenas os grupos em
+     * que TODOS os membros estão na seleção. Para cada grupo, escolhe como
+     * mestre o produto com mais dados preenchidos e executa o merge seguro
+     * transacional (soft-delete + mergedIntoId + redirecionamento de
+     * propostas, ofertas e preços).
+     */
+    bulkResolveDuplicates: protectedProcedure
+      .input(z.object({ ids: z.array(z.number()).min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        const groups = await findDuplicateGroups({ threshold: 0.82, limit: 500 });
+        const selected = new Set(input.ids);
+        const applicable = groups.filter((g) => g.products.length >= 2 && g.products.every((p) => selected.has(p.id)));
+        let merged = 0;
+        let redirected = 0;
+        const processed: Array<{ groupId: number; masterId: number; duplicateIds: number[]; reason: string; similarity: number }> = [];
+        for (const g of applicable) {
+          const sorted = [...g.products].sort((a, b) => {
+            const scoreA = (a.name?.length ?? 0) + (a.price ? 10 : 0) + (a.concentration ? 10 : 0) + (a.activeIngredient ? 10 : 0) + (a.presentation ? 5 : 0);
+            const scoreB = (b.name?.length ?? 0) + (b.price ? 10 : 0) + (b.concentration ? 10 : 0) + (b.activeIngredient ? 10 : 0) + (b.presentation ? 5 : 0);
+            return scoreB - scoreA;
+          });
+          const masterId = sorted[0].id;
+          const duplicateIds = sorted.slice(1).map((p) => p.id);
+          const res = await mergeProductGroup(masterId, duplicateIds);
+          merged += res.merged;
+          redirected += res.redirected;
+          processed.push({ groupId: g.groupId, masterId, duplicateIds, reason: g.reason, similarity: g.similarity });
+        }
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_bulk_resolve_duplicates",
+          entity: "products",
+          summary: `${processed.length} grupo(s) de duplicados resolvidos entre ${input.ids.length} produtos selecionados (${merged} mesclados)`,
+          changes: { selected: input.ids.slice(0, 500), processed: processed.slice(0, 100) },
+        });
+        return { groups: processed.length, merged, redirected };
+      }),
+
     smartSearch: protectedProcedure
       .input(
         z.object({
