@@ -10,7 +10,12 @@ import { addExtra } from "puppeteer-extra";
 import { Browser, Page, LaunchOptions } from "puppeteer";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
-const enhancedPuppeteer = addExtra(StealthPlugin as never);
+import vanillaPuppeteer from "puppeteer";
+
+// puppeteer-extra 3.x (CJS) é incompatível com o launch do Puppeteer 24 em ESM
+// ("pptr.launch is not a function"): passa o vanilla como base e registra o plugin.
+const enhancedPuppeteer = addExtra(vanillaPuppeteer as never);
+enhancedPuppeteer.use(StealthPlugin as never);
 const launch = (opts: LaunchOptions) => enhancedPuppeteer.launch(opts);
 import { getDb, recordPriceHistory } from "../db";
 import {
