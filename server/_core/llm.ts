@@ -350,7 +350,10 @@ const normalizeResponseFormat = ({
     json_schema: {
       name: schema.name,
       schema: schema.schema,
-      ...(typeof schema.strict === "boolean" ? { strict: schema.strict } : {}),
+      // A API Anthropic (modo compatível com OpenAI) exige strict:true quando
+      // response_format é json_schema — erro "strict: Field required" caso
+      // contrário. Preserva o valor explícito do schema quando definido.
+      strict: typeof schema.strict === "boolean" ? schema.strict : true,
     },
   };
 };
