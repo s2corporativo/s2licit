@@ -138,37 +138,38 @@ async function buildScrapersSection(): Promise<ScrapersSection> {
 
 async function buildPnpcSection(): Promise<string> {
   const lines: string[] = ["PORTAL PNPC / COMPRASNET (pregões Lei 14.133)", "----------------------------------"];
-  const ontem = new Date();
-  ontem.setDate(ontem.getDate() - 1);
-  const data = ontem.toISOString().slice(0, 10);
 
+  // Nota: a API histórica de dados abertos (dadosabertos.compras.gov.br/api/dados/v1/compras)
+  // foi descontinuada (404) e a API de consulta pública do PNCP (pncp.gov.br/api/consulta/v1)
+  // está fora do ar desde abr/2026, sem prazo de correção do governo federal. O bloco abaixo
+  // usa a API pública remanescente e funcional (pncp/v1/orgaos) para validar a conectividade
+  // com o portal oficial; a pesquisa de editais permanece manual no portal PNCP até a volta
+  // dos serviços públicos de consulta em massa.
   try {
-    const url =
-      "https://dadosabertos.compras.gov.br/api/dados/v1/compras?" +
-      `dataRealizacao=${data}&pagina=1&tamanhoPagina=500`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(25000) });
+    const res = await fetch(
+      "https://pncp.gov.br/api/pncp/v1/orgaos?uf=MG&pagina=1&tamanhoPagina=5",
+      { signal: AbortSignal.timeout(25000), headers: { accept: "application/json" } },
+    );
     if (!res.ok) {
-      lines.push(`  API pública do Compras.gov.br retornou HTTP ${res.status} para ${data}.`);
-      lines.push("  Verificar disponibilidade do portal em https://dadosabertos.compras.gov.br");
+      lines.push(`  API pública do PNCP retornou HTTP ${res.status}.`);
+      lines.push("  Consultar editais manualmente em https://pncp.gov.br/app/editais");
       return lines.join("\n");
     }
-    const json = (await res.json()) as { resultado?: Array<Record<string, unknown>>; totalRegistros?: number };
-    const itens = json.resultado ?? [];
-    lines.push(`  Pregões publicados em ${data}: ${json.totalRegistros ?? itens.length}`);
-    const top5 = itens.slice(0, 5);
-    for (const i of top5) {
-      const orgao = String(i["nomeOrgao"] ?? i["siglaOrgao"] ?? i["nomeUnidadeGestora"] ?? "?");
-      const titulo = String(i["tituloCompras"] ?? i["objetoCompra"] ?? "");
-      const modalidade = String(i["modalidadeCodigo"] ?? i["modalidadeNome"] ?? "");
-      lines.push(`  - [${modalidade}] ${orgao} — ${titulo.slice(0, 90)}`);
+    const json = (await res.json()) as Array<Record<string, unknown>>;
+    if (Array.isArray(json) && json.length > 0) {
+      lines.push(`  Portal PNCP (pncp.gov.br) acessível — ${json.length} órgão(s) de MG listados.`);
+      for (const o of json.slice(0, 3)) {
+        lines.push(`  - ${String(o["razaoSocial"] ?? o["nomeEntidade"] ?? "?")}`);
+      }
+    } else {
+      lines.push("  Portal PNCP acessível (resposta vazia). Consultar editais em https://pncp.gov.br/app/editais");
     }
-    if (itens.length === 0) {
-      lines.push("  (nenhum pregão publicado ontem — dias úteis são os de maior volume)");
-    }
+    lines.push("  Atenção: a API de consulta pública em massa do PNCP está fora do ar (gov.br ciente, sem prazo). " +
+      "A busca de pregões segue sendo feita manualmente no portal oficial até o restabelecimento.");
     return lines.join("\n");
   } catch (err) {
-    lines.push(`  API pública do Compras.gov.br indisponível: ${(err as Error).message}`);
-    lines.push("  O monitoramento local (cron 6h30 na VPS) permanece ativo.");
+    lines.push(`  Portal PNCP indisponível no momento: ${(err as Error).message}`);
+    lines.push("  Consultar editais manualmente em https://pncp.gov.br/app/editais");
     return lines.join("\n");
   }
 }
