@@ -18,7 +18,7 @@ function resolveSalePrice(opts: {
   }
   return manualPrice !== null
     ? manualPrice
-    : calculateSalePrice({ cost: opts.costPrice, marginPercent: opts.marginPercent });
+    : calculateSalePrice({ cost: opts.costPrice, marginPercent: opts.marginPercent ?? 0 });
 }
 
 describe("valor de venda manual por item (createProposal)", () => {
