@@ -240,13 +240,19 @@ export const FORNECEDOR_CONFIGS: Record<string, SelectorConfig> = {
   // a raspagem do DOM é fallback. Os seletores abaixo são genéricos amplos —
   // confirme os reais no Configurador ("testar login") a partir do DOM
   // renderizado (F12 → Inspecionar o <input> de e-mail/senha).
+  // ✅ Seletores confirmados no DOM real em 13/08/2026: o formulário é
+  // hidratado por JavaScript (input#cnpjcpf de CNPJ/CPF + input#password) e o
+  // botão de envio é button[type=submit]._submitBtn_h4ds0_304 ("Entrar").
+  // Os seletores genéricos ficam como fallback caso o layout volte a mudar.
   bartofil: {
     loginUrl: "https://www.bartofil.com.br/login",
-    loginEmail:
-      'input[type="email"], input[name="email"], input[name="username"], input[name="login"], input[id*="email" i], input[placeholder*="mail" i], input[placeholder*="CNPJ" i]',
+    loginEmail: '#cnpjcpf, input[type="email"], input[name="email"], input[name="username"], input[name="login"], input[id*="email" i], input[placeholder*="mail" i], input[placeholder*="CNPJ" i]',
     loginPassword:
-      'input[type="password"], input[name="password"], input[name="senha"], input[id*="pass" i], input[id*="senha" i]',
-    loginSubmit: 'button[type="submit"], [type="submit"], button[class*="login" i]',
+      '#password, input[type="password"], input[name="password"], input[name="senha"], input[id*="pass" i], input[id*="senha" i]',
+    // Prioriza o botão "Entrar" do formulário (aqui o modal de "Redefinir
+    // senha" também tem button[type=submit] "×" — seletor genérico captura
+    // o primeiro e clica no botão errado).
+    loginSubmit: 'button[class*="submitBtn" i], button[type="submit"][class*="submit" i], button[type="submit"]',
     // Espera o formulário da SPA hidratar antes de tentar o login.
     waitForSelector: 'input[type="password"]',
     categoryUrls: [],
