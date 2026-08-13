@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config({ path: "/opt/s2licit/.env" });
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
-import * as schema from "../drizzle/schema";
+import * as schema from "../drizzle/schema.ts";
 import { eq } from "drizzle-orm";
 import {
   extractItemsFromAttachment,
