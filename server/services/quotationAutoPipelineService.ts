@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { emailQuotationItems, emailQuotations } from "../../drizzle/schema";
 import { buildQuotationResponse } from "./emailQuotationResponseService";
@@ -156,20 +156,25 @@ export async function runAutoPipelineForQuotation(
     result.blockedReason = "Proposta já gerada anteriormente.";
     return result;
   }
-  if (quotation.status !== "revisao") {
-    result.blockedReason = `Status "${quotation.status}" fora do pipeline (esperado: revisao).`;
+  if (quotation.status !== "revisao" && quotation.status !== "nova") {
+    result.blockedReason = `Status "${quotation.status}" fora do pipeline (esperado: revisao ou nova).`;
     return result;
   }
 
-  // Claim atômico: reserva a cotação transicionando revisao→processando
-  // SÓ SE ainda estiver em revisao. Evita que o agendador, uma chamada manual
-  // e (em produção com mais de uma instância) outro processo processem a
-  // mesma cotação em paralelo. Se 0 linhas foram afetadas, outra execução já
+  // Claim atômico: reserva a cotação transicionando para "processando"
+  // SÓ SE ainda estiver em revisao ou nova. Evita que o agendador, uma chamada
+  // manual e (em produção com mais de uma instância) outro processo processem
+  // a mesma cotação em paralelo. Se 0 linhas foram afetadas, outra execução já
   // pegou esta cotação — não é erro, apenas não há nada a fazer aqui agora.
   const claim = await db
     .update(emailQuotations)
     .set({ status: "processando" })
-    .where(and(eq(emailQuotations.id, quotationId), eq(emailQuotations.status, "revisao")));
+    .where(
+      and(
+        eq(emailQuotations.id, quotationId),
+        inArray(emailQuotations.status, ["revisao", "nova"]),
+      ),
+    );
   const claimedRows = (claim as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0;
   if (claimedRows !== 1) {
     result.blockedReason = "Cotação já está sendo processada por outra execução.";
@@ -337,7 +342,9 @@ export async function runAutoPipelineForPending(options?: {
   const pending = await db
     .select({ id: emailQuotations.id })
     .from(emailQuotations)
-    .where(and(eq(emailQuotations.status, "revisao"), isNull(emailQuotations.propostaGeradaEm)))
+    .where(
+      and(inArray(emailQuotations.status, ["revisao", "nova"]), isNull(emailQuotations.propostaGeradaEm)),
+    )
     .limit(options?.limit ?? 50);
 
   for (const row of pending) {

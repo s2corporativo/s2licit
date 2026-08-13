@@ -17,6 +17,8 @@ import { enviarWhatsapp, isWhatsappConfigured } from "./whatsappService";
 import { executarScraper } from "./scraperEngine";
 import { expandAndSyncTambasaCatalog } from "./tambasaCatalogService";
 import { runDatabaseBackup, cleanupOldBackups } from "./backupService";
+import { runQuotationRematchSafely } from "./quotationRematchService";
+import { sendQuotationDailyReportSafely } from "./quotationDailyReportService";
 import { logger } from "../_core/logger";
 
 /**
@@ -32,9 +34,11 @@ import { logger } from "../_core/logger";
 const DEFAULT_EMAIL_SYNC_CRON = "*/15 * * * *"; // a cada 15 min
 const DEFAULT_PORTAL_OPPORTUNITY_SYNC_CRON = "0 7,12,17 * * *"; // 3x/dia
 const DEFAULT_ALERTS_CRON = "0 8 * * *"; // todo dia às 8h
+const DEFAULT_DAILY_REPORT_CRON = "0 7 * * *"; // relatório diário 7h00 (e-mail + scrapers + PNPC)
 const DEFAULT_SCRAPER_SCHEDULE_CRON = "* * * * *"; // verifica a cada minuto
 const DEFAULT_BACKUP_CRON = "0 3 * * *"; // backup diário às 3h
 const DEFAULT_BACKUP_KEEP_DAYS = 14;
+const DEFAULT_REMATCH_CRON = "0 5,17 * * *"; // 2x/dia (5h e 17h, horário de Brasília)
 const DEFAULT_PORTAL_LOGIN_SMOKETEST_CRON = "0 6 * * 1"; // segunda-feira às 6h
 const SCRAPER_TIMEZONE = "America/Sao_Paulo";
 const TAMBASA_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // catálogo completo: semanal
@@ -180,7 +184,10 @@ async function runEmailSync(): Promise<void> {
     // Cada ciclo reavalia a fila: cotações bloqueadas por preço vencido ou
     // item pendente de revisão voltam a ser tentadas depois da correção
     // (não só quando um novo e-mail chega). O pipeline já retorna rápido
-    // quando não há nada pendente.
+    // quando não há nada pendente. Antes disso, o catálogo atual é reaplicado
+    // aos itens sem correspondência — o catálogo cresce e um item que não
+    // casou ontem pode casar hoje.
+    await runQuotationRematchSafely();
     await runQuotationAutoPipeline();
   } catch (err) {
     logger.error("[Scheduler] Falha na sincronização de e-mail:", (err as Error).message);
@@ -484,6 +491,34 @@ export function initScheduledJobs(): void {
       logger.warn(
         `[Scheduler] PORTAL_OPPORTUNITY_SYNC_CRON inválido: "${expr}" — radar dos seis portais desativado.`,
       );
+    }
+  }
+
+  // 2a. Re-matching periódico das cotações em revisão: itens sem correspondência
+  //     são recruzados com o catálogo atual (que cresce diariamente). Se todos os
+  //     itens de uma cotação passarem a casar, o pipeline gera a proposta no ciclo
+  //     seguinte. Desligável com REMATCH_ENABLED=false.
+  if (enabled(process.env.REMATCH_ENABLED, true)) {
+    const expr = process.env.REMATCH_CRON || DEFAULT_REMATCH_CRON;
+    if (cron.validate(expr)) {
+      cron.schedule(expr, () => { void runQuotationRematchSafely(); }, { timezone: SCRAPER_TIMEZONE });
+      logger.info(`[Scheduler] Re-matching de cotações em revisão agendado (${expr}, horário de Brasília).`);
+    } else {
+      logger.warn(`[Scheduler] REMATCH_CRON inválido: "${expr}" — re-matching automático desativado.`);
+    }
+  }
+
+  // 2b. Relatório diário consolidado às 7h00: canal de e-mail (novas cotações,
+  //     matches e itens pendentes), scrapers de fornecedores (última rodada) e
+  //     portal PNPC/Comprasnet (pregões publicados ontem via API pública oficial).
+  //     Desligável com DAILY_REPORT_ENABLED=false.
+  if (enabled(process.env.DAILY_REPORT_ENABLED, true)) {
+    const expr = process.env.DAILY_REPORT_CRON || DEFAULT_DAILY_REPORT_CRON;
+    if (cron.validate(expr)) {
+      cron.schedule(expr, () => { void sendQuotationDailyReportSafely(); }, { timezone: SCRAPER_TIMEZONE });
+      logger.info(`[Scheduler] Relatório diário consolidado agendado (${expr}, horário de Brasília).`);
+    } else {
+      logger.warn(`[Scheduler] DAILY_REPORT_CRON inválido: "${expr}" — relatório diário desativado.`);
     }
   }
 
