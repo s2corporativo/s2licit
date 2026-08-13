@@ -129,9 +129,11 @@ export async function applyEmailConfigFromDb(): Promise<void> {
       process.env.SMTP_SECURE = row.smtpSecure ? "true" : "false";
       if (row.smtpFrom) process.env.SMTP_FROM = row.smtpFrom;
     }
-    // Filtro de seleção de e-mails: vazio significa "usar os padrões de assunto".
-    process.env.EMAIL_FILTER_SENDERS = row.senderFilter ?? "";
-    process.env.EMAIL_FILTER_SUBJECT_KEYWORDS = row.subjectKeywordFilter ?? "";
+    // Filtro de seleção de e-mails: sem critérios no banco, as envs ficam
+    // indefinidas e valem os padrões de assunto (cotação/orçamento/proposta);
+    // quando o usuário configurou critérios pela interface, eles prevalecem.
+    if (row.senderFilter != null) process.env.EMAIL_FILTER_SENDERS = row.senderFilter;
+    if (row.subjectKeywordFilter != null) process.env.EMAIL_FILTER_SUBJECT_KEYWORDS = row.subjectKeywordFilter;
     const { logFilterCriteria } = await import("./emailQuotationFilterService");
     logFilterCriteria();
     logger.info("[EmailConfig] Configuração de e-mail da interface aplicada.");

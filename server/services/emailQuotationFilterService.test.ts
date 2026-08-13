@@ -53,9 +53,16 @@ describe("matchesQuotationFilter", () => {
     expect(matchesQuotationFilter(email({ subject: "Relatório mensal" }))).toBe(true);
   });
 
+  it("env não definida mantém os padrões de assunto (caso do boot sem critérios)", () => {
+    delete process.env.EMAIL_FILTER_SENDERS;
+    delete process.env.EMAIL_FILTER_SUBJECT_KEYWORDS;
+    expect(matchesQuotationFilter(email({ subject: "Pedido de cotação" }))).toBe(true);
+    expect(matchesQuotationFilter(email({ subject: "Relatório mensal" }))).toBe(false);
+  });
+
   it("remetente selecionado com assunto sem keyword é aceito; remetente não selecionado não", () => {
     process.env.EMAIL_FILTER_SENDERS = "Funarbe";
-    process.env.EMAIL_FILTER_SUBJECT_KEYWORDS = "";
+    delete process.env.EMAIL_FILTER_SUBJECT_KEYWORDS;
     expect(matchesQuotationFilter(email({ subject: "Assunto genérico", from: { name: "Funarbe" } }))).toBe(true);
     expect(matchesQuotationFilter(email({ subject: "Assunto genérico", from: { name: "Outro Fornecedor" } }))).toBe(false);
   });
