@@ -14,6 +14,8 @@ import {
   FileText,
   ExternalLink,
   Bot,
+  Lightbulb,
+  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -299,6 +301,12 @@ function QuotationDetail({
     onSuccess: () => { toast.success("Item atualizado."); onChanged(); },
     onError: (e) => toast.error(e.message),
   });
+  const [showSuggest, setShowSuggest] = useState(false);
+  const suggestQuery = trpc.emailQuotations.suggestSimilar.useQuery(
+    { quotationId: data.quotation.id },
+    { enabled: showSuggest },
+  );
+  const hasUnmatched = data.items.some((it) => !it.produtoMatchId);
   const statusMutation = trpc.emailQuotations.setStatus.useMutation({
     onSuccess: () => { toast.success("Status atualizado."); onChanged(); },
     onError: (e) => toast.error(e.message),
@@ -514,6 +522,75 @@ function QuotationDetail({
       {items.length === 0 && (
         <div className="p-6 text-center text-sm text-gray-400">
           Nenhum item extraído automaticamente. O conteúdo original está preservado para conferência manual.
+        </div>
+      )}
+      {/* Painel de sugestão de similares para itens sem match */}
+      {canEdit && hasUnmatched && (
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          {suggestQuery.isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-gray-400"><Loader2 className="w-4 h-4 animate-spin" /> Buscando similares no catálogo…</div>
+          ) : suggestQuery.isError ? (
+            <div className="text-sm text-red-500">{suggestQuery.error.message}</div>
+          ) : (
+            <>
+              {!showSuggest ? (
+                <button
+                  onClick={() => setShowSuggest(true)}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900"
+                >
+                  <Lightbulb className="w-3.5 h-3.5" /> Sugerir similares para itens sem match
+                </button>
+              ) : suggestQuery.data && suggestQuery.data.length > 0 ? (
+                suggestQuery.data.map((sug) => (
+                  <div key={sug.itemId} className="mb-4">
+                    <div className="text-xs font-semibold text-gray-700 mb-1">
+                      Item {sug.numeroItem ?? "—"}: {sug.descricao.slice(0, 120)}
+                      {sug.descricao.length > 120 ? "…" : ""}
+                    </div>
+                    {sug.candidates.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {sug.candidates.map((c) => (
+                          <div key={c.id} className="border border-indigo-100 bg-indigo-50/50 rounded-lg px-3 py-2 max-w-[320px]">
+                            <div className="text-xs font-medium text-gray-800 truncate" title={c.name}>{c.name}</div>
+                            <div className="text-[10px] text-gray-500 truncate" title={c.activeIngredient ?? undefined}>
+                              {c.activeIngredient ? `Princípio ativo: ${c.activeIngredient}` : (c.manufacturer ?? "")}
+                            </div>
+                            <div className="text-[10px] text-gray-500">
+                              {[c.concentration, c.presentation].filter(Boolean).join(" · ")}
+                              {c.price ? ` — R$ ${c.price}` : ""}
+                              {c.supplierName ? ` — ${c.supplierName}` : ""}
+                            </div>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                                {c.method === "principioAtivo" ? "mesmo princípio ativo" : `similar ${Math.round(c.score * 100)}%`}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  confirmMutation.mutate({
+                                    itemId: sug.itemId,
+                                    produtoMatchId: c.id,
+                                    precoSugerido: c.price,
+                                  })
+                                }
+                                disabled={confirmMutation.isPending}
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-50"
+                              >
+                                <Link2 className="w-3 h-3" /> Vincular
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-gray-400">Nenhum similar encontrado no catálogo para este item.</div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="text-[11px] text-gray-400">Todos os itens já estão vinculados a produtos do catálogo.</div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

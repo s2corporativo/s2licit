@@ -14,6 +14,7 @@ import { buildQuotationResponse } from "../services/emailQuotationResponseServic
 import { isSmtpConfigured, sendEmail } from "../services/emailSenderService";
 import { ensureOpportunityFromQuotation } from "../services/opportunityWorkflowService";
 import { prepareProposalFromQuotation } from "../services/quotationPortalHandoffService";
+import { suggestSimilarItems } from "../services/emailQuotationSimilarService";
 import {
   autoConfirmThreshold,
   isAutoPipelineEnabled,
@@ -343,6 +344,15 @@ export const emailQuotationsRouter = router({
       }
       return { vencidos, proximos };
     }),
+
+  /**
+   * Sugere produtos similares (por principio ativo e similaridade de nome)
+   * para os itens SEM match de uma cotação. Sugestão assistiva: o operador
+   * vincula o candidato via setItemMatch, preservando a auditoria existente.
+   */
+  suggestSimilar: protectedProcedure
+    .input(z.object({ quotationId: z.number().int().positive() }))
+    .query(async ({ input }) => suggestSimilarItems(input.quotationId)),
 
   /** Atualiza o status de uma cotação (ex.: marcar como respondida/descartada). */
   setStatus: editorProcedure
