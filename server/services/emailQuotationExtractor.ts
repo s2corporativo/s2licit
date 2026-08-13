@@ -154,7 +154,8 @@ export async function extractItemsFromText(text: string): Promise<ExtractedItem[
             "Você extrai itens de pedidos de cotação de órgãos públicos brasileiros. " +
             "Retorne apenas os itens de produtos/materiais solicitados, com descrição, " +
             "quantidade, unidade e código de catálogo (CATMAS/CATMAT) quando houver. " +
-            "Ignore cabeçalhos, rodapés, condições e texto administrativo.",
+            "Ignore cabeçalhos, rodapés, condições e texto administrativo. " +
+            "Responda exclusivamente em json, sem markdown e sem texto adicional.",
         },
         {
           role: "user",
