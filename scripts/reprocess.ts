@@ -17,7 +17,7 @@ const mysqlUrl =
   `mysql://${process.env.MYSQL_USER}:${process.env.MYSQL_PASSWORD}@127.0.0.1:3306/${process.env.MYSQL_DATABASE}`;
 
 async function main() {
-  const db = drizzle(mysql.createConnection({ uri: mysqlUrl }), { schema });
+  const db = drizzle(mysql.createConnection({ uri: mysqlUrl }), { schema, mode: "default" });
   const id = Number(process.argv[2] ?? 765);
   const q = await db
     .select()
