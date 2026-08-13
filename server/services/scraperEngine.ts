@@ -7,10 +7,11 @@
  */
 
 import { addExtra } from "puppeteer-extra";
-import { Browser, Page } from "puppeteer";
+import { Browser, Page, LaunchOptions } from "puppeteer";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
-const puppeteer = addExtra(StealthPlugin as never);
+const enhancedPuppeteer = addExtra(StealthPlugin as never);
+const launch = (opts: LaunchOptions) => enhancedPuppeteer.launch(opts);
 import { getDb, recordPriceHistory } from "../db";
 import {
   products,
@@ -389,7 +390,7 @@ export class ScraperEngine {
   async init(): Promise<void> {
     if (this.browser) return;
     this.addLog("Iniciando navegador...");
-    this.browser = await (puppeteer as unknown as typeof import("puppeteer")).launch({
+    this.browser = await launch({
       headless: true,
       args: [
         "--no-sandbox",
