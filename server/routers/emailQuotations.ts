@@ -22,6 +22,7 @@ import {
   runAutoPipelineForPending,
   runAutoPipelineForQuotation,
 } from "../services/quotationAutoPipelineService";
+import { sendQuotationDailyReport } from "../services/quotationDailyReportService";
 
 /**
  * Cotações recebidas por e-mail (COTEP/Compras MG, FUNARB, COPASA, Cemig...).
@@ -116,6 +117,17 @@ export const emailQuotationsRouter = router({
         ? Number((Math.max(0, (confirmados - corrigidos) / confirmados) * 100).toFixed(1))
         : null;
       return { confirmados, corrigidos, taxaAcerto };
+    }),
+
+  /**
+   * Dispara manualmente o relatório diário consolidado (canal de e-mail,
+   * scrapers e portal PNPC/Comprasnet) e o envia ao destinatário SMTP.
+   * Disligável via DAILY_REPORT_ENABLED=false — mesma política do agendador.
+   */
+  testarRelatorioDiario: adminProcedure
+    .input(z.object({ destinatario: z.string().email().optional() }).optional())
+    .mutation(async ({ input }) => {
+      return sendQuotationDailyReport({ recipient: input?.destinatario });
     }),
 
   /** Dispara a sincronização da caixa de entrada (somente admin). */
