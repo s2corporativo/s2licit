@@ -2000,6 +2000,10 @@ export const emailSettings = mysqlTable("email_settings", {
   smtpPasswordEnc: text("smtpPasswordEnc"),
   smtpSecure: boolean("smtpSecure").default(false).notNull(),
   smtpFrom: varchar("smtpFrom", { length: 320 }),
+  // Filtro de seleção de e-mails: remetentes e palavras-chave de assunto
+  // aceitos como pedidos de cotação (o restante é ignorado pela sincronização).
+  senderFilter: text("senderFilter"),
+  subjectKeywordFilter: text("subjectKeywordFilter"),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 export type EmailSettings = typeof emailSettings.$inferSelect;

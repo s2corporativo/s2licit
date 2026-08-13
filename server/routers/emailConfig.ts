@@ -30,6 +30,8 @@ export const emailConfigRouter = router({
         smtpPassword: z.string().max(512).optional().nullable(),
         smtpSecure: z.boolean().optional(),
         smtpFrom: z.string().max(320).optional().nullable(),
+        senderFilter: z.string().max(4000).optional().nullable(),
+        subjectKeywordFilter: z.string().max(4000).optional().nullable(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -38,7 +40,7 @@ export const emailConfigRouter = router({
         userId: ctx.user?.id,
         action: "email_config_save",
         entity: "email_settings",
-        summary: "Configuração de e-mail atualizada pela interface",
+        summary: `Configuração de e-mail atualizada pela interface${input.senderFilter != null || input.subjectKeywordFilter != null ? "; filtros de seleção de e-mails atualizados" : ""}`,
       });
       return { ok: true };
     }),

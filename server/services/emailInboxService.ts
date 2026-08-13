@@ -77,7 +77,27 @@ export async function fetchUnseenEmails(options?: {
       // UIDs das mensagens não lidas
       const searchResult = await client.search({ seen: false }, { uid: true });
       const uids = Array.isArray(searchResult) ? searchResult : [];
-      const selected = uids.slice(-limit); // as mais recentes
+      // O filtro de seleção (remetentes/assunto de cotação) roda sobre os
+      // envelopes primeiro: busca-se até 4x o limite de UIDs para compensar
+      // os descartados, garantindo que o resultado contenha e-mails válidos.
+      const { matchesQuotationFilter } = await import("./emailQuotationFilterService");
+      const uidsToProbe = uids.slice(-(limit * 4));
+      const selected: number[] = [];
+      for (const uid of uidsToProbe) {
+        const probeMsg = await client.fetchOne(String(uid), { envelope: true }, { uid: true });
+        if (!probeMsg || !("envelope" in probeMsg)) continue;
+        const env = probeMsg.envelope;
+        const probe: FetchedEmail = {
+          messageId: `uid-${uid}@probe`,
+          from: { address: env?.from?.[0]?.address, name: env?.from?.[0]?.name },
+          subject: env?.subject ?? "(sem assunto)",
+          date: env?.date ?? null,
+          text: "",
+          attachments: [],
+        };
+        if (matchesQuotationFilter(probe)) selected.push(uid);
+        if (selected.length >= limit) break;
+      }
 
       for (const uid of selected) {
         const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });

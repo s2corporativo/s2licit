@@ -27,6 +27,10 @@ export type EmailConfigInput = {
   smtpPassword?: string | null;
   smtpSecure?: boolean;
   smtpFrom?: string | null;
+  /** Remetentes aceitos (um por linha ou separados por ";") */
+  senderFilter?: string | null;
+  /** Palavras-chave de assunto aceitas (um por linha ou separadas por ";") */
+  subjectKeywordFilter?: string | null;
 };
 
 async function getRow(): Promise<EmailSettings | null> {
@@ -60,6 +64,11 @@ export async function getEmailConfigView() {
       hasPassword: dbSmtp ? Boolean(row?.smtpPasswordEnc) : Boolean(process.env.SMTP_PASSWORD),
       origem: dbSmtp ? ("interface" as const) : process.env.SMTP_HOST ? ("ambiente" as const) : ("nao_configurado" as const),
     },
+    filtroEmail: {
+      remetentes: (row?.senderFilter ?? process.env.EMAIL_FILTER_SENDERS ?? "") as string,
+      assunto: (row?.subjectKeywordFilter ?? process.env.EMAIL_FILTER_SUBJECT_KEYWORDS ?? "") as string,
+      origem: row?.senderFilter != null || row?.subjectKeywordFilter != null ? ("interface" as const) : ("padrao" as const),
+    },
   };
 }
 
@@ -85,6 +94,8 @@ export async function saveEmailConfig(input: EmailConfigInput): Promise<void> {
       : row?.smtpPasswordEnc ?? null,
     smtpSecure: input.smtpSecure ?? row?.smtpSecure ?? false,
     smtpFrom: input.smtpFrom ?? row?.smtpFrom ?? null,
+    senderFilter: input.senderFilter ?? row?.senderFilter ?? null,
+    subjectKeywordFilter: input.subjectKeywordFilter ?? row?.subjectKeywordFilter ?? null,
   };
   if (row) {
     await db.update(emailSettings).set(values).where(eq(emailSettings.id, row.id));
@@ -118,6 +129,11 @@ export async function applyEmailConfigFromDb(): Promise<void> {
       process.env.SMTP_SECURE = row.smtpSecure ? "true" : "false";
       if (row.smtpFrom) process.env.SMTP_FROM = row.smtpFrom;
     }
+    // Filtro de seleção de e-mails: vazio significa "usar os padrões de assunto".
+    process.env.EMAIL_FILTER_SENDERS = row.senderFilter ?? "";
+    process.env.EMAIL_FILTER_SUBJECT_KEYWORDS = row.subjectKeywordFilter ?? "";
+    const { logFilterCriteria } = await import("./emailQuotationFilterService");
+    logFilterCriteria();
     logger.info("[EmailConfig] Configuração de e-mail da interface aplicada.");
   } catch (err) {
     logger.error("[EmailConfig] Falha ao aplicar configuração do banco:", err);

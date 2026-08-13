@@ -25,6 +25,8 @@ export function EmailConfigSection() {
     smtpPassword: "",
     smtpSecure: false,
     smtpFrom: "",
+    senderFilter: "",
+    subjectKeywordFilter: "",
   });
 
   useEffect(() => {
@@ -42,6 +44,8 @@ export function EmailConfigSection() {
       smtpUser: d.smtp.user,
       smtpSecure: d.smtp.secure,
       smtpFrom: d.smtp.from,
+      senderFilter: d.filtroEmail?.remetentes ?? "",
+      subjectKeywordFilter: d.filtroEmail?.assunto ?? "",
     }));
   }, [configQuery.data]);
 
@@ -79,6 +83,8 @@ export function EmailConfigSection() {
       smtpPassword: form.smtpPassword || null,
       smtpSecure: form.smtpSecure,
       smtpFrom: form.smtpFrom || null,
+      senderFilter: form.senderFilter || null,
+      subjectKeywordFilter: form.subjectKeywordFilter || null,
     });
   };
 
@@ -86,6 +92,29 @@ export function EmailConfigSection() {
     o === "interface" ? "configurado por esta tela" : o === "ambiente" ? "configurado na instalação (.env)" : "não configurado";
 
   const d = configQuery.data;
+
+  const area = (
+    id: string,
+    label: string,
+    value: string,
+    onChange: (v: string) => void,
+    opts?: { placeholder?: string; hint?: string }
+  ) => (
+    <div>
+      <label htmlFor={id} className="block text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1">
+        {label}
+      </label>
+      <textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={opts?.placeholder}
+        rows={4}
+        className="w-full border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 transition-colors resize-y"
+      />
+      {opts?.hint && <div className="text-[10px] text-gray-400 mt-0.5">{opts.hint}</div>}
+    </div>
+  );
 
   const campo = (
     id: string,
@@ -213,6 +242,25 @@ export function EmailConfigSection() {
               {testar.isPending ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />}
               Testar envio
             </button>
+          </div>
+
+          {/* Seleção de e-mails */}
+          <div className="space-y-3">
+            <div className="text-sm font-bold text-gray-800">
+              Seleção de e-mails
+              {d && <span className="ml-2 text-[10px] font-normal text-gray-400">{d.filtroEmail?.origem === "interface" ? "configurado por esta tela" : "critérios padrão de assunto ativos"}</span>}
+            </div>
+            <p className="text-[11px] text-gray-500">
+              A sincronização só processa e-mails que <strong>atendam a pelo menos um critério</strong>: remetente da lista abaixo OU assunto com uma das palavras-chave. Os demais e-mails são ignorados. Com os dois campos vazios, vale o critério padrão de assunto (cotação, orçamento, proposta de preço e variações).
+            </p>
+            {area("filtro-remetentes", "Remetentes aceitos (opcional)", form.senderFilter, (v) => set("senderFilter", v), {
+              placeholder: "Comdec\nFunarbe\nCompras MG\ncompras@empresa.com.br",
+              hint: "Um por linha ou separados por \";\". Aceita nome (ex.: Funarbe) ou endereço (ex.: compras@mg.gov.br).",
+            })}
+            {area("filtro-assunto", "Palavras-chave de assunto", form.subjectKeywordFilter, (v) => set("subjectKeywordFilter", v), {
+              placeholder: "cotação\norçamento\nproposta de preço",
+              hint: "Um por linha ou separadas por \";\". Vazio = usa o padrão (cotação, orçamento, proposta de preço, pedido de orçamento/cotação e variações com/sem acento).",
+            })}
           </div>
         </div>
       )}
