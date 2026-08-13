@@ -4,7 +4,6 @@ import {
   suggestSimilarItems,
   SIMILAR_SUGGEST_THRESHOLD,
   MAX_CANDIDATES_PER_ITEM,
-  type ItemSimilarSuggestion,
 } from "./emailQuotationSimilarService";
 
 // Mocks de banco (camada drizzle)
