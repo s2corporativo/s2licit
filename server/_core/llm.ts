@@ -358,6 +358,26 @@ const normalizeResponseFormat = ({
   };
 };
 
+/**
+ * A API Anthropic (modo compatível com OpenAI) rejeita json_schema para
+ * response_format sem explicitamente `additionalProperties: false` no schema
+ * do objeto raiz (erro 400 "additionalProperties must be explicitly set to
+ * false"). Ajusta o schema em profundidade limitada quando aplicável.
+ */
+function enforceAdditionalPropertiesFalse(
+  payload: { response_format?: { type: string; json_schema?: JsonSchema } },
+): void {
+  const rf = payload.response_format;
+  if (rf?.type !== "json_schema" || !rf.json_schema?.schema) return;
+  const root = rf.json_schema.schema as Record<string, unknown>;
+  if (
+    (root.type === "object" || (!root.type && root.properties)) &&
+    root.additionalProperties === undefined
+  ) {
+    root.additionalProperties = false;
+  }
+}
+
 /** Ordem de tentativa: provedor preferido primeiro, demais como fallback. */
 function orderedProviders(): LlmProvider[] {
   const all = [anthropicProvider(), groqProvider(), forgeProvider()].filter(
@@ -439,6 +459,10 @@ async function invokeProvider(
   if (normalizedResponseFormat) {
     payload.response_format = normalizedResponseFormat;
   }
+
+  // Corrige o schema do objeto raiz exigido pela API Anthropic (compat OpenAI):
+  // erro 400 "additionalProperties must be explicitly set to false".
+  enforceAdditionalPropertiesFalse(payload);
 
   // Timeout: sem isto, uma chamada travada deixava a request tRPC pendurada
   // indefinidamente. Configurável por env (padrão 90s).

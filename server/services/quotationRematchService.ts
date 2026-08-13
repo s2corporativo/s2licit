@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, lt } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { emailQuotations, emailQuotationItems } from "../../drizzle/schema";
 import { matchQuotationItem } from "./emailQuotationMatchingService";

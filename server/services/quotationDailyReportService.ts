@@ -13,7 +13,7 @@
  * Desligável com DAILY_REPORT_ENABLED=false. Atrasado com
  * DAILY_REPORT_HOUR_HHMM no formato "HH:MM".
  */
-import { and, eq, gt, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { emailQuotations } from "../../drizzle/schema";
 import { scraperConfigs } from "../../drizzle/schema";
