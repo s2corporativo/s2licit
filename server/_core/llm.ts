@@ -364,18 +364,51 @@ const normalizeResponseFormat = ({
  * do objeto raiz (erro 400 "additionalProperties must be explicitly set to
  * false"). Ajusta o schema em profundidade limitada quando aplicável.
  */
+function markObjectNoAdditionalProperties(
+  node: Record<string, unknown>,
+  depth: number,
+): void {
+  if (depth <= 0) return;
+  const isObject =
+    node.type === "object" || (!node.type && node.properties);
+  if (isObject) {
+    if (node.additionalProperties === undefined) {
+      node.additionalProperties = false;
+    }
+  }
+  // Percorre propriedades do objeto e itens de arrays em profundidade limitada.
+  const props = node.properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  if (props) {
+    for (const prop of Object.values(props)) {
+      if (prop && typeof prop === "object") {
+        markObjectNoAdditionalProperties(prop, depth - 1);
+      }
+    }
+  }
+  const items = node.items as Record<string, unknown> | undefined;
+  if (items && typeof items === "object") {
+    markObjectNoAdditionalProperties(items, depth - 1);
+  }
+  const anyOf = node.anyOf as Record<string, unknown>[] | undefined;
+  const oneOf = node.oneOf as Record<string, unknown>[] | undefined;
+  for (const variant of anyOf ?? oneOf ?? []) {
+    if (variant && typeof variant === "object") {
+      markObjectNoAdditionalProperties(variant, depth - 1);
+    }
+  }
+}
+
 function enforceAdditionalPropertiesFalse(
   payload: { response_format?: { type: string; json_schema?: JsonSchema } },
 ): void {
   const rf = payload.response_format;
   if (rf?.type !== "json_schema" || !rf.json_schema?.schema) return;
-  const root = rf.json_schema.schema as Record<string, unknown>;
-  if (
-    (root.type === "object" || (!root.type && root.properties)) &&
-    root.additionalProperties === undefined
-  ) {
-    root.additionalProperties = false;
-  }
+  markObjectNoAdditionalProperties(
+    rf.json_schema.schema as Record<string, unknown>,
+    6,
+  );
 }
 
 /** Ordem de tentativa: provedor preferido primeiro, demais como fallback. */
