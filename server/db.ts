@@ -69,3 +69,5 @@ export * from "./db/duplicateMerge";
 export * from "./db/supplierPrices";
 // ─── Match Logs → ./db/matchLogs ───
 export * from "./db/matchLogs";
+// ─── Relações entre Produtos → ./db/productRelations ─────────────────────────
+export * from "./db/productRelations";

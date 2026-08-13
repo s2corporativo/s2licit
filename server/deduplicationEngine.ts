@@ -1,5 +1,10 @@
 import { getDb } from "./db";
 import { levenshteinSimilarity } from "./matching/productMatcher";
+import { normalizeText } from "../shared/normalize";
+// Normalização canônica: Fonte Única em shared/normalize. O normalizador
+// local anterior (quarta implementação divergente encontrada no inventário)
+// foi removido; o engine canônico é superset funcional (minúsculas, acentos,
+// pontuação e espaços — o antigo não removia acentos).
 
 export type DuplicateAction = 
   | "criar_novo"
@@ -275,18 +280,6 @@ function calculateSimilarity(
   }
 
   return maxScore > 0 ? (score / maxScore) * 100 : 0;
-}
-
-/**
- * Normalizar texto para comparação
- */
-function normalizeText(text: string): string {
-  if (!text) return "";
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s]/g, "")
-    .replace(/\s+/g, " ");
 }
 
 /**

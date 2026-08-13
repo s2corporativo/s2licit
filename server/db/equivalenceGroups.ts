@@ -54,6 +54,9 @@ export async function createEquivalenceGroup(data: {
   categoryId?: number;
   notes?: string;
   productIds: number[];
+  relationType?: string;
+  reason?: string;
+  confidence?: number | null;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
@@ -61,6 +64,9 @@ export async function createEquivalenceGroup(data: {
     activeIngredient: data.activeIngredient,
     categoryId: data.categoryId,
     notes: data.notes,
+    relationType: data.relationType,
+    reason: data.reason,
+    confidence: data.confidence != null ? data.confidence.toFixed(4) : null,
   });
   const groupId = (result as any).insertId as number;
   if (data.productIds.length > 0) {
@@ -69,6 +75,33 @@ export async function createEquivalenceGroup(data: {
     );
   }
   return groupId;
+}
+
+/** Atualiza os metadados de relação de um grupo (tipo, razão, confiança). */
+export async function updateEquivalenceGroupRelation(
+  groupId: number,
+  data: { relationType?: string; reason?: string; confidence?: number | null }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db
+    .update(equivalenceGroups)
+    .set({
+      relationType: data.relationType,
+      reason: data.reason,
+      confidence: data.confidence != null ? data.confidence.toFixed(4) : null,
+    })
+    .where(eq(equivalenceGroups.id, groupId));
+}
+
+/** Confirma um grupo manualmente (auditoria: confirmedBy/confirmedAt). */
+export async function confirmEquivalenceGroup(groupId: number, userId?: number | null) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db
+    .update(equivalenceGroups)
+    .set({ confirmedBy: userId ?? null, confirmedAt: new Date() })
+    .where(eq(equivalenceGroups.id, groupId));
 }
 
 export async function addEquivalenceMember(groupId: number, productId: number) {

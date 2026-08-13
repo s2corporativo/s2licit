@@ -4,11 +4,34 @@ import { TRPCError } from "@trpc/server";
 import { sql } from "drizzle-orm";
 import { calculateSalePrice } from "../services/pricingSafety";
 import { invokeLLM, parseLlmJson } from "../_core/llm";
+import { classificarCompatibilidade, ClassificacaoCompatibilidade } from "../services/matchClassification";
+import { matchEditalItem, MATCH_THRESHOLD_VISIBLE, parseEditalItemText } from "../matching/productMatcher";
+import { editalExtractionSystemPrompt, editalExtractionUserPrompt } from "../prompts";
 import { addProposalItem, createProposal, getDb, getProductById, getProposalTemplate, loadFeedbackMap, loadSynonymMap, normalizeEditalTerm, recordFeedback, upsertRequestingOrg } from "../db";
+
+export type TipoMarca = "livre" | "referencia" | "restrita" | "naoSei";
 
 interface EditalExtraction {
   processo: { numero: string; modalidade: string; orgao: string; objeto: string };
-  itens: Array<{ numero: number; descricao: string; unidade: string; quantidade: number; precoUnitario: number | null; precoTotal: number | null }>;
+  itens: Array<{
+    numero: number;
+    descricao: string;
+    unidade: string;
+    quantidade: number;
+    precoUnitario: number | null;
+    precoTotal: number | null;
+    /** Campos complementares (opcional — compatibilidade retroativa): lote do item no edital. */
+    lote?: string;
+    /** Descrição exatamente como aparece no edital (texto original). */
+    descricaoOriginal?: string;
+    /** Código CATMAT/CATSER quando informado no edital. */
+    catmatCode?: string | null;
+    /** Regime de marca: livre (aceita qualquer fabricante), referencia
+     *  (equivalente aceito com marca de referência citada), restrita (só a marca citada). */
+    tipoMarca?: TipoMarca;
+    /** Marca/fabricante de referência citado no edital, quando houver. */
+    referenciaBrand?: string | null;
+  }>;
 }
 
 export const EDITAL_CHUNK_SIZE = 120000;
@@ -86,6 +109,11 @@ const EDITAL_EXTRACTION_SCHEMA = {
               quantidade: { type: "number", description: "Quantidade solicitada" },
               precoUnitario: { type: ["number", "null"], description: "Preço unitário de referência em reais (null se não informado)" },
               precoTotal: { type: ["number", "null"], description: "Preço total estimado do item em reais (null se não informado)" },
+              lote: { type: ["string", "null"], description: "Lote do item no edital, se identificado (null se não informado)" },
+              descricaoOriginal: { type: ["string", "null"], description: "Descrição exatamente como escrita no edital (texto original), se diferente da descrição estruturada" },
+              catmatCode: { type: ["string", "null"], description: "Código CATMAT/CATSER quando informado no edital (null se não informado)" },
+              tipoMarca: { type: ["string", "null"], enum: ["livre", "referencia", "restrita", "naoSei"], description: "Regime de marca: livre (aceita qualquer fabricante), referencia (equivalente aceito com marca de referência citada), restrita (só a marca citada), naoSei (indeterminável pelo texto)" },
+              referenciaBrand: { type: ["string", "null"], description: "Marca/fabricante de referência citado no edital, quando houver (null se não informado)" },
             },
             required: ["numero", "descricao", "unidade", "quantidade", "precoUnitario", "precoTotal"],
             additionalProperties: false,
@@ -104,21 +132,11 @@ async function extractEditalChunk(chunkText: string, isFirstChunk: boolean): Pro
     messages: [
       {
         role: "system",
-        content:
-          "Você é um especialista em licitações públicas brasileiras. Analise o texto de um edital (ou um trecho dele) e extraia: " +
-          "(1) metadados do processo (número do processo, modalidade, órgão, objeto) — se o trecho não contiver essa informação, use string vazia; " +
-          "(2) lista completa de itens/produtos solicitados NESTE TRECHO com: número do item (conforme numerado no próprio edital, não reenumere), descrição completa, unidade de medida, quantidade, " +
-          "preço unitário de referência (se informado no edital — pode aparecer como 'valor unitário', 'preço máximo', 'preço referência', 'valor estimado unitário') e " +
-          "preço total estimado do item (quantidade × preço unitário). " +
-          "Se o edital não informar preços, retorne null nesses campos. " +
-          (isFirstChunk
-            ? ""
-            : "Este é um trecho intermediário/final de um edital maior — extraia apenas os itens presentes neste trecho, sem inventar nem repetir itens de outras partes. ") +
-          "Responda APENAS com JSON válido conforme o schema solicitado.",
+        content: editalExtractionSystemPrompt({ isFirstChunk }),
       },
       {
         role: "user",
-        content: `Analise o seguinte texto de edital e extraia os dados solicitados:\n\n${chunkText}`,
+        content: editalExtractionUserPrompt(chunkText),
       },
     ],
     response_format: EDITAL_EXTRACTION_SCHEMA,
@@ -192,6 +210,11 @@ export const editalRouter = router({
               quantidade: z.number(),
               precoUnitario: z.number().nullable().optional(),
               precoTotal: z.number().nullable().optional(),
+              lote: z.string().optional(),
+              descricaoOriginal: z.string().optional(),
+              catmatCode: z.string().nullable().optional(),
+              tipoMarca: z.enum(["livre", "referencia", "restrita", "naoSei"]).optional(),
+              referenciaBrand: z.string().nullable().optional(),
             })
           ).min(1).max(500),
         })
@@ -217,134 +240,58 @@ export const editalRouter = router({
           productActiveIngredient: string | null;
           productImageUrl: string | null;
           productUrl: string | null;
+          /** Score numérico do match no engine canônico (0–1). */
+          score: number | null;
+          /** Faixa de uso do match segundo a §6 (Fonte Única: matchClassification). */
+          classCompatibility: Extract<ClassificacaoCompatibilidade["classe"], "exata" | "equivalente" | "provavel" | "parcial" | "incompativel">;
           confidence: "high" | "medium" | "low" | "none";
           usedFeedback: boolean;
         }> = [];
 
-        // Helper: normaliza texto para comparação
-        const normText = (s: string) =>
-          s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").trim();
-        // Helper: normaliza para chave de sinônimo (sem espaços)
-        const normKey = (s: string) =>
-          s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").trim();
-        // Helper: extrai concentração de uma string (ex: "500mg", "10%", "1g/ml")
-        const extractConcentration = (s: string): string | null => {
-          const m = normText(s).match(/(\d+[,.]?\d*)\s*(mg|mcg|ug|g|ml|l|ui|iu|%|ppm|ppb|kg|mg\/ml|g\/ml|mg\/g|ui\/ml|iu\/ml|mg\/kg)/);
-          return m ? `${m[1]}${m[2]}` : null;
+        /** Monta o registro "sem match" (nenhum candidato atingiu o piso de visibilidade). */
+        const noMatch = (
+          item: (typeof input.itens)[number],
+          score: number | null,
+          usedFeedback: boolean,
+        ) => ({
+          itemNumero: item.numero,
+          itemDescricao: item.descricao,
+          itemUnidade: item.unidade,
+          itemQuantidade: item.quantidade,
+          itemPrecoUnitario: item.precoUnitario ?? null,
+          itemPrecoTotal: item.precoTotal ?? null,
+          productId: null,
+          productName: null,
+          productPrice: null,
+          productSupplier: null,
+          productUnit: null,
+          productConcentration: null,
+          productPresentation: null,
+          productActiveIngredient: null,
+          productImageUrl: null,
+          productUrl: null,
+          score,
+          classCompatibility: "incompativel" as const,
+          confidence: "none" as const,
+          usedFeedback,
+        });
+
+        /** Traduz a classificação canônica (§6) para a legenda de confiança da tela. */
+        const classifyConfidence = (c: ClassificacaoCompatibilidade): "high" | "medium" | "low" | "none" => {
+          if (c.classe === "exata" || c.classe === "equivalente") return "high";
+          if (c.classe === "provavel") return "medium";
+          if (c.classe === "parcial") return "low";
+          return "none";
         };
-        // Helper: calcula score de similaridade técnica entre descrição do edital e produto do catálogo
-        // Prioridade: princípio ativo > concentração > forma farmacêutica > nome
-        const calcSimilarity = (
-          descricao: string,
-          prodName: string,
-          expandedTerms?: Set<string>,
-          activeIngredient?: string | null,
-          concentration?: string | null,
-          presentation?: string | null,
-        ): number => {
-          const descNorm = normText(descricao);
-          const descTokens = new Set(descNorm.split(/\s+/).filter((t) => t.length > 2));
-          const nameNorm = normText(prodName);
-          const nameTokens = new Set(nameNorm.split(/\s+/).filter((t) => t.length > 2));
-          if (descTokens.size === 0 || nameTokens.size === 0) return 0;
 
-          // --- Score base: sobreposição de tokens nome ↔ descrição ---
-          let common = 0;
-          descTokens.forEach((t) => { if (nameTokens.has(t)) common++; });
-          let score = common / Math.max(descTokens.size, nameTokens.size);
-
-          // --- Bônus por princípio ativo (peso alto: +0.40) ---
-          if (activeIngredient) {
-            const aiNorm = normText(activeIngredient);
-            const aiTokens = aiNorm.split(/\s+/).filter((t) => t.length > 2);
-            let aiMatch = false;
-            for (const tok of aiTokens) {
-              if (descTokens.has(tok) || (expandedTerms && expandedTerms.has(tok))) {
-                aiMatch = true; break;
-              }
-            }
-            if (aiMatch) score = Math.min(1, score + 0.40);
-          }
-
-          // --- Bônus por sinônimos expandidos (peso médio: +0.20) ---
-          if (expandedTerms) {
-            for (const tok of Array.from(expandedTerms)) {
-              if (nameTokens.has(tok)) { score = Math.min(1, score + 0.20); break; }
-            }
-          }
-
-          // --- Bônus por concentração coincidente (peso médio: +0.25) ---
-          const descConc = extractConcentration(descricao);
-          const prodConc = concentration ? extractConcentration(concentration) : extractConcentration(prodName);
-          if (descConc && prodConc && descConc === prodConc) {
-            score = Math.min(1, score + 0.25);
-          } else if (descConc && prodConc && descConc !== prodConc) {
-            // Penalizar levemente se concentrações são diferentes (evita match errado)
-            score = Math.max(0, score - 0.10);
-          }
-
-          // --- Bônus por forma farmacêutica coincidente (peso baixo: +0.10) ---
-          if (presentation) {
-            const presNorm = normText(presentation);
-            const presTokens = presNorm.split(/\s+/).filter((t) => t.length > 2);
-            for (const tok of presTokens) {
-              if (descTokens.has(tok)) { score = Math.min(1, score + 0.10); break; }
-            }
-          }
-
-          return score;
-        };
-        // Carrega mapa de sinônimos e de feedback aprendido uma vez para todos os itens
-        const synonymMap = await loadSynonymMap();
-        const feedbackMap = await loadFeedbackMap();
-        for (const item of input.itens) {
-          // Extrai termos significativos da descrição do edital (>= 4 chars)
-          const descNorm = normText(item.descricao);
-          const terms = descNorm.split(/\s+/).filter((t) => t.length >= 4).slice(0, 6);
-          // Expande termos via sinônimos: para cada token, adiciona o canônico se existir
-          const expandedSet = new Set<string>(terms);
-          for (const tok of terms) {
-            const key = normKey(tok);
-            const canonicals = synonymMap.get(key);
-            if (canonicals) {
-              for (const c of canonicals) {
-                // Adiciona o canônico como termo de busca
-                expandedSet.add(c);
-              }
-            }
-          }
-          // Também tenta tokens individuais de 3+ chars para abreviações
-          const shortTokens = normText(item.descricao).split(/\s+/).filter((t) => t.length >= 3);
-          for (const tok of shortTokens) {
-            const key = normKey(tok);
-            const canonicals = synonymMap.get(key);
-            if (canonicals) {
-              for (const c of canonicals) expandedSet.add(c);
-            }
-          }
-          const allTerms = Array.from(expandedSet);
-          if (allTerms.length === 0) {
-            matches.push({
-              itemNumero: item.numero, itemDescricao: item.descricao,
-              itemUnidade: item.unidade, itemQuantidade: item.quantidade,
-              itemPrecoUnitario: item.precoUnitario ?? null,
-              itemPrecoTotal: item.precoTotal ?? null,
-              productId: null, productName: null, productPrice: null, productSupplier: null,
-              productUnit: null, productConcentration: null, productPresentation: null,
-              productActiveIngredient: null, productImageUrl: null, productUrl: null,
-              confidence: "none",
-              usedFeedback: false,
-            });
-            continue;
-          }
-          // Busca candidatos usando os termos expandidos (top 5 mais longos)
-          const topTerms = allTerms.sort((a, b) => b.length - a.length).slice(0, 5);
-          let candidates: any[] = [];
-          for (const term of topTerms) {
+        /** Carrega candidatos por LIKE nos termos de busca (base do pré-filtro). */
+        async function loadCandidates(terms: string[]): Promise<any[]> {
+          const candidates: any[] = [];
+          for (const term of terms) {
             const termLike = `%${term}%`;
             const [rows] = await (db as any).execute(sql`
               SELECT p.id, p.name, p.price, p.unit, p.concentration, p.presentation,
-                     p.activeIngredient, p.imageUrl, p.productUrl, s.name as supplierName
+                     p.activeIngredient, p.manufacturer, p.imageUrl, p.productUrl, s.name as supplierName
               FROM products p
               LEFT JOIN suppliers s ON p.supplierId = s.id
               WHERE p.isActive = 'yes' AND p.price IS NOT NULL
@@ -355,59 +302,85 @@ export const editalRouter = router({
             const rowsArr = Array.isArray(rows) ? rows : [];
             candidates.push(...rowsArr);
           }
-          // Remove duplicatas por id
           const seen = new Set<number>();
-          candidates = candidates.filter((c) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
-          // Verifica se há feedback aprendido para este termo do edital
-          const normalizedItemTerm = normalizeEditalTerm(item.descricao);
-          const learnedFeedback = feedbackMap.get(normalizedItemTerm);
-          // Pontua cada candidato priorizando características técnicas (PA > concentração > forma farm. > nome)
-          const scored = candidates.map((c) => {
-            let score = calcSimilarity(
-              item.descricao,
-              c.name,
-              expandedSet,
-              c.activeIngredient,
-              c.concentration,
-              c.presentation,
-            );
-            // Boost de aprendizado: +0.60 para pares já confirmados anteriormente
-            if (learnedFeedback && learnedFeedback.productId === c.id) {
-              score = Math.min(1, score + 0.60);
-            }
-            return { ...c, score };
-          }).sort((a, b) => b.score - a.score);
-          // Threshold mínimo: pelo menos 30% de termos coincidentes (reduzido para beneficiar sinônimos)
-          const best = scored.length > 0 && scored[0].score >= 0.30 ? scored[0] : null;
-          if (best) {
-            const confidence: "high" | "medium" | "low" =
-              best.score >= 0.7 ? "high" : best.score >= 0.45 ? "medium" : "low";
-            matches.push({
-              itemNumero: item.numero, itemDescricao: item.descricao,
-              itemUnidade: item.unidade, itemQuantidade: item.quantidade,
-              itemPrecoUnitario: item.precoUnitario ?? null,
-              itemPrecoTotal: item.precoTotal ?? null,
-              productId: best.id, productName: best.name, productPrice: best.price,
-              productSupplier: best.supplierName, productUnit: best.unit,
-              productConcentration: best.concentration, productPresentation: best.presentation,
-              productActiveIngredient: best.activeIngredient ?? null,
-              productImageUrl: best.imageUrl ?? null, productUrl: best.productUrl ?? null,
-              confidence,
-              usedFeedback: !!(learnedFeedback && learnedFeedback.productId === best.id),
-            });
-          } else {
-            matches.push({
-              itemNumero: item.numero, itemDescricao: item.descricao,
-              itemUnidade: item.unidade, itemQuantidade: item.quantidade,
-              itemPrecoUnitario: item.precoUnitario ?? null,
-              itemPrecoTotal: item.precoTotal ?? null,
-              productId: null, productName: null, productPrice: null, productSupplier: null,
-              productUnit: null, productConcentration: null, productPresentation: null,
-              productActiveIngredient: null, productImageUrl: null, productUrl: null,
-              confidence: "none",
-              usedFeedback: false,
-            });
+          return candidates.filter((c) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+        }
+
+        // Carrega mapa de sinônimos e de feedback aprendido uma vez para todos os itens
+        const synonymMap = await loadSynonymMap();
+        const feedbackMap = await loadFeedbackMap();
+
+        for (const item of input.itens) {
+          // ── 1. Estrutura o item do edital no modelo canônico ──────────────
+          const editalItem = parseEditalItemText(item.descricao);
+          editalItem.unidade = item.unidade;
+
+          // ── 2. Expande termos via sinônimos aprovados ─────────────────────
+          const terms = editalItem.nome
+            .split(/\s+/)
+            .map((t) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""))
+            .filter((t) => t.length >= 3);
+          const expandedSet = new Set<string>(terms);
+          if (terms.length === 0) {
+            matches.push(noMatch(item, null, false));
+            continue;
           }
+          for (const tok of terms) {
+            const canonicals = synonymMap.get(tok);
+            if (canonicals) for (const c of canonicals) expandedSet.add(c);
+          }
+          const topTerms = Array.from(expandedSet).sort((a, b) => b.length - a.length).slice(0, 5);
+          if (topTerms.length === 0) {
+            matches.push(noMatch(item, null, false));
+            continue;
+          }
+
+          // ── 3. Candidatos → engine canônico ───────────────────────────────
+          const candidates = await loadCandidates(topTerms);
+          const engineCandidates = candidates.map((c: any) => ({
+            ...c,
+            price: c.price ?? null,
+            supplierName: c.supplierName ?? null,
+            imageUrl: c.imageUrl ?? null,
+            productUrl: c.productUrl ?? null,
+          }));
+          const engineResults = matchEditalItem(editalItem, engineCandidates, 5);
+          const learnedItemId = feedbackMap.get(normalizeEditalTerm(item.descricao))?.productId;
+          // Boost de aprendizado: +0.60 para pares já confirmados anteriormente (fonte: feedbackMap),
+          // aplicado sobre o score canônico e limitado a 1.
+          const withBoost = engineResults.map((r) => ({
+            ...r,
+            boostedScore: Math.min(1, r.score + (learnedItemId === r.product.id ? 0.6 : 0)),
+          })).sort((a, b) => b.boostedScore - a.boostedScore);
+
+          // ── 4. Decisão e classificação canônicas (§6) ─────────────────────
+          const best = withBoost.length > 0 && withBoost[0].boostedScore >= MATCH_THRESHOLD_VISIBLE ? withBoost[0] : null;
+          if (!best) {
+            matches.push(noMatch(item, null, false));
+            continue;
+          }
+          const classification = classificarCompatibilidade(best.boostedScore);
+          const classe: "exata" | "equivalente" | "provavel" | "parcial" | "incompativel" =
+            classification.classe === "nao_encontrado" || classification.classe === "indisponivel"
+              ? "incompativel"
+              : classification.classe;
+          const confidence = classifyConfidence(classification);
+
+          matches.push({
+            itemNumero: item.numero, itemDescricao: item.descricao,
+            itemUnidade: item.unidade, itemQuantidade: item.quantidade,
+            itemPrecoUnitario: item.precoUnitario ?? null,
+            itemPrecoTotal: item.precoTotal ?? null,
+            productId: best.product.id, productName: best.product.name, productPrice: best.product.price ?? null,
+            productSupplier: best.product.supplierName ?? null, productUnit: best.product.unit ?? null,
+            productConcentration: best.product.concentration ?? null, productPresentation: best.product.presentation ?? null,
+            productActiveIngredient: best.product.activeIngredient ?? null,
+            productImageUrl: best.product.imageUrl ?? null, productUrl: best.product.productUrl ?? null,
+            score: best.boostedScore,
+            classCompatibility: classe,
+            confidence,
+            usedFeedback: learnedItemId === best.product.id,
+          });
         }
         return { matches };
       }),
