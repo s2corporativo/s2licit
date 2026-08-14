@@ -157,7 +157,10 @@ export async function embedText(
 ): Promise<EmbeddingResult> {
   const env = embeddingEnv();
   const provider = options.provider ?? env.provider;
-  const model = options.model ?? DEFAULT_EMBEDDING_MODEL;
+  // Groq hospeda o modelo com sufixo -v1.5 (RAG_GROQ_EMBED_MODEL); o modelo
+  // nomic-embed-text puro só existe local/remote. A família mantém 768 dimensões.
+  const groqModel = options.model ?? env.groqEmbedModel;
+  const model = provider === "groq" ? groqModel : (options.model ?? DEFAULT_EMBEDDING_MODEL);
 
   if (!text.trim()) {
     throw new Error("embedText: texto vazio — geração de embedding rejeitada");
@@ -215,7 +218,7 @@ export async function embedTextBatch(
 
   if (provider === "groq") {
     const out = [];
-    for (const text of texts) out.push(await embedText(text, { ...options, provider: "groq" }));
+    for (const text of texts) out.push(await embedText(text, { provider: "groq" }));
     return out;
   }
   const url = options.ollamaUrl ?? env.ollamaUrl;
