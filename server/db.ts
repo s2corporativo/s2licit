@@ -25,8 +25,12 @@ export * from "./db/importLogs";
 
 // ─── Dashboard Stats → ./db/dashboard ───
 export * from "./db/dashboard";
-// ─── Bulk Update Products → ./db/bulkUpdateProducts ───
-export * from "./db/bulkUpdateProducts";
+// ─── Bulk Update Products → ./db/bulkUpdateProducts (+ operações em massa) ───
+export {
+  bulkUpdateProducts,
+  bulkArchiveProducts,
+  bulkReactivateProducts,
+} from "./db/bulkOperations";
 // ─── Company Settings → ./db/companySettings ───
 export * from "./db/companySettings";
 // ─── Requesting Orgs → ./db/requestingOrgs ──────────────────────────────────

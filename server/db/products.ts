@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { InsertProduct, categories, products, suppliers } from "../../drizzle/schema";
 import { escapeLike, simplifyDbError } from "./_helpers";
 import { getDb } from "./_client";
@@ -16,6 +16,8 @@ export async function listProducts(opts: {
   hasImage?: boolean;
   hasProductUrl?: boolean;
   withoutFichaTecnica?: boolean;
+  /** Filtro de incompletos definido pelo mesmo critério de qualidade do frontend (Produtos.tsx / QUALITY_FIELDS). */
+  incomplete?: boolean;
   limit?: number;
   offset?: number;
   sortBy?: "name" | "price" | "mapa" | "supplier" | "category" | "manufacturer" | "createdAt";
@@ -79,6 +81,31 @@ export async function listProducts(opts: {
   if (opts.hasImage === true) conditions.push(sql`${products.imageUrl} IS NOT NULL AND ${products.imageUrl} != ''`);
   if (opts.hasProductUrl === true) conditions.push(sql`${products.productUrl} IS NOT NULL AND ${products.productUrl} != ''`);
   if (opts.withoutFichaTecnica === true) conditions.push(sql`(${products.fichaTecnica} IS NULL OR ${products.fichaTecnica} = '')`);
+
+  // Filtro de incompletos server-side: qualquer campo de qualidade vazio/nulo
+  // (mesmo critério de calcQualityScore do frontend — QUALITY_FIELDS)
+  if (opts.incomplete === true) {
+    conditions.push(
+      or(
+        isNull(products.name),
+        isNull(products.activeIngredient),
+        isNull(products.concentration),
+        isNull(products.presentation),
+        isNull(products.manufacturer),
+        isNull(products.unit),
+        isNull(products.imageUrl),
+        isNull(products.barcode),
+        eq(products.name, ""),
+        eq(products.activeIngredient, ""),
+        eq(products.concentration, ""),
+        eq(products.presentation, ""),
+        eq(products.manufacturer, ""),
+        eq(products.unit, ""),
+        eq(products.imageUrl, ""),
+        eq(products.barcode, "")
+      )!
+    );
+  }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
