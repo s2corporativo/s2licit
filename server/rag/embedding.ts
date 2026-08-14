@@ -76,11 +76,12 @@ const httpPost = async (
   }
 };
 
-/** Embedding via Ollama /api/embed (formato aberto, idêntico local/remote). */
+/** Embedding via Ollama /api/embed (formato aberto, idêntico local/remote).
+ *  Aceita texto único ou array de textos (input array), preservando ordem. */
 async function ollamaEmbed(
   ollamaUrl: string,
   model: string,
-  text: string,
+  text: string | string[],
   timeoutMs: number
 ): Promise<EmbeddingResult> {
   const res = await httpPost(
@@ -192,4 +193,38 @@ export async function embedText(
 /** Valida dimensão do vetor contra o esperado (família do modelo). */
 export function validateDimensions(vector: number[], expected = DEFAULT_DIMENSIONS): boolean {
   return Array.isArray(vector) && vector.length === expected;
+}
+
+/** Tamanho do lote para embeddings em massa (um POST resolve N textos). */
+export const EMBED_BATCH_SIZE = 32;
+
+/**
+ * Embeddings em lote — resolve vários textos em um único POST ao Ollama
+ * (input array), reduzindo drasticamente o overhead por produto e o
+ * congestionamento de CPU em máquinas sem GPU.
+ * O fallback Groq executa serialmente (API sem suporte a array no modelo usado).
+ */
+export async function embedTextBatch(
+  texts: string[],
+  options: EmbeddingOptions = {}
+): Promise<Array<{ vector: number[]; model: string; dimensions: number }>> {
+  if (texts.length === 0) return [];
+  const env = embeddingEnv();
+  const provider = options.provider ?? env.provider;
+  const model = options.model ?? DEFAULT_EMBEDDING_MODEL;
+
+  if (provider === "groq") {
+    const out = [];
+    for (const text of texts) out.push(await embedText(text, { ...options, provider: "groq" }));
+    return out;
+  }
+  const url = options.ollamaUrl ?? env.ollamaUrl;
+  const res = await httpPost(`${url.replace(/\/$/, "")}/api/embed`, { model, input: texts }, env.timeoutMs);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Ollama /api/embed HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { embeddings?: number[][] };
+  const vecs = data.embeddings ?? [];
+  return texts.map((_t, i) => ({ vector: vecs[i] ?? vecs[0] ?? [], model, dimensions: vecs[0]?.length ?? DEFAULT_DIMENSIONS }));
 }

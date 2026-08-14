@@ -19,7 +19,7 @@
 import { eq, and, inArray, desc, sql, lte } from "drizzle-orm";
 import { getDb } from "../db";
 import { productEmbeddings, products } from "../../drizzle/schema";
-import { embedText, DEFAULT_EMBEDDING_MODEL, DEFAULT_DIMENSIONS } from "./embedding";
+import { embedText, embedTextBatch, EMBED_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, DEFAULT_DIMENSIONS } from "./embedding";
 import { buildProductDigest, RAG_DIGEST_VERSION } from "./digest";
 import { logger } from "../_core/logger";
 
@@ -115,33 +115,35 @@ export async function reindexAll(concurrency = CONCURRENCY): Promise<ReindexResu
   const falhas: ReindexResult["falhas"] = [];
   let indexados = 0;
 
-  // Fila com concorrência limitada.
-  const queue = [...eligible];
-  const workers: Promise<void>[] = [];
-  for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
-    workers.push(
-      (async () => {
-        while (queue.length > 0) {
-          const product = queue.shift();
-          if (!product) return;
-          let lastError: string | null = null;
-          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            try {
-              const { digest, embedding, model } = await embedOne(product.id, product);
-              await upsertEmbedding(db, product.id, digest, embedding, model);
-              indexados += 1;
-              lastError = null;
-              break;
-            } catch (error) {
-              lastError = String(error);
-            }
-          }
-          falhas.push({ productId: product.id, nome: product.name, erro: lastError ?? "desconhecido" });
+  // Processamento em lotes: EMBED_BATCH_SIZE digests por POST ao provedor
+  // (input array do Ollama), com 1 worker por vez para não congestionar a CPU
+  // de máquinas sem GPU. A fila de workers por produto foi substituída.
+  let head = 0;
+  while (head < eligible.length) {
+    const batch = eligible.slice(head, head + EMBED_BATCH_SIZE);
+    const digests = batch.map((p) => buildProductDigest(p));
+    let lastError: string | null = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const results = await embedTextBatch(digests);
+        for (let i = 0; i < batch.length; i++) {
+          await upsertEmbedding(db, batch[i].id, digests[i], results[i].vector, results[i].model);
         }
-      })()
-    );
+        indexados += batch.length;
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = String(error);
+      }
+    }
+    if (lastError) {
+      for (const p of batch) falhas.push({ productId: p.id, nome: p.name, erro: lastError });
+    }
+    head += batch.length;
+    if (indexados % 200 === 0 || head >= eligible.length) {
+      logger.info("[rag.indexer] progresso: %d/%d", indexados, eligible.length);
+    }
   }
-  await Promise.all(workers);
 
   const tempoMs = Date.now() - start;
   logger.info(
