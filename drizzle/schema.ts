@@ -2046,3 +2046,41 @@ export const integrationSettings = mysqlTable(
   (t) => [uniqueIndex("uq_integration_chave").on(t.chave)]
 );
 export type IntegrationSetting = typeof integrationSettings.$inferSelect;
+
+// ─── RAG: Motor de Equivalências por Vetores (migration 0020) ───────────────
+// product_embeddings armazena o vetor (JSON, 768 dim — nomic-embed-text)
+// gerado a partir do digest canônico do produto. A busca por similaridade de
+// cosseno é feita em memória sobre os candidatos pré-filtrados; sem dependência
+// de extensão vetorial do MySQL 8.0.
+export const productEmbeddings = mysqlTable(
+  "product_embeddings",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    productId: int("productId").notNull(),
+    provider: varchar("provider", { length: 32 }).notNull().default("nomic-embed-text"),
+    model: varchar("model", { length: 64 }).notNull().default("nomic-embed-text"),
+    dimensions: int("dimensions").notNull().default(768),
+    embedding: json("embedding").notNull().$type<number[]>(),
+    textDigest: text("textDigest").notNull(),
+    version: int("version").notNull().default(1),
+    indexedAt: timestamp("indexedAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_product_embedding_version").on(t.productId, t.version)]
+);
+export type ProductEmbedding = typeof productEmbeddings.$inferSelect;
+export type InsertProductEmbedding = typeof productEmbeddings.$inferInsert;
+
+// rag_config: chaves de configuração lidas por `ragConfig.get()` (Fonte Única).
+export const ragConfig = mysqlTable(
+  "rag_config",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    key: varchar("key", { length: 64 }).notNull().unique(),
+    value: varchar("value", { length: 512 }).notNull(),
+    description: text("description"),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_rag_config_key").on(t.key)]
+);
+export type RagConfigRow = typeof ragConfig.$inferSelect;
