@@ -59,13 +59,10 @@ async function fetchEligibleProducts(db: NonNullable<Awaited<ReturnType<typeof g
     );
 }
 
-async function embedOne(productId: number, nome: string) {
-  // Fonte Única de campos: mesma projeção de fetchEligibleProducts.
-  let product = null;
-  const db = await getDb();
-  if (!db) throw new Error("indexer: banco indisponível");
-  const rows = await fetchEligibleProducts(db);
-  product = rows.find((p) => p.id === productId) ?? null;
+async function embedOne(productId: number, product: NonNullable<Awaited<ReturnType<typeof fetchEligibleProducts>>>[number]) {
+  // Recebe o produto já carregado — evita reconsultar fetchEligibleProducts
+  // (SELECT de todo o catálogo) por produto na fila concorrente, o que saturava
+  // o pool de conexões do MySQL (connectionLimit) e travava a reindexação.
   if (!product) throw new Error(`produto ${productId} não elegível ou inexistente`);
   const digest = buildProductDigest(product);
   const result = await embedText(digest);
@@ -130,7 +127,7 @@ export async function reindexAll(concurrency = CONCURRENCY): Promise<ReindexResu
           let lastError: string | null = null;
           for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
-              const { digest, embedding, model } = await embedOne(product.id, product.name);
+              const { digest, embedding, model } = await embedOne(product.id, product);
               await upsertEmbedding(db, product.id, digest, embedding, model);
               indexados += 1;
               return;
@@ -164,7 +161,7 @@ export async function reindexProduct(productId: number): Promise<{ indexed: bool
     const rows = await fetchEligibleProducts(db);
     const product = rows.find((p) => p.id === productId);
     if (!product) return { indexed: false, erro: "produto não elegível ou inexistente" };
-    const { digest, embedding, model } = await embedOne(productId, product.name);
+    const { digest, embedding, model } = await embedOne(productId, product);
     await upsertEmbedding(db, productId, digest, embedding, model);
     return { indexed: true };
   } catch (error) {
