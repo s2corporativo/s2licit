@@ -56,6 +56,59 @@ export type BuscaRagResult = {
 const FRASE_INSUFICIENTE = "TR tecnicamente insuficiente para correspondência segura.";
 const FRASE_MOTOR_DESLIGADO = "Motor de Equivalências RAG desativado na configuração.";
 
+/**
+ * Cache em memória de embeddings de consulta (digest → vetor). Reduz o tempo
+ * de busca de consultas repetidas: o gargalo local (~7 s/embed no Ollama CPU)
+ * cai para milissegundos quando o mesmo digest é reutilizado. Limite de
+ * entradas e TTL de 30 min mantêm a memória sob controle.
+ */
+const QUERY_EMBED_CACHE = new Map<string, { vector: number[]; model: string; ts: number }>();
+const QUERY_EMBED_CACHE_TTL_MS = 30 * 60 * 1000;
+const QUERY_EMBED_CACHE_MAX = 500;
+
+/** Invalida o cache de consultas quando a base indexada muda (reindexação). */
+export function clearQueryEmbedCache(): void {
+  QUERY_EMBED_CACHE.clear();
+}
+
+async function embedQueryCached(queryDigest: string): Promise<{ vector: number[]; model: string }> {
+  // Purge expirados a cada acesso (manutenção simples, sem timer).
+  const now = Date.now();
+  let purged = false;
+  for (const [key, entry] of QUERY_EMBED_CACHE) {
+    if (now - entry.ts > QUERY_EMBED_CACHE_TTL_MS) {
+      QUERY_EMBED_CACHE.delete(key);
+      purged = true;
+    }
+  }
+  void purged;
+  const cached = QUERY_EMBED_CACHE.get(queryDigest);
+  if (cached) return { vector: cached.vector, model: cached.model };
+  const result = await embedText(queryDigest);
+  if (QUERY_EMBED_CACHE.size >= QUERY_EMBED_CACHE_MAX) {
+    // Remove a entrada mais antiga antes de inserir.
+    const oldest = QUERY_EMBED_CACHE.keys().next().value;
+    if (oldest !== undefined) QUERY_EMBED_CACHE.delete(oldest);
+  }
+  QUERY_EMBED_CACHE.set(queryDigest, { vector: result.vector, model: result.model, ts: now });
+  return { vector: result.vector, model: result.model };
+}
+
+/**
+ * Amostra ampliada: carrega até SAMPLE_WINDOW candidatos do banco e retorna
+ * apenas o topK por score. O SELECT sem ORDER não garante ordem determinística,
+ * então a janela larga evita que a busca dependa de uma fatia aleatória do
+ * banco (limitação do MySQL 8.0 sem índice vetorial). Janela = max(topK*20,
+ * 500), limitada a SAMPLE_CAP para não sobrecarregar memória/cálculo.
+ */
+const SAMPLE_WINDOW_FACTOR = 20;
+const SAMPLE_MIN = 500;
+const SAMPLE_CAP = 4000;
+
+function sampleWindow(topK: number): number {
+  return Math.min(SAMPLE_CAP, Math.max(SAMPLE_MIN, topK * SAMPLE_WINDOW_FACTOR));
+}
+
 /** Recuperação vetorial bruta (estágio 1). */
 async function retrieveCandidates(
   queryVector: number[],
@@ -64,28 +117,25 @@ async function retrieveCandidates(
 ): Promise<Array<{ productId: number; score: number; model: string }>> {
   const db = await getDb();
   if (!db) return [];
-  // Carrega candidatos com digest e embedding (JSON → array).
-  const build = (extraWhere?: typeof eq) =>
-    db
-      .select({
-        productId: productEmbeddings.productId,
-        embedding: productEmbeddings.embedding,
-        model: productEmbeddings.model,
-        tipoCatalogo: products.tipoCatalogo,
-      })
-      .from(productEmbeddings)
-      .innerJoin(products, eq(products.id, productEmbeddings.productId))
-      .where(
-        tipoCatalogo
-          ? and(
-              eq(products.isActive, "yes"),
-              sql`${products.deletedAt} IS NULL`,
-              eq(products.tipoCatalogo, tipoCatalogo as never)
-            )
-          : and(eq(products.isActive, "yes"), sql`${products.deletedAt} IS NULL`)
+  // Carrega candidatos com digest e embedding (JSON → array) em janela ampliada.
+  const where = tipoCatalogo
+    ? and(
+        eq(products.isActive, "yes"),
+        sql`${products.deletedAt} IS NULL`,
+        eq(products.tipoCatalogo, tipoCatalogo as never)
       )
-      .limit(topK);
-  const rows = await build();
+    : and(eq(products.isActive, "yes"), sql`${products.deletedAt} IS NULL`);
+  const rows = await db
+    .select({
+      productId: productEmbeddings.productId,
+      embedding: productEmbeddings.embedding,
+      model: productEmbeddings.model,
+      tipoCatalogo: products.tipoCatalogo,
+    })
+    .from(productEmbeddings)
+    .innerJoin(products, eq(products.id, productEmbeddings.productId))
+    .where(where)
+    .limit(sampleWindow(topK));
   const scored = rows
     .map((row) => {
       const vec = Array.isArray(row.embedding) ? (row.embedding as number[]) : null;
@@ -164,7 +214,7 @@ export async function buscarEquivalencias(
 
   try {
     const queryDigest = buildQueryDigest(query);
-    const embedResult = await embedText(queryDigest);
+    const embedResult = await embedQueryCached(queryDigest);
     const candidates = await retrieveCandidates(embedResult.vector, topK, options.tipoCatalogo);
 
     const aceitaveis = candidates.filter((c) => c.score >= minScore).slice(0, maxResults);

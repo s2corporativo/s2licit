@@ -22,6 +22,7 @@ import { productEmbeddings, products } from "../../drizzle/schema";
 import { embedText, embedTextBatch, EMBED_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, DEFAULT_DIMENSIONS } from "./embedding";
 import { buildProductDigest, RAG_DIGEST_VERSION } from "./digest";
 import { logger } from "../_core/logger";
+import { clearQueryEmbedCache } from "./search";
 
 export type ReindexResult = {
   total: number;
@@ -146,6 +147,9 @@ export async function reindexAll(concurrency = CONCURRENCY): Promise<ReindexResu
   }
 
   const tempoMs = Date.now() - start;
+  // Nova base indexada: invalida o cache de vetores de consulta para que
+  // buscas posteriores comparem com os embeddings atualizados.
+  clearQueryEmbedCache();
   logger.info(
     "[rag.indexer] reindexAll concluída: %d/%d produtos (%d ms, %d falhas)",
     indexados,
