@@ -6,6 +6,7 @@ import { declarationsRouter } from "./routers/declarations";
 import { reclassificacaoRouter } from "./routers/reclassificacao";
 import { categoriesRouter } from "./routers/categories";
 import { equivalencesRouter } from "./routers/equivalences";
+import { ragRouter } from "./routers/rag";
 import { dashboardRouter } from "./routers/dashboard";
 import { financialRouter } from "./routers/financial";
 import { proposalsRouter } from "./routers/proposals";
@@ -116,6 +117,7 @@ export const appRouter = router({
 
   // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: equivalencesRouter,
+  rag: ragRouter,
 
   // ─── Import Logs ──────────────────────────────────────────────────────────
   imports: importsRouter,
