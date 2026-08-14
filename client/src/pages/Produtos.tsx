@@ -10,6 +10,7 @@ import {
   Copy,
   Download,
   Edit2,
+  FileArchive as ArchiveIcon,
   FileSpreadsheet,
   Upload,
   ExternalLink,
@@ -705,36 +706,78 @@ function BulkEditPanel({
     onError: (e) => toast.error(e.message),
   });
 
+  // Marcação explícita por campo: "alterar" habilita o valor preenchido;
+  // "limpar" seta o campo para NULL/vazio (sem confundir com "não alterar").
+  const [enabledFields, setEnabledFields] = useState<string[]>([]);
+  const [clearFields, setClearFields] = useState<string[]>([]);
+  const toggleEnabled = (field: string, checked: boolean) => {
+    setEnabledFields((prev) => (checked ? [...new Set([...prev, field])] : prev.filter((f) => f !== field)));
+    if (checked) setClearFields((prev) => prev.filter((f) => f !== field));
+  };
+  const toggleClear = (field: string, checked: boolean) => {
+    setClearFields((prev) => (checked ? [...new Set([...prev, field])] : prev.filter((f) => f !== field)));
+    if (checked) setEnabledFields((prev) => prev.filter((f) => f !== field));
+  };
+  const fieldActions = (field: string, value: string) => (
+    <div className="flex items-center gap-1.5 mt-1" title="Marcar o que será feito com este campo">
+      <label className="flex items-center gap-1 text-[9px] font-semibold text-gray-500 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabledFields.includes(field)}
+          onChange={(e) => toggleEnabled(field, e.target.checked)}
+        />
+        alterar
+      </label>
+      <label className="flex items-center gap-1 text-[9px] font-semibold text-red-500 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={clearFields.includes(field)}
+          onChange={(e) => toggleClear(field, e.target.checked)}
+        />
+        limpar
+      </label>
+    </div>
+  );
   const handleApply = () => {
     const data: any = { ids: selectedIds };
-    if (name.trim()) data.name = name.trim();
-    if (code.trim()) data.code = code.trim();
-    if (barcode.trim()) data.barcode = barcode.trim();
-    if (activeIngredient.trim()) data.activeIngredient = activeIngredient.trim();
-    if (manufacturer.trim()) data.manufacturer = manufacturer.trim();
-    if (concentration.trim()) data.concentration = concentration.trim();
-    if (presentation.trim()) data.presentation = presentation.trim();
-    if (pharmaceuticalForm.trim()) data.pharmaceuticalForm = pharmaceuticalForm.trim();
-    if (unit.trim()) data.unit = unit.trim();
-    if (description.trim()) data.description = description.trim();
-    if (price.trim()) data.price = price.trim();
-    if (priceUnit.trim()) data.priceUnit = priceUnit.trim();
-    if (mapa.trim()) data.mapa = mapa.trim();
+    const push = (field: string, value: string) => {
+      const v = value.trim();
+      if (enabledFields.includes(field) && v !== "") data[field] = v;
+      else if (clearFields.includes(field)) {
+        // limpar sem incluir no data de alteração: chega via clearFields
+      }
+    };
+    push("name", name);
+    push("code", code);
+    push("barcode", barcode);
+    push("activeIngredient", activeIngredient);
+    push("manufacturer", manufacturer);
+    push("concentration", concentration);
+    push("presentation", presentation);
+    push("pharmaceuticalForm", pharmaceuticalForm);
+    push("unit", unit);
+    push("description", description);
+    push("price", price);
+    push("priceUnit", priceUnit);
+    push("mapa", mapa);
+    push("imageUrl", imageUrl);
+    push("productUrl", productUrl);
+    push("stock", stock);
+    push("codigoFornecedor", codigoFornecedor);
+    push("informacaoTecnica", informacaoTecnica);
     if (priceAdjust && priceAdjust !== "0") data.priceAdjustPercent = parseFloat(priceAdjust);
-    if (imageUrl.trim()) data.imageUrl = imageUrl.trim();
-    if (productUrl.trim()) data.productUrl = productUrl.trim();
     if (supplierId) data.supplierId = Number(supplierId);
     if (categoryId) data.categoryId = Number(categoryId);
     if (isActive) data.isActive = isActive;
-    if (stock.trim()) data.stock = stock.trim();
-    if (codigoFornecedor.trim()) data.codigoFornecedor = codigoFornecedor.trim();
-    if (informacaoTecnica.trim()) data.informacaoTecnica = informacaoTecnica.trim();
-    if (freightValue.trim()) data.freightValue = freightValue.trim();
-    if (taxValue.trim()) data.taxValue = taxValue.trim();
-    if (Object.keys(data).length === 1) {
-      toast.error("Preencha ao menos um campo para alterar.");
+    if (enabledFields.includes("freightValue") && freightValue.trim()) data.freightValue = freightValue.trim();
+    if (enabledFields.includes("taxValue") && taxValue.trim()) data.taxValue = taxValue.trim();
+    const actionable = Object.keys(data).length > 1 || clearFields.length > 0;
+    if (!actionable) {
+      toast.error("Marque \"alterar\" para ao menos um campo preenchido ou \"limpar\" para ao menos um campo.");
       return;
     }
+    data.enabledFields = enabledFields.length > 0 ? enabledFields : undefined;
+    data.clearFields = clearFields.length > 0 ? clearFields : undefined;
     bulkUpdate.mutate(data);
   };
 
@@ -767,18 +810,22 @@ function BulkEditPanel({
           <div>
             <label className={labelClass}>Produto</label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("name", name)}
           </div>
           <div>
             <label className={labelClass}>Código Interno</label>
             <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("code", code)}
           </div>
           <div>
             <label className={labelClass}>EAN / GTIN / Código de Barras</label>
             <input type="text" value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("barcode", barcode)}
           </div>
           <div>
             <label className={labelClass}>Estoque</label>
             <input type="text" value={stock} onChange={(e) => setStock(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("stock", stock)}
           </div>
         </div>
       </div>
@@ -790,27 +837,33 @@ function BulkEditPanel({
           <div className="lg:col-span-2">
             <label className={labelClass}>Princípio Ativo / Composição</label>
             <input type="text" value={activeIngredient} onChange={(e) => setActiveIngredient(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("activeIngredient", activeIngredient)}
           </div>
           <div>
             <label className={labelClass}>Fabricante / Laboratório</label>
             <input type="text" value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("manufacturer", manufacturer)}
           </div>
           <div>
             <label className={labelClass}>Concentração</label>
             <input type="text" value={concentration} onChange={(e) => setConcentration(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("concentration", concentration)}
           </div>
            <div>
             <label className={labelClass}>Apresentação</label>
             <input type="text" value={presentation} onChange={(e) => setPresentation(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("presentation", presentation)}
           </div>
           <div>
             <label className={labelClass}>Forma Farmacêutica</label>
             <input type="text" value={pharmaceuticalForm} onChange={(e) => setPharmaceuticalForm(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("pharmaceuticalForm", pharmaceuticalForm)}
           </div>
         </div>
         <div className="mt-3">
           <label className={labelClass}>Descrição / Informações Adicionais</label>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Não alterar" rows={2} className={`${fieldClass} resize-none`} />
+          {fieldActions("description", description)}
         </div>
       </div>
       {/* Section: Preços */}
@@ -820,18 +873,22 @@ function BulkEditPanel({
           <div>
             <label className={labelClass}>Preço Unitário (R$)</label>
             <input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("price", price)}
           </div>
           <div>
             <label className={labelClass}>Unidade do Preço</label>
             <input type="text" value={priceUnit} onChange={(e) => setPriceUnit(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("priceUnit", priceUnit)}
           </div>
           <div>
             <label className={labelClass}>Unidade</label>
             <input type="text" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("unit", unit)}
           </div>
           <div>
             <label className={labelClass}>MAPA / ANVISA</label>
             <input type="text" value={mapa} onChange={(e) => setMapa(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("mapa", mapa)}
           </div>
           <div>
             <label className={labelClass}>Ajuste de Preço (%)</label>
@@ -856,18 +913,22 @@ function BulkEditPanel({
           <div>
             <label className={labelClass}>Código Fornecedor</label>
             <input type="text" value={codigoFornecedor} onChange={(e) => setCodigoFornecedor(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("codigoFornecedor", codigoFornecedor)}
           </div>
           <div>
             <label className={labelClass}>Frete por Unidade (R$)</label>
             <input type="number" value={freightValue} onChange={(e) => setFreightValue(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("freightValue", freightValue)}
           </div>
           <div>
             <label className={labelClass}>Impostos / ST (R$)</label>
             <input type="number" value={taxValue} onChange={(e) => setTaxValue(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("taxValue", taxValue)}
           </div>
           <div className="md:col-span-1">
             <label className={labelClass}>Informação Técnica</label>
             <input type="text" value={informacaoTecnica} onChange={(e) => setInformacaoTecnica(e.target.value)} placeholder="Não alterar" className={fieldClass} />
+            {fieldActions("informacaoTecnica", informacaoTecnica)}
           </div>
         </div>
       </div>
@@ -878,6 +939,7 @@ function BulkEditPanel({
           <div>
             <label className={labelClass}>URL da Imagem</label>
             <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://... (não alterar se vazio)" className={fieldClass} />
+            {fieldActions("imageUrl", imageUrl)}
             {imageUrl && (
               <img src={imageUrl} alt="" className="mt-1 h-10 object-contain border border-gray-100" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
             )}
@@ -885,6 +947,7 @@ function BulkEditPanel({
           <div>
             <label className={labelClass}>Link do Produto</label>
             <input type="url" value={productUrl} onChange={(e) => setProductUrl(e.target.value)} placeholder="https://... (não alterar se vazio)" className={fieldClass} />
+            {fieldActions("productUrl", productUrl)}
           </div>
         </div>
       </div>
@@ -899,6 +962,7 @@ function BulkEditPanel({
               <option value="">Não alterar</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
+            {supplierId ? fieldActions("supplierId", supplierId) : null}
           </div>
           <div>
             <label className={labelClass}>Categoria</label>
@@ -906,6 +970,7 @@ function BulkEditPanel({
               <option value="">Não alterar</option>
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {categoryId ? fieldActions("categoryId", categoryId) : null}
           </div>
           <div>
             <label className={labelClass}>Status</label>
@@ -914,6 +979,7 @@ function BulkEditPanel({
               <option value="yes">Ativar todos</option>
               <option value="no">Desativar todos</option>
             </select>
+            {isActive ? fieldActions("isActive", isActive) : null}
           </div>
         </div>
       </div>
@@ -1035,6 +1101,7 @@ export default function Produtos() {
     hasImage: filterHasImage || undefined,
     hasProductUrl: filterHasLink || undefined,
     withoutFichaTecnica: filterWithoutFichaTecnica || undefined,
+    incomplete: filterIncomplete || undefined,
     sortBy: sortField,
     sortDir,
     limit,
@@ -1060,11 +1127,19 @@ export default function Produtos() {
     onError: (e) => toast.error(e.message),
   });
 
-  const bulkDeleteMutation = trpc.products.bulkDelete.useMutation({
+  const bulkArchiveMutation = trpc.products.bulkArchive.useMutation({
     onSuccess: (res) => {
       utils.products.list.invalidate();
       setSelectedIds(new Set());
-      toast.success(`${res.deleted} produto${res.deleted !== 1 ? "s" : ""} excluído${res.deleted !== 1 ? "s" : ""}.`);
+      toast.success(`${res.archived} produto${res.archived !== 1 ? "s" : ""} arquivado${res.archived !== 1 ? "s" : ""} (pode ser reativado).`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const bulkReactivateMutation = trpc.products.bulkReactivate.useMutation({
+    onSuccess: (res) => {
+      utils.products.list.invalidate();
+      setSelectedIds(new Set());
+      toast.success(`${res.reactivated} produto${res.reactivated !== 1 ? "s" : ""} reativado${res.reactivated !== 1 ? "s" : ""}.`);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1174,37 +1249,71 @@ export default function Produtos() {
     reclassifyStartMutation.mutate({ productIds, includeAlreadyCategorized: includeAlreadyCategorized ?? false });
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkArchive = async () => {
     const count = selectedIds.size;
+    const isArchiveAction = filterIsActive !== "no";
     const ok = await confirm({
-      title: `Excluir ${count} produto${count !== 1 ? "s" : ""}?`,
-      description: `${count} produto${count !== 1 ? "s" : ""} selecionado${count !== 1 ? "s" : ""} ser${count !== 1 ? "ão" : "á"} removido${count !== 1 ? "s" : ""} do catálogo, incluindo preços e histórico associados. Esta ação não pode ser desfeita.`,
-      confirmLabel: "Excluir",
+      title: isArchiveAction
+        ? `Arquivar ${count} produto${count !== 1 ? "s" : ""}?`
+        : `Reativar ${count} produto${count !== 1 ? "s" : ""}?`,
+      description: isArchiveAction
+        ? `${count} produto${count !== 1 ? "s" : ""} selecionado${count !== 1 ? "s" : ""} será${count !== 1 ? "ão" : "á"} arquivado${count !== 1 ? "s" : ""} (oculto${count !== 1 ? "s" : ""} do catálogo, preservando preços, histórico e referências). A reativação pode ser feita a qualquer momento.`
+        : `${count} produto${count !== 1 ? "s" : ""} arquivado${count !== 1 ? "s" : ""} será${count !== 1 ? "ão" : "á"} reativado${count !== 1 ? "s" : ""} e voltará${count !== 1 ? "ão" : "á"} a constar no catálogo.`,
+      confirmLabel: isArchiveAction ? "Arquivar" : "Reativar",
     });
     if (!ok) return;
-    bulkDeleteMutation.mutate({ ids: Array.from(selectedIds) });
+    if (isArchiveAction) bulkArchiveMutation.mutate({ ids: Array.from(selectedIds) });
+    else bulkReactivateMutation.mutate({ ids: Array.from(selectedIds) });
   };
 
   const rawItems = data?.items ?? [];
-  // Filtro client-side de produtos incompletos (score < 7)
-  const items = filterIncomplete
-    ? rawItems.filter((p) => calcQualityScore(p as unknown as Record<string, unknown>).score < QUALITY_FIELDS.length)
-    : rawItems;
-  const total = filterIncomplete ? items.length : (data?.total ?? 0);
+  // Filtro de incompletos agora é server-side (mesmo critério QUALITY_FIELDS);
+  // o score client-side é usado apenas no indicador visual de enriquecimento.
+  const items = rawItems;
+  const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / limit);
 
   const allPageIds = items.map((p) => p.id);
   const allSelected = allPageIds.length > 0 && allPageIds.every((id) => selectedIds.has(id));
   const someSelected = allPageIds.some((id) => selectedIds.has(id));
+  // Seleção global: "todos os N do filtro" (server-side via total), em vez de
+  // apenas a página visível — essencial para operações em massa no catálogo.
+  const [selectAllOfFilter, setSelectAllOfFilter] = useState<number>(0);
+  const allFilteredSelected = total > 0 && selectedIds.size >= total;
 
   const toggleAll = () => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allSelected) allPageIds.forEach((id) => next.delete(id));
-      else allPageIds.forEach((id) => next.add(id));
-      return next;
-    });
+    if (allFilteredSelected) {
+      // Desmarcar todos os do filtro (inclui ids extra-página)
+      setSelectedIds(new Set());
+      setSelectAllOfFilter(0);
+    } else if (allSelected && total > allPageIds.length) {
+      // Página completa selecionada e há mais páginas → selecionar todos do filtro
+      // (os demais ids serão considerados via total no backend)
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        allPageIds.forEach((id) => next.add(id));
+        return next;
+      });
+      // Sinaliza modo global armazenando o total no estado de intenção
+      setSelectAllOfFilter(total);
+    } else {
+      // Selecionar/desselecionar apenas a página visível
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (allSelected) allPageIds.forEach((id) => next.delete(id));
+        else allPageIds.forEach((id) => next.add(id));
+        return next;
+      });
+      if (allSelected) setSelectAllOfFilter(0);
+    }
   };
+
+  // Limpar seleção quando os filtros mudam (evita operar sobre conjunto antigo)
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setSelectAllOfFilter(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCategoryId, JSON.stringify(extraCategoryIds), filterSupplier, debouncedSearch, searchField, filterManufacturer, filterIsActive, filterPriceMin, filterPriceMax, filterHasImage, filterHasLink, filterIncomplete, filterWithoutFichaTecnica, sortField, sortDir]);
 
   const toggleOne = (id: number) => {
     setSelectedIds((prev) => {
@@ -1368,12 +1477,18 @@ export default function Produtos() {
                   : `Resolver Duplicados (${selectedIds.size})`}
               </button>
               <button
-                onClick={handleBulkDelete}
-                disabled={bulkDeleteMutation.isPending}
+                onClick={handleBulkArchive}
+                disabled={bulkArchiveMutation.isPending || bulkReactivateMutation.isPending}
                 className="flex items-center gap-2 border-2 border-blue-800 text-blue-800 px-3 py-2 text-xs font-bold hover:bg-blue-800 hover:text-white transition-colors disabled:opacity-50"
               >
-                <Trash2 size={12} />
-                {bulkDeleteMutation.isPending ? "Excluindo..." : `Excluir (${selectedIds.size})`}
+                <ArchiveIcon size={12} />
+                {bulkArchiveMutation.isPending || bulkReactivateMutation.isPending
+                  ? filterIsActive !== "no"
+                    ? "Arquivando..."
+                    : "Reativando..."
+                  : filterIsActive !== "no"
+                    ? `Arquivar (${selectedIds.size})`
+                    : `Reativar (${selectedIds.size})`}
               </button>
             </>
           )}
@@ -1767,8 +1882,8 @@ export default function Produtos() {
             <thead>
               <tr>
                 <th className="w-8 text-center">
-                  <button onClick={toggleAll} className="text-gray-400 hover:text-gray-900">
-                    {allSelected ? <CheckSquare size={13} className="text-blue-800" /> : someSelected ? <CheckSquare size={13} className="text-gray-300" /> : <Square size={13} />}
+                  <button onClick={toggleAll} className="text-gray-400 hover:text-gray-900" title={selectAllOfFilter > 0 ? `Todos os ${total} produtos do filtro selecionados` : "Selecionar página"}>
+                    {selectAllOfFilter > 0 ? <CheckSquare size={13} className="text-blue-800" /> : allSelected ? <CheckSquare size={13} className="text-blue-800" /> : someSelected ? <CheckSquare size={13} className="text-gray-300" /> : <Square size={13} />}
                   </button>
                 </th>
                 <th className="w-10 text-center">Img</th>

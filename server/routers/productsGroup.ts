@@ -3,6 +3,8 @@
 import { z } from "zod";
 import {
   bulkUpdateProducts,
+  bulkArchiveProducts,
+  bulkReactivateProducts,
   compareByActiveIngredient,
   createProduct,
   deleteProduct,
@@ -42,6 +44,8 @@ export const productsRouter = router({
           hasImage: z.boolean().optional(),
           hasProductUrl: z.boolean().optional(),
           withoutFichaTecnica: z.boolean().optional(),
+          /** Filtro de incompletos server-side (mesmo critério de qualidade do frontend). */
+          incomplete: z.boolean().optional(),
           limit: z.number().min(1).max(500).optional(),
           offset: z.number().min(0).optional(),
           sortBy: z.enum(["name", "price", "mapa", "supplier", "category", "manufacturer", "createdAt"]).optional(),
@@ -179,11 +183,35 @@ export const productsRouter = router({
           registroRegulatorio: z.enum(["MAPA", "ANVISA", "FORN"]).optional().nullable(),
           laboratorio: z.string().optional().nullable(),
           nomeProduto: z.string().optional().nullable(),
+          // Campos do painel de edição em lote (achados da auditoria #107)
+          informacaoTecnica: z.string().optional().nullable(),
+          freightValue: z.string().optional().nullable(),
+          taxValue: z.string().optional().nullable(),
+          // Limpeza explícita de campos (null), sem confundir com "não alterar"
+          clearFields: z.array(z.string()).optional(),
+          // Marcações explícitas por campo ("habilitar alteração de X")
+          enabledFields: z.array(z.string()).optional(),
         })
       )
-      .mutation(({ input }) => {
-        const { ids, ...data } = input;
-        return bulkUpdateProducts(ids, data as any);
+      .mutation(async ({ input, ctx }) => {
+        const { ids, enabledFields, clearFields, ...data } = input;
+        const enabledSet = enabledFields?.length ? new Set(enabledFields) : undefined;
+        // Se houver marcação explícita de campos, aplicar somente os habilitados
+        const filtered =
+          enabledSet && enabledSet.size > 0
+            ? (Object.fromEntries(
+                Object.entries(data).filter(([k]) => enabledSet.has(k))
+              ) as typeof data)
+            : data;
+        const updated = await bulkUpdateProducts(ids, filtered, { clearFields });
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_bulk_update",
+          entity: "products",
+          summary: `${ids.length} produto(s) atualizado(s) em lote (campos: ${Object.keys(filtered).join(", ")}${clearFields?.length ? `; limpos: ${clearFields.join(", ")}` : ""})`,
+          changes: { ids: ids.slice(0, 500), fields: Object.keys(filtered), clearFields },
+        });
+        return updated;
       }),
 
     delete: protectedProcedure
@@ -199,20 +227,40 @@ export const productsRouter = router({
         });
       }),
 
-    bulkDelete: protectedProcedure
+    /**
+     * Arquivamento em massa (soft-delete): preserva preços, histórico e
+     * referências. DELETE físico continua disponível apenas em delete
+     * individual (ação pontual), nunca como operação comum da UI.
+     */
+    bulkArchive: protectedProcedure
       .input(z.object({ ids: z.array(z.number()).min(1) }))
       .mutation(async ({ input, ctx }) => {
-        for (const id of input.ids) {
-          await deleteProduct(id);
-        }
+        const archived = await bulkArchiveProducts(input.ids);
         await recordAudit({
           userId: ctx.user?.id,
-          action: "product_bulk_delete",
+          action: "product_bulk_archive",
           entity: "products",
-          summary: `${input.ids.length} produtos excluídos em massa`,
+          summary: `${input.ids.length} produto(s) arquivado(s) em massa (soft-delete)`,
           changes: { ids: input.ids.slice(0, 500) },
         });
-        return { deleted: input.ids.length };
+        return { archived };
+      }),
+
+    /**
+     * Reativação em lote de produtos arquivados (isActive = yes).
+     */
+    bulkReactivate: protectedProcedure
+      .input(z.object({ ids: z.array(z.number()).min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        const reactivated = await bulkReactivateProducts(input.ids);
+        await recordAudit({
+          userId: ctx.user?.id,
+          action: "product_bulk_reactivate",
+          entity: "products",
+          summary: `${input.ids.length} produto(s) reativado(s) em massa`,
+          changes: { ids: input.ids.slice(0, 500) },
+        });
+        return { reactivated };
       }),
 
     /**
