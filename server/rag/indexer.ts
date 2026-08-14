@@ -130,7 +130,8 @@ export async function reindexAll(concurrency = CONCURRENCY): Promise<ReindexResu
               const { digest, embedding, model } = await embedOne(product.id, product);
               await upsertEmbedding(db, product.id, digest, embedding, model);
               indexados += 1;
-              return;
+              lastError = null;
+              break;
             } catch (error) {
               lastError = String(error);
             }
