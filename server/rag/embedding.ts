@@ -148,8 +148,25 @@ async function groqEmbed(
 }
 
 /**
+ * Cache em memória de embeddings já calculados (texto canônico → vetor).
+ * Elimina chamadas repetidas ao Ollama para textos idênticos (ex.: digests
+ * de produto recalculados em reindexações parciais ou buscas repetidas).
+ * TTL de 30 min e limite de 500 entradas mantêm a memória sob controle;
+ * o cache nunca substitui o vetor persistido no banco.
+ */
+const EMBED_CACHE = new Map<string, { result: EmbeddingResult; ts: number }>();
+const EMBED_CACHE_TTL_MS = 30 * 60 * 1000;
+const EMBED_CACHE_MAX = 500;
+
+/** Invalida o cache (usado em testes e quando a base indexada muda). */
+export function clearEmbedCache(): void {
+  EMBED_CACHE.clear();
+}
+
+/**
  * Gera o embedding de um texto com resiliência e fallback de provedor.
  * Ordem: provedor configurado → Groq (se disponível e diferente) → erro claro.
+ * Usa cache em memória para textos já calculados dentro do TTL.
  */
 export async function embedText(
   text: string,
@@ -166,31 +183,53 @@ export async function embedText(
     throw new Error("embedText: texto vazio — geração de embedding rejeitada");
   }
 
+  // Cache: chave = provedor + modelo + texto (vetores só são intercambiáveis
+  // dentro da mesma família de modelo).
+  const cacheKey = `${provider}:${model}:${text}`;
+  const now = Date.now();
+  const cached = EMBED_CACHE.get(cacheKey);
+  if (cached && now - cached.ts <= EMBED_CACHE_TTL_MS) return cached.result;
+
   // Caminho principal
+  let result: EmbeddingResult;
   try {
     if (provider === "groq") {
-      return await groqEmbed(env.groqApiKey, model, text, env.timeoutMs);
+      result = await groqEmbed(env.groqApiKey, model, text, env.timeoutMs);
+    } else {
+      const url = options.ollamaUrl ?? env.ollamaUrl;
+      result = await ollamaEmbed(url, model, text, env.timeoutMs);
     }
-    const url = options.ollamaUrl ?? env.ollamaUrl;
-    return await ollamaEmbed(url, model, text, env.timeoutMs);
   } catch (primaryError) {
     logger.warn("[rag.embedding] provedor principal falhou: %s", String(primaryError));
     // Fallback: Groq configurado e não era o principal
     if (provider !== "groq" && env.groqApiKey) {
       try {
-        const result = await groqEmbed(env.groqApiKey, env.groqEmbedModel, text, env.timeoutMs);
+        result = await groqEmbed(env.groqApiKey, env.groqEmbedModel, text, env.timeoutMs);
         logger.info("[rag.embedding] fallback Groq OK (modelo %s)", result.model);
-        return result;
       } catch (fallbackError) {
         logger.error("[rag.embedding] fallback Groq também falhou: %s", String(fallbackError));
+        throw new Error(
+          `Motor de Equivalências RAG indisponível: provedor '${provider}' falhou e não há fallback configurado. ` +
+            "Verifique RAG_EMBEDDING_PROVIDER, RAG_OLLAMA_URL e/ou RAG_GROQ_API_KEY. " +
+            `Erro original: ${String(primaryError)}`
+        );
       }
+    } else {
+      throw new Error(
+        `Motor de Equivalências RAG indisponível: provedor '${provider}' falhou e não há fallback configurado. ` +
+          "Verifique RAG_EMBEDDING_PROVIDER, RAG_OLLAMA_URL e/ou RAG_GROQ_API_KEY. " +
+          `Erro original: ${String(primaryError)}`
+      );
     }
-    throw new Error(
-      `Motor de Equivalências RAG indisponível: provedor '${provider}' falhou e não há fallback configurado. ` +
-        "Verifique RAG_EMBEDDING_PROVIDER, RAG_OLLAMA_URL e/ou RAG_GROQ_API_KEY. " +
-        `Erro original: ${String(primaryError)}`
-    );
   }
+
+  // Armazena no cache e mantém o limite de entradas (remove o mais antigo).
+  if (EMBED_CACHE.size >= EMBED_CACHE_MAX) {
+    const oldest = EMBED_CACHE.keys().next().value;
+    if (oldest !== undefined) EMBED_CACHE.delete(oldest);
+  }
+  EMBED_CACHE.set(cacheKey, { result, ts: now });
+  return result;
 }
 
 /** Valida dimensão do vetor contra o esperado (família do modelo). */
