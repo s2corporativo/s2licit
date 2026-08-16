@@ -72,6 +72,37 @@ export const suppliers = mysqlTable("suppliers", {
 export type Supplier = typeof suppliers.$inferSelect;
 export type InsertSupplier = typeof suppliers.$inferInsert;
 
+// ─── Sanções de fornecedores (Lei 14.133/21, art. 155) ──────────────────────
+// Penalidades ativas e vigentes bloqueiam/alertam cotações que envolvam
+// produtos do fornecedor sancionado. ON DELETE RESTRICT impede a exclusão
+// acidental de fornecedor com sanção registrada.
+export const supplierSanctions = mysqlTable(
+  "supplier_sanctions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    supplierId: int("supplierId").notNull().references(() => suppliers.id, {
+      onDelete: "restrict",
+    }),
+    orgao: varchar("orgao", { length: 256 }).notNull(),
+    processo: varchar("processo", { length: 128 }),
+    penalidade: varchar("penalidade", { length: 32 }).notNull().default("advertencia"),
+    dataInicio: date("dataInicio").notNull(),
+    dataFim: date("dataFim"), // nula = sem prazo definido (art. 156)
+    referenciaLegal: varchar("referenciaLegal", { length: 512 }),
+    observacoes: text("observacoes"),
+    criadoPor: varchar("criadoPor", { length: 256 }),
+    status: varchar("status", { length: 16 }).notNull().default("ativa"), // ativa | revogada | expirada
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_supplier_sanctions_supplier").on(table.supplierId),
+    index("idx_supplier_sanctions_status_fim").on(table.status, table.dataFim),
+  ],
+);
+export type InsertSupplierSanction = typeof supplierSanctions.$inferInsert;
+export type SupplierSanction = typeof supplierSanctions.$inferSelect;
+
 // Importações de fornecedores via XML
 export const products = mysqlTable(
   "products",
