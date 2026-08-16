@@ -43,6 +43,9 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      # O domínio de produção é servido por HTTPS; cookies de sessão devem
+      # permanecer Secure mesmo se o proxy não repassar x-forwarded-proto.
+      FORCE_SECURE_COOKIES: "true"
       DATABASE_URL: mysql://${MYSQL_USER:-s2user}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-sistema_s2}
       # Backups automáticos gravados em volume persistente — sobrevivem a rebuilds.
       BACKUP_DIR: /app/backups
