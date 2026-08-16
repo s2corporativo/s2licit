@@ -1312,7 +1312,6 @@ export default function Produtos() {
   useEffect(() => {
     setSelectedIds(new Set());
     setSelectAllOfFilter(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategoryId, JSON.stringify(extraCategoryIds), filterSupplier, debouncedSearch, searchField, filterManufacturer, filterIsActive, filterPriceMin, filterPriceMax, filterHasImage, filterHasLink, filterIncomplete, filterWithoutFichaTecnica, sortField, sortDir]);
 
   const toggleOne = (id: number) => {

@@ -16,10 +16,10 @@
  * pipeline novo incrementa a versão e desativa as linhas antigas
  * (soft-delete via UPDATE de version+1 sobrescreve o unique index).
  */
-import { eq, and, inArray, desc, sql, lte } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { productEmbeddings, products } from "../../drizzle/schema";
-import { embedText, embedTextBatch, EMBED_BATCH_SIZE, DEFAULT_EMBEDDING_MODEL, DEFAULT_DIMENSIONS } from "./embedding";
+import { embedText, embedTextBatch, EMBED_BATCH_SIZE, DEFAULT_DIMENSIONS } from "./embedding";
 import { buildProductDigest, RAG_DIGEST_VERSION } from "./digest";
 import { logger } from "../_core/logger";
 import { clearQueryEmbedCache } from "./search";

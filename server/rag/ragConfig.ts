@@ -8,7 +8,6 @@
  */
 import { getDb } from "../db";
 import { ragConfig } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
 import { logger } from "../_core/logger";
 
 export type RagConfig = {
