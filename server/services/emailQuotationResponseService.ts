@@ -14,8 +14,9 @@ import { calculateSalePrice } from "./pricingSafety";
 
 /**
  * Monta e gera o PDF de orçamento-resposta a partir de uma cotação recebida
- * por e-mail. Somente itens com match confirmado e custo positivo podem
- * participar. A margem é calculada sobre a receita, nunca como markup.
+ * por e-mail. Somente itens com produto vinculado (match) e custo positivo
+ * podem participar — a vinculação já é considerada confirmação do match.
+ * A margem é calculada sobre a receita, nunca como markup.
  *
  * Margem por categoria: quando o produto casado pertence a uma categoria com
  * regra de precificação ativa (tela Regras por Categoria), a margem daquela
@@ -138,9 +139,11 @@ export async function priceQuotationItems(
     throw new Error("A cotação não possui itens para responder.");
   }
 
-  const unconfirmedItems = data.items.filter(
-    (item) => item.produtoMatchId == null || item.matchConfirmado !== true,
-  );
+  // Simplificação (2026-08-16): o match é considerado confirmado sempre que
+  // há um produto vinculado (produtoMatchId != null) — a vinculação já é um
+  // ato de confirmação. O bloqueio persiste APENAS para itens sem nenhum
+  // produto associado, quando não há custo nem margem possíveis.
+  const unconfirmedItems = data.items.filter((item) => item.produtoMatchId == null);
   if (unconfirmedItems.length > 0) {
     throw new Error(
       `Cotação bloqueada: confirme o match de ${unconfirmedItems.length} item(ns) antes de gerar ou enviar o orçamento.`,
