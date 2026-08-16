@@ -11,6 +11,7 @@ import { dashboardRouter } from "./routers/dashboard";
 import { financialRouter } from "./routers/financial";
 import { proposalsRouter } from "./routers/proposals";
 import { suppliersRouter } from "./routers/suppliers";
+import { sanctionsRouter } from "./routers/sanctions";
 import { companyRouter } from "./routers/company";
 import { orgsRouter } from "./routers/orgs";
 import { synonymsRouter } from "./routers/synonyms";
@@ -111,6 +112,7 @@ export const appRouter = router({
 
   // ─── Suppliers ────────────────────────────────────────────────────────────
   suppliers: suppliersRouter,
+  sanctions: sanctionsRouter,
 
   // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
