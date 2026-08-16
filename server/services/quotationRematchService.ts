@@ -24,8 +24,11 @@ export interface RematchResult {
  * pipeline (runQuotationAutoPipeline), que roda a cada 15 minutos e logo
  * em seguida da sincronização.
  */
+const DEFAULT_ITEMS_PER_RUN = 25;
+
 export async function runQuotationRematch(options?: {
   limit?: number;
+  maxItemsPerRun?: number;
 }): Promise<RematchResult> {
   const result: RematchResult = {
     quotationsChecked: 0,
@@ -41,6 +44,11 @@ export async function runQuotationRematch(options?: {
   }
 
   const limit = options?.limit ?? 100;
+  // Limite de segurança por execução: processar todos os itens pendentes de
+  // até 100 cotações de uma vez saturava o servidor (catálogo com mais de
+  // 27 mil produtos carregado em memória + embeddings sequenciais por item).
+  const maxItemsPerRun = options?.maxItemsPerRun ?? DEFAULT_ITEMS_PER_RUN;
+  let itemsRemaining = maxItemsPerRun;
 
   // Cotações em revisão com ao menos um item ainda sem correspondência.
   const pending = await db
@@ -80,6 +88,10 @@ export async function runQuotationRematch(options?: {
       let updated = 0;
       let matched = 0;
       for (const item of items) {
+        if (itemsRemaining <= 0) {
+          break;
+        }
+        itemsRemaining--;
         const hit = await matchQuotationItem(
           {
             descricao: item.descricao,
@@ -119,6 +131,14 @@ export async function runQuotationRematch(options?: {
       result.newMatches += matched;
     } catch (err) {
       result.errors.push(`Cotação ${row.id}: ${(err as Error).message}`);
+    }
+
+    if (itemsRemaining <= 0) {
+      logger.info(
+        `[Rematch] limite de itens desta execução atingido (${maxItemsPerRun}); ` +
+          `o restante será processado na próxima janela agendada.`,
+      );
+      break;
     }
   }
 
