@@ -1,6 +1,5 @@
 import { inArray } from "drizzle-orm";
-import { getDb } from "../db";
-import { getCompanySettings } from "../db";
+import { getDb, getCompanySettings } from "../db";
 import { products } from "../../drizzle/schema";
 import { getActiveCategoryPricingRules } from "../db/categoryPricingQueries";
 import { getEmailQuotationWithItems } from "./emailQuotationSyncService";
@@ -12,47 +11,21 @@ import {
 } from "./quotationPdfGeneratorService";
 import { calculateSalePrice } from "./pricingSafety";
 
-/**
- * Monta e gera o PDF de orçamento-resposta a partir de uma cotação recebida
- * por e-mail. Somente itens com produto vinculado (match) e custo positivo
- * podem participar — a vinculação já é considerada confirmação do match.
- * A margem é calculada sobre a receita, nunca como markup.
- *
- * Margem por categoria: quando o produto casado pertence a uma categoria com
- * regra de precificação ativa (tela Regras por Categoria), a margem daquela
- * regra prevalece sobre a margem padrão da empresa/parâmetro — por exemplo,
- * medicamento e material de limpeza podem ter margens diferentes na mesma
- * proposta. Itens sem regra de categoria usam a margem padrão normalmente.
- */
-
 export interface BuildResponseResult {
   pdfBase64: string;
   total: number;
   itemCount: number;
   itemsSemPreco: number;
-  /** Margem padrão usada como base (empresa ou parâmetro informado). */
   marginPercent: number;
-  /** Margem efetiva real (lucro/venda) considerando eventuais overrides por categoria. */
   effectiveMarginPercent: number;
-  /** Quantos itens usaram margem de categoria em vez da margem padrão. */
   categoryOverrides: number;
+  manualPriceItems: number;
 }
 
-/**
- * Aplica margem SOBRE O PREÇO DE VENDA (mesma fórmula do PricingService):
- *   precoVenda = custo / (1 - margem%/100)
- * Ex.: custo 100, margem 30% → 142,86 (margem real 30%), e não 130 (markup,
- * que daria só 23,1% de margem real). Margem ≥ 100% é inválida.
- */
 export function applyMargin(basePrice: number, marginPercent: number): number {
   return calculateSalePrice({ cost: basePrice, marginPercent });
 }
 
-/**
- * Resolve a margem de um item: a regra de categoria ativa prevalece sobre a
- * margem padrão. Pura e testável — recebe as regras já carregadas (por
- * categoryId) em vez de consultar o banco.
- */
 export function resolveItemMarginPercent(
   categoryId: number | null | undefined,
   rulesByCategoryId: Map<number, number>,
@@ -63,7 +36,6 @@ export function resolveItemMarginPercent(
   return override != null ? override : defaultMarginPercent;
 }
 
-/** Carrega as regras de margem por categoria ativas, já num Map categoryId→margem. */
 async function loadActiveMarginRulesByCategory(): Promise<Map<number, number>> {
   const rules = await getActiveCategoryPricingRules();
   const map = new Map<number, number>();
@@ -74,10 +46,7 @@ async function loadActiveMarginRulesByCategory(): Promise<Map<number, number>> {
   return map;
 }
 
-/** Carrega categoryId dos produtos casados, em lote (productId → categoryId). */
-async function loadProductCategories(
-  productIds: Array<number | null>,
-): Promise<Map<number, number | null>> {
+async function loadProductCategories(productIds: Array<number | null>): Promise<Map<number, number | null>> {
   const ids = [...new Set(productIds.filter((id): id is number => id != null))];
   const map = new Map<number, number | null>();
   if (ids.length === 0) return map;
@@ -91,6 +60,176 @@ async function loadProductCategories(
   return map;
 }
 
+function quantityOf(value: string | null): number {
+  const n = value != null ? Number(value) : 1;
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function actualMarginPercent(cost: number, sale: number): number {
+  if (!Number.isFinite(cost) || !Number.isFinite(sale) || sale <= 0) return 0;
+  return ((sale - cost) / sale) * 100;
+}
+
+export interface PricingPreviewItem {
+  quotationItemId: number;
+  produtoMatchId: number | null;
+  descricao: string;
+  productName: string | null;
+  supplierName: string | null;
+  quantidade: number;
+  unidade: string | null;
+  custoUnitario: number | null;
+  unitPrice: number | null;
+  totalCost: number | null;
+  totalPrice: number | null;
+  marginPercent: number | null;
+  pricingMode: "automatic" | "manual" | "blocked";
+  hasCategoryRule: boolean;
+  belowCost: boolean;
+  blocker: "sem_match" | "sem_custo" | null;
+}
+
+export interface QuotationPricingPreview {
+  items: PricingPreviewItem[];
+  defaultMarginPercent: number;
+  totalCost: number;
+  totalSale: number;
+  totalProfit: number;
+  effectiveMarginPercent: number;
+  unmatchedItems: number;
+  itemsSemCusto: number;
+  manualPriceItems: number;
+  categoryOverrides: number;
+  canGenerate: boolean;
+}
+
+/**
+ * Preview tolerante a itens incompletos. É usado pela tela operacional para
+ * mostrar custo, venda, margem e totais antes de gerar a proposta, sem obrigar
+ * o operador a sair da cotação.
+ */
+export async function previewQuotationPricing(
+  quotationId: number,
+  options?: { marginPercent?: number },
+): Promise<QuotationPricingPreview> {
+  const data = await getEmailQuotationWithItems(quotationId);
+  if (!data) throw new Error("Cotação não encontrada.");
+
+  const company = await getCompanySettings();
+  const configuredMargin = Number(company?.minMarginPercent ?? "15");
+  const defaultMarginPercent =
+    options?.marginPercent != null
+      ? options.marginPercent
+      : Number.isFinite(configuredMargin)
+        ? configuredMargin
+        : 15;
+
+  const marginRulesByCategory = await loadActiveMarginRulesByCategory();
+  const categoryByProductId = await loadProductCategories(data.items.map((item) => item.produtoMatchId));
+
+  let unmatchedItems = 0;
+  let itemsSemCusto = 0;
+  let manualPriceItems = 0;
+  let categoryOverrides = 0;
+
+  const items: PricingPreviewItem[] = data.items.map((item) => {
+    const quantidade = quantityOf(item.quantidade);
+    if (item.produtoMatchId == null) {
+      unmatchedItems++;
+      return {
+        quotationItemId: item.id,
+        produtoMatchId: null,
+        descricao: item.descricao,
+        productName: item.productName ?? null,
+        supplierName: item.supplierName ?? null,
+        quantidade,
+        unidade: item.unidade,
+        custoUnitario: null,
+        unitPrice: null,
+        totalCost: null,
+        totalPrice: null,
+        marginPercent: null,
+        pricingMode: "blocked",
+        hasCategoryRule: false,
+        belowCost: false,
+        blocker: "sem_match",
+      };
+    }
+
+    const costCandidate = Number(item.precoSugerido ?? item.productPrice);
+    if (!Number.isFinite(costCandidate) || costCandidate <= 0) {
+      itemsSemCusto++;
+      return {
+        quotationItemId: item.id,
+        produtoMatchId: item.produtoMatchId,
+        descricao: item.descricao,
+        productName: item.productName ?? null,
+        supplierName: item.supplierName ?? null,
+        quantidade,
+        unidade: item.unidade,
+        custoUnitario: null,
+        unitPrice: null,
+        totalCost: null,
+        totalPrice: null,
+        marginPercent: null,
+        pricingMode: "blocked",
+        hasCategoryRule: false,
+        belowCost: false,
+        blocker: "sem_custo",
+      };
+    }
+
+    const categoryId = categoryByProductId.get(item.produtoMatchId) ?? null;
+    const categoryMargin = resolveItemMarginPercent(categoryId, marginRulesByCategory, defaultMarginPercent);
+    const hasCategoryRule = categoryId != null && marginRulesByCategory.has(categoryId);
+    const manualCandidate = item.precoVendaManual != null ? Number(item.precoVendaManual) : NaN;
+    const isManual = Number.isFinite(manualCandidate) && manualCandidate > 0;
+    const unitPrice = Number((isManual ? manualCandidate : applyMargin(costCandidate, categoryMargin)).toFixed(2));
+    const marginPercent = Number(actualMarginPercent(costCandidate, unitPrice).toFixed(2));
+
+    if (isManual) manualPriceItems++;
+    else if (hasCategoryRule) categoryOverrides++;
+
+    return {
+      quotationItemId: item.id,
+      produtoMatchId: item.produtoMatchId,
+      descricao: item.descricao,
+      productName: item.productName ?? null,
+      supplierName: item.supplierName ?? null,
+      quantidade,
+      unidade: item.unidade,
+      custoUnitario: Number(costCandidate.toFixed(4)),
+      unitPrice,
+      totalCost: Number((costCandidate * quantidade).toFixed(2)),
+      totalPrice: Number((unitPrice * quantidade).toFixed(2)),
+      marginPercent,
+      pricingMode: isManual ? "manual" : "automatic",
+      hasCategoryRule,
+      belowCost: unitPrice < costCandidate,
+      blocker: null,
+    };
+  });
+
+  const totalCost = items.reduce((sum, item) => sum + (item.totalCost ?? 0), 0);
+  const totalSale = items.reduce((sum, item) => sum + (item.totalPrice ?? 0), 0);
+  const totalProfit = totalSale - totalCost;
+  const effectiveMarginPercent = totalSale > 0 ? (totalProfit / totalSale) * 100 : 0;
+
+  return {
+    items,
+    defaultMarginPercent,
+    totalCost: Number(totalCost.toFixed(2)),
+    totalSale: Number(totalSale.toFixed(2)),
+    totalProfit: Number(totalProfit.toFixed(2)),
+    effectiveMarginPercent: Number(effectiveMarginPercent.toFixed(2)),
+    unmatchedItems,
+    itemsSemCusto,
+    manualPriceItems,
+    categoryOverrides,
+    canGenerate: items.length > 0 && unmatchedItems === 0 && itemsSemCusto === 0,
+  };
+}
+
 export interface PricedQuotationItem {
   quotationItemId: number;
   produtoMatchId: number | null;
@@ -101,6 +240,7 @@ export interface PricedQuotationItem {
   unitPrice: number;
   totalPrice: number;
   marginPercent: number;
+  pricingMode: "automatic" | "manual";
 }
 
 export interface PricedQuotationResult {
@@ -110,99 +250,50 @@ export interface PricedQuotationResult {
   marginPercent: number;
   effectiveMarginPercent: number;
   categoryOverrides: number;
+  manualPriceItems: number;
 }
 
-/**
- * Calcula o preço de venda de cada item de uma cotação (margem por categoria
- * quando houver regra ativa, senão a margem padrão). Núcleo compartilhado
- * pelo PDF de orçamento (`buildQuotationResponse`) e pelo "preencher no
- * portal" (`quotationPortalHandoffService`) — os dois preços devem ser
- * exatamente os mesmos.
- */
 export async function priceQuotationItems(
   quotationId: number,
   options?: { marginPercent?: number },
 ): Promise<PricedQuotationResult> {
   const data = await getEmailQuotationWithItems(quotationId);
   if (!data) throw new Error("Cotação não encontrada.");
+  if (data.items.length === 0) throw new Error("A cotação não possui itens para responder.");
 
-  const company = await getCompanySettings();
-  const configuredMargin = Number(company?.minMarginPercent ?? "15");
-  const marginPercent =
-    options?.marginPercent != null
-      ? options.marginPercent
-      : Number.isFinite(configuredMargin)
-        ? configuredMargin
-        : 15;
-
-  if (data.items.length === 0) {
-    throw new Error("A cotação não possui itens para responder.");
-  }
-
-  // Simplificação (2026-08-16): o match é considerado confirmado sempre que
-  // há um produto vinculado (produtoMatchId != null) — a vinculação já é um
-  // ato de confirmação. O bloqueio persiste APENAS para itens sem nenhum
-  // produto associado, quando não há custo nem margem possíveis.
-  const unconfirmedItems = data.items.filter((item) => item.produtoMatchId == null);
-  if (unconfirmedItems.length > 0) {
+  const preview = await previewQuotationPricing(quotationId, options);
+  if (preview.unmatchedItems > 0) {
     throw new Error(
-      `Cotação bloqueada: confirme o match de ${unconfirmedItems.length} item(ns) antes de gerar ou enviar o orçamento.`,
+      `Cotação bloqueada: selecione o produto de ${preview.unmatchedItems} item(ns) antes de gerar ou enviar o orçamento.`,
+    );
+  }
+  if (preview.itemsSemCusto > 0) {
+    throw new Error(
+      `Cotação bloqueada: informe custo positivo para ${preview.itemsSemCusto} item(ns).`,
     );
   }
 
-  const invalidPriceItems = data.items.filter((item) => {
-    const price = Number(item.precoSugerido);
-    return !Number.isFinite(price) || price <= 0;
-  });
-  if (invalidPriceItems.length > 0) {
-    throw new Error(
-      `Cotação bloqueada: informe custo positivo para ${invalidPriceItems.length} item(ns).`,
-    );
-  }
-
-  const marginRulesByCategory = await loadActiveMarginRulesByCategory();
-  const categoryByProductId = await loadProductCategories(
-    data.items.map((item) => item.produtoMatchId),
-  );
-
-  let categoryOverrides = 0;
-  let totalCusto = 0;
-  const items: PricedQuotationItem[] = data.items.map((item) => {
-    const base = Number(item.precoSugerido);
-    const quantity = item.quantidade != null ? Number(item.quantidade) : 1;
-    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
-    const categoryId = item.produtoMatchId != null ? categoryByProductId.get(item.produtoMatchId) : null;
-    const itemMargin = resolveItemMarginPercent(categoryId, marginRulesByCategory, marginPercent);
-    // Conta a regra de categoria APLICADA, não a mudança de número: uma
-    // regra ativa cuja margem coincide com a padrão ainda é um override
-    // (decisão explícita da categoria), só não muda o preço final.
-    if (categoryId != null && marginRulesByCategory.has(categoryId)) categoryOverrides++;
-    const unitPrice = Number(applyMargin(base, itemMargin).toFixed(2));
-    totalCusto += base * safeQuantity;
-
-    return {
-      quotationItemId: item.id,
-      produtoMatchId: item.produtoMatchId,
-      descricao: item.descricao,
-      quantidade: safeQuantity,
-      unidade: item.unidade,
-      custoUnitario: base,
-      unitPrice,
-      totalPrice: unitPrice * safeQuantity,
-      marginPercent: itemMargin,
-    };
-  });
-
-  const subtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
-  const effectiveMarginPercent = subtotal > 0 ? ((subtotal - totalCusto) / subtotal) * 100 : marginPercent;
+  const items: PricedQuotationItem[] = preview.items.map((item) => ({
+    quotationItemId: item.quotationItemId,
+    produtoMatchId: item.produtoMatchId,
+    descricao: item.descricao,
+    quantidade: item.quantidade,
+    unidade: item.unidade,
+    custoUnitario: item.custoUnitario!,
+    unitPrice: item.unitPrice!,
+    totalPrice: item.totalPrice!,
+    marginPercent: item.marginPercent!,
+    pricingMode: item.pricingMode as "automatic" | "manual",
+  }));
 
   return {
     quotation: data.quotation,
     items,
-    subtotal: Number(subtotal.toFixed(2)),
-    marginPercent,
-    effectiveMarginPercent: Number(effectiveMarginPercent.toFixed(2)),
-    categoryOverrides,
+    subtotal: preview.totalSale,
+    marginPercent: preview.defaultMarginPercent,
+    effectiveMarginPercent: preview.effectiveMarginPercent,
+    categoryOverrides: preview.categoryOverrides,
+    manualPriceItems: preview.manualPriceItems,
   };
 }
 
@@ -256,5 +347,6 @@ export async function buildQuotationResponse(
     marginPercent: priced.marginPercent,
     effectiveMarginPercent: priced.effectiveMarginPercent,
     categoryOverrides: priced.categoryOverrides,
+    manualPriceItems: priced.manualPriceItems,
   };
 }
