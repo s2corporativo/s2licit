@@ -114,8 +114,18 @@ jobs:
       - name: Migrar e subir aplicação
         run: |
           set -euo pipefail
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd /opt/s2licit && DOMAIN='$DEPLOY_DOMAIN' S2_IMAGE='$S2_IMAGE' bash scripts/vps-bootstrap.sh"
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<REMOTE
+          set -euo pipefail
+          cd /opt/s2licit
+          # Deploys antigos podem ter deixado o container com o mesmo nome
+          # fora do projeto Compose atual. Substituímos somente o app; banco e
+          # volumes persistentes não são removidos.
+          if docker ps -a --format '{{.Names}}' | grep -qx 'sistema-s2-app'; then
+            echo "Substituindo container anterior sistema-s2-app..."
+            docker rm -f sistema-s2-app >/dev/null
+          fi
+          DOMAIN='$DEPLOY_DOMAIN' S2_IMAGE='$S2_IMAGE' bash scripts/vps-bootstrap.sh
+          REMOTE
 
       - name: Validar readiness
         run: |
