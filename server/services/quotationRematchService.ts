@@ -24,7 +24,7 @@ export interface RematchResult {
  * pipeline (runQuotationAutoPipeline), que roda a cada 15 minutos e logo
  * em seguida da sincronização.
  */
-const DEFAULT_ITEMS_PER_RUN = 25;
+const DEFAULT_ITEMS_PER_RUN = 15;
 
 export async function runQuotationRematch(options?: {
   limit?: number;
@@ -92,6 +92,10 @@ export async function runQuotationRematch(options?: {
           break;
         }
         itemsRemaining--;
+        logger.info(
+          `[Rematch] cotação ${row.id}: item ${items.length - itemsRemaining}/${items.length} ` +
+            `(restam ${maxItemsPerRun - itemsRemaining}/${maxItemsPerRun} nesta execução)`,
+        );
         const hit = await matchQuotationItem(
           {
             descricao: item.descricao,
