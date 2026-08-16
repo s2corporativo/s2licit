@@ -1,83 +1,46 @@
-# Deploy do Sistema S2 na VPS via SSH.
-#
-# O workflow preserva o .env da VPS, aplica somente secrets/variables não vazios,
-# reconstrói os containers e só conclui quando aplicação + MySQL respondem em
-# /readyz. Nenhum valor sensível é escrito nos logs.
+# Deploy do S2Licit na VPS sem depender do runner self-hosted.
+# O build roda no GitHub-hosted runner e a publicação é feita por SSH.
 name: Deploy VPS
 
-# O deploy automático dispara em push no main. A validação de código
-# (lint, tipos, testes e build) é feita localmente antes do merge, pois o
-# workflow de CI referenciado anteriormente foi removido do repositório.
-# O disparo manual (workflow_dispatch) continua disponível para emergências.
 on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      host:
-        description: "IP/host da VPS"
-        required: true
-        default: "13.140.167.153"
-      ssh_user:
-        description: "Usuário SSH"
-        required: true
-        default: "root"
-      password:
-        description: "Senha SSH (deixe vazio para usar o secret VPS_PASSWORD)"
-        required: false
-        default: ""
-      domain:
-        description: "Domínio para HTTPS automático. Deixe vazio para manter o domínio já salvo na VPS."
-        required: false
-        default: ""
 
 env:
-  DEPLOY_HOST: ${{ inputs.host }}
-  DEPLOY_USER: ${{ inputs.ssh_user }}
-  DEPLOY_DOMAIN: ${{ inputs.domain }}
+  DEPLOY_HOST: 13.140.167.153
+  DEPLOY_USER: root
+  DEPLOY_DOMAIN: s2.s2corporativo.com.br
 
 concurrency:
   group: deploy-vps
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  # Publica a imagem validada pelo CI no ghcr, etiquetada pelo SHA do commit.
-  # O deploy passa a ser "pull + up" — o artefato que sobe é exatamente o
-  # testado, o build não compete por CPU/RAM com o app na VPS e a imagem
-  # anterior fica disponível para rollback em 1 comando.
   build-image:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    # Executa na própria VPS (runner self-hosted s2-contabo), que já tem
-    # Docker instalado — o build não consome runner hospedado do GitHub.
-    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
-    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: read
       packages: write
     outputs:
       image: ${{ steps.meta.outputs.image }}
     steps:
-      - name: Resolver referência alvo (push ou manual)
-        if: always()
-        run: |
-          echo "TARGET_REF=${{ github.ref }}" >> "$GITHUB_ENV"
-          echo "TARGET_SHA=${{ github.sha }}" >> "$GITHUB_ENV"
-
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TARGET_REF }}
-      - name: Login no ghcr
+
+      - name: Login no GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Definir tag da imagem
+
+      - name: Definir imagem por SHA
         id: meta
         run: |
-          SHA="${{ env.TARGET_SHA }}"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${SHA}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Build e push
         uses: docker/build-push-action@v6
         with:
@@ -88,216 +51,97 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
 
   deploy:
-    # Em push no main roda automaticamente; disparo manual sempre roda.
-    # Executa na própria VPS (runner self-hosted) — não precisa mais de SSH.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: build-image
-    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
+    runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: read
       packages: read
+    env:
+      SSHPASS: ${{ secrets.VPS_PASSWORD }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      S2_IMAGE: ${{ needs.build-image.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TARGET_REF }}
 
-      - name: Sincronizar código na própria VPS
+      - name: Preparar SSH
+        env:
+          VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
         run: |
-          if [ ! -d /opt/s2licit ]; then
-            echo "::error::Diretório /opt/s2licit ausente na VPS — instalação manual necessária." >&2
+          set -euo pipefail
+          if [ -z "${SSHPASS:-}" ]; then
+            echo "::error::Secret VPS_PASSWORD não configurado."
             exit 1
           fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass rsync
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          if [ -n "${VPS_HOST_KEY:-}" ]; then
+            printf '%s\n' "$VPS_HOST_KEY" > "$HOME/.ssh/known_hosts"
+            chmod 600 "$HOME/.ssh/known_hosts"
+            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
+          else
+            echo "::warning::VPS_HOST_KEY ausente; usando conexão sem pinagem de host nesta execução."
+            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
+          fi
+
+      - name: Testar acesso à VPS
+        run: |
+          set -euo pipefail
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "echo 'SSH da VPS disponível' && docker --version && docker compose version"
+
+      - name: Sincronizar código
+        run: |
+          set -euo pipefail
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/s2licit"
           rsync -az --delete \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
             --exclude .env \
-            ./ /opt/s2licit/
+            -e "sshpass -e ssh $SSH_OPTS" \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/s2licit/"
 
-      - name: Instalar, migrar e subir
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          S2_IMAGE: ${{ needs.build-image.outputs.image }}
-        run: |
-          # Login temporário no ghcr para o pull da imagem publicada por SHA.
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
-          DOMAIN='${DEPLOY_DOMAIN}' S2_IMAGE='${S2_IMAGE}' bash /opt/s2licit/scripts/vps-bootstrap.sh
-
-      - name: Validar aplicação e MySQL
+      - name: Autenticar imagem na VPS
         run: |
           set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
+
+      - name: Migrar e subir aplicação
+        run: |
+          set -euo pipefail
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /opt/s2licit && DOMAIN='$DEPLOY_DOMAIN' S2_IMAGE='$S2_IMAGE' bash scripts/vps-bootstrap.sh"
+
+      - name: Validar readiness
+        run: |
+          set -euo pipefail
+          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
           cd /opt/s2licit
-          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
+          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2 || true)
           LOCAL_PORT=${LOCAL_PORT:-3000}
           for i in $(seq 1 45); do
-            if curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null; then
-              echo "Aplicação e MySQL prontos ✅"
+            if curl -fsS "http://127.0.0.1:${LOCAL_PORT}/readyz" >/dev/null 2>&1; then
+              echo "Aplicação e MySQL prontos"
+              docker compose ps
               exit 0
             fi
             sleep 4
           done
           echo "Aplicação não ficou pronta" >&2
           docker compose ps >&2 || true
-          docker compose logs --tail=80 app db >&2 || true
-          exit 1
-
-      # Secrets aceitos. Valores ausentes são ignorados e nunca apagam o .env:
-      # Segurança/login: ADMIN_PASSWORD
-      # IA: GROQ_API_KEY, ANTHROPIC_API_KEY, BUILT_IN_FORGE_API_KEY/URL
-      # E-mail legado: EMAIL_USER, EMAIL_PASSWORD
-      # E-mail avançado: IMAP_* e SMTP_*
-      # WhatsApp: WHATSAPP_PHONE_ID/TOKEN/WEBHOOK_URL/TO
-      # Ajustes não sensíveis podem ser Repository Variables ou Secrets.
-      - name: Aplicar integrações cadastradas no GitHub
-        env:
-          SSHPASS: ${{ inputs.password != '' && inputs.password || secrets.VPS_PASSWORD }}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BUILT_IN_FORGE_API_URL: ${{ secrets.BUILT_IN_FORGE_API_URL }}
-          BUILT_IN_FORGE_API_KEY: ${{ secrets.BUILT_IN_FORGE_API_KEY }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          IMAP_HOST: ${{ secrets.IMAP_HOST }}
-          IMAP_PORT: ${{ secrets.IMAP_PORT }}
-          IMAP_USER: ${{ secrets.IMAP_USER }}
-          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
-          IMAP_TLS: ${{ secrets.IMAP_TLS }}
-          IMAP_MAILBOX: ${{ secrets.IMAP_MAILBOX }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
-          SMTP_FROM: ${{ secrets.SMTP_FROM }}
-          WHATSAPP_PHONE_ID: ${{ secrets.WHATSAPP_PHONE_ID }}
-          WHATSAPP_TOKEN: ${{ secrets.WHATSAPP_TOKEN }}
-          WHATSAPP_WEBHOOK_URL: ${{ secrets.WHATSAPP_WEBHOOK_URL }}
-          WHATSAPP_TO: ${{ secrets.WHATSAPP_TO }}
-          AI_PROVIDER: ${{ vars.AI_PROVIDER != '' && vars.AI_PROVIDER || secrets.AI_PROVIDER }}
-          GROQ_MODEL: ${{ vars.GROQ_MODEL != '' && vars.GROQ_MODEL || secrets.GROQ_MODEL }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL != '' && vars.ANTHROPIC_MODEL || secrets.ANTHROPIC_MODEL }}
-          LLM_TIMEOUT_MS: ${{ vars.LLM_TIMEOUT_MS != '' && vars.LLM_TIMEOUT_MS || secrets.LLM_TIMEOUT_MS }}
-          WHATSAPP_API_VERSION: ${{ vars.WHATSAPP_API_VERSION != '' && vars.WHATSAPP_API_VERSION || secrets.WHATSAPP_API_VERSION }}
-          EMAIL_SYNC_ENABLED: ${{ vars.EMAIL_SYNC_ENABLED != '' && vars.EMAIL_SYNC_ENABLED || secrets.EMAIL_SYNC_ENABLED }}
-          EMAIL_SYNC_CRON: ${{ vars.EMAIL_SYNC_CRON != '' && vars.EMAIL_SYNC_CRON || secrets.EMAIL_SYNC_CRON }}
-          ALERTS_ENABLED: ${{ vars.ALERTS_ENABLED != '' && vars.ALERTS_ENABLED || secrets.ALERTS_ENABLED }}
-          ALERTS_CRON: ${{ vars.ALERTS_CRON != '' && vars.ALERTS_CRON || secrets.ALERTS_CRON }}
-          SCRAPER_SCHEDULE_ENABLED: ${{ vars.SCRAPER_SCHEDULE_ENABLED != '' && vars.SCRAPER_SCHEDULE_ENABLED || secrets.SCRAPER_SCHEDULE_ENABLED }}
-          SCRAPER_SCHEDULE_CRON: ${{ vars.SCRAPER_SCHEDULE_CRON != '' && vars.SCRAPER_SCHEDULE_CRON || secrets.SCRAPER_SCHEDULE_CRON }}
-        run: |
-          set -euo pipefail
-
-          # Compatibilidade com os secrets antigos EMAIL_USER/EMAIL_PASSWORD.
-          EMAIL_USER="${EMAIL_USER:-adm@vetmg.com.br}"
-          if [ -n "${EMAIL_PASSWORD:-}" ]; then
-            IMAP_HOST="${IMAP_HOST:-imap.gmail.com}"
-            IMAP_PORT="${IMAP_PORT:-993}"
-            IMAP_USER="${IMAP_USER:-$EMAIL_USER}"
-            IMAP_PASSWORD="${IMAP_PASSWORD:-$EMAIL_PASSWORD}"
-            IMAP_TLS="${IMAP_TLS:-true}"
-            IMAP_MAILBOX="${IMAP_MAILBOX:-INBOX}"
-            SMTP_HOST="${SMTP_HOST:-smtp.gmail.com}"
-            SMTP_PORT="${SMTP_PORT:-587}"
-            SMTP_USER="${SMTP_USER:-$EMAIL_USER}"
-            SMTP_PASSWORD="${SMTP_PASSWORD:-$EMAIL_PASSWORD}"
-            SMTP_SECURE="${SMTP_SECURE:-false}"
-            SMTP_FROM="${SMTP_FROM:-$EMAIL_USER}"
-          fi
-
-          cat > /tmp/remote-config.sh <<'REMOTE'
-          set -euo pipefail
-          cd /opt/s2licit
-          set_kv_b64() {
-            KEY="$1" VALUE_B64="$2" python3 - <<'PY'
-          import base64, os
-          from pathlib import Path
-
-          key = os.environ["KEY"]
-          value = base64.b64decode(os.environ["VALUE_B64"]).decode("utf-8")
-          if "\n" in value or "\r" in value:
-              raise SystemExit(f"Valor multilinha não permitido para {key}")
-          path = Path(".env")
-          lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-          replacement = f"{key}={value}"
-          updated = False
-          output = []
-          for line in lines:
-              if line.startswith(f"{key}="):
-                  if not updated:
-                      output.append(replacement)
-                      updated = True
-              else:
-                  output.append(line)
-          if not updated:
-              output.append(replacement)
-          tmp = path.with_suffix(".env.tmp")
-          tmp.write_text("\n".join(output) + "\n", encoding="utf-8")
-          os.chmod(tmp, 0o600)
-          os.replace(tmp, path)
-          PY
-          }
-          REMOTE
-
-          applied=0
-          append_value() {
-            key="$1"
-            value="${!key:-}"
-            [ -n "$value" ] || return 0
-            encoded=$(printf %s "$value" | base64 -w0)
-            printf "set_kv_b64 '%s' '%s'\n" "$key" "$encoded" >> /tmp/remote-config.sh
-            echo "Configurando ${key}"
-            applied=$((applied + 1))
-          }
-
-          for key in \
-            ADMIN_PASSWORD GROQ_API_KEY ANTHROPIC_API_KEY \
-            BUILT_IN_FORGE_API_URL BUILT_IN_FORGE_API_KEY \
-            AI_PROVIDER GROQ_MODEL ANTHROPIC_MODEL LLM_TIMEOUT_MS \
-            IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_TLS IMAP_MAILBOX \
-            SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_SECURE SMTP_FROM \
-            EMAIL_SYNC_ENABLED EMAIL_SYNC_CRON ALERTS_ENABLED ALERTS_CRON \
-            SCRAPER_SCHEDULE_ENABLED SCRAPER_SCHEDULE_CRON \
-            WHATSAPP_PHONE_ID WHATSAPP_TOKEN WHATSAPP_API_VERSION \
-            WHATSAPP_WEBHOOK_URL WHATSAPP_TO; do
-            append_value "$key"
-          done
-
-          if [ "$applied" -eq 0 ]; then
-            echo "Nenhuma configuração nova informada; mantendo o .env atual."
-            exit 0
-          fi
-
-          cat >> /tmp/remote-config.sh <<'REMOTE'
-          docker compose up -d --force-recreate app >/dev/null
-          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2)
-          LOCAL_PORT=${LOCAL_PORT:-3000}
-          for i in $(seq 1 45); do
-            curl -fsS -o /dev/null "http://127.0.0.1:${LOCAL_PORT}/readyz" 2>/dev/null && {
-              echo "Integrações aplicadas e aplicação pronta ✅"
-              exit 0
-            }
-            sleep 4
-          done
-          echo "Aplicação não ficou pronta após aplicar integrações" >&2
-          docker compose logs --tail=80 app >&2 || true
+          docker compose logs --tail=120 app db >&2 || true
           exit 1
           REMOTE
-
-          # Runner self-hosted já executa na própria VPS: roda o script localmente.
-          bash /tmp/remote-config.sh
 
       - name: Resumo
         run: |
-          echo "### Deploy concluído ✅" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$DEPLOY_DOMAIN" ]; then
-            echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- URL: http://$DEPLOY_HOST/" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo "- Código, migrações e integrações sincronizados" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Readiness validada em /readyz (aplicação + MySQL)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Nenhum valor de secret foi exibido nos logs" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Deploy concluído" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Imagem: $S2_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Readiness: aplicação + MySQL" >> "$GITHUB_STEP_SUMMARY"
