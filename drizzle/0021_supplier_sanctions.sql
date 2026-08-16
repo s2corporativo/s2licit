@@ -25,6 +25,6 @@ CREATE TABLE IF NOT EXISTS `supplier_sanctions` (
 	CONSTRAINT `fk_supplier_sanctions_supplier` FOREIGN KEY (`supplierId`) REFERENCES `suppliers`(`id`) ON DELETE RESTRICT
 );
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS `idx_supplier_sanctions_supplier` ON `supplier_sanctions` (`supplierId`);
+CREATE INDEX `idx_supplier_sanctions_supplier` ON `supplier_sanctions` (`supplierId`);
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS `idx_supplier_sanctions_status_fim` ON `supplier_sanctions` (`status`, `dataFim`);
+CREATE INDEX `idx_supplier_sanctions_status_fim` ON `supplier_sanctions` (`status`, `dataFim`);
