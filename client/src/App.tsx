@@ -89,12 +89,8 @@ function Router() {
                 <Route path="/busca-global" component={BuscaGlobal} />
                 <Route path="/busca"><Redirect to="/busca-global?modo=precos" /></Route>
                 <Route path="/manual" component={Manual} />
-                <Route path="/centro-operacional">
-                  <RequireAuth message="Acesse a Central Operacional após fazer login." minRole="editor"><CentroOperacional /></RequireAuth>
-                </Route>
-                <Route path="/diagnostico">
-                  <RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor"><Diagnostico /></RequireAuth>
-                </Route>
+                <Route path="/centro-operacional"><RequireAuth message="Acesse a Central Operacional após fazer login." minRole="editor"><CentroOperacional /></RequireAuth></Route>
+                <Route path="/diagnostico"><RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor"><Diagnostico /></RequireAuth></Route>
                 <Route path="/comparacao" component={Comparacao} />
                 <Route path="/categorias" component={Categorias} />
                 <Route path="/produtos" component={Produtos} />
@@ -132,7 +128,7 @@ function Router() {
                 <Route path="/propostas"><RequireAuth message="Gerencie propostas comerciais após fazer login."><Propostas /></RequireAuth></Route>
                 <Route path="/proposta-rapida"><Redirect to="/propostas" /></Route>
                 <Route path="/propostas/:id"><RequireAuth message="Edite propostas após fazer login."><PropostaEditor /></RequireAuth></Route>
-                <Route path="/propostas-admin"><Redirect to="/propostas" /></Route>
+                <Route path="/propostas-admin"><Redirect to="/configuracao" /></Route>
                 <Route path="/financeiro"><RequireAuth message="Acesse o controle financeiro após fazer login."><ControleFinanceiro /></RequireAuth></Route>
                 <Route path="/enriquecimento"><RequireAuth message="Faça login para acessar o enriquecimento de catálogo."><EnriquecimentoCatalogo /></RequireAuth></Route>
                 <Route path="/reclassificacao"><RequireAuth message="Faça login para acessar a reclassificação em lote." minRole="editor"><ReclassificacaoIA /></RequireAuth></Route>

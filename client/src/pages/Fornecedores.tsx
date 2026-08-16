@@ -21,45 +21,74 @@ const emptyForm: SupplierForm = {
   notes: "",
 };
 
+type SanctionForm = {
+  orgao: string;
+  processo: string;
+  penalidade: "advertencia" | "multa" | "impedimento" | "inidoneidade";
+  dataInicio: string;
+  dataFim: string;
+  referenciaLegal: string;
+  observacoes: string;
+};
+
+const emptySanctionForm: SanctionForm = {
+  orgao: "",
+  processo: "",
+  penalidade: "advertencia",
+  dataInicio: "",
+  dataFim: "",
+  referenciaLegal: "",
+  observacoes: "",
+};
+
 export default function Fornecedores() {
   const { confirm, confirmDialog } = useConfirm();
+  const utils = trpc.useUtils();
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<SupplierForm>(emptyForm);
-
-  const { data: suppliers, isLoading } = trpc.suppliers.list.useQuery({ activeOnly: false });
-  const utils = trpc.useUtils();
-
-  const createMutation = trpc.suppliers.create.useMutation({
-    onSuccess: () => { utils.suppliers.list.invalidate(); resetForm(); },
-  });
-  const updateMutation = trpc.suppliers.update.useMutation({
-    onSuccess: () => { utils.suppliers.list.invalidate(); resetForm(); },
-  });
-  const deleteMutation = trpc.suppliers.delete.useMutation({
-    onSuccess: () => utils.suppliers.list.invalidate(),
-  });
-  const toggleActiveMutation = trpc.suppliers.update.useMutation({
-    onSuccess: () => utils.suppliers.list.invalidate(),
-  });
-
-  // ─── Gestão de sanções do fornecedor selecionado ───────────────────────────
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [showSanctionForm, setShowSanctionForm] = useState(false);
-  const [sanctionForm, setSanctionForm] = useState({
-    orgao: "",
-    processo: "",
-    penalidade: "advertencia" as "advertencia" | "multa" | "impedimento" | "inidoneidade",
-    dataInicio: "",
-    dataFim: "",
-    referenciaLegal: "",
-    observacoes: "",
-  });
+  const [sanctionForm, setSanctionForm] = useState<SanctionForm>(emptySanctionForm);
 
+  const { data: suppliers, isLoading } = trpc.suppliers.list.useQuery({ activeOnly: false });
   const sanctionsListQuery = trpc.sanctions.list.useQuery(
     { supplierId: selectedSupplierId ?? undefined },
     { enabled: selectedSupplierId != null },
   );
+
+  const resetForm = () => {
+    setShowForm(false);
+    setEditId(null);
+    setForm(emptyForm);
+  };
+
+  const resetSanctionForm = () => {
+    setShowSanctionForm(false);
+    setSanctionForm(emptySanctionForm);
+  };
+
+  const createMutation = trpc.suppliers.create.useMutation({
+    onSuccess: () => {
+      utils.suppliers.list.invalidate();
+      resetForm();
+    },
+  });
+  const updateMutation = trpc.suppliers.update.useMutation({
+    onSuccess: () => {
+      utils.suppliers.list.invalidate();
+      resetForm();
+    },
+  });
+  const deleteMutation = trpc.suppliers.delete.useMutation({
+    onSuccess: () => {
+      utils.suppliers.list.invalidate();
+      setSelectedSupplierId(null);
+    },
+  });
+  const toggleActiveMutation = trpc.suppliers.update.useMutation({
+    onSuccess: () => utils.suppliers.list.invalidate(),
+  });
   const createSanctionMutation = trpc.sanctions.create.useMutation({
     onSuccess: () => {
       utils.sanctions.list.invalidate();
@@ -76,14 +105,29 @@ export default function Fornecedores() {
     onError: (e) => alert(e.message),
   });
 
-  const resetSanctionForm = () => {
-    setShowSanctionForm(false);
-    setSanctionForm({ orgao: "", processo: "", penalidade: "advertencia", dataInicio: "", dataFim: "", referenciaLegal: "", observacoes: "" });
+  const handleEdit = (supplier: any) => {
+    setEditId(supplier.id);
+    setForm({
+      name: supplier.name ?? "",
+      code: supplier.code ?? "",
+      contact: supplier.contact ?? "",
+      email: supplier.email ?? "",
+      phone: supplier.phone ?? "",
+      notes: supplier.notes ?? "",
+    });
+    setShowForm(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) return;
+    if (editId) updateMutation.mutate({ id: editId, ...form });
+    else createMutation.mutate(form);
   };
 
   const handleSubmitSanction = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sanctionForm.orgao.trim() || !sanctionForm.dataInicio || !selectedSupplierId) return;
+    if (!selectedSupplierId || !sanctionForm.orgao.trim() || !sanctionForm.dataInicio) return;
     createSanctionMutation.mutate({
       supplierId: selectedSupplierId,
       orgao: sanctionForm.orgao.trim(),
@@ -96,367 +140,267 @@ export default function Fornecedores() {
     });
   };
 
-  const resetForm = () => {
-    setShowForm(false);
-    setEditId(null);
-    setForm(emptyForm);
-  };
-
-  const handleEdit = (s: any) => {
-    setEditId(s.id);
-    setForm({
-      name: s.name ?? "",
-      code: s.code ?? "",
-      contact: s.contact ?? "",
-      email: s.email ?? "",
-      phone: s.phone ?? "",
-      notes: s.notes ?? "",
-    });
-    setShowForm(true);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    if (editId) {
-      updateMutation.mutate({ id: editId, ...form });
-    } else {
-      createMutation.mutate(form);
-    }
-  };
+  const selectedSupplier = suppliers?.find((supplier) => supplier.id === selectedSupplierId);
 
   return (
-    <div className="p-8 max-w-4xl">
-      <div className="mb-6 flex items-start justify-between">
+    <div className="max-w-7xl p-8">
+      <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <span className="its-bar" />
-          <h1 className="text-3xl font-black tracking-tight text-gray-900">
-            Fornecedores
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Gerencie o cadastro de fornecedores do sistema.
+          <h1 className="text-3xl font-black tracking-tight text-gray-900">Fornecedores</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Contatos, situação cadastral e sanções dos fornecedores usados nas cotações.
           </p>
         </div>
         <button
-          onClick={() => { setShowForm(!showForm); setEditId(null); setForm(emptyForm); }}
-          className="flex items-center gap-2 bg-gray-900 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-800 transition-colors"
+          onClick={() => {
+            setEditId(null);
+            setForm(emptyForm);
+            setShowForm((value) => !value);
+          }}
+          className="flex items-center gap-2 bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800"
         >
-          <Plus size={14} />
-          Novo Fornecedor
+          <Plus size={14} /> Novo Fornecedor
         </button>
       </div>
 
-      {/* Form */}
       {showForm && (
-        <div className="border border-gray-900 p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="mb-6 border border-gray-900 p-6">
+          <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-black tracking-tight text-gray-900">
               {editId ? "Editar Fornecedor" : "Novo Fornecedor"}
             </h2>
-            <button onClick={resetForm}>
+            <button onClick={resetForm} aria-label="Fechar formulário">
               <X size={16} className="text-gray-400 hover:text-gray-900" />
             </button>
           </div>
           <form onSubmit={handleSubmit}>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div className="col-span-2">
-                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                  Nome *
-                </label>
+            <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label="Nome *" className="md:col-span-2">
                 <input
-                  type="text"
                   value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))}
                   required
-                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                   placeholder="Nome do fornecedor"
                 />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                  Código
-                </label>
+              </Field>
+              <Field label="Código">
                 <input
-                  type="text"
                   value={form.code}
-                  onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                  onChange={(e) => setForm((current) => ({ ...current, code: e.target.value }))}
+                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                   placeholder="Código interno"
                 />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                  Contato
-                </label>
+              </Field>
+              <Field label="Contato">
                 <input
-                  type="text"
                   value={form.contact}
-                  onChange={(e) => setForm((f) => ({ ...f, contact: e.target.value }))}
-                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                  onChange={(e) => setForm((current) => ({ ...current, contact: e.target.value }))}
+                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                   placeholder="Nome do contato"
                 />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                  E-mail
-                </label>
+              </Field>
+              <Field label="E-mail">
                 <input
                   type="email"
                   value={form.email}
-                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                  onChange={(e) => setForm((current) => ({ ...current, email: e.target.value }))}
+                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                   placeholder="email@fornecedor.com"
                 />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                  Telefone
-                </label>
+              </Field>
+              <Field label="Telefone">
                 <input
-                  type="text"
                   value={form.phone}
-                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
+                  onChange={(e) => setForm((current) => ({ ...current, phone: e.target.value }))}
+                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                   placeholder="(00) 00000-0000"
                 />
-              </div>
-              <div className="col-span-2">
-                <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                  Observações
-                </label>
+              </Field>
+              <Field label="Observações" className="md:col-span-2">
                 <textarea
                   value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  onChange={(e) => setForm((current) => ({ ...current, notes: e.target.value }))}
                   rows={2}
-                  className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 resize-none"
-                  placeholder="Notas internas sobre este fornecedor"
+                  className="w-full resize-none border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                 />
-              </div>
+              </Field>
             </div>
             <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2 border border-gray-300 text-sm font-semibold text-gray-700 hover:border-gray-900 transition-colors"
-              >
+              <button type="button" onClick={resetForm} className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:border-gray-900">
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={createMutation.isPending || updateMutation.isPending}
-                className="flex items-center gap-2 bg-gray-900 text-white px-5 py-2 text-sm font-semibold hover:bg-blue-800 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 bg-gray-900 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50"
               >
-                <Check size={14} />
-                {editId ? "Salvar alterações" : "Criar fornecedor"}
+                <Check size={14} /> {editId ? "Salvar alterações" : "Criar fornecedor"}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Painel de sanções do fornecedor selecionado */}
-      {selectedSupplierId != null && (() => {
-        const sel = suppliers?.find((x) => x.id === selectedSupplierId);
-        return (
-          <div className="border border-gray-900 p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-black tracking-tight text-gray-900 flex items-center gap-2">
-                <ShieldAlert size={14} />
-                Sanções — {sel?.name ?? "Fornecedor"} (Lei 14.133/21, art. 155)
-              </h2>
-              <button onClick={resetSanctionForm}>
-                <X size={16} className="text-gray-400 hover:text-gray-900" />
-              </button>
-            </div>
-            {sanctionsListQuery.isLoading ? (
-              <p className="text-xs text-gray-400">Carregando sanções...</p>
-            ) : sanctionsListQuery.data && sanctionsListQuery.data.length > 0 ? (
-              <div className="mb-4 space-y-2">
-                {sanctionsListQuery.data.map((s: any) => (
-                  <div
-                    key={s.id}
-                    className={`border px-4 py-3 flex items-start justify-between gap-3 ${
-                      s.status === "ativa" ? "border-blue-800 bg-blue-50" : "border-gray-200 bg-gray-50"
-                    }`}
-                  >
-                    <div className="text-xs">
-                      <div className="font-bold text-gray-900">
-                        {s.penalidade.toUpperCase()}
-                        {s.status !== "ativa" && (
-                          <span className="ml-2 font-normal text-gray-400">({s.status})</span>
-                        )}
-                      </div>
-                      <div className="text-gray-600 mt-1">
-                        {s.orgao}
-                        {s.processo ? ` · Processo ${s.processo}` : ""}
-                        {s.referenciaLegal ? ` · ${s.referenciaLegal}` : ""}
-                      </div>
-                      <div className="text-gray-400 mt-1">
-                        {new Date(s.dataInicio).toLocaleDateString("pt-BR")}
-                        {s.dataFim ? ` → ${new Date(s.dataFim).toLocaleDateString("pt-BR")}` : " → sem prazo definido"}
-                      </div>
-                      {s.observacoes ? <div className="text-gray-500 italic mt-1">{s.observacoes}</div> : null}
-                    </div>
-                    {s.status === "ativa" && (
-                      <button
-                        onClick={async () => {
-                          const ok = await confirm({
-                            title: "Revogar esta sanção?",
-                            description: "A sanção será marcada como revogada (mantida no histórico). Registre quem solicitou a revogação nas observações.",
-                            confirmLabel: "Revogar",
-                          });
-                          if (ok) revokeSanctionMutation.mutate({ id: s.id });
-                        }}
-                        className="shrink-0 px-3 py-1 border border-gray-300 text-[10px] font-bold tracking-widest uppercase text-gray-600 hover:border-blue-800 hover:text-blue-800 transition-colors"
-                      >
-                        Revogar
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 mb-4">
-                Nenhuma sanção registrada para este fornecedor.
-              </p>
-            )}
-
+      {selectedSupplierId != null && (
+        <div className="mb-6 border border-gray-900 p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 text-sm font-black text-gray-900">
+              <ShieldAlert size={15} /> Sanções — {selectedSupplier?.name ?? "Fornecedor"}
+            </h2>
             <button
-              type="button"
-              onClick={() => setShowSanctionForm((v) => !v)}
-              className="flex items-center gap-2 bg-gray-900 text-white px-4 py-2 text-sm font-semibold hover:bg-blue-800 transition-colors mb-3"
+              onClick={() => {
+                setSelectedSupplierId(null);
+                resetSanctionForm();
+              }}
+              aria-label="Fechar sanções"
             >
-              <Plus size={14} />
-              {showSanctionForm ? "Cancelar" : "Registrar sanção"}
+              <X size={16} className="text-gray-400 hover:text-gray-900" />
             </button>
-
-            {showSanctionForm && (
-              <form onSubmit={handleSubmitSanction} className="border-t border-gray-200 pt-4">
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Órgão sancionador *
-                    </label>
-                    <input
-                      type="text"
-                      value={sanctionForm.orgao}
-                      onChange={(e) => setSanctionForm((f) => ({ ...f, orgao: e.target.value }))}
-                      required
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-                      placeholder="Ex.: Prefeitura Municipal de ..., DNIT, MAPA"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Processo
-                    </label>
-                    <input
-                      type="text"
-                      value={sanctionForm.processo}
-                      onChange={(e) => setSanctionForm((f) => ({ ...f, processo: e.target.value }))}
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-                      placeholder="Número do processo administrativo"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Penalidade *
-                    </label>
-                    <select
-                      value={sanctionForm.penalidade}
-                      onChange={(e) =>
-                        setSanctionForm((f) => ({
-                          ...f,
-                          penalidade: e.target.value as typeof sanctionForm.penalidade,
-                        }))
-                      }
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white"
-                    >
-                      <option value="advertencia">Advertência</option>
-                      <option value="multa">Multa</option>
-                      <option value="impedimento">Impedimento de licitar/contratar</option>
-                      <option value="inidoneidade">Declaração de inidoneidade</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Data de início *
-                    </label>
-                    <input
-                      type="date"
-                      value={sanctionForm.dataInicio}
-                      onChange={(e) => setSanctionForm((f) => ({ ...f, dataInicio: e.target.value }))}
-                      required
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Data de fim (opcional)
-                    </label>
-                    <input
-                      type="date"
-                      value={sanctionForm.dataFim}
-                      onChange={(e) => setSanctionForm((f) => ({ ...f, dataFim: e.target.value }))}
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-                    />
-                    <p className="text-[10px] text-gray-400 mt-1">Em branco = sem prazo definido (art. 156)</p>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Referência legal
-                    </label>
-                    <input
-                      type="text"
-                      value={sanctionForm.referenciaLegal}
-                      onChange={(e) => setSanctionForm((f) => ({ ...f, referenciaLegal: e.target.value }))}
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
-                      placeholder="Ex.: Lei 14.133/21, art. 155, III"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">
-                      Observações
-                    </label>
-                    <textarea
-                      value={sanctionForm.observacoes}
-                      onChange={(e) => setSanctionForm((f) => ({ ...f, observacoes: e.target.value }))}
-                      rows={2}
-                      className="w-full border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 resize-none"
-                      placeholder="Motivo, fontes (CEIS, CNEP) e responsável pelo registro"
-                    />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 mb-3">
-                  <AlertTriangle size={14} className="text-blue-800" />
-                  <p className="text-xs text-gray-600">
-                    Fornecedores com sanção ativa bloqueiam alertas em orçamentos que
-                    incluam produtos deles. A decisão final de participar cabe ao cliente.
-                  </p>
-                </div>
-                <button
-                  type="submit"
-                  disabled={createSanctionMutation.isPending}
-                  className="flex items-center gap-2 bg-blue-800 text-white px-5 py-2 text-sm font-semibold hover:bg-blue-900 transition-colors disabled:opacity-50"
-                >
-                  <Check size={14} />
-                  Registrar sanção
-                </button>
-              </form>
-            )}
           </div>
-        );
-      })()}
 
-      {/* Suppliers list */}
+          {sanctionsListQuery.isLoading ? (
+            <p className="text-xs text-gray-400">Carregando sanções...</p>
+          ) : sanctionsListQuery.data?.length ? (
+            <div className="mb-4 space-y-2">
+              {sanctionsListQuery.data.map((sanction: any) => (
+                <div
+                  key={sanction.id}
+                  className={`flex items-start justify-between gap-3 border px-4 py-3 ${sanction.status === "ativa" ? "border-blue-800 bg-blue-50" : "border-gray-200 bg-gray-50"}`}
+                >
+                  <div className="text-xs">
+                    <div className="font-bold text-gray-900">
+                      {String(sanction.penalidade).toUpperCase()}
+                      {sanction.status !== "ativa" && <span className="ml-2 font-normal text-gray-400">({sanction.status})</span>}
+                    </div>
+                    <div className="mt-1 text-gray-600">
+                      {sanction.orgao}{sanction.processo ? ` · Processo ${sanction.processo}` : ""}{sanction.referenciaLegal ? ` · ${sanction.referenciaLegal}` : ""}
+                    </div>
+                    <div className="mt-1 text-gray-400">
+                      {new Date(sanction.dataInicio).toLocaleDateString("pt-BR")}
+                      {sanction.dataFim ? ` → ${new Date(sanction.dataFim).toLocaleDateString("pt-BR")}` : " → sem prazo definido"}
+                    </div>
+                    {sanction.observacoes && <div className="mt-1 italic text-gray-500">{sanction.observacoes}</div>}
+                  </div>
+                  {sanction.status === "ativa" && (
+                    <button
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Revogar esta sanção?",
+                          description: "A sanção será mantida no histórico e marcada como revogada.",
+                          confirmLabel: "Revogar",
+                        });
+                        if (ok) revokeSanctionMutation.mutate({ id: sanction.id });
+                      }}
+                      className="shrink-0 border border-gray-300 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-gray-600 hover:border-blue-800 hover:text-blue-800"
+                    >
+                      Revogar
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mb-4 text-xs text-gray-400">Nenhuma sanção registrada para este fornecedor.</p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowSanctionForm((value) => !value)}
+            className="mb-3 flex items-center gap-2 bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+          >
+            <Plus size={14} /> {showSanctionForm ? "Cancelar" : "Registrar sanção"}
+          </button>
+
+          {showSanctionForm && (
+            <form onSubmit={handleSubmitSanction} className="border-t border-gray-200 pt-4">
+              <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label="Órgão sancionador *" className="md:col-span-2">
+                  <input
+                    value={sanctionForm.orgao}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, orgao: e.target.value }))}
+                    required
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Processo">
+                  <input
+                    value={sanctionForm.processo}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, processo: e.target.value }))}
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Penalidade *">
+                  <select
+                    value={sanctionForm.penalidade}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, penalidade: e.target.value as SanctionForm["penalidade"] }))}
+                    className="w-full border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  >
+                    <option value="advertencia">Advertência</option>
+                    <option value="multa">Multa</option>
+                    <option value="impedimento">Impedimento de licitar/contratar</option>
+                    <option value="inidoneidade">Declaração de inidoneidade</option>
+                  </select>
+                </Field>
+                <Field label="Data de início *">
+                  <input
+                    type="date"
+                    value={sanctionForm.dataInicio}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, dataInicio: e.target.value }))}
+                    required
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Data de fim">
+                  <input
+                    type="date"
+                    value={sanctionForm.dataFim}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, dataFim: e.target.value }))}
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Referência legal">
+                  <input
+                    value={sanctionForm.referenciaLegal}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, referenciaLegal: e.target.value }))}
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                    placeholder="Lei 14.133/21, art. 155..."
+                  />
+                </Field>
+                <Field label="Observações" className="md:col-span-2">
+                  <textarea
+                    value={sanctionForm.observacoes}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, observacoes: e.target.value }))}
+                    rows={2}
+                    className="w-full resize-none border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+              </div>
+              <div className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+                <AlertTriangle size={14} className="text-blue-800" />
+                Sanções ativas geram bloqueio preventivo na geração de orçamento com produtos do fornecedor.
+              </div>
+              <button
+                type="submit"
+                disabled={createSanctionMutation.isPending}
+                className="flex items-center gap-2 bg-blue-800 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50"
+              >
+                <Check size={14} /> Registrar sanção
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="py-12 text-center">
-          <div className="w-6 h-1 bg-gray-200 mx-auto mb-3 animate-pulse" />
+          <div className="mx-auto mb-3 h-1 w-6 animate-pulse bg-gray-200" />
           <p className="text-xs text-gray-400">Carregando...</p>
         </div>
-      ) : suppliers && suppliers.length > 0 ? (
-        <div className="border border-gray-200">
-          <table className="its-table">
+      ) : suppliers?.length ? (
+        <div className="overflow-x-auto border border-gray-200">
+          <table className="its-table min-w-[1180px]">
             <thead>
               <tr>
                 <th>Nome</th>
@@ -465,80 +409,55 @@ export default function Fornecedores() {
                 <th>E-mail</th>
                 <th>Telefone</th>
                 <th>Status</th>
-                <th></th>
+                <th>Sanções</th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody>
-              {suppliers.map((s) => (
-                <tr key={s.id}>
+              {suppliers.map((supplier) => (
+                <tr key={supplier.id}>
+                  <td><div className="font-semibold text-xs text-gray-900">{supplier.name}</div></td>
+                  <td className="text-xs text-gray-600">{supplier.code || "—"}</td>
+                  <td className="text-xs text-gray-600">{supplier.contact || "—"}</td>
+                  <td className="text-xs text-gray-600">{supplier.email || "—"}</td>
+                  <td className="text-xs text-gray-600">{supplier.phone || "—"}</td>
                   <td>
-                    <div className="font-semibold text-xs text-gray-900">{s.name}</div>
-                  </td>
-                  <td>
-                    <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">
-                      {s.isActive === "yes" ? "Ativo" : "Inativo"}
-                    </span>
-                  </td>
-                  <td className="text-xs text-gray-500">
-                    {new Date(s.createdAt).toLocaleDateString("pt-BR")}
+                    <button
+                      onClick={() => toggleActiveMutation.mutate({ id: supplier.id, isActive: supplier.isActive === "yes" ? "no" : "yes" })}
+                      className={`border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${supplier.isActive === "yes" ? "border-green-300 bg-green-50 text-green-700" : "border-gray-200 text-gray-400"}`}
+                    >
+                      {supplier.isActive === "yes" ? "Ativo" : "Inativo"}
+                    </button>
                   </td>
                   <td>
                     <button
                       onClick={() => {
-                        if (selectedSupplierId === s.id) {
-                          setSelectedSupplierId(null);
-                          setShowSanctionForm(false);
-                          return;
-                        }
-                        setSelectedSupplierId(s.id);
+                        setSelectedSupplierId((current) => current === supplier.id ? null : supplier.id);
                         setShowSanctionForm(false);
                       }}
-                      className={`text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 border transition-colors flex items-center gap-1 ${
-                        selectedSupplierId === s.id
-                          ? "border-blue-800 text-blue-800 bg-blue-50"
-                          : "border-gray-200 text-gray-500"
-                      }`}
-                      title="Sanções (Lei 14.133/21)"
+                      className={`flex items-center gap-1 border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${selectedSupplierId === supplier.id ? "border-blue-800 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-500"}`}
                     >
-                      <ShieldAlert size={10} />
-                      Sanções
-                    </button>
-                    <button
-                      onClick={() =>
-                        toggleActiveMutation.mutate({
-                          id: s.id,
-                          isActive: s.isActive === "yes" ? "no" : "yes",
-                        })
-                      }
-                      className={`text-[10px] font-bold tracking-widest uppercase px-2 py-0.5 border transition-colors ${
-                        s.isActive === "yes"
-                          ? "border-green-300 text-green-700 bg-green-50"
-                          : "border-gray-200 text-gray-400"
-                      }`}
-                    >
-                      {s.isActive === "yes" ? "Ativo" : "Inativo"}
+                      <ShieldAlert size={10} /> Gerenciar
                     </button>
                   </td>
                   <td>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleEdit(s)}
-                        className="text-gray-300 hover:text-gray-900 transition-colors"
-                      >
-                        <Pencil size={12} />
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => handleEdit(supplier)} aria-label={`Editar ${supplier.name}`} className="text-gray-400 hover:text-gray-900">
+                        <Pencil size={14} />
                       </button>
                       <button
+                        aria-label={`Excluir ${supplier.name}`}
                         onClick={async () => {
                           const ok = await confirm({
-                            title: `Excluir fornecedor "${s.name}"?`,
+                            title: `Excluir fornecedor "${supplier.name}"?`,
                             description: "Todos os produtos deste fornecedor serão removidos do catálogo, junto com seus preços. Esta ação não pode ser desfeita.",
                             confirmLabel: "Excluir",
                           });
-                          if (ok) deleteMutation.mutate({ id: s.id });
+                          if (ok) deleteMutation.mutate({ id: supplier.id });
                         }}
-                        className="text-gray-300 hover:text-blue-800 transition-colors"
+                        className="text-gray-400 hover:text-red-700"
                       >
-                        <X size={12} />
+                        <X size={14} />
                       </button>
                     </div>
                   </td>
@@ -549,13 +468,20 @@ export default function Fornecedores() {
         </div>
       ) : (
         <div className="border border-gray-200 py-16 text-center">
-          <Building2 size={24} className="text-gray-200 mx-auto mb-3" />
-          <p className="text-sm text-gray-400">
-            Nenhum fornecedor cadastrado. Clique em "Novo Fornecedor" para começar.
-          </p>
+          <Building2 size={24} className="mx-auto mb-3 text-gray-200" />
+          <p className="text-sm text-gray-400">Nenhum fornecedor cadastrado. Clique em "Novo Fornecedor" para começar.</p>
         </div>
       )}
       {confirmDialog}
+    </div>
+  );
+}
+
+function Field({ label, className = "", children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={className}>
+      <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-gray-400">{label}</label>
+      {children}
     </div>
   );
 }

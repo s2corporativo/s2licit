@@ -9,7 +9,9 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY . .
-RUN pnpm run build
+# Gate de segurança: o deploy não cria/publica imagem se o TypeScript estiver
+# inconsistente. Isso substitui a validação local citada no workflow de deploy.
+RUN pnpm run check && pnpm run build
 
 # ── Estágio 2: dependências de produção (sem devDependencies) ────────────────
 FROM node:22-bookworm-slim AS proddeps

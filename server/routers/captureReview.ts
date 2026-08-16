@@ -1,478 +1,307 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { eq, desc, and, inArray } from "drizzle-orm";
-import { productCaptureHistory, products, suppliers } from "../../drizzle/schema";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
+import {
+  capturedProductBatches,
+  capturedProducts,
+  products,
+} from "../../drizzle/schema";
 import { logger } from "../_core/logger";
 
+const reviewStatus = z.enum(["pending", "approved", "rejected", "applied"]);
+const sourceType = z.enum(["url", "html", "pdf", "spreadsheet", "xml", "docx", "text", "image"]);
+
+async function syncBatchCounters(batchIds: number[]) {
+  const db = await getDb();
+  if (!db || batchIds.length === 0) return;
+
+  for (const batchId of [...new Set(batchIds)]) {
+    const rows = await db
+      .select({ status: capturedProducts.status, total: count() })
+      .from(capturedProducts)
+      .where(eq(capturedProducts.batchId, batchId))
+      .groupBy(capturedProducts.status);
+
+    const total = rows.reduce((sum, row) => sum + Number(row.total), 0);
+    const approved = Number(rows.find((row) => row.status === "approved")?.total ?? 0);
+    const rejected = Number(rows.find((row) => row.status === "rejected")?.total ?? 0);
+    const applied = Number(rows.find((row) => row.status === "applied")?.total ?? 0);
+    const pending = Number(rows.find((row) => row.status === "pending")?.total ?? 0);
+
+    let status: "review" | "approved" | "rejected" | "applied" = "review";
+    if (total > 0 && applied === total) status = "applied";
+    else if (total > 0 && rejected === total) status = "rejected";
+    else if (pending === 0 && approved + applied + rejected === total) status = "approved";
+
+    await db
+      .update(capturedProductBatches)
+      .set({ totalApproved: approved + applied, totalRejected: rejected, status })
+      .where(eq(capturedProductBatches.id, batchId));
+  }
+}
+
+async function getBatchIdsForItems(ids: number[]) {
+  const db = await getDb();
+  if (!db || ids.length === 0) return [] as number[];
+  const rows = await db
+    .select({ batchId: capturedProducts.batchId })
+    .from(capturedProducts)
+    .where(inArray(capturedProducts.id, ids));
+  return rows.map((row) => row.batchId);
+}
+
+/**
+ * Central de Revisão da Captura Inteligente.
+ * A versão anterior lia product_capture_history, um fluxo legado que não
+ * recebe os lotes criados por intelligentCapture. Captura e revisão passam a
+ * usar a mesma fonte de verdade: captured_product_batches/captured_products.
+ */
 export const captureReviewRouter = router({
-  /**
-   * Lista produtos capturados pendentes de revisão
-   */
   listPending: protectedProcedure
     .input(
       z.object({
-        supplierId: z.number().optional(),
-        status: z.enum(["detected", "approved", "rejected", "applied"]).optional(),
-        limit: z.number().default(50),
-        offset: z.number().default(0),
-      })
+        sourceType: sourceType.optional(),
+        status: reviewStatus.optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+      }),
     )
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database connection failed");
 
       try {
-        const baseQuery = db
-          .select({
-            id: productCaptureHistory.id,
-            productId: productCaptureHistory.productId,
-            productName: products.name,
-            supplierName: suppliers.name,
-            field: productCaptureHistory.fieldChanged,
-            oldValue: productCaptureHistory.valueBefore,
-            newValue: productCaptureHistory.valueAfter,
-            status: productCaptureHistory.status,
-            createdAt: productCaptureHistory.createdAt,
-          })
-          .from(productCaptureHistory)
-          .innerJoin(products, eq(productCaptureHistory.productId, products.id))
-          .innerJoin(suppliers, eq(productCaptureHistory.supplierId, suppliers.id));
-
         const conditions = [];
-        if (input.supplierId) {
-          conditions.push(eq(productCaptureHistory.supplierId, input.supplierId));
-        }
-        if (input.status) {
-          conditions.push(eq(productCaptureHistory.status, input.status));
-        }
+        if (input.sourceType) conditions.push(eq(capturedProductBatches.sourceType, input.sourceType));
+        if (input.status) conditions.push(eq(capturedProducts.status, input.status));
+        const where = conditions.length ? and(...conditions) : undefined;
 
-        const items = await (conditions.length > 0
-          ? baseQuery.where(and(...conditions))
-          : baseQuery)
-          .orderBy(desc(productCaptureHistory.createdAt))
-          .limit(input.limit)
-          .offset(input.offset)
-          .execute();
-
-        return {
-          items,
-          total: items.length,
-        };
-      } catch (error) {
-        logger.error("Error listing pending captures:", error);
-        return { items: [], total: 0 };
-      }
-    }),
-
-  /**
-   * Obtém detalhes de um produto para preview
-   */
-  getProductPreview: protectedProcedure
-    .input(z.object({ productId: z.number() }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-
-      try {
-        const product = await db
-          .select()
-          .from(products)
-          .where(eq(products.id, input.productId))
-          .limit(1)
-          .execute();
-
-        return product[0] || null;
-      } catch (error) {
-        logger.error("Error getting product preview:", error);
-        return null;
-      }
-    }),
-
-  /**
-   * Estatísticas da revisão
-   */
-  getReviewStats: protectedProcedure
-    .input(z.object({ supplierId: z.number().optional() }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      if (!db) {
-        return { total: 0, pendingReview: 0, approved: 0, rejected: 0, applied: 0 };
-      }
-
-      try {
-        const rows = await db
-          .select({
-            supplierId: productCaptureHistory.supplierId,
-            status: productCaptureHistory.status,
-          })
-          .from(productCaptureHistory)
-          .execute();
-
-        const filtered = input.supplierId
-          ? rows.filter((row) => row.supplierId === input.supplierId)
-          : rows;
-
-        return {
-          total: filtered.length,
-          pendingReview: filtered.filter((row) => row.status === "detected").length,
-          approved: filtered.filter((row) => row.status === "approved").length,
-          rejected: filtered.filter((row) => row.status === "rejected").length,
-          applied: filtered.filter((row) => row.status === "applied").length,
-        };
-      } catch (error) {
-        logger.error("Error getting review stats:", error);
-        return { total: 0, pendingReview: 0, approved: 0, rejected: 0, applied: 0 };
-      }
-    }),
-
-  /**
-   * Fornecedores com itens pendentes
-   */
-  getSuppliersWithPending: protectedProcedure
-    .query(async () => {
-      const db = await getDb();
-      if (!db) return [];
-
-      try {
-        const rows = await db
-          .select({
-            supplierId: suppliers.id,
-            supplierName: suppliers.name,
-            status: productCaptureHistory.status,
-          })
-          .from(productCaptureHistory)
-          .innerJoin(suppliers, eq(productCaptureHistory.supplierId, suppliers.id))
-          .execute();
-
-        const grouped = new Map<number, { supplierId: number; supplierName: string; pendingCount: number }>();
-        for (const row of rows) {
-          const current = grouped.get(row.supplierId) ?? {
-            supplierId: row.supplierId,
-            supplierName: row.supplierName,
-            pendingCount: 0,
-          };
-          if (row.status === "detected") current.pendingCount += 1;
-          grouped.set(row.supplierId, current);
-        }
-
-        return Array.from(grouped.values()).filter((row) => row.pendingCount > 0);
-      } catch (error) {
-        logger.error("Error getting suppliers with pending items:", error);
-        return [];
-      }
-    }),
-
-  /**
-   * Aprova produtos em lote
-   */
-  approveBatch: protectedProcedure
-    .input(z.object({ ids: z.array(z.number()), userId: z.number().optional() }))
-    .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-
-      try {
-        if (input.ids.length === 0) {
-          return { success: true, approved: 0 };
-        }
-
-        const userId = input.userId || (ctx.user?.id as number);
-        const now = new Date();
-
-        await db
-          .update(productCaptureHistory)
-          .set({
-            status: "approved",
-            approvedBy: userId,
-            approvedAt: now,
-          })
-          .where(inArray(productCaptureHistory.id, input.ids))
-          .execute();
-
-        return { success: true, approved: input.ids.length };
-      } catch (error) {
-        logger.error("Error approving batch:", error);
-        return { success: false, approved: 0, error: String(error) };
-      }
-    }),
-
-  /**
-   * Rejeita produtos em lote
-   */
-  rejectBatch: protectedProcedure
-    .input(z.object({ ids: z.array(z.number()), userId: z.number().optional() }))
-    .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-
-      try {
-        if (input.ids.length === 0) {
-          return { success: true, rejected: 0 };
-        }
-
-        const userId = input.userId || (ctx.user?.id as number);
-        const now = new Date();
-
-        await db
-          .update(productCaptureHistory)
-          .set({
-            status: "rejected",
-            approvedBy: userId,
-            approvedAt: now,
-          })
-          .where(inArray(productCaptureHistory.id, input.ids))
-          .execute();
-
-        return { success: true, rejected: input.ids.length };
-      } catch (error) {
-        logger.error("Error rejecting batch:", error);
-        return { success: false, rejected: 0, error: String(error) };
-      }
-    }),
-
-  /**
-   * Desfaz a última ação em lote restaurando o estado anterior informado pelo frontend
-   */
-  undoBatchAction: protectedProcedure
-    .input(
-      z.object({
-        items: z.array(
-          z.object({
-            id: z.number(),
-            previousStatus: z.enum(["detected", "approved", "rejected", "applied"]),
-            previousApprovedBy: z.number().nullable().optional(),
-            previousApprovedAt: z.union([z.string(), z.null()]).optional(),
-          })
-        ),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-
-      try {
-        if (input.items.length === 0) {
-          return { success: true, restored: 0 };
-        }
-
-        for (const item of input.items) {
-          await db
-            .update(productCaptureHistory)
-            .set({
-              status: item.previousStatus,
-              approvedBy: item.previousApprovedBy ?? null,
-              approvedAt: item.previousApprovedAt ? new Date(item.previousApprovedAt) : null,
+        const [items, totals] = await Promise.all([
+          db
+            .select({
+              id: capturedProducts.id,
+              batchId: capturedProducts.batchId,
+              productName: capturedProducts.name,
+              brand: capturedProducts.brand,
+              manufacturer: capturedProducts.manufacturer,
+              description: capturedProducts.description,
+              presentation: capturedProducts.presentation,
+              barcode: capturedProducts.barcode,
+              sku: capturedProducts.sku,
+              price: capturedProducts.price,
+              unit: capturedProducts.unit,
+              category: capturedProducts.category,
+              matchedProductId: capturedProducts.matchedProductId,
+              matchedProductName: products.name,
+              actionSuggestion: capturedProducts.actionSuggestion,
+              duplicateSignal: capturedProducts.duplicateSignal,
+              status: capturedProducts.status,
+              sourceType: capturedProductBatches.sourceType,
+              sourceLabel: capturedProductBatches.sourceLabel,
+              sourceReference: capturedProductBatches.sourceReference,
+              createdAt: capturedProducts.createdAt,
             })
-            .where(eq(productCaptureHistory.id, item.id))
-            .execute();
-        }
-
-        return { success: true, restored: input.items.length };
-      } catch (error) {
-        logger.error("Error undoing batch action:", error);
-        return { success: false, restored: 0, error: String(error) };
-      }
-    }),
-
-  /**
-   * Obtém o detalhe de itens por ids para compor snapshots de desfazer no frontend
-   */
-  getItemsByIds: protectedProcedure
-    .input(z.object({ ids: z.array(z.number()) }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-
-      try {
-        if (input.ids.length === 0) {
-          return [];
-        }
-
-        return await db
-          .select({
-            id: productCaptureHistory.id,
-            status: productCaptureHistory.status,
-            approvedBy: productCaptureHistory.approvedBy,
-            approvedAt: productCaptureHistory.approvedAt,
-          })
-          .from(productCaptureHistory)
-          .where(inArray(productCaptureHistory.id, input.ids))
-          .execute();
-      } catch (error) {
-        logger.error("Error getting capture items by ids:", error);
-        return [];
-      }
-    }),
-
-  /**
-   * Aplica mudanças aprovadas aos produtos
-   */
-  applyApprovedChanges: protectedProcedure
-    .input(z.object({ ids: z.array(z.number()) }))
-    .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database connection failed");
-
-      try {
-        if (input.ids.length === 0) {
-          return { success: true, applied: 0 };
-        }
-
-        // Buscar os registros aprovados
-        const approved = await db
-          .select()
-          .from(productCaptureHistory)
-          .where(
-            and(
-              inArray(productCaptureHistory.id, input.ids),
-              eq(productCaptureHistory.status, "approved")
-            )
-          )
-          .execute();
-
-        let appliedCount = 0;
-        let errorCount = 0;
-
-        // Whitelist de campos que podem ser atualizados dinamicamente
-        // (nomes reais das colunas em drizzle/schema.ts → products)
-        const allowedFields = new Set([
-          "price",
-          "name",
-          "description",
-          "manufacturer",
-          "ean",
-          "code",
+            .from(capturedProducts)
+            .innerJoin(capturedProductBatches, eq(capturedProducts.batchId, capturedProductBatches.id))
+            .leftJoin(products, eq(capturedProducts.matchedProductId, products.id))
+            .where(where)
+            .orderBy(desc(capturedProducts.createdAt))
+            .limit(input.limit)
+            .offset(input.offset),
+          db
+            .select({ total: count() })
+            .from(capturedProducts)
+            .innerJoin(capturedProductBatches, eq(capturedProducts.batchId, capturedProductBatches.id))
+            .where(where),
         ]);
 
-        // Aplicar cada mudança ao produto
-        for (const change of approved) {
-          try {
-            // Validar campo permitido antes de atualizar
-            if (!allowedFields.has(change.fieldChanged)) {
-              logger.error(
-                `Campo não permitido para atualização dinâmica: ${change.fieldChanged}`
-              );
-              errorCount++;
-              continue;
-            }
-
-            const product = await db
-              .select({ id: products.id })
-              .from(products)
-              .where(eq(products.id, change.productId))
-              .limit(1)
-              .execute();
-
-            if (product.length === 0) {
-              errorCount++;
-              continue;
-            }
-
-            // Atualizar o campo do produto com o novo valor
-            const updateData: Record<string, any> = {};
-            updateData[change.fieldChanged] = change.valueAfter;
-
-            await db
-              .update(products)
-              .set(updateData)
-              .where(eq(products.id, change.productId))
-              .execute();
-
-            // Marcar como aplicado
-            await db
-              .update(productCaptureHistory)
-              .set({ status: "applied" })
-              .where(eq(productCaptureHistory.id, change.id))
-              .execute();
-
-            appliedCount++;
-          } catch (err) {
-            logger.error(`Error applying change ${change.id}:`, err);
-            errorCount++;
-          }
-        }
-
-        return { success: true, applied: appliedCount, errors: errorCount };
+        return { items, total: Number(totals[0]?.total ?? 0) };
       } catch (error) {
-        logger.error("Error applying approved changes:", error);
-        return { success: false, applied: 0, error: String(error) };
+        logger.error("Error listing captured products for review:", error);
+        throw error;
       }
     }),
 
-  /**
-   * Exporta mudanças em CSV
-   */
-  exportChanges: protectedProcedure
-    .input(
-      z.object({
-        supplierId: z.number().optional(),
-        status: z.enum(["detected", "approved", "rejected", "applied"]).optional(),
-      })
-    )
+  getReviewStats: protectedProcedure
+    .input(z.object({ sourceType: sourceType.optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { total: 0, pendingReview: 0, approved: 0, rejected: 0, applied: 0 };
+
+      const where = input?.sourceType ? eq(capturedProductBatches.sourceType, input.sourceType) : undefined;
+      const rows = await db
+        .select({ status: capturedProducts.status, total: count() })
+        .from(capturedProducts)
+        .innerJoin(capturedProductBatches, eq(capturedProducts.batchId, capturedProductBatches.id))
+        .where(where)
+        .groupBy(capturedProducts.status);
+
+      const byStatus = (status: "pending" | "approved" | "rejected" | "applied") =>
+        Number(rows.find((row) => row.status === status)?.total ?? 0);
+      return {
+        total: rows.reduce((sum, row) => sum + Number(row.total), 0),
+        pendingReview: byStatus("pending"),
+        approved: byStatus("approved"),
+        rejected: byStatus("rejected"),
+        applied: byStatus("applied"),
+      };
+    }),
+
+  getSourcesWithPending: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return [];
+    return db
+      .select({ sourceType: capturedProductBatches.sourceType, pendingCount: count() })
+      .from(capturedProducts)
+      .innerJoin(capturedProductBatches, eq(capturedProducts.batchId, capturedProductBatches.id))
+      .where(eq(capturedProducts.status, "pending"))
+      .groupBy(capturedProductBatches.sourceType);
+  }),
+
+  approveBatch: protectedProcedure
+    .input(z.object({ ids: z.array(z.number().int().positive()).min(1) }))
     .mutation(async ({ input }) => {
-      try {
-        const csv = await buildCaptureCsv(input);
-        return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
-      } catch (error) {
-        logger.error("Error exporting CSV:", error);
-        return { csv: "", filename: "" };
+      const db = await getDb();
+      if (!db) throw new Error("Database connection failed");
+      const batchIds = await getBatchIdsForItems(input.ids);
+      await db.update(capturedProducts).set({ status: "approved" }).where(inArray(capturedProducts.id, input.ids));
+      await syncBatchCounters(batchIds);
+      return { success: true, approved: input.ids.length };
+    }),
+
+  rejectBatch: protectedProcedure
+    .input(z.object({ ids: z.array(z.number().int().positive()).min(1) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database connection failed");
+      const batchIds = await getBatchIdsForItems(input.ids);
+      await db.update(capturedProducts).set({ status: "rejected" }).where(inArray(capturedProducts.id, input.ids));
+      await syncBatchCounters(batchIds);
+      return { success: true, rejected: input.ids.length };
+    }),
+
+  getItemsByIds: protectedProcedure
+    .input(z.object({ ids: z.array(z.number().int().positive()) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db || input.ids.length === 0) return [];
+      return db.select({ id: capturedProducts.id, status: capturedProducts.status })
+        .from(capturedProducts)
+        .where(inArray(capturedProducts.id, input.ids));
+    }),
+
+  undoBatchAction: protectedProcedure
+    .input(z.object({ items: z.array(z.object({ id: z.number().int().positive(), previousStatus: reviewStatus })) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database connection failed");
+      const ids = input.items.map((item) => item.id);
+      const batchIds = await getBatchIdsForItems(ids);
+      for (const item of input.items) {
+        await db.update(capturedProducts).set({ status: item.previousStatus }).where(eq(capturedProducts.id, item.id));
       }
+      await syncBatchCounters(batchIds);
+      return { success: true, restored: input.items.length };
+    }),
+
+  /** Aplica somente itens aprovados já vinculados a um produto real. */
+  applyApprovedChanges: protectedProcedure
+    .input(z.object({ ids: z.array(z.number().int().positive()).min(1) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database connection failed");
+
+      const rows = await db.select().from(capturedProducts)
+        .where(and(inArray(capturedProducts.id, input.ids), eq(capturedProducts.status, "approved")));
+
+      let applied = 0;
+      let skipped = 0;
+      const batchIds = rows.map((row) => row.batchId);
+      for (const item of rows) {
+        if (!item.matchedProductId) {
+          skipped++;
+          continue;
+        }
+        const update: Record<string, unknown> = {};
+        if (item.name) update.name = item.name;
+        if (item.manufacturer) update.manufacturer = item.manufacturer;
+        if (item.description) update.description = item.description;
+        if (item.presentation) update.presentation = item.presentation;
+        if (item.barcode) update.barcode = item.barcode;
+        if (item.price != null) update.price = item.price;
+        if (item.unit) update.unit = item.unit;
+        if (Object.keys(update).length > 0) {
+          await db.update(products).set(update as any).where(eq(products.id, item.matchedProductId));
+        }
+        await db.update(capturedProducts).set({ status: "applied" }).where(eq(capturedProducts.id, item.id));
+        applied++;
+      }
+      await syncBatchCounters(batchIds);
+      return { success: true, applied, skipped };
+    }),
+
+  exportChanges: protectedProcedure
+    .input(z.object({ sourceType: sourceType.optional(), status: reviewStatus.optional() }).optional())
+    .mutation(async ({ input }) => {
+      const csv = await buildCaptureCsv(input ?? {});
+      return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
     }),
 
   exportCsv: protectedProcedure
-    .input(z.object({ supplierId: z.number().optional() }))
+    .input(z.object({ sourceType: sourceType.optional() }).optional())
     .query(async ({ input }) => {
-      try {
-        const csv = await buildCaptureCsv(input);
-        return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
-      } catch (error) {
-        logger.error("Error exporting CSV:", error);
-        return { csv: "", filename: "" };
-      }
+      const csv = await buildCaptureCsv(input ?? {});
+      return { csv, filename: `capturas-${new Date().toISOString().slice(0, 10)}.csv` };
     }),
 });
 
-/** Monta o CSV das alterações de captura (com filtros opcionais). */
 async function buildCaptureCsv(filters: {
-  supplierId?: number;
-  status?: "detected" | "approved" | "rejected" | "applied";
+  sourceType?: "url" | "html" | "pdf" | "spreadsheet" | "xml" | "docx" | "text" | "image";
+  status?: "pending" | "approved" | "rejected" | "applied";
 }): Promise<string> {
   const db = await getDb();
   if (!db) throw new Error("Database connection failed");
 
   const conditions = [];
-  if (filters.supplierId) conditions.push(eq(productCaptureHistory.supplierId, filters.supplierId));
-  if (filters.status) conditions.push(eq(productCaptureHistory.status, filters.status));
+  if (filters.sourceType) conditions.push(eq(capturedProductBatches.sourceType, filters.sourceType));
+  if (filters.status) conditions.push(eq(capturedProducts.status, filters.status));
+  const where = conditions.length ? and(...conditions) : undefined;
 
-  const base = db
-    .select({
-      id: productCaptureHistory.id,
-      productName: products.name,
-      supplierName: suppliers.name,
-      field: productCaptureHistory.fieldChanged,
-      oldValue: productCaptureHistory.valueBefore,
-      newValue: productCaptureHistory.valueAfter,
-      status: productCaptureHistory.status,
-      createdAt: productCaptureHistory.createdAt,
-    })
-    .from(productCaptureHistory)
-    .innerJoin(products, eq(productCaptureHistory.productId, products.id))
-    .innerJoin(suppliers, eq(productCaptureHistory.supplierId, suppliers.id));
-
-  const rows = await (conditions.length > 0 ? base.where(and(...conditions)) : base)
-    .orderBy(desc(productCaptureHistory.createdAt))
-    .limit(50000)
-    .execute();
+  const rows = await db.select({
+    id: capturedProducts.id,
+    batchId: capturedProducts.batchId,
+    productName: capturedProducts.name,
+    manufacturer: capturedProducts.manufacturer,
+    presentation: capturedProducts.presentation,
+    barcode: capturedProducts.barcode,
+    price: capturedProducts.price,
+    unit: capturedProducts.unit,
+    category: capturedProducts.category,
+    matchedProductId: capturedProducts.matchedProductId,
+    actionSuggestion: capturedProducts.actionSuggestion,
+    duplicateSignal: capturedProducts.duplicateSignal,
+    status: capturedProducts.status,
+    sourceType: capturedProductBatches.sourceType,
+    sourceLabel: capturedProductBatches.sourceLabel,
+    createdAt: capturedProducts.createdAt,
+  })
+    .from(capturedProducts)
+    .innerJoin(capturedProductBatches, eq(capturedProducts.batchId, capturedProductBatches.id))
+    .where(where)
+    .orderBy(desc(capturedProducts.createdAt))
+    .limit(50000);
 
   const esc = (v: unknown) => {
     const s = v == null ? "" : String(v);
     return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = "id;produto;fornecedor;campo;valor_anterior;valor_novo;status;data";
-  const lines = rows.map((r) =>
-    [r.id, r.productName, r.supplierName, r.field, r.oldValue, r.newValue, r.status,
-      r.createdAt ? new Date(r.createdAt).toISOString() : ""].map(esc).join(";"),
-  );
+  const header = "id;lote;produto;fabricante;apresentacao;codigo_barras;preco;unidade;categoria;produto_match_id;acao_sugerida;duplicidade;status;origem;rotulo_origem;data";
+  const lines = rows.map((row) => [
+    row.id, row.batchId, row.productName, row.manufacturer, row.presentation,
+    row.barcode, row.price, row.unit, row.category, row.matchedProductId,
+    row.actionSuggestion, row.duplicateSignal, row.status, row.sourceType,
+    row.sourceLabel, row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
+  ].map(esc).join(";"));
   return [header, ...lines].join("\n");
 }
