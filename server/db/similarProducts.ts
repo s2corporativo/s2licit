@@ -18,27 +18,17 @@ export type SimilarProduct = {
   savingsPercent: number | null;
 };
 
-/**
- * Busca produtos similares com a mesma composição (princípio ativo),
- * ordenados por preço crescente. Retorna apenas produtos mais baratos que o referência.
- */
+/** Busca equivalentes por princípio ativo. Similaridade não significa preço menor. */
 export async function getSimilarProductsByIngredient(
   productId: number,
-  referencePrice: number | null
+  referencePrice: number | null,
 ): Promise<SimilarProduct[]> {
   const db = await getDb();
   if (!db) return [];
 
-  // Busca o produto de referência
-  const [ref] = await db
-    .select()
-    .from(products)
-    .where(eq(products.id, productId))
-    .limit(1);
-
+  const [ref] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
   if (!ref || !ref.activeIngredient?.trim()) return [];
 
-  // Busca todos os produtos com o mesmo princípio ativo
   const similar = await db
     .select({
       id: products.id,
@@ -60,19 +50,19 @@ export async function getSimilarProductsByIngredient(
       and(
         eq(products.isActive, "yes"),
         like(products.activeIngredient, `%${ref.activeIngredient.trim()}%`),
-        // Exclui o próprio produto
-        sql`${products.id} != ${productId}`
-      )
+        sql`${products.id} != ${productId}`,
+      ),
     )
-    .orderBy(asc(products.price))
+    // NULL pode aparecer antes de valores em ordenação crescente no MySQL;
+    // preço ausente nunca deve ganhar semântica de "menor preço".
+    .orderBy(sql`${products.price} IS NULL`, asc(products.price))
     .limit(20);
 
   const refPrice = referencePrice ?? (ref.price ? parseFloat(ref.price) : null);
-
   return similar.map((p) => {
     const pPrice = p.price ? parseFloat(p.price) : null;
     const savingsPercent =
-      refPrice && pPrice && refPrice > 0 && pPrice < refPrice
+      refPrice != null && refPrice > 0 && pPrice != null && Number.isFinite(pPrice) && pPrice > 0 && pPrice < refPrice
         ? Math.round(((refPrice - pPrice) / refPrice) * 100)
         : null;
     return { ...p, savingsPercent };
@@ -80,18 +70,20 @@ export async function getSimilarProductsByIngredient(
 }
 
 /**
- * Busca produtos similares mais baratos que o produto selecionado.
- * Retorna apenas os que têm preço inferior ao de referência.
+ * Alternativa "mais barata" exige duas evidências numéricas: preço de
+ * referência positivo e preço alternativo positivo/inferior. Sem isso, a API
+ * retorna lista vazia e a UI não pode afirmar economia inexistente.
  */
 export async function getCheaperAlternatives(
   productId: number,
-  referencePrice: number | null
+  referencePrice: number | null,
 ): Promise<SimilarProduct[]> {
+  if (referencePrice == null || !Number.isFinite(referencePrice) || referencePrice <= 0) return [];
   const all = await getSimilarProductsByIngredient(productId, referencePrice);
-  const refPrice = referencePrice;
-  if (!refPrice) return all.slice(0, 5);
-  return all.filter((p) => {
-    const pPrice = p.price ? parseFloat(p.price) : null;
-    return pPrice !== null && pPrice < refPrice;
-  }).slice(0, 5);
+  return all
+    .filter((p) => {
+      const pPrice = p.price ? parseFloat(p.price) : NaN;
+      return Number.isFinite(pPrice) && pPrice > 0 && pPrice < referencePrice;
+    })
+    .slice(0, 5);
 }
