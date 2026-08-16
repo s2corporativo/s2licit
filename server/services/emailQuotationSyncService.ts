@@ -1,6 +1,12 @@
 import { desc, eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { emailQuotationItems, emailQuotations } from "../../drizzle/schema";
+import {
+  categories,
+  emailQuotationItems,
+  emailQuotations,
+  products,
+  suppliers,
+} from "../../drizzle/schema";
 import { fetchUnseenEmails, isImapConfigured } from "./emailInboxService";
 import {
   extractItemsFromAttachment,
@@ -9,6 +15,7 @@ import {
   type ExtractedItem,
 } from "./emailQuotationExtractor";
 import { matchQuotationItems } from "./emailQuotationMatchingService";
+import { getQuotationItemSalePrices } from "./quotationItemPricingService";
 
 /**
  * Orquestra a ingestão de cotações por e-mail:
@@ -49,7 +56,6 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
 
   for (const email of emails) {
     try {
-      // Deduplicação por Message-ID
       const existing = await db
         .select({ id: emailQuotations.id })
         .from(emailQuotations)
@@ -60,10 +66,6 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
         continue;
       }
 
-      // Extrai itens: tenta cada anexo processável, na ordem em que veio no
-      // e-mail, até um render itens (uma imagem sem itens não pode "roubar"
-      // a vez de um PDF/planilha válido que venha depois); sem nenhum anexo
-      // com itens, cai para o corpo do e-mail.
       let items: ExtractedItem[] = [];
       let sourceType: "spreadsheet" | "pdf" | "docx" | "image" | "body" = "body";
       let sourceFilename: string | null = null;
@@ -84,7 +86,7 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
           sourceFilename = attachment.filename;
           break;
         } catch {
-          continue; // anexo corrompido/formato inesperado — tenta o próximo
+          continue;
         }
       }
       if (items.length === 0) {
@@ -122,11 +124,11 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
             quantidade: item.quantidade != null ? String(item.quantidade) : null,
             unidade: item.unidade ?? null,
             codigoCatalogo: item.codigoCatalogo ?? null,
-            produtoMatchId: matches[idx].produtoMatchId,
-            matchScore: matches[idx].matchScore != null ? String(matches[idx].matchScore) : null,
-            matchMethod: matches[idx].matchMethod,
+            produtoMatchId: matches[idx]?.produtoMatchId ?? null,
+            matchScore: matches[idx]?.matchScore != null ? String(matches[idx].matchScore) : null,
+            matchMethod: matches[idx]?.matchMethod ?? "nenhum",
             matchConfirmado: false,
-            precoSugerido: matches[idx].precoSugerido,
+            precoSugerido: matches[idx]?.precoSugerido ?? null,
           })),
         );
       }
@@ -140,7 +142,6 @@ export async function syncEmailQuotations(options?: { limit?: number }): Promise
   return result;
 }
 
-/** Heurística simples para identificar o órgão pelo remetente/assunto. */
 function guessOrgao(name?: string, address?: string, subject?: string): string | null {
   const haystack = `${name ?? ""} ${address ?? ""} ${subject ?? ""}`.toLowerCase();
   const known: Array<[string, string]> = [
@@ -157,7 +158,6 @@ function guessOrgao(name?: string, address?: string, subject?: string): string |
   return name || null;
 }
 
-/** Lista cotações recebidas, mais recentes primeiro. */
 export async function listEmailQuotations(status?: string) {
   const db = await getDb();
   if (!db) return [];
@@ -168,15 +168,53 @@ export async function listEmailQuotations(status?: string) {
   return rows;
 }
 
-/** Detalhe de uma cotação com seus itens. */
+/**
+ * Detalhe operacional enriquecido. A UI não precisa mais exibir apenas o ID do
+ * match: recebe nome, fabricante, apresentação, fornecedor e custo do produto.
+ */
 export async function getEmailQuotationWithItems(id: number) {
   const db = await getDb();
   if (!db) return null;
   const [quotation] = await db.select().from(emailQuotations).where(eq(emailQuotations.id, id)).limit(1);
   if (!quotation) return null;
-  const items = await db
-    .select()
+
+  const rows = await db
+    .select({
+      id: emailQuotationItems.id,
+      quotationId: emailQuotationItems.quotationId,
+      numeroItem: emailQuotationItems.numeroItem,
+      descricao: emailQuotationItems.descricao,
+      quantidade: emailQuotationItems.quantidade,
+      unidade: emailQuotationItems.unidade,
+      codigoCatalogo: emailQuotationItems.codigoCatalogo,
+      produtoMatchId: emailQuotationItems.produtoMatchId,
+      matchScore: emailQuotationItems.matchScore,
+      matchMethod: emailQuotationItems.matchMethod,
+      matchConfirmado: emailQuotationItems.matchConfirmado,
+      matchAuto: emailQuotationItems.matchAuto,
+      precoSugerido: emailQuotationItems.precoSugerido,
+      createdAt: emailQuotationItems.createdAt,
+      updatedAt: emailQuotationItems.updatedAt,
+      productName: products.name,
+      productManufacturer: products.manufacturer,
+      productPresentation: products.presentation,
+      productConcentration: products.concentration,
+      productPrice: products.price,
+      productCode: products.code,
+      supplierName: suppliers.name,
+      categoryName: categories.name,
+    })
     .from(emailQuotationItems)
+    .leftJoin(products, eq(emailQuotationItems.produtoMatchId, products.id))
+    .leftJoin(suppliers, eq(products.supplierId, suppliers.id))
+    .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(eq(emailQuotationItems.quotationId, id));
+
+  const salePrices = await getQuotationItemSalePrices(rows.map((item) => item.id));
+  const items = rows.map((item) => ({
+    ...item,
+    precoVendaManual: salePrices.get(item.id) ?? null,
+  }));
+
   return { quotation, items };
 }
