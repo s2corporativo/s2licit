@@ -1,6 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { getDb, getCompanySettings } from "../db";
 import { products } from "../../drizzle/schema";
+import { getActiveSanctionsByProductIds } from "../db/sanctions";
 import { getActiveCategoryPricingRules } from "../db/categoryPricingQueries";
 import { getEmailQuotationWithItems } from "./emailQuotationSyncService";
 import {
@@ -104,9 +105,8 @@ export interface QuotationPricingPreview {
 }
 
 /**
- * Preview tolerante a itens incompletos. É usado pela tela operacional para
- * mostrar custo, venda, margem e totais antes de gerar a proposta, sem obrigar
- * o operador a sair da cotação.
+ * Preview tolerante a itens incompletos. A tela mostra custo, venda, margem e
+ * totais antes de gerar a proposta, sem obrigar o operador a sair da cotação.
  */
 export async function previewQuotationPricing(
   quotationId: number,
@@ -271,6 +271,27 @@ export async function priceQuotationItems(
     throw new Error(
       `Cotação bloqueada: informe custo positivo para ${preview.itemsSemCusto} item(ns).`,
     );
+  }
+
+  // Mantém a proteção acrescentada no módulo de fornecedores: orçamento não
+  // é gerado silenciosamente com fornecedor que possua sanção ativa.
+  const matchedProductIds = data.items
+    .map((item) => item.produtoMatchId)
+    .filter((id): id is number => id != null);
+  if (matchedProductIds.length > 0) {
+    const sanctionsByProduct = await getActiveSanctionsByProductIds(matchedProductIds);
+    const affected = [...sanctionsByProduct.entries()];
+    if (affected.length > 0) {
+      const detalhes = affected
+        .map(
+          ([productName, sanc]) =>
+            `• ${productName}: fornecedor ${sanc.fornecedor} — ${sanc.penalidade} (${sanc.orgao}, processo ${sanc.processo ?? "não informado"})`,
+        )
+        .join("\n");
+      throw new Error(
+        `Atenção: há fornecedor com sanção ATIVA vinculada a ${affected.length} produto(ns) desta cotação:\n${detalhes}\nRevise a situação antes de gerar ou enviar o orçamento.`,
+      );
+    }
   }
 
   const items: PricedQuotationItem[] = preview.items.map((item) => ({
