@@ -141,6 +141,13 @@
       "when": 1786582515421,
       "tag": "0019_optimal_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1786582600000,
+      "tag": "0021_supplier_sanctions",
+      "breakpoints": true
     }
   ]
 }

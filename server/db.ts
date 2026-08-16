@@ -12,6 +12,7 @@ export * from "./db/users";
 export * from "./db/categories";
 // ─── Suppliers → ./db/suppliers ───
 export * from "./db/suppliers";
+export * from "./db/sanctions";
 // ─── Products → ./db/products ───
 export * from "./db/products";
 // ─── Smart Search → ./db/smartSearch ───

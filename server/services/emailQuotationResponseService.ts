@@ -2,6 +2,7 @@ import { inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { getCompanySettings } from "../db";
 import { products } from "../../drizzle/schema";
+import { getActiveSanctionsByProductIds } from "../db/sanctions";
 import { getActiveCategoryPricingRules } from "../db/categoryPricingQueries";
 import { getEmailQuotationWithItems } from "./emailQuotationSyncService";
 import {
@@ -148,6 +149,29 @@ export async function priceQuotationItems(
     throw new Error(
       `Cotação bloqueada: confirme o match de ${unconfirmedItems.length} item(ns) antes de gerar ou enviar o orçamento.`,
     );
+  }
+
+  // Sanções ativas (Lei 14.133/21, art. 155): se algum produto vinculado aos
+  // itens pertence a fornecedor com penalidade ativa e vigente, o operador é
+  // alertado antes de gerar o orçamento. Exige confirmação explícita, pois
+  // a decisão de participar do certame é do cliente.
+  const matchedProductIds = data.items
+    .map((item) => item.produtoMatchId)
+    .filter((id): id is number => id != null);
+  if (matchedProductIds.length > 0) {
+    const sanctionsByProduct = await getActiveSanctionsByProductIds(matchedProductIds);
+    const affected = [...sanctionsByProduct.entries()];
+    if (affected.length > 0) {
+      const detalhes = affected
+        .map(
+          ([productName, sanc]) =>
+            `• ${productName}: fornecedor ${sanc.fornecedor} — ${sanc.penalidade} (${sanc.orgao}, processo ${sanc.processo ?? "não informado"})`,
+        )
+        .join("\n");
+      throw new Error(
+        `Atenção: há fornecedor com sanção ATIVA vinculada a ${affected.length} produto(ns) desta cotação:\n${detalhes}\nRevise a situação antes de gerar ou enviar o orçamento.`,
+      );
+    }
   }
 
   const invalidPriceItems = data.items.filter((item) => {
