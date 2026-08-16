@@ -4,18 +4,13 @@ import { getDb } from "../db";
 import { emailQuotations, certidoes, contractAlerts, postAwardContracts } from "../../drizzle/schema";
 import { logger } from "../_core/logger";
 
-/**
- * Agenda única: junta todos os prazos que importam ao operador numa lista só,
- * ordenada por data — "o que preciso fazer hoje / esta semana".
- */
-
 export type TipoAgenda = "cotacao" | "certidao" | "contrato_alerta" | "contrato_fim";
 
 export interface ItemAgenda {
   tipo: TipoAgenda;
   titulo: string;
   detalhe: string;
-  data: string;          // ISO date
+  data: string;
   diasRestantes: number;
   urgencia: "vencido" | "hoje" | "urgente" | "proximo" | "futuro";
   link: string;
@@ -38,41 +33,36 @@ function diasAte(d: Date): number {
 }
 
 export const agendaRouter = router({
-  /** Lista unificada de prazos, ordenada por data. */
   proximos: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) return { itens: [] as ItemAgenda[], resumo: { vencidos: 0, hoje: 0, semana: 0 } };
 
     const itens: ItemAgenda[] = [];
 
-    // Cotações a responder
     try {
-      const cots = await db
-        .select()
-        .from(emailQuotations)
-        .where(isNotNull(emailQuotations.prazoResposta));
+      const cots = await db.select().from(emailQuotations).where(isNotNull(emailQuotations.prazoResposta));
       for (const c of cots) {
         if (!c.prazoResposta || c.status === "respondida" || c.status === "descartada") continue;
         const dias = diasAte(new Date(c.prazoResposta));
         itens.push({
           tipo: "cotacao",
           titulo: `Responder cotação: ${c.orgao ?? c.subject ?? `#${c.id}`}`,
-          detalhe: `${c.matchedItems}/${c.totalItems} itens casados`,
+          detalhe: `${c.matchedItems}/${c.totalItems} itens vinculados`,
           data: new Date(c.prazoResposta).toISOString(),
           diasRestantes: dias,
           urgencia: classificar(dias),
-          link: "/cotacoes-recebidas",
+          // Deep-link: elimina a busca manual dentro de até 200 cotações.
+          link: `/cotacoes-recebidas?cotacao=${c.id}`,
         });
       }
     } catch (err) { logger.error("[Agenda] Erro ao buscar cotações:", (err as Error).message); }
 
-    // Certidões
     try {
       const certs = await db.select().from(certidoes).where(eq(certidoes.ativa, true));
       for (const c of certs) {
         if (!c.dataValidade) continue;
         const dias = diasAte(new Date(c.dataValidade));
-        if (dias > 60) continue; // só as próximas
+        if (dias > 60) continue;
         itens.push({
           tipo: "certidao",
           titulo: `Certidão vence: ${c.tipo}`,
@@ -85,7 +75,6 @@ export const agendaRouter = router({
       }
     } catch (err) { logger.error("[Agenda] Erro ao buscar certidões:", (err as Error).message); }
 
-    // Alertas de contrato (abertos)
     try {
       const alertas = await db.select().from(contractAlerts).where(eq(contractAlerts.status, "open"));
       for (const a of alertas) {
@@ -103,12 +92,8 @@ export const agendaRouter = router({
       }
     } catch (err) { logger.error("[Agenda] Erro ao buscar alertas de contrato:", (err as Error).message); }
 
-    // Fim de contratos
     try {
-      const contratos = await db
-        .select()
-        .from(postAwardContracts)
-        .where(and(isNotNull(postAwardContracts.endDate), ne(postAwardContracts.status, "closed")));
+      const contratos = await db.select().from(postAwardContracts).where(and(isNotNull(postAwardContracts.endDate), ne(postAwardContracts.status, "closed")));
       for (const ct of contratos) {
         if (!ct.endDate) continue;
         const dias = diasAte(new Date(ct.endDate));
@@ -126,7 +111,6 @@ export const agendaRouter = router({
     } catch (err) { logger.error("[Agenda] Erro ao buscar fim de contratos:", (err as Error).message); }
 
     itens.sort((a, b) => a.diasRestantes - b.diasRestantes);
-
     return {
       itens,
       resumo: {
