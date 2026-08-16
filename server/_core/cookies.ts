@@ -21,6 +21,21 @@ function isSecureRequest(req: Request) {
   return protoList.some(proto => proto.trim().toLowerCase() === "https");
 }
 
+/**
+ * Política única de cookies de sessão.
+ *
+ * Em produção o S2Licit é publicado atrás de HTTPS; portanto, `Secure` deixa
+ * de depender apenas do header recebido do proxy. FORCE_SECURE_COOKIES segue
+ * disponível para ambientes específicos e desenvolvimento com TLS.
+ */
+export function shouldUseSecureSessionCookie(req: Request) {
+  return (
+    process.env.NODE_ENV === "production" ||
+    process.env.FORCE_SECURE_COOKIES === "true" ||
+    isSecureRequest(req)
+  );
+}
+
 export function getSessionCookieOptions(
   req: Request
 ): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
@@ -46,9 +61,6 @@ export function getSessionCookieOptions(
     httpOnly: true,
     path: "/",
     sameSite: "lax",
-    // FORCE_SECURE_COOKIES=true força o atributo Secure independentemente do
-    // header x-forwarded-proto — recomendado quando há TLS (domínio + Caddy).
-    // Sem TLS (acesso por IP em HTTP puro) o atributo tornaria o login impossível.
-    secure: isSecureRequest(req) || process.env.FORCE_SECURE_COOKIES === "true",
+    secure: shouldUseSecureSessionCookie(req),
   };
 }
