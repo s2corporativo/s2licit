@@ -10,7 +10,6 @@ import { AlertCircle, CheckCircle, Download, RotateCcw, Sparkles, XCircle } from
 
 export const ALL_STATUS = "__all_status__";
 export const ALL_SOURCES = "__all_sources__";
-// Compatibilidade com testes/helpers antigos; o filtro operacional agora é por origem, não fornecedor.
 export const ALL_SUPPLIERS = "__all_suppliers__";
 export function mapSupplierFilterValue(value: string): number | undefined {
   if (value === ALL_SUPPLIERS) return undefined;
@@ -20,7 +19,6 @@ export function mapSupplierFilterValue(value: string): number | undefined {
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "applied";
 type SourceType = "url" | "html" | "pdf" | "spreadsheet" | "xml" | "docx" | "text" | "image";
-
 type UndoItemSnapshot = { id: number; previousStatus: ReviewStatus };
 type LastBatchAction = { actionType: "approve" | "reject"; itemCount: number; items: UndoItemSnapshot[] };
 
@@ -29,14 +27,7 @@ export function mapStatusFilterValue(value: string): ReviewStatus | undefined {
 }
 
 const SOURCE_LABELS: Record<SourceType, string> = {
-  url: "Site",
-  html: "HTML",
-  pdf: "PDF",
-  spreadsheet: "Planilha",
-  xml: "XML",
-  docx: "DOCX",
-  text: "Texto",
-  image: "Imagem / OCR",
+  url: "Site", html: "HTML", pdf: "PDF", spreadsheet: "Planilha", xml: "XML", docx: "DOCX", text: "Texto", image: "Imagem / OCR",
 };
 
 function formatStatusLabel(status: ReviewStatus) {
@@ -208,7 +199,7 @@ export function CaptureReview() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1100px]">
               <thead className="bg-slate-100/80 text-slate-700"><tr>
-                <th className="px-4 py-3 text-left"><Checkbox checked={selectedIds.size === items.length && items.length > 0} onChange={toggleAll} /></th>
+                <th className="px-4 py-3 text-left"><Checkbox checked={selectedIds.size === items.length && items.length > 0} onCheckedChange={() => toggleAll()} /></th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase">Produto capturado</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase">Origem</th>
                 <th className="px-4 py-3 text-left text-xs font-bold uppercase">Match no catálogo</th>
@@ -219,7 +210,7 @@ export function CaptureReview() {
               </tr></thead>
               <tbody className="divide-y divide-slate-200 bg-white">
                 {items.map((item) => <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3"><Checkbox checked={selectedIds.has(item.id)} onChange={() => toggleOne(item.id)} /></td>
+                  <td className="px-4 py-3"><Checkbox checked={selectedIds.has(item.id)} onCheckedChange={() => toggleOne(item.id)} /></td>
                   <td className="px-4 py-3"><div className="font-semibold text-slate-900">{item.productName}</div><div className="mt-1 text-xs text-slate-500">{[item.manufacturer, item.presentation, item.category].filter(Boolean).join(" · ") || "Sem detalhes adicionais"}</div></td>
                   <td className="px-4 py-3 text-sm text-slate-700"><div>{SOURCE_LABELS[item.sourceType as SourceType]}</div><div className="mt-1 max-w-[220px] truncate text-xs text-slate-400">{item.sourceLabel || `Lote #${item.batchId}`}</div></td>
                   <td className="px-4 py-3 text-sm">{item.matchedProductId ? <><div className="font-medium text-emerald-700">{item.matchedProductName || `Produto #${item.matchedProductId}`}</div><div className="mt-1 text-xs text-slate-500">{item.duplicateSignal}</div></> : <span className="font-medium text-amber-700">Sem match — revisão manual</span>}</td>
