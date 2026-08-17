@@ -32,7 +32,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Propostas",
     items: [
-      { href: "/propostas", icon: FileText, label: "Central de propostas" },
+      { href: "/propostas", icon: FileText, label: "Central de propostas", minRole: "editor" },
       { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
       { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
     ],
@@ -41,7 +41,7 @@ const navGroups: NavGroup[] = [
     label: "Execução",
     items: [
       { href: "/centro-operacional", icon: PackageCheck, label: "Operação e entregas", minRole: "editor" },
-      { href: "/financeiro", icon: CircleDollarSign, label: "Financeiro" },
+      { href: "/financeiro", icon: CircleDollarSign, label: "Financeiro", minRole: "editor" },
       { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
     ],
   },
@@ -62,7 +62,7 @@ const navGroups: NavGroup[] = [
       { href: "/configuracao", icon: Settings, label: "Configurações", minRole: "admin" },
       { href: "/integracoes", icon: Bot, label: "Integrações e IA", minRole: "admin" },
       { href: "/usuarios", icon: Users, label: "Usuários e permissões", minRole: "admin" },
-      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "editor" },
+      { href: "/diagnostico", icon: Activity, label: "Diagnóstico", minRole: "admin" },
       { href: "/manual", icon: BookOpen, label: "Ajuda e manual" },
     ],
   },

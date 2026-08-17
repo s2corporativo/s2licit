@@ -90,7 +90,7 @@ function Router() {
                 <Route path="/busca"><Redirect to="/busca-global?modo=precos" /></Route>
                 <Route path="/manual" component={Manual} />
                 <Route path="/centro-operacional"><RequireAuth message="Acesse a Central Operacional após fazer login." minRole="editor"><CentroOperacional /></RequireAuth></Route>
-                <Route path="/diagnostico"><RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="editor"><Diagnostico /></RequireAuth></Route>
+                <Route path="/diagnostico"><RequireAuth message="Acesse a Central de Diagnóstico após fazer login." minRole="admin"><Diagnostico /></RequireAuth></Route>
                 <Route path="/comparacao" component={Comparacao} />
                 <Route path="/categorias" component={Categorias} />
                 <Route path="/produtos" component={Produtos} />
@@ -110,13 +110,13 @@ function Router() {
                 <Route path="/captura-scheduler"><Redirect to="/captura-inteligente" /></Route>
                 <Route path="/captura-analytics"><Redirect to="/captura-inteligente" /></Route>
                 <Route path="/central-operacional"><Redirect to="/funil" /></Route>
-                <Route path="/cotacoes-recebidas"><RequireAuth message="Acesse as cotações recebidas após fazer login."><CotacoesRecebidas /></RequireAuth></Route>
-                <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login."><RadarPncp /></RequireAuth></Route>
-                <Route path="/certidoes"><RequireAuth message="Acesse as certidões após fazer login." minRole="editor"><Certidoes /></RequireAuth></Route>
+                <Route path="/cotacoes-recebidas"><RequireAuth message="Acesse as cotações recebidas após fazer login." minRole="editor"><CotacoesRecebidas /></RequireAuth></Route>
+                <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login." minRole="editor"><RadarPncp /></RequireAuth></Route>
+                <Route path="/certidoes"><RequireAuth message="Acesse as certidões após fazer login." minRole="admin"><Certidoes /></RequireAuth></Route>
                 <Route path="/central-ia"><RequireAuth message="Acesse a Central de IA após fazer login." minRole="admin"><CentralIA /></RequireAuth></Route>
                 <Route path="/integracoes"><RequireAuth message="Acesse as integrações após fazer login." minRole="admin"><Integracoes /></RequireAuth></Route>
                 <Route path="/sala-disputa"><RequireAuth message="Acesse a Sala de Disputa após fazer login." minRole="editor"><SalaDisputa /></RequireAuth></Route>
-                <Route path="/portais-licitacao"><RequireAuth message="Acesse os portais de licitação após fazer login." minRole="editor"><PortaisLicitacao /></RequireAuth></Route>
+                <Route path="/portais-licitacao"><RequireAuth message="Acesse os portais de licitação após fazer login." minRole="admin"><PortaisLicitacao /></RequireAuth></Route>
                 <Route path="/documentos-habilitacao"><RequireAuth message="Gerencie documentos de habilitação após fazer login." minRole="editor"><DocumentosHabilitacaoPage /></RequireAuth></Route>
                 <Route path="/diligencias"><RequireAuth message="Gerencie diligências e recursos após fazer login." minRole="editor"><DiligenciasPage /></RequireAuth></Route>
                 <Route path="/enriquecimento-nfe"><RequireAuth message="Enriqueça produtos de NF-e após fazer login." minRole="editor"><NfeEnrichmentPipeline /></RequireAuth></Route>
@@ -125,11 +125,11 @@ function Router() {
                 <Route path="/contratos-pos-licitacao"><Redirect to="/centro-operacional?tab=contratos" /></Route>
                 <Route path="/captura-inteligente"><RequireAuth message="Acesse a captura inteligente multi-origem após fazer login." minRole="editor"><IntelligentCaptureCenter /></RequireAuth></Route>
                 <Route path="/admin/database-health"><RequireAuth message="Acesse o verificador de integridade do banco após fazer login." minRole="admin"><DatabaseIntegrityCheck /></RequireAuth></Route>
-                <Route path="/propostas"><RequireAuth message="Gerencie propostas comerciais após fazer login."><Propostas /></RequireAuth></Route>
+                <Route path="/propostas"><RequireAuth message="Gerencie propostas comerciais após fazer login." minRole="editor"><Propostas /></RequireAuth></Route>
                 <Route path="/proposta-rapida"><Redirect to="/propostas" /></Route>
-                <Route path="/propostas/:id"><RequireAuth message="Edite propostas após fazer login."><PropostaEditor /></RequireAuth></Route>
+                <Route path="/propostas/:id"><RequireAuth message="Edite propostas após fazer login." minRole="editor"><PropostaEditor /></RequireAuth></Route>
                 <Route path="/propostas-admin"><Redirect to="/configuracao" /></Route>
-                <Route path="/financeiro"><RequireAuth message="Acesse o controle financeiro após fazer login."><ControleFinanceiro /></RequireAuth></Route>
+                <Route path="/financeiro"><RequireAuth message="Acesse o controle financeiro após fazer login." minRole="editor"><ControleFinanceiro /></RequireAuth></Route>
                 <Route path="/enriquecimento"><RequireAuth message="Faça login para acessar o enriquecimento de catálogo."><EnriquecimentoCatalogo /></RequireAuth></Route>
                 <Route path="/reclassificacao"><RequireAuth message="Faça login para acessar a reclassificação em lote." minRole="editor"><ReclassificacaoIA /></RequireAuth></Route>
                 <Route path="/edital"><RequireAuth message="Importe editais após fazer login." minRole="editor"><ImportarEdital /></RequireAuth></Route>
