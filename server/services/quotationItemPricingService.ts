@@ -1,22 +1,17 @@
 import { inArray, sql } from "drizzle-orm";
-import { decimal, int, mysqlTable, timestamp } from "drizzle-orm/mysql-core";
 import { getDb } from "../db";
+import { quotationItemPricing } from "../../drizzle/schema";
 
-/**
- * Preço de venda manual por item de cotação.
- *
- * Mantemos o custo no campo legado email_quotation_items.precoSugerido porque
- * ele já funciona como snapshot de custo no pipeline atual. O preço de venda
- * informado pelo operador fica separado para não destruir essa referência.
- */
-export const quotationItemPricing = mysqlTable("quotation_item_pricing", {
-  itemId: int("itemId").primaryKey(),
-  salePrice: decimal("salePrice", { precision: 15, scale: 4 }),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+// Model consolidado no drizzle/schema.ts (definição canônica única);
+// comentário movido para o schema, que passa a ser a fonte da verdade.
 
 let tableEnsured = false;
 
+/**
+ * Garantia idempotente da tabela para deploys que ainda não aplicaram a
+ * migration 0022. Quando o banco estiver em dia, o CREATE TABLE IF NOT EXISTS
+ * não altera nada e esta camada pode ser removida num próximo ciclo de limpeza.
+ */
 async function ensureQuotationItemPricingTable(): Promise<void> {
   if (tableEnsured) return;
   const db = await getDb();

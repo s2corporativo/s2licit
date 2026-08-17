@@ -1628,6 +1628,21 @@ export const emailQuotationItems = mysqlTable(
 export type EmailQuotationItem = typeof emailQuotationItems.$inferSelect;
 export type InsertEmailQuotationItem = typeof emailQuotationItems.$inferInsert;
 
+// ─── Preço de venda manual por item de cotação (precificação manual) ─────────
+// Antes de 08/2026 a tabela era criada por SQL cru em
+// `server/services/quotationItemPricingService.ts` (via migrate-production).
+// Este model consolida a definição no schema oficial do drizzle, mantendo
+// compatibilidade 1:1 com a estrutura existente (idempotente — a tabela já
+// criada pelas migrations não é alterada).
+export const quotationItemPricing = mysqlTable("quotation_item_pricing", {
+  itemId: int("itemId").primaryKey(),
+  salePrice: decimal("salePrice", { precision: 15, scale: 4 }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type QuotationItemPricing = typeof quotationItemPricing.$inferSelect;
+export type InsertQuotationItemPricing = typeof quotationItemPricing.$inferInsert;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Certidões e documentos de habilitação da empresa (com controle de validade).
 // Perder habilitação por certidão vencida é o erro mais caro em licitação.
