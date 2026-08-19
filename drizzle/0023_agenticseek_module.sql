@@ -1,6 +1,6 @@
 -- Migration 0023 — Módulo AgenticSeek (prospecção automatizada de licitações)
 -- Tabelas: agenticseek_buscas e agenticseek_resultados.
--- Idempotente: usa CREATE TABLE IF NOT EXISTS e CREATE INDEX IF NOT EXISTS.
+-- Idempotente: usa CREATE TABLE IF NOT EXISTS.
 
 CREATE TABLE IF NOT EXISTS agenticseek_buscas (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS agenticseek_buscas (
   KEY idx_agenticseek_created (createdAt),
   CONSTRAINT fk_agenticseek_busca_user FOREIGN KEY (userId) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS agenticseek_resultados (
   id INT AUTO_INCREMENT PRIMARY KEY,
