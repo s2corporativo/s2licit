@@ -24,7 +24,11 @@ describe("migrate-production", () => {
     expect(statements).toHaveLength(2);
     expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS agenticseek_buscas");
     expect(statements[1]).toContain("CREATE TABLE IF NOT EXISTS agenticseek_resultados");
-    expect(statements.every((statement) => (statement.match(/CREATE TABLE/gi) ?? []).length === 1)).toBe(true);
+    expect(
+      statements.every(
+        (statement) => (statement.match(/^\s*CREATE\s+TABLE\b/gim) ?? []).length === 1,
+      ),
+    ).toBe(true);
   });
 
   it("remove comandos vazios", () => {
