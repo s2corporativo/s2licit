@@ -7,11 +7,25 @@ import {
   rankSuppliersForProduct,
   resolveQuotationIntelligently,
 } from "../services/quotationDecisionService";
+import {
+  getCommercialIntelligence,
+  getCommercialProtection,
+  getEnhancedSupplierScore,
+  recordQuotationFeedback,
+  refreshStaleQuotationPrices,
+  runQuotationBulkAction,
+} from "../services/quotationOptimizationService";
 
-/**
- * Camada de decisão da cotação: memória operacional, ranking de fornecedores,
- * risco, limite máximo de compra e resolução assistida em lote.
- */
+const feedbackKind = z.enum([
+  "match_approved",
+  "product_selected",
+  "product_rejected",
+  "supplier_selected",
+  "supplier_rejected",
+  "sale_adjusted",
+]);
+
+/** Camada de decisão, aprendizado e proteção comercial da cotação. */
 export const quotationDecisionRouter = router({
   summary: protectedProcedure
     .input(z.object({ quotationId: z.number().int().positive() }))
@@ -25,6 +39,10 @@ export const quotationDecisionRouter = router({
     .input(z.object({ productId: z.number().int().positive() }))
     .query(({ input }) => rankSuppliersForProduct(input.productId)),
 
+  supplierScore: protectedProcedure
+    .input(z.object({ productId: z.number().int().positive() }))
+    .query(({ input }) => getEnhancedSupplierScore(input.productId)),
+
   maxPurchasePrice: protectedProcedure
     .input(z.object({
       targetSale: z.number().positive(),
@@ -33,6 +51,39 @@ export const quotationDecisionRouter = router({
       taxValue: z.number().nonnegative().optional(),
     }))
     .query(({ input }) => calculateMaxPurchasePrice(input)),
+
+  protection: protectedProcedure
+    .input(z.object({ quotationId: z.number().int().positive() }))
+    .query(({ input }) => getCommercialProtection(input.quotationId)),
+
+  commercialIntelligence: protectedProcedure.query(() => getCommercialIntelligence()),
+
+  feedback: editorProcedure
+    .input(z.object({
+      quotationId: z.number().int().positive(),
+      itemId: z.number().int().positive(),
+      kind: feedbackKind,
+      productId: z.number().int().positive().nullable().optional(),
+      supplierId: z.number().int().positive().nullable().optional(),
+      previousProductId: z.number().int().positive().nullable().optional(),
+      previousSupplierId: z.number().int().positive().nullable().optional(),
+      value: z.number().nullable().optional(),
+      note: z.string().max(1000).nullable().optional(),
+    }))
+    .mutation(({ input, ctx }) => recordQuotationFeedback({ ...input, userId: ctx.user?.id ?? null })),
+
+  refreshPrices: editorProcedure
+    .input(z.object({ quotationId: z.number().int().positive() }))
+    .mutation(({ input, ctx }) => refreshStaleQuotationPrices(input.quotationId, ctx.user?.id ?? null)),
+
+  bulkAction: editorProcedure
+    .input(z.object({
+      quotationId: z.number().int().positive(),
+      itemIds: z.array(z.number().int().positive()).max(500).default([]),
+      action: z.enum(["approve_safe", "use_best_supplier", "apply_margin", "refresh_prices"]),
+      value: z.number().optional(),
+    }))
+    .mutation(({ input, ctx }) => runQuotationBulkAction({ ...input, userId: ctx.user?.id ?? null })),
 
   resolve: editorProcedure
     .input(z.object({ quotationId: z.number().int().positive() }))
