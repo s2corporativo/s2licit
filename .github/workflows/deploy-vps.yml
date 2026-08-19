@@ -1,5 +1,7 @@
-# Deploy do S2Licit na VPS sem depender do runner self-hosted.
-# O build roda no GitHub-hosted runner e a publicação é feita por SSH.
+# Deploy do S2Licit na VPS Contabo.
+# O artefato Docker continua sendo construído no GitHub-hosted runner; a
+# publicação ocorre no runner self-hosted instalado na própria VPS, evitando
+# senha SSH/root e mantendo o deploy auditável por SHA.
 name: Deploy VPS
 
 on:
@@ -8,8 +10,6 @@ on:
   workflow_dispatch:
 
 env:
-  DEPLOY_HOST: 13.140.167.153
-  DEPLOY_USER: root
   DEPLOY_DOMAIN: s2.s2corporativo.com.br
 
 concurrency:
@@ -38,8 +38,7 @@ jobs:
 
       - name: Definir imagem por SHA
         id: meta
-        run: |
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Build e push
         uses: docker/build-push-action@v6
@@ -52,85 +51,56 @@ jobs:
 
   deploy:
     needs: build-image
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 40
     permissions:
       contents: read
       packages: read
     env:
-      SSHPASS: ${{ secrets.VPS_PASSWORD }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       S2_IMAGE: ${{ needs.build-image.outputs.image }}
     steps:
-      - name: Checkout
+      - name: Checkout da versão a publicar
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Preparar SSH
-        env:
-          VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+      - name: Validar ambiente da VPS
         run: |
           set -euo pipefail
-          if [ -z "${SSHPASS:-}" ]; then
-            echo "::error::Secret VPS_PASSWORD não configurado."
-            exit 1
-          fi
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass rsync
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-          if [ -n "${VPS_HOST_KEY:-}" ]; then
-            printf '%s\n' "$VPS_HOST_KEY" > "$HOME/.ssh/known_hosts"
-            chmod 600 "$HOME/.ssh/known_hosts"
-            echo "SSH_OPTS=-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-          else
-            echo "::warning::VPS_HOST_KEY ausente; usando conexão sem pinagem de host nesta execução."
-            echo "SSH_OPTS=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-          fi
+          echo "Runner: $(hostname)"
+          docker --version
+          docker compose version
+          mkdir -p /opt/s2licit
+          test -w /opt/s2licit || { echo "::error::Runner sem permissão de escrita em /opt/s2licit"; exit 1; }
 
-      - name: Testar acesso à VPS
+      - name: Sincronizar código localmente
         run: |
           set -euo pipefail
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "echo 'SSH da VPS disponível' && docker --version && docker compose version"
-
-      - name: Sincronizar código
-        run: |
-          set -euo pipefail
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/s2licit"
           rsync -az --delete \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
             --exclude .env \
-            -e "sshpass -e ssh $SSH_OPTS" \
-            ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/s2licit/"
+            ./ /opt/s2licit/
 
-      - name: Autenticar imagem na VPS
+      - name: Autenticar imagem no GHCR
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
 
       - name: Migrar e subir aplicação
         run: |
           set -euo pipefail
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<REMOTE
-          set -euo pipefail
           cd /opt/s2licit
-          # Deploys antigos podem ter deixado o container com o mesmo nome
-          # fora do projeto Compose atual. Substituímos somente o app; banco e
-          # volumes persistentes não são removidos.
           if docker ps -a --format '{{.Names}}' | grep -qx 'sistema-s2-app'; then
             echo "Substituindo container anterior sistema-s2-app..."
             docker rm -f sistema-s2-app >/dev/null
           fi
-          DOMAIN='$DEPLOY_DOMAIN' S2_IMAGE='$S2_IMAGE' bash scripts/vps-bootstrap.sh
-          REMOTE
+          DOMAIN="$DEPLOY_DOMAIN" S2_IMAGE="$S2_IMAGE" bash scripts/vps-bootstrap.sh
 
       - name: Validar readiness
         run: |
-          set -euo pipefail
-          sshpass -e ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2 || true)
@@ -147,7 +117,6 @@ jobs:
           docker compose ps >&2 || true
           docker compose logs --tail=120 app db >&2 || true
           exit 1
-          REMOTE
 
       - name: Resumo
         run: |
@@ -155,3 +124,4 @@ jobs:
           echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
           echo "- Imagem: $S2_IMAGE" >> "$GITHUB_STEP_SUMMARY"
           echo "- Readiness: aplicação + MySQL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Execução: runner self-hosted Contabo (sem SSH externo)" >> "$GITHUB_STEP_SUMMARY"
