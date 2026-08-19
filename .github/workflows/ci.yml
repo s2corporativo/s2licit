@@ -10,48 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  refresh-lockfile:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      changed: ${{ steps.lock.outputs.changed }}
-    steps:
-      - name: Checkout branch da PR
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-      - name: pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-      - name: Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - name: Regenerar lockfile
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: '1'
-        run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
-      - name: Persistir lockfile atualizado
-        id: lock
-        run: |
-          if git diff --quiet -- pnpm-lock.yaml; then
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add pnpm-lock.yaml
-          git commit -m 'Atualiza lockfile para undici corrigido'
-          git push origin HEAD:${{ github.head_ref }}
-          echo 'changed=true' >> "$GITHUB_OUTPUT"
-
   validate:
-    needs: refresh-lockfile
-    if: needs.refresh-lockfile.outputs.changed != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -59,24 +18,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
+
       - name: Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile
+
       - name: Gate estático da auditoria
         run: node scripts/validate-audit-fixes.mjs
+
       - name: Lint
         run: pnpm lint
+
       - name: Typecheck
         run: pnpm check
+
       - name: Testes
         run: pnpm test
+
       - name: Build
         run: pnpm build
