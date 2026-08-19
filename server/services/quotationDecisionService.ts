@@ -101,7 +101,7 @@ type HistoricalMatch = {
 async function loadHistoricalMatches(excludeQuotationId: number): Promise<HistoricalMatch[]> {
   const db = await getDb();
   if (!db) return [];
-  return db
+  const rows = await db
     .select({
       quotationItemId: emailQuotationItems.id,
       quotationId: emailQuotationItems.quotationId,
@@ -130,7 +130,8 @@ async function loadHistoricalMatches(excludeQuotationId: number): Promise<Histor
       ),
     )
     .orderBy(desc(emailQuotations.receivedAt))
-    .limit(MEMORY_LIMIT) as unknown as HistoricalMatch[];
+    .limit(MEMORY_LIMIT);
+  return rows as HistoricalMatch[];
 }
 
 export type MatchMemoryCandidate = {
@@ -157,15 +158,15 @@ function memoryCandidatesForItem(
   const current = normalizeText(item.descricao);
   if (!current) return [];
   const byProduct = new Map<number, MatchMemoryCandidate>();
+
   for (const row of history) {
     const similarity = calculateStringSimilarity(current, normalizeText(row.descricao));
     if (similarity < 0.62) continue;
-    const currentCandidate = byProduct.get(row.produtoMatchId);
     const sameOrg = Boolean(orgao && row.orgao && normalizeText(orgao) === normalizeText(row.orgao));
     const won = row.resultado === "ganhou";
-    const lastCost = safeNumber(row.precoSugerido ?? row.productPrice);
-    const lastSale = safeNumber(row.precoVendaManual);
-    if (!currentCandidate) {
+    const existing = byProduct.get(row.produtoMatchId);
+
+    if (!existing) {
       byProduct.set(row.produtoMatchId, {
         productId: row.produtoMatchId,
         productName: row.productName,
@@ -176,17 +177,18 @@ function memoryCandidatesForItem(
         approvals: 1,
         wins: won ? 1 : 0,
         sameOrgUses: sameOrg ? 1 : 0,
-        lastCost,
-        lastSale,
+        lastCost: safeNumber(row.precoSugerido ?? row.productPrice),
+        lastSale: safeNumber(row.precoVendaManual),
         lastUsedAt: row.receivedAt,
         evidence: [],
       });
-    } else {
-      currentCandidate.approvals += 1;
-      currentCandidate.wins += won ? 1 : 0;
-      currentCandidate.sameOrgUses += sameOrg ? 1 : 0;
-      if (similarity > currentCandidate.similarity) currentCandidate.similarity = similarity;
+      continue;
     }
+
+    existing.approvals += 1;
+    existing.wins += won ? 1 : 0;
+    existing.sameOrgUses += sameOrg ? 1 : 0;
+    existing.similarity = Math.max(existing.similarity, similarity);
   }
 
   return [...byProduct.values()]
@@ -195,9 +197,11 @@ function memoryCandidatesForItem(
       const winBoost = Math.min(0.07, candidate.wins * 0.02);
       const orgBoost = Math.min(0.06, candidate.sameOrgUses * 0.025);
       candidate.confidence = Math.min(0.995, candidate.similarity * 0.86 + evidenceBoost + winBoost + orgBoost);
-      if (candidate.approvals > 0) candidate.evidence.push(`${candidate.approvals} match(es) aprovado(s)`);
-      if (candidate.wins > 0) candidate.evidence.push(`${candidate.wins} cotação(ões) vencedora(s)`);
-      if (candidate.sameOrgUses > 0) candidate.evidence.push(`${candidate.sameOrgUses} uso(s) no mesmo órgão`);
+      candidate.evidence = [
+        `${candidate.approvals} match(es) aprovado(s)`,
+        candidate.wins > 0 ? `${candidate.wins} vitória(s)` : null,
+        candidate.sameOrgUses > 0 ? `${candidate.sameOrgUses} uso(s) no mesmo órgão` : null,
+      ].filter((value): value is string => Boolean(value));
       return candidate;
     })
     .sort((a, b) => b.confidence - a.confidence || b.wins - a.wins || b.approvals - a.approvals)
@@ -235,12 +239,7 @@ export type SupplierRankRow = {
   daysOld: number | null;
   winCount: number;
   score: number;
-  scoreBreakdown: {
-    cost: number;
-    availability: number;
-    freshness: number;
-    wins: number;
-  };
+  scoreBreakdown: { cost: number; availability: number; freshness: number; wins: number };
 };
 
 async function supplierWinCounts(productId: number): Promise<Map<number, number>> {
@@ -262,21 +261,21 @@ async function supplierWinCounts(productId: number): Promise<Map<number, number>
 
 export async function rankSuppliersForProduct(productId: number): Promise<SupplierRankRow[]> {
   const offers = await getProductSupplierPrices(productId);
-  const winCounts = await supplierWinCounts(productId);
+  const wins = await supplierWinCounts(productId);
   const enriched = await Promise.all(
     offers.map(async (offer) => {
       const history = await getPriceHistory(productId, offer.supplierId, 1);
-      const latest = history[0] as any | undefined;
+      const latest = history[0];
       const basePrice = safeNumber(offer.price);
       const promoPrice = safeNumber(offer.promoPrice);
       const effectivePrice = promoPrice != null && promoPrice > 0 ? promoPrice : basePrice;
       const freightValue = positive(latest?.freightValue);
       const taxValue = positive(latest?.taxValue);
-      const landedCost = effectivePrice == null
+      const rawLandedCost = effectivePrice == null
         ? null
-        : Number(calcLandedCost(String(effectivePrice), String(freightValue), String(taxValue)).toFixed(4));
+        : calcLandedCost(String(effectivePrice), String(freightValue), String(taxValue));
+      const landedCost = rawLandedCost == null ? null : Number(rawLandedCost.toFixed(4));
       const updatedAt = (offer.updatedAt ?? latest?.recordedAt ?? null) as Date | null;
-      const freshnessInfo = classifyFreshness(updatedAt);
       return {
         offer,
         basePrice,
@@ -286,37 +285,35 @@ export async function rankSuppliersForProduct(productId: number): Promise<Suppli
         taxValue,
         landedCost,
         updatedAt,
-        freshnessInfo,
-        winCount: winCounts.get(offer.supplierId) ?? 0,
+        freshness: classifyFreshness(updatedAt),
+        winCount: wins.get(offer.supplierId) ?? 0,
       };
     }),
   );
 
-  const costs = enriched.map((r) => r.landedCost).filter((v): v is number => v != null && v > 0);
-  const minCost = costs.length ? Math.min(...costs) : null;
-  const maxWins = Math.max(1, ...enriched.map((r) => r.winCount));
+  const costs = enriched.map((row) => row.landedCost).filter((value): value is number => value != null && value > 0);
+  const minCost = costs.length > 0 ? Math.min(...costs) : null;
+  const maxWins = Math.max(1, ...enriched.map((row) => row.winCount));
 
   return enriched
     .map((row) => {
       const costScore = row.landedCost && minCost ? Math.min(100, (minCost / row.landedCost) * 100) : 0;
       const availabilityText = normalizeText(row.offer.availability);
-      const stock = safeNumber(row.offer.stock);
-      const availabilityScore = stock != null
-        ? stock > 0 ? 100 : 0
-        : availabilityText.includes("dispon") || availabilityText.includes("estoque")
-          ? 90
-          : availabilityText.includes("indispon") || availabilityText.includes("ruptura")
-            ? 0
+      const stockNumber = safeNumber(row.offer.stock);
+      const availabilityScore = stockNumber != null
+        ? stockNumber > 0 ? 100 : 0
+        : availabilityText.includes("indispon") || availabilityText.includes("ruptura")
+          ? 0
+          : availabilityText.includes("dispon") || availabilityText.includes("estoque")
+            ? 90
             : 55;
-      const freshnessScore = row.freshnessInfo.status === "fresh"
-        ? 100
-        : row.freshnessInfo.status === "attention"
-          ? 72
-          : row.freshnessInfo.status === "stale"
-            ? 25
+      const freshnessScore = row.freshness.status === "fresh" ? 100
+        : row.freshness.status === "attention" ? 72
+          : row.freshness.status === "stale" ? 25
             : 35;
       const winsScore = row.winCount > 0 ? Math.min(100, 55 + (row.winCount / maxWins) * 45) : 35;
       const score = costScore * 0.45 + availabilityScore * 0.20 + freshnessScore * 0.15 + winsScore * 0.20;
+
       return {
         rank: 0,
         offerId: row.offer.id,
@@ -333,8 +330,8 @@ export async function rankSuppliersForProduct(productId: number): Promise<Suppli
         stock: row.offer.stock ?? null,
         link: row.offer.linkProduto ?? null,
         updatedAt: row.updatedAt,
-        freshness: row.freshnessInfo.status,
-        daysOld: row.freshnessInfo.daysOld,
+        freshness: row.freshness.status,
+        daysOld: row.freshness.daysOld,
         winCount: row.winCount,
         score: Number(score.toFixed(1)),
         scoreBreakdown: {
@@ -371,8 +368,8 @@ export type ItemDecision = {
 };
 
 function riskLevel(reasons: Array<{ severity: QuotationRiskLevel; text: string }>): QuotationRiskLevel {
-  if (reasons.some((r) => r.severity === "red")) return "red";
-  if (reasons.some((r) => r.severity === "yellow")) return "yellow";
+  if (reasons.some((reason) => reason.severity === "red")) return "red";
+  if (reasons.some((reason) => reason.severity === "yellow")) return "yellow";
   return "green";
 }
 
@@ -380,26 +377,34 @@ export async function getQuotationDecisionSummary(quotationId: number) {
   const data = await getEmailQuotationWithItems(quotationId);
   if (!data) throw new Error("Cotação não encontrada.");
   const preview = await previewQuotationPricing(quotationId);
-  const memory = await getQuotationMatchMemory(quotationId);
-  const memoryByItem = new Map(memory.map((row) => [row.itemId, row.candidates]));
+  const memoryRows = await getQuotationMatchMemory(quotationId);
+  const memoryByItem = new Map(memoryRows.map((row) => [row.itemId, row.candidates]));
   const previewByItem = new Map(preview.items.map((row) => [row.quotationItemId, row]));
+  const rankingCache = new Map<number, Promise<SupplierRankRow[]>>();
+  const rankingFor = (productId: number) => {
+    const cached = rankingCache.get(productId);
+    if (cached) return cached;
+    const pending = rankSuppliersForProduct(productId);
+    rankingCache.set(productId, pending);
+    return pending;
+  };
 
   const items: ItemDecision[] = await Promise.all(data.items.map(async (item) => {
     const pricing = previewByItem.get(item.id);
-    const supplierRanking = item.produtoMatchId ? await rankSuppliersForProduct(item.produtoMatchId) : [];
+    const supplierRanking = item.produtoMatchId ? await rankingFor(item.produtoMatchId) : [];
     const topSupplier = supplierRanking[0];
     const freshness = classifyFreshness(pricing?.costUpdatedAt ?? topSupplier?.updatedAt ?? null);
     const matchScore = safeNumber(item.matchScore);
     const minMarginPercent = preview.defaultMarginPercent;
     const sale = pricing?.unitPrice ?? null;
-    const maxPurchase = sale != null
-      ? calculateMaxPurchasePrice({
+    const maxPurchasePrice = sale == null
+      ? null
+      : calculateMaxPurchasePrice({
           targetSale: sale,
           minMarginPercent,
           freightValue: pricing?.freightValue ?? 0,
           taxValue: pricing?.taxValue ?? 0,
-        }).maxPurchasePrice
-      : null;
+        }).maxPurchasePrice;
 
     const reasons: Array<{ severity: QuotationRiskLevel; text: string }> = [];
     if (!item.produtoMatchId) reasons.push({ severity: "red", text: "Produto ainda sem match." });
@@ -429,27 +434,28 @@ export async function getQuotationDecisionSummary(quotationId: number) {
       sale,
       marginPercent: pricing?.marginPercent ?? null,
       minMarginPercent,
-      maxPurchasePrice: maxPurchase,
+      maxPurchasePrice,
       priceFreshness: freshness.status,
       priceAgeDays: freshness.daysOld,
       risk: riskLevel(reasons),
-      riskReasons: reasons.map((r) => r.text),
+      riskReasons: reasons.map((reason) => reason.text),
       memory: memoryByItem.get(item.id) ?? [],
       supplierRanking,
     };
   }));
 
-  const green = items.filter((i) => i.risk === "green").length;
-  const yellow = items.filter((i) => i.risk === "yellow").length;
-  const red = items.filter((i) => i.risk === "red").length;
+  const resolved = items.filter((item) => item.risk === "green").length;
+  const needsReview = items.filter((item) => item.risk === "yellow").length;
+  const blocked = items.filter((item) => item.risk === "red").length;
+
   return {
     quotationId,
     items,
     totals: {
       totalItems: items.length,
-      resolved: green,
-      needsReview: yellow,
-      blocked: red,
+      resolved,
+      needsReview,
+      blocked,
       unmatched: preview.unmatchedItems,
       withoutCost: preview.itemsSemCusto,
       totalBaseCost: preview.totalBaseCost,
@@ -459,7 +465,7 @@ export async function getQuotationDecisionSummary(quotationId: number) {
       totalSale: preview.totalSale,
       totalProfit: preview.totalProfit,
       effectiveMarginPercent: preview.effectiveMarginPercent,
-      canGenerate: preview.canGenerate && red === 0,
+      canGenerate: preview.canGenerate && blocked === 0,
     },
   };
 }
@@ -482,24 +488,23 @@ export async function resolveQuotationIntelligently(quotationId: number, userId?
     if (item.produtoMatchId && item.matchConfirmado) continue;
     const memory = memoryByItem.get(item.id)?.[0];
     const similar = similarByItem.get(item.id)?.[0];
-    let chosen: { productId: number; price: string | null; confidence: number; source: "memory" | "similar" } | null = null;
-    if (memory && memory.confidence >= AUTO_MEMORY_THRESHOLD) {
-      chosen = { productId: memory.productId, price: memory.lastCost != null ? String(memory.lastCost) : null, confidence: memory.confidence, source: "memory" };
-    } else if (similar && similar.score >= AUTO_SUGGESTION_THRESHOLD) {
-      chosen = { productId: similar.id, price: similar.price ?? null, confidence: similar.score, source: "similar" };
-    }
+    const chosen = memory && memory.confidence >= AUTO_MEMORY_THRESHOLD
+      ? { productId: memory.productId, price: memory.lastCost == null ? null : String(memory.lastCost), confidence: memory.confidence, source: "memory" as const }
+      : similar && similar.score >= AUTO_SUGGESTION_THRESHOLD
+        ? { productId: similar.id, price: similar.price ?? null, confidence: similar.score, source: "similar" as const }
+        : null;
     if (!chosen) continue;
 
     await db.transaction(async (tx) => {
       await tx
         .update(emailQuotationItems)
         .set({
-          produtoMatchId: chosen!.productId,
-          matchScore: String(Number(chosen!.confidence.toFixed(4))),
+          produtoMatchId: chosen.productId,
+          matchScore: String(Number(chosen.confidence.toFixed(4))),
           matchMethod: "nome",
           matchConfirmado: true,
           matchAuto: true,
-          precoSugerido: chosen!.price,
+          precoSugerido: chosen.price,
         })
         .where(eq(emailQuotationItems.id, item.id));
       await tx.insert(auditLogs).values({
@@ -508,24 +513,16 @@ export async function resolveQuotationIntelligently(quotationId: number, userId?
         entity: "email_quotation_items",
         entityId: item.id,
         origin: "system",
-        summary: `Match resolvido por ${chosen!.source === "memory" ? "memória operacional" : "similaridade"} com ${Math.round(chosen!.confidence * 100)}% de confiança`,
-        changes: { productId: chosen!.productId, source: chosen!.source, confidence: chosen!.confidence } as any,
+        summary: `Match resolvido por ${chosen.source === "memory" ? "memória operacional" : "similaridade"} com ${Math.round(chosen.confidence * 100)}% de confiança`,
+        changes: { productId: chosen.productId, source: chosen.source, confidence: chosen.confidence } as any,
       });
     });
-    autoResolved++;
+    autoResolved += 1;
     decisions.push({ itemId: item.id, productId: chosen.productId, source: chosen.source, confidence: chosen.confidence });
   }
 
   const summary = await getQuotationDecisionSummary(quotationId);
-  await db
-    .update(emailQuotations)
-    .set({ status: summary.totals.canGenerate ? "revisao" : "revisao" })
-    .where(eq(emailQuotations.id, quotationId));
+  await db.update(emailQuotations).set({ status: "revisao" }).where(eq(emailQuotations.id, quotationId));
 
-  return {
-    quotationId,
-    autoResolved,
-    decisions,
-    summary,
-  };
+  return { quotationId, autoResolved, decisions, summary };
 }
