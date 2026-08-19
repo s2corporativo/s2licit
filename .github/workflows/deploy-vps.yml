@@ -1,7 +1,8 @@
 # Deploy do S2Licit na VPS Contabo.
 # O artefato Docker continua sendo construído no GitHub-hosted runner; a
-# publicação ocorre no runner self-hosted instalado na própria VPS, evitando
-# senha SSH/root e mantendo o deploy auditável por SHA.
+# publicação ocorre no runner self-hosted instalado na própria VPS. Operações
+# que precisam acessar o .env root:600 são executadas via sudo, sem reduzir a
+# proteção do arquivo nem depender de senha SSH externa.
 name: Deploy VPS
 
 on:
@@ -71,13 +72,14 @@ jobs:
           echo "Runner: $(hostname)"
           docker --version
           docker compose version
-          mkdir -p /opt/s2licit
-          test -w /opt/s2licit || { echo "::error::Runner sem permissão de escrita em /opt/s2licit"; exit 1; }
+          sudo -n true || { echo "::error::Runner precisa de sudo não-interativo para preservar o .env root:600."; exit 1; }
+          sudo mkdir -p /opt/s2licit
+          sudo test -d /opt/s2licit
 
       - name: Sincronizar código localmente
         run: |
           set -euo pipefail
-          rsync -az --delete \
+          sudo rsync -az --delete \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
@@ -87,35 +89,35 @@ jobs:
       - name: Autenticar imagem no GHCR
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
+          printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
 
       - name: Migrar e subir aplicação
         run: |
           set -euo pipefail
           cd /opt/s2licit
-          if docker ps -a --format '{{.Names}}' | grep -qx 'sistema-s2-app'; then
+          if sudo docker ps -a --format '{{.Names}}' | grep -qx 'sistema-s2-app'; then
             echo "Substituindo container anterior sistema-s2-app..."
-            docker rm -f sistema-s2-app >/dev/null
+            sudo docker rm -f sistema-s2-app >/dev/null
           fi
-          DOMAIN="$DEPLOY_DOMAIN" S2_IMAGE="$S2_IMAGE" bash scripts/vps-bootstrap.sh
+          sudo env DOMAIN="$DEPLOY_DOMAIN" S2_IMAGE="$S2_IMAGE" bash scripts/vps-bootstrap.sh
 
       - name: Validar readiness
         run: |
           set -euo pipefail
           cd /opt/s2licit
-          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2 || true)
+          LOCAL_PORT=$(sudo sh -c "grep '^APP_LOCAL_PORT=' .env 2>/dev/null | cut -d= -f2" || true)
           LOCAL_PORT=${LOCAL_PORT:-3000}
           for i in $(seq 1 45); do
             if curl -fsS "http://127.0.0.1:${LOCAL_PORT}/readyz" >/dev/null 2>&1; then
               echo "Aplicação e MySQL prontos"
-              docker compose ps
+              sudo docker compose ps
               exit 0
             fi
             sleep 4
           done
           echo "Aplicação não ficou pronta" >&2
-          docker compose ps >&2 || true
-          docker compose logs --tail=120 app db >&2 || true
+          sudo docker compose ps >&2 || true
+          sudo docker compose logs --tail=120 app db >&2 || true
           exit 1
 
       - name: Resumo
@@ -125,3 +127,4 @@ jobs:
           echo "- Imagem: $S2_IMAGE" >> "$GITHUB_STEP_SUMMARY"
           echo "- Readiness: aplicação + MySQL" >> "$GITHUB_STEP_SUMMARY"
           echo "- Execução: runner self-hosted Contabo (sem SSH externo)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Segredos: .env preservado como root:600" >> "$GITHUB_STEP_SUMMARY"
