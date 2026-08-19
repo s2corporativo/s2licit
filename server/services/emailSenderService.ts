@@ -1,7 +1,12 @@
 import nodemailer from "nodemailer";
 
 /**
- * Envio de e-mail (SMTP) para responder cotações.
+ * Envio de e-mail (SMTP) exclusivamente para comunicação operacional:
+ * resposta de cotações e envio de propostas.
+ *
+ * Avisos/relatórios automáticos do sistema por e-mail estão desativados para
+ * evitar excesso de mensagens. Alertas devem permanecer nos canais internos
+ * e/ou WhatsApp quando configurado.
  *
  * Configuração por ambiente (opcional — sem ela, o envio é desabilitado):
  *   SMTP_HOST, SMTP_PORT (padrão 587), SMTP_USER, SMTP_PASSWORD,
@@ -32,7 +37,27 @@ export interface SendEmailInput {
   attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
 
+/**
+ * Bloqueia mensagens automáticas de aviso/relatório sem interferir no SMTP
+ * usado para responder cotações e encaminhar propostas comerciais.
+ */
+function isAutomaticSystemNotice(subject: string): boolean {
+  const normalized = subject.trim().toLocaleLowerCase("pt-BR");
+  return (
+    normalized.startsWith("relatório diário s2 licit") ||
+    normalized.startsWith("relatorio diario s2 licit") ||
+    normalized.startsWith("alertas do dia — sistema s2") ||
+    normalized.startsWith("alertas do dia - sistema s2")
+  );
+}
+
 export async function sendEmail(input: SendEmailInput): Promise<{ messageId: string }> {
+  if (isAutomaticSystemNotice(input.subject)) {
+    // Retorno intencional sem SMTP: mantém compatibilidade com os chamadores
+    // antigos enquanto elimina definitivamente o envio desses avisos.
+    return { messageId: "automatic-system-email-disabled" };
+  }
+
   if (!isSmtpConfigured()) {
     throw new Error(
       "SMTP não configurado. Defina SMTP_HOST, SMTP_USER e SMTP_PASSWORD no ambiente.",
