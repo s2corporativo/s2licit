@@ -169,8 +169,9 @@ export async function listEmailQuotations(status?: string) {
 }
 
 /**
- * Detalhe operacional enriquecido. A UI não precisa mais exibir apenas o ID do
- * match: recebe nome, fabricante, apresentação, fornecedor e custo do produto.
+ * Detalhe operacional enriquecido. Além do produto casado, entrega os
+ * componentes do custo real (preço, frete e tributos) e a URL de origem para
+ * que a tela de cotações consiga auditar a precificação sem sair do fluxo.
  */
 export async function getEmailQuotationWithItems(id: number) {
   const db = await getDb();
@@ -200,6 +201,10 @@ export async function getEmailQuotationWithItems(id: number) {
       productPresentation: products.presentation,
       productConcentration: products.concentration,
       productPrice: products.price,
+      productFreightValue: products.freightValue,
+      productTaxValue: products.taxValue,
+      productUrl: products.productUrl,
+      productSupplierId: products.supplierId,
       productCode: products.code,
       supplierName: suppliers.name,
       categoryName: categories.name,
