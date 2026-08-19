@@ -1786,6 +1786,98 @@ export const funilEventos = mysqlTable(
 export type FunilEvento = typeof funilEventos.$inferSelect;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AgenticSeek — Prospecção automatizada de licitações (módulo M-AgenticSeek).
+//
+// Buscas orientadas por objetivo ("indústrias em Betim com licitação em 90
+// dias"), executadas sobre a API oficial do PNCP com pontuação de relevância
+// por IA, validação de CNPJ do órgão e consolidação/deduplicação. Os resultados
+// podem ser enviados ao funil de oportunidades (origemTipo = "agenticseek").
+//
+// Custo: a pontuação IA usa invokeLLM (anthropic/groq/forge) — os custos são
+// estimados com estimateCostUsd/usdBrlRate e gravados na busca.
+// ─────────────────────────────────────────────────────────────────────────────
+export const agenticseekBuscas = mysqlTable(
+  "agenticseek_buscas",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").references(() => users.id, { onDelete: "set null" }),
+    objetivo: text("objetivo").notNull(),
+    keywords: varchar("keywords", { length: 1024 }),
+    uf: varchar("uf", { length: 2 }),
+    municipio: varchar("municipio", { length: 128 }),
+    diasAtras: int("diasAtras"),
+    modalidades: varchar("modalidades", { length: 64 }),
+    status: mysqlEnum("status", ["pendente", "executando", "concluida", "erro", "cancelada"]).default("pendente").notNull(),
+    totalResultados: int("totalResultados").default(0).notNull(),
+    totalValidados: int("totalValidados").default(0).notNull(),
+    erroMensagem: text("erroMensagem"),
+    custoEstimadoBrl: decimal("custoEstimadoBrl", { precision: 12, scale: 4 }),
+    custoEstimadoUsd: decimal("custoEstimadoUsd", { precision: 12, scale: 4 }),
+    tempoExecucaoMs: int("tempoExecucaoMs"),
+    startedAt: timestamp("startedAt"),
+    completedAt: timestamp("completedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_agenticseek_status").on(table.status),
+    index("idx_agenticseek_user").on(table.userId),
+    index("idx_agenticseek_created").on(table.createdAt),
+  ]
+);
+export type AgenticseekBusca = typeof agenticseekBuscas.$inferSelect;
+export type InsertAgenticseekBusca = typeof agenticseekBuscas.$inferInsert;
+export const agenticseekResultados = mysqlTable(
+  "agenticseek_resultados",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    buscaId: int("buscaId")
+      .notNull()
+      .references(() => agenticseekBuscas.id, { onDelete: "cascade" }),
+    fonte: mysqlEnum("fonte", ["pncp"]).default("pncp").notNull(),
+    // Dados do edital
+    editalId: varchar("editalId", { length: 256 }),
+    numeroControlePncp: varchar("numeroControlePncp", { length: 64 }),
+    orgao: varchar("orgao", { length: 512 }),
+    cnpjOrgao: varchar("cnpjOrgao", { length: 20 }),
+    uf: varchar("uf", { length: 2 }),
+    municipio: varchar("municipio", { length: 128 }),
+    modalidade: varchar("modalidade", { length: 128 }),
+    objeto: text("objeto"),
+    dataPublicacao: varchar("dataPublicacao", { length: 32 }),
+    dataAbertura: varchar("dataAbertura", { length: 32 }),
+    dataEncerramento: varchar("dataEncerramento", { length: 32 }),
+    valorEstimado: decimal("valorEstimado", { precision: 15, scale: 2 }),
+    link: text("link"),
+    // Validação do órgão
+    cnpjValido: boolean("cnpjValido"),
+    cnpjNaturezaJuridica: varchar("cnpjNaturezaJuridica", { length: 256 }),
+    cnpjCnae: varchar("cnpjCnae", { length: 32 }),
+    // Compatibilidade do órgão com o objetivo (avaliada pela IA)
+    orgaoCompativel: boolean("orgaoCompativel"),
+    orgaoCompatibilidadeNota: text("orgaoCompatibilidadeNota"),
+    // Scoring IA
+    relevanceScore: int("relevanceScore"),
+    relevanceJustificativa: text("relevanceJustificativa"),
+    validated: boolean("validated").default(false).notNull(),
+    validationErrors: json("validationErrors"),
+    rawData: json("rawData"),
+    // Vinculação opcional ao funil
+    funilOportunidadeId: int("funilOportunidadeId"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_agenticseek_result_busca").on(table.buscaId),
+    index("idx_agenticseek_result_edital").on(table.editalId),
+    index("idx_agenticseek_result_cnpj").on(table.cnpjOrgao),
+    index("idx_agenticseek_result_score").on(table.relevanceScore),
+  ]
+);
+export type AgenticseekResultado = typeof agenticseekResultados.$inferSelect;
+export type InsertAgenticseekResultado = typeof agenticseekResultados.$inferInsert;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Motor Tributário (Tax Engine): regras versionadas com vigência, por UF.
 // O sistema NÃO afirma enquadramento — calcula estimativas a partir das
 // regras cadastradas (validação contábil é responsabilidade do operador).

@@ -38,6 +38,7 @@ import { mfaRouter } from "./routers/mfaRouter";
 import { usersRouter } from "./routers/usersRouter";
 import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
 import { pncpRadarRouter } from "./routers/pncpRadar";
+import { agenticSeekRouter } from "./routers/agenticSeekRouter";
 import { emailQuotationsRouter } from "./routers/emailQuotations";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
@@ -86,6 +87,7 @@ export const appRouter = router({
   documents: documentGovernanceRouter,
   workflow: workflowRouter,
   pncpRadar: pncpRadarRouter,
+  agenticSeek: agenticSeekRouter,
   emailQuotations: emailQuotationsRouter,
   certidoes: certidoesRouter,
   ai: aiRouter,

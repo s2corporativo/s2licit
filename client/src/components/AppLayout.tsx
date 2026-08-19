@@ -25,6 +25,7 @@ const navGroups: NavGroup[] = [
     label: "Oportunidades",
     items: [
       { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
+      { href: "/agenticseek", icon: Bot, label: "AgenticSeek", minRole: "editor" },
       { href: "/cotacoes-recebidas", icon: FileText, label: "Cotações recebidas", minRole: "editor" },
       { href: "/edital", icon: FileScan, label: "Analisar oportunidade", minRole: "editor" },
     ],
