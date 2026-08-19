@@ -4,12 +4,12 @@ import type { ExtractedItem } from "./emailQuotationExtractor";
 import { nameMatchThreshold } from "./quotationAutoPipelineService";
 
 /**
- * Cruzamento de itens de cotação com o catálogo de produtos.
+ * Cruzamento de itens de cotação com o catálogo.
  *
- * Estratégia, em ordem de prioridade:
- *   1. Código CATMAS exato (determinístico).
- *   2. Código CATMAT exato (determinístico).
- *   3. Similaridade de nome (Levenshtein normalizado), acima de um limiar.
+ * 1. CATMAS exato — determinístico.
+ * 2. CATMAT exato — determinístico.
+ * 3. Nome — APENAS candidato para revisão. Score nominal nunca é promovido a
+ *    1.000, evitando que identidade textual contorne a política técnica.
  */
 
 export type MatchMethod = "catmas" | "catmat" | "nome" | "nenhum";
@@ -27,10 +27,6 @@ interface CatalogProduct {
   price: string | null;
 }
 
-/**
- * Encontra o melhor produto do catálogo (já carregado) por similaridade de nome.
- * Exportada e pura para facilitar testes.
- */
 export function bestNameMatch(
   descricao: string,
   catalog: CatalogProduct[],
@@ -39,33 +35,24 @@ export function bestNameMatch(
   let best: { product: CatalogProduct; score: number } | null = null;
   for (const product of catalog) {
     const score = calculateStringSimilarity(descricao, product.name);
-    if (score >= threshold && (!best || score > best.score)) {
-      best = { product, score };
-    }
+    if (score >= threshold && (!best || score > best.score)) best = { product, score };
   }
   return best;
 }
 
-/**
- * Limiar efetivo de match por nome: definido pela configuração central
- * (QUOTATION_NAME_MATCH_THRESHOLD) para que o limiar de entrada na revisão
- * e o limiar de auto-confirmação sejam calibrados no mesmo lugar.
- */
 export function effectiveNameMatchThreshold(): number {
   return nameMatchThreshold();
 }
 
 function isCatmasCode(code: string): boolean {
-  // CATMAS (MG) costuma ter 8+ dígitos; CATMAT (federal) ~6. Usamos o formato
-  // para escolher UM catálogo — nunca cruzamos CATMAS↔CATMAT (numerações
-  // independentes; um código pode existir por coincidência no outro catálogo e
-  // ligar o item ao produto errado com "score 1").
   return /^\d{8,}$/.test(code.trim());
 }
 
 /**
- * Cruza um único item com o catálogo. `catalog` é o conjunto de produtos ativos
- * já carregado (evita N queries). Códigos de catálogo são consultados no banco.
+ * Similaridade textual é recuperação, não decisão de equivalência. Mesmo que o
+ * texto seja idêntico, o score persistido fica no máximo em 0,999. Com o
+ * limiar de auto-confirmação de produção em 1,00, somente os códigos oficiais
+ * determinísticos podem ser confirmados sem revisão/guarda técnica.
  */
 export async function matchQuotationItem(
   item: ExtractedItem,
@@ -74,7 +61,6 @@ export async function matchQuotationItem(
   const code = item.codigoCatalogo?.trim();
 
   if (code) {
-    // Escolhe UM catálogo pelo formato do código e consulta só ele.
     const [method, lookup] = isCatmasCode(code)
       ? (["catmas", findProductByCatmas] as const)
       : (["catmat", findProductByCatmat] as const);
@@ -83,7 +69,7 @@ export async function matchQuotationItem(
       return {
         produtoMatchId: found.id,
         matchScore: 1,
-        matchMethod: method as MatchMethod,
+        matchMethod: method,
         precoSugerido: found.price ?? null,
       };
     }
@@ -93,7 +79,7 @@ export async function matchQuotationItem(
   if (nameHit) {
     return {
       produtoMatchId: nameHit.product.id,
-      matchScore: Number(nameHit.score.toFixed(4)),
+      matchScore: Number(Math.min(nameHit.score, 0.999).toFixed(4)),
       matchMethod: "nome",
       precoSugerido: nameHit.product.price ?? null,
     };
@@ -102,9 +88,6 @@ export async function matchQuotationItem(
   return { produtoMatchId: null, matchScore: null, matchMethod: "nenhum", precoSugerido: null };
 }
 
-/**
- * Cruza todos os itens de uma cotação, carregando o catálogo uma única vez.
- */
 export async function matchQuotationItems(items: ExtractedItem[]): Promise<ItemMatch[]> {
   const catalog = await listProductsForMatching();
   return Promise.all(items.map((item) => matchQuotationItem(item, catalog)));
