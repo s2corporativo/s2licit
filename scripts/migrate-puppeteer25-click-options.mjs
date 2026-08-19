@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 
+// Migração pontual e idempotência controlada: falha se o código esperado mudar.
 const file = "server/services/propostaAgent.ts";
 const before = await readFile(file, "utf8");
 const needle = "{ clickCount: 3 }";
