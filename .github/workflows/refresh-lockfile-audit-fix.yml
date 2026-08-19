@@ -6,6 +6,7 @@ on:
       - agent/auditoria-correcao-3-31
     paths:
       - package.json
+      - pnpm-workspace.yaml
 
 permissions:
   contents: write
