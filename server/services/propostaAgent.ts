@@ -556,7 +556,7 @@ export class PropostaAgente {
       try {
         const el = await this.page.$(sel);
         if (el) {
-          await el.click({ clickCount: 3 });
+          await el.click({ count: 3 });
           await el.type(valor, { delay: 60 });
           return true;
         }
@@ -818,7 +818,7 @@ export class PropostaAgente {
         if (linhaAtual && cfg.seletores.inputPreco) {
           const inputsNaLinha = await linhaAtual.$$(cfg.seletores.inputPreco).catch(() => []);
           if (inputsNaLinha.length > 0) {
-            await inputsNaLinha[0].click({ clickCount: 3 });
+            await inputsNaLinha[0].click({ count: 3 });
             await inputsNaLinha[0].type(valorBR, { delay: 60 });
             preencheu = true;
 
@@ -826,7 +826,7 @@ export class PropostaAgente {
             if (cfg.seletores.inputMarca && item.marca) {
               const marcaInps = await linhaAtual.$$(cfg.seletores.inputMarca).catch(() => []);
               if (marcaInps[0]) {
-                await marcaInps[0].click({ clickCount: 3 });
+                await marcaInps[0].click({ count: 3 });
                 await marcaInps[0].type(item.marca, { delay: 50 });
               }
             }
@@ -836,7 +836,7 @@ export class PropostaAgente {
         // Estratégia 2: input pelo índice global na página
         if (!preencheu && todosInputsPreco[item.numero - 1]) {
           const inp = todosInputsPreco[item.numero - 1];
-          await inp.click({ clickCount: 3 });
+          await inp.click({ count: 3 });
           await inp.type(valorBR, { delay: 60 });
           preencheu = true;
         }
