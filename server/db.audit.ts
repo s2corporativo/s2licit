@@ -1,4 +1,4 @@
-import { getTableName, is, sql } from 'drizzle-orm';
+import { getTableColumns, getTableName, is, sql } from 'drizzle-orm';
 import { MySqlTable } from 'drizzle-orm/mysql-core';
 import * as schema from '../drizzle/schema';
 import { getDb } from './db';
@@ -7,6 +7,9 @@ export interface TableCheckResult {
   name: string;
   exists: boolean;
   columnCount?: number;
+  expectedColumnCount?: number;
+  missingColumns?: string[];
+  unexpectedColumns?: string[];
   error?: string;
 }
 
@@ -19,76 +22,68 @@ export interface DatabaseIntegrityReport {
   summary: string;
 }
 
-// Derivada do próprio schema Drizzle — nunca fica defasada em relação ao código.
-const EXPECTED_TABLES = Object.values(schema)
+const EXPECTED_TABLE_OBJECTS = Object.values(schema)
   .filter((value) => is(value as object, MySqlTable))
-  .map((table) => getTableName(table as MySqlTable))
-  .sort();
+  .map((table) => table as MySqlTable)
+  .sort((a, b) => getTableName(a).localeCompare(getTableName(b)));
 
-/**
- * Verifica a existência de uma tabela no banco de dados
- */
+const EXPECTED_TABLES = EXPECTED_TABLE_OBJECTS.map((table) => getTableName(table));
+
+function expectedColumns(table: MySqlTable): string[] {
+  return Object.values(getTableColumns(table)).map((column: any) => String(column.name)).sort();
+}
+
 export async function checkTableExists(tableName: string): Promise<TableCheckResult> {
   try {
     const db = await getDb();
-    if (!db) {
-      return {
-        name: tableName,
-        exists: false,
-        error: 'Database connection unavailable',
-      };
-    }
-    const result = await db.execute(
-      sql`SELECT COUNT(*) as column_count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${tableName}`
-    );
-    
-    const columnCount = (result[0] as any)?.column_count || 0;
-    
-    if (columnCount === 0) {
-      return {
-        name: tableName,
-        exists: false,
-        error: 'Table not found in database schema',
-      };
-    }
-
+    if (!db) return { name: tableName, exists: false, error: 'Database connection unavailable' };
+    const rows = await db.execute(sql`
+      SELECT COLUMN_NAME AS column_name
+        FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${tableName}
+       ORDER BY ORDINAL_POSITION
+    `);
+    const actual = (rows as unknown as Array<{ column_name: string }>).map((r) => String(r.column_name));
+    const table = EXPECTED_TABLE_OBJECTS.find((t) => getTableName(t) === tableName);
+    const expected = table ? expectedColumns(table) : [];
+    if (actual.length === 0) return { name: tableName, exists: false, error: 'Table not found in database schema' };
+    const actualSet = new Set(actual);
+    const expectedSet = new Set(expected);
+    const missingColumns = expected.filter((c) => !actualSet.has(c));
+    const unexpectedColumns = actual.filter((c) => !expectedSet.has(c));
     return {
       name: tableName,
       exists: true,
-      columnCount,
+      columnCount: actual.length,
+      expectedColumnCount: expected.length,
+      missingColumns,
+      unexpectedColumns,
     };
   } catch (error) {
-    return {
-      name: tableName,
-      exists: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return { name: tableName, exists: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
 
-/**
- * Verifica a integridade completa do banco de dados
- */
 export async function checkDatabaseIntegrity(): Promise<DatabaseIntegrityReport> {
   const timestamp = new Date();
   const tableResults: TableCheckResult[] = [];
   const missingTables: string[] = [];
 
-  // Uma única consulta ao information_schema cobre todas as tabelas esperadas
-  const columnCounts = new Map<string, number>();
+  let actualByTable = new Map<string, string[]>();
   try {
     const db = await getDb();
-    if (!db) {
-      throw new Error('Database connection unavailable');
-    }
-    const rows = await db.execute(
-      sql`SELECT TABLE_NAME as table_name, COUNT(*) as column_count
-          FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE()
-          GROUP BY TABLE_NAME`
-    );
-    for (const row of rows as unknown as Array<{ table_name: string; column_count: number }>) {
-      columnCounts.set(row.table_name, Number(row.column_count));
+    if (!db) throw new Error('Database connection unavailable');
+    const rows = await db.execute(sql`
+      SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name
+        FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+       ORDER BY TABLE_NAME, ORDINAL_POSITION
+    `);
+    for (const row of rows as unknown as Array<{ table_name: string; column_name: string }>) {
+      const table = String(row.table_name);
+      const list = actualByTable.get(table) ?? [];
+      list.push(String(row.column_name));
+      actualByTable.set(table, list);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -98,104 +93,80 @@ export async function checkDatabaseIntegrity(): Promise<DatabaseIntegrityReport>
       totalTables: EXPECTED_TABLES.length,
       missingTables: [...EXPECTED_TABLES],
       tables: EXPECTED_TABLES.map((name) => ({ name, exists: false, error: message })),
-      summary: `✗ Falha ao consultar o banco: ${message}`,
+      summary: `Falha ao consultar o banco: ${message}`,
     };
   }
 
-  for (const tableName of EXPECTED_TABLES) {
-    const columnCount = columnCounts.get(tableName);
-    if (columnCount === undefined) {
-      tableResults.push({ name: tableName, exists: false, error: 'Table not found in database schema' });
+  let tablesWithColumnDrift = 0;
+  for (const table of EXPECTED_TABLE_OBJECTS) {
+    const tableName = getTableName(table);
+    const actual = actualByTable.get(tableName);
+    if (!actual) {
       missingTables.push(tableName);
-    } else {
-      tableResults.push({ name: tableName, exists: true, columnCount });
+      tableResults.push({ name: tableName, exists: false, error: 'Table not found in database schema' });
+      continue;
     }
+    const expected = expectedColumns(table);
+    const actualSet = new Set(actual);
+    const expectedSet = new Set(expected);
+    const missingColumns = expected.filter((c) => !actualSet.has(c));
+    const unexpectedColumns = actual.filter((c) => !expectedSet.has(c));
+    if (missingColumns.length > 0) tablesWithColumnDrift++;
+    tableResults.push({
+      name: tableName,
+      exists: true,
+      columnCount: actual.length,
+      expectedColumnCount: expected.length,
+      missingColumns,
+      unexpectedColumns,
+    });
   }
 
-  // Determinar status geral
   let status: 'healthy' | 'warning' | 'critical' = 'healthy';
-  if (missingTables.length > 0 && missingTables.length <= 3) {
-    status = 'warning';
-  } else if (missingTables.length > 3) {
-    status = 'critical';
-  }
+  if (missingTables.length > 0 || tablesWithColumnDrift > 0) status = 'critical';
+  else if (tableResults.some((t) => (t.unexpectedColumns?.length ?? 0) > 0)) status = 'warning';
 
-  const summary = 
-    missingTables.length === 0
-      ? `✓ Banco íntegro: ${tableResults.length} tabelas verificadas com sucesso`
-      : `⚠ ${missingTables.length} tabela(s) ausente(s): ${missingTables.join(', ')}`;
+  const summary = status === 'healthy'
+    ? `Banco íntegro: ${tableResults.length} tabelas e colunas Drizzle verificadas`
+    : `Schema divergente: ${missingTables.length} tabela(s) ausente(s), ${tablesWithColumnDrift} tabela(s) com coluna(s) esperada(s) ausente(s).`;
 
-  return {
-    timestamp,
-    status,
-    totalTables: EXPECTED_TABLES.length,
-    missingTables,
-    tables: tableResults,
-    summary,
-  };
+  return { timestamp, status, totalTables: EXPECTED_TABLES.length, missingTables, tables: tableResults, summary };
 }
 
-/**
- * Verifica chaves estrangeiras e relacionamentos críticos
- */
 export async function checkForeignKeyIntegrity(): Promise<Record<string, any>> {
   try {
     const db = await getDb();
-    if (!db) {
-      return {
-        status: 'error',
-        error: 'Database connection unavailable',
-      };
-    }
-    const result = await db.execute(
-      sql`SELECT CONSTRAINT_NAME, TABLE_NAME, REFERENCED_TABLE_NAME 
-          FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS 
-          WHERE CONSTRAINT_SCHEMA = DATABASE()`
-    );
-    
-    return {
-      status: 'ok',
-      foreignKeys: result,
-      count: (result as any[]).length,
-    };
+    if (!db) return { status: 'error', error: 'Database connection unavailable' };
+    const result = await db.execute(sql`
+      SELECT CONSTRAINT_NAME, TABLE_NAME, REFERENCED_TABLE_NAME
+        FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+       WHERE CONSTRAINT_SCHEMA = DATABASE()
+    `);
+    return { status: 'ok', foreignKeys: result, count: (result as any[]).length };
   } catch (error) {
-    return {
-      status: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
 
-/**
- * Retorna estatísticas gerais do banco
- */
 export async function getDatabaseStats(): Promise<Record<string, any>> {
   try {
     const db = await getDb();
-    if (!db) {
-      return {
-        status: 'error',
-        error: 'Database connection unavailable',
-      };
-    }
-    const result = await db.execute(
-      sql`SELECT 
-            TABLE_NAME,
-            TABLE_ROWS,
-            ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb
-          FROM information_schema.TABLES
-          WHERE TABLE_SCHEMA = DATABASE()
-          ORDER BY TABLE_ROWS DESC`
-    );
-    
-    return {
-      status: 'ok',
-      tables: result,
-    };
+    if (!db) return { status: 'error', error: 'Database connection unavailable' };
+    const result = await db.execute(sql`
+      SELECT TABLE_NAME, TABLE_ROWS,
+             ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb
+        FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = DATABASE()
+       ORDER BY TABLE_ROWS DESC
+    `);
+    const indexes = await db.execute(sql`
+      SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
+        FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+       ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+    `);
+    return { status: 'ok', tables: result, indexes };
   } catch (error) {
-    return {
-      status: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' };
   }
 }
