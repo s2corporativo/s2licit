@@ -41,6 +41,10 @@ services:
       # Relatórios automáticos por e-mail foram removidos da operação normal.
       DAILY_REPORT_ENABLED: "false"
       QUOTATION_AUTO_SEND_ENABLED: "false"
+      # Scrapers amplos permanecem disponíveis para execução manual/revisada,
+      # mas o agendamento automático fica desligado até a guarda de plausibilidade
+      # estar integrada em todos os caminhos de atualização de custo.
+      SCRAPER_SCHEDULE_ENABLED: "false"
       # Segurança de equivalência: nome sozinho não auto-confirma.
       QUOTATION_AUTO_CONFIRM_THRESHOLD: ${QUOTATION_AUTO_CONFIRM_THRESHOLD:-1}
       # Custos padrão entram na fórmula se o fluxo não fornecer valores específicos.
