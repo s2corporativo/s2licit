@@ -81,7 +81,7 @@
     "papaparse": "^5.5.4",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.17.2",
-    "puppeteer": "^24.43.1",
+    "puppeteer": "^25.4.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "^19.2.7",
@@ -129,6 +129,7 @@
   "overrides": {
     "@esbuild-kit/core-utils>esbuild": "^0.25.12",
     "brace-expansion": ">=5.0.9",
+    "deepmerge-ts": ">=8.0.0",
     "exceljs>uuid": "^13.0.2",
     "ip-address": ">=10.3.1",
     "js-yaml": ">=4.3.1",
