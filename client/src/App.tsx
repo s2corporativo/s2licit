@@ -47,6 +47,7 @@ const DiligenciasPage = lazy(() => import("./pages/Diligencias"));
 const DocumentosHabilitacaoPage = lazy(() => import("./pages/DocumentosHabilitacao"));
 const CotacoesRecebidas = lazy(() => import("./pages/CotacoesRecebidas"));
 const RadarPncp = lazy(() => import("./pages/RadarPncp"));
+const AgenticSeek = lazy(() => import("./pages/AgenticSeek"));
 const Certidoes = lazy(() => import("./pages/Certidoes"));
 const CentralIA = lazy(() => import("./pages/CentralIA"));
 const SalaDisputa = lazy(() => import("./pages/SalaDisputa"));
@@ -112,6 +113,7 @@ function Router() {
                 <Route path="/central-operacional"><Redirect to="/funil" /></Route>
                 <Route path="/cotacoes-recebidas"><RequireAuth message="Acesse as cotações recebidas após fazer login." minRole="editor"><CotacoesRecebidas /></RequireAuth></Route>
                 <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login." minRole="editor"><RadarPncp /></RequireAuth></Route>
+                <Route path="/agenticseek"><RequireAuth message="Faça login para acessar o AgenticSeek." minRole="editor"><AgenticSeek /></RequireAuth></Route>
                 <Route path="/certidoes"><RequireAuth message="Acesse as certidões após fazer login." minRole="admin"><Certidoes /></RequireAuth></Route>
                 <Route path="/central-ia"><RequireAuth message="Acesse a Central de IA após fazer login." minRole="admin"><CentralIA /></RequireAuth></Route>
                 <Route path="/integracoes"><RequireAuth message="Acesse as integrações após fazer login." minRole="admin"><Integracoes /></RequireAuth></Route>
