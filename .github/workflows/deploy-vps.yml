@@ -1,8 +1,8 @@
-# Deploy do S2Licit na VPS Contabo.
-# O artefato Docker continua sendo construído no GitHub-hosted runner; a
-# publicação ocorre no runner self-hosted instalado na própria VPS. Operações
-# que precisam acessar o .env root:600 são executadas via sudo, sem reduzir a
-# proteção do arquivo nem depender de senha SSH externa.
+# Deploy recorrente do S2Licit na VPS Contabo.
+# A imagem é construída no GitHub-hosted runner e publicada pelo runner
+# self-hosted da própria VPS. O provisionamento do host (Nginx/Caddy/Certbot)
+# fica separado do deploy recorrente: aqui atualizamos somente código, imagem,
+# containers e readiness. O .env permanece root:600 no host.
 name: Deploy VPS
 
 on:
@@ -72,52 +72,90 @@ jobs:
           echo "Runner: $(hostname)"
           docker --version
           docker compose version
-          sudo -n true || { echo "::error::Runner precisa de sudo não-interativo para preservar o .env root:600."; exit 1; }
-          sudo mkdir -p /opt/s2licit
-          sudo test -d /opt/s2licit
+          test -d /opt/s2licit || { echo "::error::Diretório /opt/s2licit ausente; execute o provisionamento inicial antes do deploy."; exit 1; }
+          test -w /opt/s2licit || { echo "::error::Runner sem permissão de escrita em /opt/s2licit."; exit 1; }
 
       - name: Sincronizar código localmente
         run: |
           set -euo pipefail
-          sudo rsync -az --delete \
+          rsync -az --delete \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
             --exclude .env \
             ./ /opt/s2licit/
 
-      - name: Autenticar imagem no GHCR
+      - name: Autenticar e baixar imagem exata
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
+          docker pull "$S2_IMAGE"
 
-      - name: Migrar e subir aplicação
+      - name: Preparar ambiente protegido para o Compose
         run: |
           set -euo pipefail
-          cd /opt/s2licit
-          if sudo docker ps -a --format '{{.Names}}' | grep -qx 'sistema-s2-app'; then
-            echo "Substituindo container anterior sistema-s2-app..."
-            sudo docker rm -f sistema-s2-app >/dev/null
-          fi
-          sudo env DOMAIN="$DEPLOY_DOMAIN" S2_IMAGE="$S2_IMAGE" bash scripts/vps-bootstrap.sh
+          uid=$(id -u)
+          gid=$(id -g)
+          # O runner pertence ao grupo docker, que já é equivalente a acesso
+          # administrativo ao daemon. Usamos a própria imagem publicada como
+          # helper root apenas sobre /opt/s2licit para atualizar S2_IMAGE e
+          # copiar o .env para o workspace com permissão 600 do runner.
+          # O arquivo original nunca deixa de ser root:600.
+          docker run --rm --entrypoint sh \
+            -e NEW_IMAGE="$S2_IMAGE" \
+            -e OUT_UID="$uid" \
+            -e OUT_GID="$gid" \
+            -v /opt/s2licit:/config \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            "$S2_IMAGE" -c '
+              set -eu
+              test -f /config/.env
+              current=$(grep "^S2_IMAGE=" /config/.env 2>/dev/null | cut -d= -f2- || true)
+              if [ -n "$current" ] && [ "$current" != "$NEW_IMAGE" ]; then
+                if grep -q "^S2_IMAGE_PREVIOUS=" /config/.env; then
+                  sed -i "s|^S2_IMAGE_PREVIOUS=.*|S2_IMAGE_PREVIOUS=${current}|" /config/.env
+                else
+                  printf "S2_IMAGE_PREVIOUS=%s\n" "$current" >> /config/.env
+                fi
+              fi
+              if grep -q "^S2_IMAGE=" /config/.env; then
+                sed -i "s|^S2_IMAGE=.*|S2_IMAGE=${NEW_IMAGE}|" /config/.env
+              else
+                printf "S2_IMAGE=%s\n" "$NEW_IMAGE" >> /config/.env
+              fi
+              chown 0:0 /config/.env
+              chmod 600 /config/.env
+              cp /config/.env /workspace/.env
+              chown "${OUT_UID}:${OUT_GID}" /workspace/.env
+              chmod 600 /workspace/.env
+            '
+          test -r .env
+          test "$(stat -c '%a' .env)" = "600"
+
+      - name: Subir aplicação e banco
+        run: |
+          set -euo pipefail
+          # A imagem executa scripts/migrate-production.mjs no entrypoint antes
+          # de iniciar o backend; não é necessário rodar o bootstrap de host.
+          docker compose --env-file .env pull app
+          docker compose --env-file .env up -d --no-build --remove-orphans
 
       - name: Validar readiness
         run: |
           set -euo pipefail
-          cd /opt/s2licit
-          LOCAL_PORT=$(sudo sh -c "grep '^APP_LOCAL_PORT=' .env 2>/dev/null | cut -d= -f2" || true)
+          LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2 || true)
           LOCAL_PORT=${LOCAL_PORT:-3000}
           for i in $(seq 1 45); do
             if curl -fsS "http://127.0.0.1:${LOCAL_PORT}/readyz" >/dev/null 2>&1; then
               echo "Aplicação e MySQL prontos"
-              sudo docker compose ps
+              docker compose --env-file .env ps
               exit 0
             fi
             sleep 4
           done
           echo "Aplicação não ficou pronta" >&2
-          sudo docker compose ps >&2 || true
-          sudo docker compose logs --tail=120 app db >&2 || true
+          docker compose --env-file .env ps >&2 || true
+          docker compose --env-file .env logs --tail=160 app db >&2 || true
           exit 1
 
       - name: Resumo
@@ -126,5 +164,9 @@ jobs:
           echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
           echo "- Imagem: $S2_IMAGE" >> "$GITHUB_STEP_SUMMARY"
           echo "- Readiness: aplicação + MySQL" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Execução: runner self-hosted Contabo (sem SSH externo)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Segredos: .env preservado como root:600" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Execução: Docker Compose no runner Contabo, sem SSH/sudo" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Segredos persistentes: /opt/s2licit/.env mantido root:600" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remover cópia temporária do .env
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/.env"
