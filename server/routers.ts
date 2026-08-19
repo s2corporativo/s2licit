@@ -40,6 +40,7 @@ import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
 import { pncpRadarRouter } from "./routers/pncpRadar";
 import { agenticSeekRouter } from "./routers/agenticSeekRouter";
 import { emailQuotationsRouter } from "./routers/emailQuotations";
+import { quotationDecisionRouter } from "./routers/quotationDecision";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
 import { emailConfigRouter } from "./routers/emailConfig";
@@ -89,6 +90,7 @@ export const appRouter = router({
   pncpRadar: pncpRadarRouter,
   agenticSeek: agenticSeekRouter,
   emailQuotations: emailQuotationsRouter,
+  quotationDecision: quotationDecisionRouter,
   certidoes: certidoesRouter,
   ai: aiRouter,
   emailConfig: emailConfigRouter,
