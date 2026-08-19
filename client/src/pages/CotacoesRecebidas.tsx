@@ -12,7 +12,6 @@ import {
   ExternalLink,
   FileText,
   Globe2,
-  History,
   KanbanSquare,
   Loader2,
   MailCheck,
