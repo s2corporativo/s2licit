@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   isIgnorableMigrationError,
@@ -14,6 +15,16 @@ describe("migrate-production", () => {
         "CREATE TABLE a (id int);--> statement-breakpoint\nALTER TABLE a ADD name text;",
       ),
     ).toEqual(["CREATE TABLE a (id int);", "ALTER TABLE a ADD name text;"]);
+  });
+
+  it("mantém a migration AgenticSeek em dois statements MySQL independentes", () => {
+    const sql = readFileSync(new URL("../drizzle/0023_agenticseek_module.sql", import.meta.url), "utf8");
+    const statements = splitMigrationStatements(sql);
+
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS agenticseek_buscas");
+    expect(statements[1]).toContain("CREATE TABLE IF NOT EXISTS agenticseek_resultados");
+    expect(statements.every((statement) => (statement.match(/CREATE TABLE/gi) ?? []).length === 1)).toBe(true);
   });
 
   it("remove comandos vazios", () => {
