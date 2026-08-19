@@ -94,7 +94,6 @@ type HistoricalMatch = {
   resultado: string | null;
   matchScore: string | null;
   precoSugerido: string | null;
-  precoVendaManual: string | null;
   receivedAt: Date | null;
 };
 
@@ -115,7 +114,6 @@ async function loadHistoricalMatches(excludeQuotationId: number): Promise<Histor
       resultado: emailQuotations.resultado,
       matchScore: emailQuotationItems.matchScore,
       precoSugerido: emailQuotationItems.precoSugerido,
-      precoVendaManual: emailQuotationItems.precoVendaManual,
       receivedAt: emailQuotations.receivedAt,
     })
     .from(emailQuotationItems)
@@ -178,7 +176,7 @@ function memoryCandidatesForItem(
         wins: won ? 1 : 0,
         sameOrgUses: sameOrg ? 1 : 0,
         lastCost: safeNumber(row.precoSugerido ?? row.productPrice),
-        lastSale: safeNumber(row.precoVendaManual),
+        lastSale: null,
         lastUsedAt: row.receivedAt,
         evidence: [],
       });
@@ -232,7 +230,7 @@ export type SupplierRankRow = {
   taxValue: number;
   landedCost: number | null;
   availability: string | null;
-  stock: string | null;
+  stock: number | null;
   link: string | null;
   updatedAt: Date | null;
   freshness: PriceFreshness;
