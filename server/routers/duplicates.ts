@@ -1,10 +1,10 @@
-import { router, protectedProcedure } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { z } from "zod";
-import { getDb } from "../db";
+import { getDb, mergeProductGroup } from "../db";
 import { products, duplicateExceptions } from "../../drizzle/schema";
 import { eq, or, and } from "drizzle-orm";
-import { logger } from "../_core/logger";
 import { jaroWinklerSimilarity as canonicalJaroWinklerSimilarity } from "../matching/productMatcher";
+import { recordAudit } from "../services/auditService";
 
 function pairKey(id1: number, id2: number): string {
   return id1 < id2 ? `${id1}:${id2}` : `${id2}:${id1}`;
@@ -18,27 +18,18 @@ async function loadExceptionPairs(db: NonNullable<Awaited<ReturnType<typeof getD
 
 /**
  * Similaridade Jaro-Winkler (0-1, 1 = idêntico), case-insensitive.
- * Delega para matching/productMatcher.ts#jaroWinklerSimilarity — este
- * arquivo tinha sua própria cópia do algoritmo com um bug real: a janela
- * de match (`maxDist`) não usava Math.floor, divergindo do algoritmo
- * padrão para strings de tamanho ímpar (ex.: par com maior comprimento 5
- * dava janela 1.5 em vez de 1). A versão canônica é a implementação
- * correta (com Math.floor) já usada e testada em 4 outros pontos do
- * matching de produtos.
+ * Delega para matching/productMatcher.ts#jaroWinklerSimilarity.
  */
 function jaroWinklerSimilarity(s1: string, s2: string): number {
   return canonicalJaroWinklerSimilarity(s1.toLowerCase().trim(), s2.toLowerCase().trim());
 }
 
 export const duplicatesRouter = router({
-  /**
-   * Detectar produtos duplicados
-   * Retorna grupos de produtos com similaridade > 0.7 em nome + concentração
-   */
+  /** Detectar produtos duplicados. */
   detectDuplicates: protectedProcedure
-    .input(z.object({ 
+    .input(z.object({
       minSimilarity: z.number().min(0).max(1).default(0.7),
-      limit: z.number().min(1).max(1000).default(100)
+      limit: z.number().min(1).max(1000).default(100),
     }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -51,7 +42,6 @@ export const duplicatesRouter = router({
         .limit(1000);
 
       const exceptions = await loadExceptionPairs(db);
-
       const duplicateGroups: Array<{
         groupId: string;
         products: Array<{
@@ -64,12 +54,10 @@ export const duplicatesRouter = router({
         }>;
         similarity: number;
       }> = [];
-
       const processed = new Set<number>();
 
       for (let i = 0; i < allProducts.length; i++) {
         if (processed.has(allProducts[i].id)) continue;
-
         const group = [allProducts[i]];
         processed.add(allProducts[i].id);
 
@@ -77,21 +65,13 @@ export const duplicatesRouter = router({
           if (processed.has(allProducts[j].id)) continue;
           if (exceptions.has(pairKey(allProducts[i].id, allProducts[j].id))) continue;
 
-          const nameSimilarity = jaroWinklerSimilarity(
-            allProducts[i].name,
-            allProducts[j].name
-          );
-
-          // Se concentração é similar ou ambas vazias
-          const concSimilarity = 
-            (!allProducts[i].concentration && !allProducts[j].concentration) ? 1 :
-            (allProducts[i].concentration && allProducts[j].concentration) ?
-              jaroWinklerSimilarity(
-                allProducts[i].concentration || "",
-                allProducts[j].concentration || ""
-              ) : 0;
-
-          // Score combinado: 60% nome + 40% concentração
+          const nameSimilarity = jaroWinklerSimilarity(allProducts[i].name, allProducts[j].name);
+          const concSimilarity =
+            (!allProducts[i].concentration && !allProducts[j].concentration)
+              ? 1
+              : (allProducts[i].concentration && allProducts[j].concentration)
+                ? jaroWinklerSimilarity(allProducts[i].concentration || "", allProducts[j].concentration || "")
+                : 0;
           const combinedScore = nameSimilarity * 0.6 + concSimilarity * 0.4;
 
           if (combinedScore >= input.minSimilarity) {
@@ -125,141 +105,88 @@ export const duplicatesRouter = router({
     }),
 
   /**
-   * Mesclar dois produtos em um
-   * Mantém o produto principal e atualiza referências do secundário
+   * Mescla dois produtos usando o merge canônico transacional, que preserva
+   * histórico e redireciona propostas, equivalências, ofertas e preços.
    */
-  mergeDuplicates: protectedProcedure
+  mergeDuplicates: editorProcedure
     .input(z.object({
-      primaryProductId: z.number(),
-      secondaryProductId: z.number(),
-      keepFields: z.array(z.string()).optional(), // Campos do secundário a manter
+      primaryProductId: z.number().int().positive(),
+      secondaryProductId: z.number().int().positive(),
+      keepFields: z.array(z.string()).optional(),
     }))
-    .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("DB indisponível");
-
-      const primary = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, input.primaryProductId))
-        .then((rows) => rows[0]);
-
-      const secondary = await db
-        .select()
-        .from(products)
-        .where(eq(products.id, input.secondaryProductId))
-        .then((rows) => rows[0]);
-
-      if (!primary || !secondary) {
-        throw new Error("Um ou ambos os produtos não encontrados");
+    .mutation(async ({ input, ctx }) => {
+      if (input.primaryProductId === input.secondaryProductId) {
+        throw new Error("Produto mestre e duplicado precisam ser diferentes");
       }
-
-      // Mesclar campos: manter valores do primário, preencher vazios com secundário
-      let merged = {
-        ...primary,
-        activeIngredient: primary.activeIngredient || secondary.activeIngredient,
-        concentration: primary.concentration || secondary.concentration,
-        presentation: primary.presentation || secondary.presentation,
-        manufacturer: primary.manufacturer || secondary.manufacturer,
-        imageUrl: primary.imageUrl || secondary.imageUrl,
-        productUrl: primary.productUrl || secondary.productUrl,
-        barcode: primary.barcode || secondary.barcode,
-        mapa: primary.mapa || secondary.mapa,
-      };
-
-      // Se campos importantes estão vazios, usar LLM para consolidar
-      if (!merged.activeIngredient || !merged.concentration) {
-        try {
-          const { invokeLLM } = await import("../_core/llm");
-          const response = await invokeLLM({
-            messages: [
-              {
-                role: "system",
-                content: "Você é um especialista em catálogo de produtos (veterinários, humanos, materiais de construção e insumos). Consolide as informações dos produtos duplicados, retornando JSON.",
-              },
-              {
-                role: "user",
-                content: `Produto 1: ${JSON.stringify(primary)}\nProduto 2: ${JSON.stringify(secondary)}\n\nRetorne JSON com: activeIngredient, concentration, manufacturer`,
-              },
-            ],
-          });
-          try {
-            const content = typeof response.choices[0].message.content === 'string' 
-              ? response.choices[0].message.content 
-              : JSON.stringify(response.choices[0].message.content);
-            const consolidated = JSON.parse(content || "{}");
-            merged.activeIngredient = consolidated.activeIngredient || merged.activeIngredient;
-            merged.concentration = consolidated.concentration || merged.concentration;
-            merged.manufacturer = consolidated.manufacturer || merged.manufacturer;
-          } catch (e) {
-            logger.error("Erro ao parsear resposta LLM:", e);
-          }
-        } catch (e) {
-          logger.error("Erro ao consolidar com LLM:", e);
-        }
-      }
-
-      // Atualizar produto primário
-      await db
-        .update(products)
-        .set(merged)
-        .where(eq(products.id, input.primaryProductId));
-
-      // Desativar produto secundário (não deletar para manter histórico),
-      // com carimbo de quando e para onde foi fundido
-      await db
-        .update(products)
-        .set({ isActive: "no", deletedAt: new Date(), mergedIntoId: input.primaryProductId })
-        .where(eq(products.id, input.secondaryProductId));
-
+      const result = await mergeProductGroup(input.primaryProductId, [input.secondaryProductId]);
+      await recordAudit({
+        userId: ctx.user?.id ?? null,
+        action: "product_merge",
+        entity: "products",
+        entityId: input.primaryProductId,
+        origin: "operator",
+        summary: `Produto ${input.secondaryProductId} mesclado no mestre ${input.primaryProductId}`,
+        changes: {
+          masterId: input.primaryProductId,
+          duplicateIds: [input.secondaryProductId],
+          merged: result.merged,
+          redirected: result.redirected,
+        },
+      });
       return {
         success: true,
         primaryProductId: input.primaryProductId,
         secondaryProductId: input.secondaryProductId,
-        message: "Produtos mesclados com sucesso",
+        merged: result.merged,
+        redirected: result.redirected,
+        message: "Produtos mesclados com sucesso e referências preservadas",
       };
     }),
 
-  /**
-   * Substituir referências de um produto por outro
-   * Útil quando um produto é claramente duplicado
-   */
-  replaceProduct: protectedProcedure
+  /** Substitui um produto antigo por outro usando o mesmo merge transacional. */
+  replaceProduct: editorProcedure
     .input(z.object({
-      oldProductId: z.number(),
-      newProductId: z.number(),
+      oldProductId: z.number().int().positive(),
+      newProductId: z.number().int().positive(),
     }))
-    .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new Error("DB indisponível");
-
-      // Desativar produto antigo, com carimbo de quando e para onde apontou
-      await db
-        .update(products)
-        .set({ isActive: "no", deletedAt: new Date(), mergedIntoId: input.newProductId })
-        .where(eq(products.id, input.oldProductId));
-
+    .mutation(async ({ input, ctx }) => {
+      if (input.oldProductId === input.newProductId) {
+        throw new Error("Produto antigo e novo precisam ser diferentes");
+      }
+      const result = await mergeProductGroup(input.newProductId, [input.oldProductId]);
+      await recordAudit({
+        userId: ctx.user?.id ?? null,
+        action: "product_replace",
+        entity: "products",
+        entityId: input.newProductId,
+        origin: "operator",
+        summary: `Produto ${input.oldProductId} substituído pelo mestre ${input.newProductId}`,
+        changes: {
+          oldProductId: input.oldProductId,
+          newProductId: input.newProductId,
+          merged: result.merged,
+          redirected: result.redirected,
+        },
+      });
       return {
         success: true,
         oldProductId: input.oldProductId,
         newProductId: input.newProductId,
-        message: "Produto substituído com sucesso",
+        merged: result.merged,
+        redirected: result.redirected,
+        message: "Produto substituído com sucesso e referências preservadas",
       };
     }),
 
-  /**
-   * Marcar dois produtos como "não duplicados"
-   * Adiciona à tabela de exceções para não aparecer novamente
-   */
-  markAsNotDuplicate: protectedProcedure
+  /** Marca dois produtos como não duplicados. */
+  markAsNotDuplicate: editorProcedure
     .input(z.object({
-      productId1: z.number(),
-      productId2: z.number(),
+      productId1: z.number().int().positive(),
+      productId2: z.number().int().positive(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
-
       if (input.productId1 === input.productId2) {
         throw new Error("Não é possível marcar um produto como não duplicado dele mesmo");
       }
@@ -270,8 +197,8 @@ export const duplicatesRouter = router({
         .where(
           or(
             and(eq(duplicateExceptions.productId1, input.productId1), eq(duplicateExceptions.productId2, input.productId2)),
-            and(eq(duplicateExceptions.productId1, input.productId2), eq(duplicateExceptions.productId2, input.productId1))
-          )
+            and(eq(duplicateExceptions.productId1, input.productId2), eq(duplicateExceptions.productId2, input.productId1)),
+          ),
         )
         .limit(1);
 
@@ -280,18 +207,21 @@ export const duplicatesRouter = router({
           productId1: input.productId1,
           productId2: input.productId2,
         });
+        await recordAudit({
+          userId: ctx.user?.id ?? null,
+          action: "product_duplicate_exception",
+          entity: "products",
+          entityId: input.productId1,
+          origin: "operator",
+          summary: `Produtos ${input.productId1} e ${input.productId2} marcados como distintos`,
+          changes: { productId1: input.productId1, productId2: input.productId2 },
+        });
       }
 
-      return {
-        success: true,
-        message: "Marcado como não duplicado",
-      };
+      return { success: true, message: "Marcado como não duplicado" };
     }),
 
-  /**
-   * Listar todos os grupos de duplicados detectados
-   * Com paginação e filtros
-   */
+  /** Listar grupos de duplicados detectados com paginação. */
   listDuplicateGroups: protectedProcedure
     .input(z.object({
       page: z.number().min(1).default(1),
@@ -299,7 +229,6 @@ export const duplicatesRouter = router({
       minSimilarity: z.number().min(0).max(1).default(0.7),
     }))
     .query(async ({ input }) => {
-      // Reutilizar detectDuplicates com limite
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
 
@@ -307,37 +236,24 @@ export const duplicatesRouter = router({
         .select()
         .from(products)
         .where(eq(products.isActive, "yes"));
-
       const exceptions = await loadExceptionPairs(db);
-
       const duplicateGroups: Array<{
         groupId: string;
         count: number;
         similarity: number;
-        products: Array<{
-          id: number;
-          name: string;
-          concentration: string | null;
-        }>;
+        products: Array<{ id: number; name: string; concentration: string | null }>;
       }> = [];
-
       const processed = new Set<number>();
 
       for (let i = 0; i < allProducts.length; i++) {
         if (processed.has(allProducts[i].id)) continue;
-
         const group = [allProducts[i]];
         processed.add(allProducts[i].id);
 
         for (let j = i + 1; j < allProducts.length; j++) {
           if (processed.has(allProducts[j].id)) continue;
           if (exceptions.has(pairKey(allProducts[i].id, allProducts[j].id))) continue;
-
-          const nameSimilarity = jaroWinklerSimilarity(
-            allProducts[i].name,
-            allProducts[j].name
-          );
-
+          const nameSimilarity = jaroWinklerSimilarity(allProducts[i].name, allProducts[j].name);
           if (nameSimilarity >= input.minSimilarity) {
             group.push(allProducts[j]);
             processed.add(allProducts[j].id);
@@ -349,23 +265,17 @@ export const duplicatesRouter = router({
             if (idx === 0) return 0;
             return sum + jaroWinklerSimilarity(group[0].name, p.name);
           }, 0) / (group.length - 1);
-
           duplicateGroups.push({
             groupId: `group_${i}`,
             count: group.length,
             similarity: avgSimilarity,
-            products: group.map((p) => ({
-              id: p.id,
-              name: p.name,
-              concentration: p.concentration,
-            })),
+            products: group.map((p) => ({ id: p.id, name: p.name, concentration: p.concentration })),
           });
         }
       }
 
       const start = (input.page - 1) * input.pageSize;
       const end = start + input.pageSize;
-
       return {
         groups: duplicateGroups.slice(start, end),
         total: duplicateGroups.length,
@@ -375,54 +285,45 @@ export const duplicatesRouter = router({
       };
     }),
 
-  /**
-   * Obter estatísticas de duplicados
-   */
-  getDuplicateStats: protectedProcedure
-    .query(async () => {
-      const db = await getDb();
-      if (!db) throw new Error("DB indisponível");
+  /** Obter estatísticas de duplicados. */
+  getDuplicateStats: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new Error("DB indisponível");
 
-      const allProducts = await db
-        .select()
-        .from(products)
-        .where(eq(products.isActive, "yes"));
+    const allProducts = await db
+      .select()
+      .from(products)
+      .where(eq(products.isActive, "yes"));
 
-      let totalDuplicateGroups = 0;
-      let totalDuplicateProducts = 0;
-      const processed = new Set<number>();
+    let totalDuplicateGroups = 0;
+    let totalDuplicateProducts = 0;
+    const processed = new Set<number>();
 
-      for (let i = 0; i < allProducts.length; i++) {
-        if (processed.has(allProducts[i].id)) continue;
-
-        let groupSize = 1;
-        processed.add(allProducts[i].id);
-
-        for (let j = i + 1; j < allProducts.length; j++) {
-          if (processed.has(allProducts[j].id)) continue;
-
-          const similarity = jaroWinklerSimilarity(
-            allProducts[i].name,
-            allProducts[j].name
-          );
-
-          if (similarity >= 0.7) {
-            groupSize++;
-            processed.add(allProducts[j].id);
-          }
-        }
-
-        if (groupSize > 1) {
-          totalDuplicateGroups++;
-          totalDuplicateProducts += groupSize;
+    for (let i = 0; i < allProducts.length; i++) {
+      if (processed.has(allProducts[i].id)) continue;
+      let groupSize = 1;
+      processed.add(allProducts[i].id);
+      for (let j = i + 1; j < allProducts.length; j++) {
+        if (processed.has(allProducts[j].id)) continue;
+        const similarity = jaroWinklerSimilarity(allProducts[i].name, allProducts[j].name);
+        if (similarity >= 0.7) {
+          groupSize++;
+          processed.add(allProducts[j].id);
         }
       }
+      if (groupSize > 1) {
+        totalDuplicateGroups++;
+        totalDuplicateProducts += groupSize;
+      }
+    }
 
-      return {
-        totalProducts: allProducts.length,
-        totalDuplicateGroups,
-        totalDuplicateProducts,
-        duplicatePercentage: (totalDuplicateProducts / allProducts.length * 100).toFixed(2),
-      };
-    }),
+    return {
+      totalProducts: allProducts.length,
+      totalDuplicateGroups,
+      totalDuplicateProducts,
+      duplicatePercentage: allProducts.length > 0
+        ? (totalDuplicateProducts / allProducts.length * 100).toFixed(2)
+        : "0.00",
+    };
+  }),
 });
