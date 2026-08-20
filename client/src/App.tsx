@@ -66,6 +66,7 @@ const Login = lazy(() => import("./pages/Login"));
 const Manual = lazy(() => import("./pages/Manual"));
 const Diagnostico = lazy(() => import("./pages/Diagnostico"));
 const CentroOperacional = lazy(() => import("./pages/CentroOperacional"));
+const InteligenciaLicitacoes = lazy(() => import("./pages/InteligenciaLicitacoes"));
 
 function PageLoading() {
   return <div className="min-h-[60vh] flex items-center justify-center"><div className="w-8 h-1 bg-blue-800 animate-pulse rounded" /></div>;
@@ -82,6 +83,7 @@ function Router() {
               <Switch>
                 <Route path="/" component={Dashboard} />
                 <Route path="/dashboard"><Redirect to="/" /></Route>
+                <Route path="/inteligencia"><RequireAuth message="Acesse a Inteligência Comercial após fazer login." minRole="editor"><InteligenciaLicitacoes /></RequireAuth></Route>
                 <Route path="/agenda" component={Agenda} />
                 <Route path="/desempenho" component={Desempenho} />
                 <Route path="/funil" component={Funil} />
