@@ -99,6 +99,26 @@ describe("duplicatesRouter", () => {
       expect(result.length).toBe(1);
       expect(result[0].products.map((p) => p.id).sort()).toEqual([1, 2]);
     });
+
+    it("modo direcionado encontra duplicado além do antigo corte de 1.000 produtos", async () => {
+      productsData = Array.from({ length: 1000 }, (_, index) => ({
+        id: index + 1,
+        name: `Produto totalmente distinto ${index + 1}`,
+        concentration: null,
+        presentation: null,
+        manufacturer: null,
+        isActive: "yes",
+      }));
+      productsData.push(
+        { id: 1001, name: "Eletrodo combinado de pH DME-CV1", concentration: null, presentation: null, manufacturer: "Digimed", isActive: "yes" },
+        { id: 1002, name: "Eletrodo combinado pH DME CV1", concentration: null, presentation: null, manufacturer: "Digimed", isActive: "yes" },
+      );
+
+      const result = await caller().detectDuplicates({ productId: 1001, minSimilarity: 0.78, limit: 20 });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].products.map((p) => p.id)).toContain(1002);
+    });
   });
 
   describe("listDuplicateGroups", () => {
