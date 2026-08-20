@@ -1,0 +1,40 @@
+name: Backup finalize guard PR143
+
+on:
+  push:
+    branches: [agent/selective-hardening-127]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[skip-backup-guard]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/selective-hardening-127
+      - name: Serializar finalização do backup
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('server/services/backupService.ts')
+          s = p.read_text()
+          old1 = '    let outputCompleted = false;\n\n    const done ='
+          new1 = '    let outputCompleted = false;\n    let finalizing = false;\n\n    const done ='
+          old2 = '      if (settled || !dumpCompleted || !outputCompleted) return;\n      const offsite = await copyBackupOffsite(outFile);'
+          new2 = '      if (settled || finalizing || !dumpCompleted || !outputCompleted) return;\n      finalizing = true;\n      const offsite = await copyBackupOffsite(outFile);'
+          if old1 not in s or old2 not in s:
+              raise SystemExit('Trecho esperado do backup não encontrado; abortando sem alteração.')
+          p.write_text(s.replace(old1, new1, 1).replace(old2, new2, 1))
+          PY
+          git diff --check
+          if git diff --quiet -- server/services/backupService.ts; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/services/backupService.ts
+          git commit -m "fix: serializar finalização do backup [skip-backup-guard]"
+          git push origin HEAD:agent/selective-hardening-127
