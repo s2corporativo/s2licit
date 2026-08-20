@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, or } from "drizzle-orm";
 import { auditLogs, emailQuotationItems, emailQuotations } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { calculateSalePrice } from "./pricingSafety";
@@ -54,6 +54,8 @@ export async function getQuotationTimeline(quotationId: number) {
   const matched = items.filter((item) => item.produtoMatchId != null).length;
   const confirmed = items.filter((item) => item.matchConfirmado).length;
   const priced = items.filter((item) => num(item.precoSugerido ?? item.productPrice) != null).length;
+  const itemDates = items.map((item) => item.updatedAt ?? item.createdAt).filter(Boolean).sort();
+  const lastItemDate = itemDates.length ? itemDates[itemDates.length - 1] : null;
   const events: TimelineEvent[] = [];
 
   events.push({
@@ -74,7 +76,7 @@ export async function getQuotationTimeline(quotationId: number) {
   });
   events.push({
     key: "match",
-    at: items.map((item) => item.updatedAt ?? item.createdAt).filter(Boolean).sort().at(-1) ?? q.updatedAt ?? null,
+    at: lastItemDate ?? q.updatedAt ?? null,
     kind: "match",
     title: "Matching de produtos",
     detail: `${matched}/${items.length} com produto · ${confirmed}/${items.length} confirmados`,
@@ -125,12 +127,14 @@ export async function getQuotationTimeline(quotationId: number) {
 
   if (db) {
     const itemIds = items.map((item) => Number(item.id)).filter(Number.isFinite);
-    const clauses = [and(eq(auditLogs.entity, "email_quotations"), eq(auditLogs.entityId, quotationId))];
-    if (itemIds.length) clauses.push(and(eq(auditLogs.entity, "email_quotation_items"), inArray(auditLogs.entityId, itemIds)));
+    const quotationClause = and(eq(auditLogs.entity, "email_quotations"), eq(auditLogs.entityId, quotationId));
+    const itemClause = itemIds.length
+      ? and(eq(auditLogs.entity, "email_quotation_items"), inArray(auditLogs.entityId, itemIds))
+      : undefined;
     const logs = await db
       .select({ id: auditLogs.id, action: auditLogs.action, summary: auditLogs.summary, createdAt: auditLogs.createdAt })
       .from(auditLogs)
-      .where(or(...clauses))
+      .where(itemClause ? or(quotationClause, itemClause) : quotationClause)
       .orderBy(asc(auditLogs.createdAt))
       .limit(300);
     for (const log of logs) {
@@ -171,7 +175,10 @@ export async function getSmartMarginSuggestions(quotationId: number) {
         itemId: item.itemId,
         productId: item.productId,
         productName: item.productName,
+        description: item.descricao,
         currentCost: item.cost,
+        currentSale: item.sale,
+        currentMarginPercent: item.marginPercent,
         minMarginPercent: item.minMarginPercent,
         recommendedMarginPercent: item.minMarginPercent,
         recommendedSale: item.cost == null ? null : Number(calculateSalePrice({ cost: item.cost, marginPercent: item.minMarginPercent }).toFixed(2)),
@@ -179,6 +186,8 @@ export async function getSmartMarginSuggestions(quotationId: number) {
         highSale: null,
         winningSamples: 0,
         historicalSamples: 0,
+        priceFreshness: item.priceFreshness,
+        risk: item.risk,
         rationale: ["Sem histórico suficiente; usada a margem mínima de proteção."],
       })),
     };
@@ -195,7 +204,11 @@ export async function getSmartMarginSuggestions(quotationId: number) {
         })
         .from(emailQuotationItems)
         .innerJoin(emailQuotations, eq(emailQuotationItems.quotationId, emailQuotations.id))
-        .where(and(inArray(emailQuotationItems.produtoMatchId, productIds), eq(emailQuotationItems.matchConfirmado, true)))
+        .where(and(
+          inArray(emailQuotationItems.produtoMatchId, productIds),
+          eq(emailQuotationItems.matchConfirmado, true),
+          ne(emailQuotationItems.quotationId, quotationId),
+        ))
         .limit(3000)
     : [];
   const salePrices = await getQuotationItemSalePrices(history.map((row) => row.itemId));
