@@ -96,17 +96,40 @@ jobs:
             exit 1
           fi
 
-      - name: Validar conta de smoke
+      - name: Preparar conta técnica de smoke
         run: |
-          if [ -z "$SMOKE_USER_EMAIL" ] || [ -z "$SMOKE_USER_PASSWORD" ]; then
-            echo "::error::Configure SMOKE_USER_EMAIL e SMOKE_USER_PASSWORD."
-            exit 1
+          set -euo pipefail
+          if [ -n "${SMOKE_USER_EMAIL:-}" ] && [ -n "${SMOKE_USER_PASSWORD:-}" ]; then
+            echo "SMOKE_AUTH_SOURCE=dedicated-secrets" >> "$GITHUB_ENV"
+            echo "Conta dedicada de smoke configurada por secrets."
+            exit 0
           fi
+
+          smoke_email="s2-production-smoke@local.invalid"
+          smoke_password=$(openssl rand -hex 24)
+          echo "::add-mask::$smoke_password"
+          printf 'SMOKE_USER_EMAIL=%s\n' "$smoke_email" >> "$GITHUB_ENV"
+          printf 'SMOKE_USER_PASSWORD=%s\n' "$smoke_password" >> "$GITHUB_ENV"
+          echo "SMOKE_AUTH_SOURCE=ephemeral-technical-account" >> "$GITHUB_ENV"
+
+          docker exec \
+            -e SMOKE_USER_EMAIL="$smoke_email" \
+            -e SMOKE_USER_PASSWORD="$smoke_password" \
+            sistema-s2-app node scripts/ensure-smoke-user.mjs
+          echo "Conta técnica editor ativada com senha aleatória somente para este smoke."
 
       - name: Executar smoke autenticado
         id: smoke
         continue-on-error: true
         run: node scripts/production-smoke.mjs
+
+      - name: Desativar conta técnica efêmera
+        if: always() && env.SMOKE_AUTH_SOURCE == 'ephemeral-technical-account'
+        run: |
+          docker exec \
+            -e SMOKE_USER_EMAIL="$SMOKE_USER_EMAIL" \
+            -e SMOKE_USER_DISABLE=1 \
+            sistema-s2-app node scripts/ensure-smoke-user.mjs
 
       - name: Publicar evidências
         if: always()
@@ -122,21 +145,27 @@ jobs:
         uses: actions/github-script@v7
         env:
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          AUTH_SOURCE: ${{ env.SMOKE_AUTH_SOURCE }}
         with:
           script: |
             const passed = process.env.SMOKE_OUTCOME === 'success';
+            const ephemeral = process.env.AUTH_SOURCE === 'ephemeral-technical-account';
             await github.rest.repos.createCommitStatus({
               ...context.repo,
               sha: context.payload.workflow_run.head_sha,
               state: passed ? 'success' : 'failure',
               context: 'production-smoke',
-              description: passed ? 'Produção homologada pelo smoke autenticado' : 'Smoke autenticado de produção falhou',
+              description: passed
+                ? (ephemeral ? 'Produção homologada com conta técnica efêmera' : 'Produção homologada pelo smoke autenticado')
+                : 'Smoke autenticado de produção falhou',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
-      - name: Abrir ou atualizar incidente quando falhar
-        if: always() && steps.smoke.outcome != 'success'
+      - name: Gerenciar incidente do smoke
+        if: always()
         uses: actions/github-script@v7
+        env:
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
         with:
           script: |
             const title = '🚨 Smoke de produção do S2 Licit falhou';
@@ -144,6 +173,14 @@ jobs:
             const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'open', per_page: 100 });
             const incident = issues.find(i => !i.pull_request && i.title === title);
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const passed = process.env.SMOKE_OUTCOME === 'success';
+            if (passed) {
+              if (incident) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: incident.number, body: `✅ Produção voltou a passar no smoke autenticado. Evidências: ${runUrl}` });
+                await github.rest.issues.update({ owner, repo, issue_number: incident.number, state: 'closed', state_reason: 'completed' });
+              }
+              return;
+            }
             const body = `A homologação automática pós-deploy falhou.\n\n- Commit: ${context.payload.workflow_run.head_sha}\n- Deploy: ${context.payload.workflow_run.html_url}\n- Smoke/evidências: ${runUrl}`;
             if (incident) await github.rest.issues.createComment({ owner, repo, issue_number: incident.number, body });
             else await github.rest.issues.create({ owner, repo, title, body });
