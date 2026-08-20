@@ -30,6 +30,19 @@ import { logger } from "../_core/logger";
  * Tudo idempotente: cotações com proposta já gerada são puladas.
  */
 
+const LEGACY_AUTO_CONFIRM_THRESHOLD = 0.82;
+
+/**
+ * Mantido por compatibilidade com o endpoint de status e instalações antigas.
+ * Desde a política determinística, este valor NÃO autoriza match por nome:
+ * similaridade textual é sempre sugestão para revisão humana.
+ */
+export function autoConfirmThreshold(): number {
+  const raw = Number(process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD);
+  if (Number.isFinite(raw) && raw >= 0.5 && raw <= 1) return raw;
+  return LEGACY_AUTO_CONFIRM_THRESHOLD;
+}
+
 /**
  * Limiar MÍNIMO de similaridade de nome para o match por nome sequer entrar
  * no catálogo de candidatos da revisão (abaixo disso, o item não recebe match
