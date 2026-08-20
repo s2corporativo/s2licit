@@ -70,7 +70,7 @@ export default function InteligenciaLicitacoes() {
   const { data: priceHistory = [] } = trpc.products.priceHistoryByProduct.useQuery({ productId: productId ?? 0, limit: 40 }, { enabled: productId != null });
   const { data: supplierScore = [] } = trpc.quotationDecision.supplierScore.useQuery({ productId: productId ?? 0 }, { enabled: productId != null });
   const { data: equivalents } = trpc.products.suggestEquivalentsByFichaTecnica.useQuery({ productId: productId ?? 0, limit: 20, onlyWithPrice: false }, { enabled: productId != null });
-  const { data: duplicates = [] } = trpc.duplicates.detectDuplicates.useQuery({ minSimilarity: 0.78, limit: 200 }, { enabled: productId != null });
+  const { data: duplicates = [] } = trpc.duplicates.detectDuplicates.useQuery({ productId: productId ?? undefined, minSimilarity: 0.78, limit: 200 }, { enabled: productId != null });
   const { data: quotations = [] } = trpc.emailQuotations.list.useQuery(undefined);
   const { data: timeline = [] } = trpc.quotationDecision.timeline.useQuery({ quotationId: quotationId ?? 0 }, { enabled: quotationId != null });
   const { data: smartMargins } = trpc.quotationDecision.smartMargins.useQuery({ quotationId: quotationId ?? 0 }, { enabled: quotationId != null });
