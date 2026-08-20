@@ -75,6 +75,19 @@ export function isIgnorableMigrationError(error) {
   return IGNORABLE_ERROR_NUMBERS.has(errno) || IGNORABLE_ERROR_CODES.has(code);
 }
 
+/**
+ * Migration já aplicada é histórico imutável. O antigo comportamento
+ * reconciliava silenciosamente o hash registrado no banco quando o arquivo
+ * versionado mudava, mascarando drift. Agora isso falha por padrão.
+ *
+ * MIGRATION_ALLOW_DRIFT_RECONCILE=true existe apenas como escape operacional
+ * explícito para uma instalação legada que ainda precise alinhar o histórico
+ * uma única vez; não deve permanecer habilitado em produção.
+ */
+export function shouldReconcileMigrationDrift(env = process.env) {
+  return env.MIGRATION_ALLOW_DRIFT_RECONCILE === "true";
+}
+
 function describeError(error) {
   if (!(error instanceof Error)) return String(error);
   const code = typeof error.code === "string" ? ` ${error.code}` : "";
@@ -204,16 +217,18 @@ export async function runProductionMigrations({ databaseUrl = process.env.DATABA
 
       const recordedHash = timestamps.get(createdAt);
       if (recordedHash && recordedHash !== hash) {
-        // O timestamp já foi aplicado, mas o conteúdo do arquivo mudou. Isso
-        // acontece quando uma migração já aplicada recebe uma correção de
-        // compatibilidade (ex.: encurtar nomes de FK acima de 64 caracteres,
-        // remover índice inválido em coluna TEXT) para instalações novas.
-        // O schema desta base já reflete a migração aplicada — reconciliamos
-        // o hash registrado e seguimos, sem reexecutar nem derrubar o boot.
+        if (!shouldReconcileMigrationDrift()) {
+          throw new Error(
+            `[Migration] Drift detectado em ${entry.tag}: uma migration já aplicada foi alterada ` +
+              `(banco ${recordedHash.slice(0, 12)}…; arquivo ${hash.slice(0, 12)}…). ` +
+              "Crie uma nova migration em vez de reescrever histórico. " +
+              "Para alinhar uma instalação legada conscientemente, use MIGRATION_ALLOW_DRIFT_RECONCILE=true somente durante esse deploy.",
+          );
+        }
+
         console.warn(
-          `[Migration] ${entry.tag}: arquivo da migração já aplicada foi atualizado ` +
-            `(hash ${recordedHash.slice(0, 12)}… → ${hash.slice(0, 12)}…). ` +
-            "Reconciliando o histórico sem reexecutar.",
+          `[Migration] ${entry.tag}: reconciliação EXPLÍCITA de drift habilitada ` +
+            `(hash ${recordedHash.slice(0, 12)}… → ${hash.slice(0, 12)}…).`,
         );
         await connection.execute(
           "UPDATE `__drizzle_migrations` SET `hash` = ? WHERE `created_at` = ? AND `hash` = ?",
