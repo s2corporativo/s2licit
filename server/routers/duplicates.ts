@@ -6,28 +6,202 @@ import { eq, or, and } from "drizzle-orm";
 import { jaroWinklerSimilarity as canonicalJaroWinklerSimilarity } from "../matching/productMatcher";
 import { recordAudit } from "../services/auditService";
 
+type ProductRow = typeof products.$inferSelect;
+
+type DuplicateProduct = {
+  id: number;
+  name: string;
+  concentration: string | null;
+  presentation: string | null;
+  manufacturer: string | null;
+  similarity: number;
+};
+
+type DuplicateGroup = {
+  groupId: string;
+  products: DuplicateProduct[];
+  similarity: number;
+};
+
 function pairKey(id1: number, id2: number): string {
   return id1 < id2 ? `${id1}:${id2}` : `${id2}:${id1}`;
 }
 
-/** Carrega os pares marcados como "não duplicados" como um Set para checagem O(1). */
-async function loadExceptionPairs(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<Set<string>> {
-  const rows = await db.select({ productId1: duplicateExceptions.productId1, productId2: duplicateExceptions.productId2 }).from(duplicateExceptions);
+async function loadExceptionPairs(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ productId1: duplicateExceptions.productId1, productId2: duplicateExceptions.productId2 })
+    .from(duplicateExceptions);
   return new Set(rows.map((r) => pairKey(r.productId1, r.productId2)));
 }
 
-/**
- * Similaridade Jaro-Winkler (0-1, 1 = idêntico), case-insensitive.
- * Delega para matching/productMatcher.ts#jaroWinklerSimilarity.
- */
 function jaroWinklerSimilarity(s1: string, s2: string): number {
   return canonicalJaroWinklerSimilarity(s1.toLowerCase().trim(), s2.toLowerCase().trim());
 }
 
+function combinedSimilarity(a: ProductRow, b: ProductRow): number {
+  const nameSimilarity = jaroWinklerSimilarity(a.name, b.name);
+  const concSimilarity =
+    (!a.concentration && !b.concentration)
+      ? 1
+      : (a.concentration && b.concentration)
+        ? jaroWinklerSimilarity(a.concentration, b.concentration)
+        : 0;
+  return nameSimilarity * 0.7 + concSimilarity * 0.3;
+}
+
+function compactName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Chaves de bloqueio para reduzir o universo de pares comparados. Produtos
+ * realmente duplicados tendem a compartilhar o início normalizado do nome;
+ * duas larguras aumentam recall sem voltar à comparação global O(n²).
+ */
+function blockingKeys(product: ProductRow): string[] {
+  const compact = compactName(product.name);
+  if (!compact) return [`id:${product.id}`];
+  const keys = new Set<string>();
+  keys.add(`p8:${compact.slice(0, Math.min(8, compact.length))}`);
+  if (compact.length >= 12) keys.add(`p12:${compact.slice(0, 12)}`);
+  return Array.from(keys);
+}
+
+function toDuplicateProduct(product: ProductRow, similarity: number): DuplicateProduct {
+  return {
+    id: product.id,
+    name: product.name,
+    concentration: product.concentration,
+    presentation: product.presentation,
+    manufacturer: product.manufacturer,
+    similarity,
+  };
+}
+
+function targetDuplicateGroup(
+  allProducts: ProductRow[],
+  targetId: number,
+  exceptions: Set<string>,
+  minSimilarity: number,
+  limit: number,
+): DuplicateGroup[] {
+  const target = allProducts.find((product) => product.id === targetId);
+  if (!target) return [];
+
+  const matches = allProducts
+    .filter((candidate) => candidate.id !== target.id)
+    .filter((candidate) => !exceptions.has(pairKey(target.id, candidate.id)))
+    .map((candidate) => ({ candidate, score: combinedSimilarity(target, candidate) }))
+    .filter(({ score }) => score >= minSimilarity)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, limit - 1));
+
+  if (matches.length === 0) return [];
+  const average = matches.reduce((sum, item) => sum + item.score, 0) / matches.length;
+  return [{
+    groupId: `product_${target.id}`,
+    products: [
+      toDuplicateProduct(target, 1),
+      ...matches.map(({ candidate, score }) => toDuplicateProduct(candidate, score)),
+    ],
+    similarity: average,
+  }];
+}
+
+function blockedDuplicateGroups(
+  allProducts: ProductRow[],
+  exceptions: Set<string>,
+  minSimilarity: number,
+  limit = Number.POSITIVE_INFINITY,
+): DuplicateGroup[] {
+  const buckets = new Map<string, ProductRow[]>();
+  for (const product of allProducts) {
+    for (const key of blockingKeys(product)) {
+      const bucket = buckets.get(key) ?? [];
+      bucket.push(product);
+      buckets.set(key, bucket);
+    }
+  }
+
+  const candidatePairs = new Map<string, [ProductRow, ProductRow]>();
+  for (const bucket of buckets.values()) {
+    if (bucket.length < 2) continue;
+    for (let i = 0; i < bucket.length; i++) {
+      for (let j = i + 1; j < bucket.length; j++) {
+        const a = bucket[i];
+        const b = bucket[j];
+        const key = pairKey(a.id, b.id);
+        if (!candidatePairs.has(key) && !exceptions.has(key)) {
+          candidatePairs.set(key, [a, b]);
+        }
+      }
+    }
+  }
+
+  const adjacency = new Map<number, Array<{ product: ProductRow; score: number }>>();
+  for (const [a, b] of candidatePairs.values()) {
+    const score = combinedSimilarity(a, b);
+    if (score < minSimilarity) continue;
+    adjacency.set(a.id, [...(adjacency.get(a.id) ?? []), { product: b, score }]);
+    adjacency.set(b.id, [...(adjacency.get(b.id) ?? []), { product: a, score }]);
+  }
+
+  const byId = new Map(allProducts.map((product) => [product.id, product]));
+  const visited = new Set<number>();
+  const groups: DuplicateGroup[] = [];
+
+  for (const product of allProducts) {
+    if (visited.has(product.id) || !adjacency.has(product.id)) continue;
+    const queue = [product.id];
+    const component = new Set<number>();
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (component.has(id)) continue;
+      component.add(id);
+      visited.add(id);
+      for (const neighbor of adjacency.get(id) ?? []) {
+        if (!component.has(neighbor.product.id)) queue.push(neighbor.product.id);
+      }
+    }
+    if (component.size < 2) continue;
+
+    const members = Array.from(component)
+      .map((id) => byId.get(id))
+      .filter((row): row is ProductRow => Boolean(row));
+    const master = members[0];
+    const scored = members.map((member, index) => ({
+      member,
+      score: index === 0 ? 1 : combinedSimilarity(master, member),
+    }));
+    const similarities = scored.slice(1).map((item) => item.score);
+    groups.push({
+      groupId: `group_${master.id}`,
+      products: scored.map(({ member, score }) => toDuplicateProduct(member, score)),
+      similarity: similarities.length
+        ? similarities.reduce((sum, score) => sum + score, 0) / similarities.length
+        : 1,
+    });
+    if (groups.length >= limit) break;
+  }
+
+  return groups;
+}
+
 export const duplicatesRouter = router({
-  /** Detectar produtos duplicados. */
+  /**
+   * Detecta duplicados. Com `productId`, compara o produto selecionado contra
+   * TODO o catálogo ativo em O(n), sem limite de 1.000 registros. Sem alvo,
+   * usa blocking por prefixo normalizado para evitar uma varredura global O(n²).
+   */
   detectDuplicates: protectedProcedure
     .input(z.object({
+      productId: z.number().int().positive().optional(),
       minSimilarity: z.number().min(0).max(1).default(0.7),
       limit: z.number().min(1).max(1000).default(100),
     }))
@@ -38,76 +212,21 @@ export const duplicatesRouter = router({
       const allProducts = await db
         .select()
         .from(products)
-        .where(eq(products.isActive, "yes"))
-        .limit(1000);
-
+        .where(eq(products.isActive, "yes"));
       const exceptions = await loadExceptionPairs(db);
-      const duplicateGroups: Array<{
-        groupId: string;
-        products: Array<{
-          id: number;
-          name: string;
-          concentration: string | null;
-          presentation: string | null;
-          manufacturer: string | null;
-          similarity: number;
-        }>;
-        similarity: number;
-      }> = [];
-      const processed = new Set<number>();
 
-      for (let i = 0; i < allProducts.length; i++) {
-        if (processed.has(allProducts[i].id)) continue;
-        const group = [allProducts[i]];
-        processed.add(allProducts[i].id);
-
-        for (let j = i + 1; j < allProducts.length; j++) {
-          if (processed.has(allProducts[j].id)) continue;
-          if (exceptions.has(pairKey(allProducts[i].id, allProducts[j].id))) continue;
-
-          const nameSimilarity = jaroWinklerSimilarity(allProducts[i].name, allProducts[j].name);
-          const concSimilarity =
-            (!allProducts[i].concentration && !allProducts[j].concentration)
-              ? 1
-              : (allProducts[i].concentration && allProducts[j].concentration)
-                ? jaroWinklerSimilarity(allProducts[i].concentration || "", allProducts[j].concentration || "")
-                : 0;
-          const combinedScore = nameSimilarity * 0.6 + concSimilarity * 0.4;
-
-          if (combinedScore >= input.minSimilarity) {
-            group.push(allProducts[j]);
-            processed.add(allProducts[j].id);
-          }
-        }
-
-        if (group.length > 1) {
-          const avgSimilarity = group.reduce((sum, p, idx) => {
-            if (idx === 0) return 0;
-            return sum + jaroWinklerSimilarity(group[0].name, p.name);
-          }, 0) / (group.length - 1);
-
-          duplicateGroups.push({
-            groupId: `group_${Date.now()}_${Math.random()}`,
-            products: group.map((p) => ({
-              id: p.id,
-              name: p.name,
-              concentration: p.concentration,
-              presentation: p.presentation,
-              manufacturer: p.manufacturer,
-              similarity: jaroWinklerSimilarity(group[0].name, p.name),
-            })),
-            similarity: avgSimilarity,
-          });
-        }
+      if (input.productId) {
+        return targetDuplicateGroup(
+          allProducts,
+          input.productId,
+          exceptions,
+          input.minSimilarity,
+          input.limit,
+        );
       }
-
-      return duplicateGroups.slice(0, input.limit);
+      return blockedDuplicateGroups(allProducts, exceptions, input.minSimilarity, input.limit);
     }),
 
-  /**
-   * Mescla dois produtos usando o merge canônico transacional, que preserva
-   * histórico e redireciona propostas, equivalências, ofertas e preços.
-   */
   mergeDuplicates: editorProcedure
     .input(z.object({
       primaryProductId: z.number().int().positive(),
@@ -143,7 +262,6 @@ export const duplicatesRouter = router({
       };
     }),
 
-  /** Substitui um produto antigo por outro usando o mesmo merge transacional. */
   replaceProduct: editorProcedure
     .input(z.object({
       oldProductId: z.number().int().positive(),
@@ -178,7 +296,6 @@ export const duplicatesRouter = router({
       };
     }),
 
-  /** Marca dois produtos como não duplicados. */
   markAsNotDuplicate: editorProcedure
     .input(z.object({
       productId1: z.number().int().positive(),
@@ -221,7 +338,6 @@ export const duplicatesRouter = router({
       return { success: true, message: "Marcado como não duplicado" };
     }),
 
-  /** Listar grupos de duplicados detectados com paginação. */
   listDuplicateGroups: protectedProcedure
     .input(z.object({
       page: z.number().min(1).default(1),
@@ -231,95 +347,45 @@ export const duplicatesRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
-
       const allProducts = await db
         .select()
         .from(products)
         .where(eq(products.isActive, "yes"));
       const exceptions = await loadExceptionPairs(db);
-      const duplicateGroups: Array<{
-        groupId: string;
-        count: number;
-        similarity: number;
-        products: Array<{ id: number; name: string; concentration: string | null }>;
-      }> = [];
-      const processed = new Set<number>();
-
-      for (let i = 0; i < allProducts.length; i++) {
-        if (processed.has(allProducts[i].id)) continue;
-        const group = [allProducts[i]];
-        processed.add(allProducts[i].id);
-
-        for (let j = i + 1; j < allProducts.length; j++) {
-          if (processed.has(allProducts[j].id)) continue;
-          if (exceptions.has(pairKey(allProducts[i].id, allProducts[j].id))) continue;
-          const nameSimilarity = jaroWinklerSimilarity(allProducts[i].name, allProducts[j].name);
-          if (nameSimilarity >= input.minSimilarity) {
-            group.push(allProducts[j]);
-            processed.add(allProducts[j].id);
-          }
-        }
-
-        if (group.length > 1) {
-          const avgSimilarity = group.reduce((sum, p, idx) => {
-            if (idx === 0) return 0;
-            return sum + jaroWinklerSimilarity(group[0].name, p.name);
-          }, 0) / (group.length - 1);
-          duplicateGroups.push({
-            groupId: `group_${i}`,
-            count: group.length,
-            similarity: avgSimilarity,
-            products: group.map((p) => ({ id: p.id, name: p.name, concentration: p.concentration })),
-          });
-        }
-      }
-
+      const groups = blockedDuplicateGroups(allProducts, exceptions, input.minSimilarity);
       const start = (input.page - 1) * input.pageSize;
-      const end = start + input.pageSize;
       return {
-        groups: duplicateGroups.slice(start, end),
-        total: duplicateGroups.length,
+        groups: groups.slice(start, start + input.pageSize).map((group) => ({
+          groupId: group.groupId,
+          count: group.products.length,
+          similarity: group.similarity,
+          products: group.products.map((product) => ({
+            id: product.id,
+            name: product.name,
+            concentration: product.concentration,
+          })),
+        })),
+        total: groups.length,
         page: input.page,
         pageSize: input.pageSize,
-        totalPages: Math.ceil(duplicateGroups.length / input.pageSize),
+        totalPages: Math.ceil(groups.length / input.pageSize),
       };
     }),
 
-  /** Obter estatísticas de duplicados. */
   getDuplicateStats: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("DB indisponível");
-
     const allProducts = await db
       .select()
       .from(products)
       .where(eq(products.isActive, "yes"));
-
-    let totalDuplicateGroups = 0;
-    let totalDuplicateProducts = 0;
-    const processed = new Set<number>();
-
-    for (let i = 0; i < allProducts.length; i++) {
-      if (processed.has(allProducts[i].id)) continue;
-      let groupSize = 1;
-      processed.add(allProducts[i].id);
-      for (let j = i + 1; j < allProducts.length; j++) {
-        if (processed.has(allProducts[j].id)) continue;
-        const similarity = jaroWinklerSimilarity(allProducts[i].name, allProducts[j].name);
-        if (similarity >= 0.7) {
-          groupSize++;
-          processed.add(allProducts[j].id);
-        }
-      }
-      if (groupSize > 1) {
-        totalDuplicateGroups++;
-        totalDuplicateProducts += groupSize;
-      }
-    }
+    const exceptions = await loadExceptionPairs(db);
+    const groups = blockedDuplicateGroups(allProducts, exceptions, 0.7);
+    const totalDuplicateProducts = groups.reduce((sum, group) => sum + group.products.length, 0);
 
     return {
       totalProducts: allProducts.length,
-      totalDuplicateGroups,
+      totalDuplicateGroups: groups.length,
       totalDuplicateProducts,
       duplicatePercentage: allProducts.length > 0
         ? (totalDuplicateProducts / allProducts.length * 100).toFixed(2)
