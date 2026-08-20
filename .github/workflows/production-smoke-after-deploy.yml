@@ -20,7 +20,6 @@ env:
   SMOKE_USER_EMAIL: ${{ secrets.SMOKE_USER_EMAIL }}
   SMOKE_USER_PASSWORD: ${{ secrets.SMOKE_USER_PASSWORD }}
   SMOKE_MFA_TOKEN: ${{ secrets.SMOKE_MFA_TOKEN }}
-  SMOKE_SCREENSHOT_DIR: artifacts/smoke
 
 jobs:
   deploy-failed:
@@ -58,43 +57,12 @@ jobs:
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
-      - name: Checkout da versão publicada
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Habilitar pnpm
-        run: corepack enable
-
-      - name: Instalar dependências
-        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
-
-      - name: Localizar ou instalar navegador
+      - name: Validar container publicado
         run: |
-          for candidate in /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser; do
-            if [ -x "$candidate" ]; then
-              echo "PUPPETEER_EXECUTABLE_PATH=$candidate" >> "$GITHUB_ENV"
-              exit 0
-            fi
-          done
-          export DEBIAN_FRONTEND=noninteractive
-          if command -v apt-get >/dev/null; then
-            apt-get update -q
-            apt-get install -y -q chromium >/dev/null 2>&1 || apt-get install -y -q chromium-browser >/dev/null 2>&1
-          fi
-          if [ -x /usr/bin/chromium ]; then
-            echo "PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium" >> "$GITHUB_ENV"
-          elif [ -x /usr/bin/chromium-browser ]; then
-            echo "PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser" >> "$GITHUB_ENV"
-          else
-            echo "Nenhum Chrome/Chromium disponível" >&2
-            exit 1
-          fi
+          set -euo pipefail
+          docker inspect sistema-s2-app >/dev/null
+          docker exec sistema-s2-app test -x /usr/bin/chromium
+          docker exec sistema-s2-app test -f /app/scripts/production-smoke.mjs
 
       - name: Preparar conta técnica de smoke
         run: |
@@ -118,10 +86,26 @@ jobs:
             sistema-s2-app node scripts/ensure-smoke-user.mjs
           echo "Conta técnica editor ativada com senha aleatória somente para este smoke."
 
-      - name: Executar smoke autenticado
+      - name: Executar smoke autenticado no container
         id: smoke
         continue-on-error: true
-        run: node scripts/production-smoke.mjs
+        run: |
+          docker exec \
+            -e SMOKE_BASE_URL="$SMOKE_BASE_URL" \
+            -e SMOKE_ROUTES="$SMOKE_ROUTES" \
+            -e SMOKE_USER_EMAIL="$SMOKE_USER_EMAIL" \
+            -e SMOKE_USER_PASSWORD="$SMOKE_USER_PASSWORD" \
+            -e SMOKE_MFA_TOKEN="$SMOKE_MFA_TOKEN" \
+            -e SMOKE_SCREENSHOT_DIR=/tmp/s2-production-smoke \
+            -e PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+            sistema-s2-app sh -lc 'rm -rf /tmp/s2-production-smoke && node scripts/production-smoke.mjs'
+
+      - name: Copiar evidências do container
+        if: always()
+        run: |
+          rm -rf artifacts/smoke
+          mkdir -p artifacts
+          docker cp sistema-s2-app:/tmp/s2-production-smoke artifacts/smoke 2>/dev/null || true
 
       - name: Desativar conta técnica efêmera
         if: always() && env.SMOKE_AUTH_SOURCE == 'ephemeral-technical-account'
