@@ -1,0 +1,37 @@
+name: One-shot focused duplicate patch
+
+on:
+  push:
+    branches: [agent/focused-duplicate-intelligence]
+    paths:
+      - .github/workflows/one-shot-focused-duplicate-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/focused-duplicate-intelligence
+      - name: Aplicar alteração mínima e remover workflow temporário
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('client/src/pages/InteligenciaLicitacoes.tsx')
+          text = path.read_text()
+          old = 'const { data: duplicates = [] } = trpc.duplicates.detectDuplicates.useQuery({ minSimilarity: 0.78, limit: 200 }, { enabled: productId != null });'
+          new = 'const { data: duplicates = [] } = trpc.duplicates.detectDuplicates.useQuery({ productId: productId ?? undefined, minSimilarity: 0.78, limit: 200 }, { enabled: productId != null });'
+          if old not in text:
+              raise SystemExit('Trecho esperado não encontrado; abortando sem alterar arquivo.')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/one-shot-focused-duplicate-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add client/src/pages/InteligenciaLicitacoes.tsx .github/workflows/one-shot-focused-duplicate-patch.yml
+          git commit -m 'perf: focar duplicidades no produto selecionado'
+          git push origin HEAD:agent/focused-duplicate-intelligence
