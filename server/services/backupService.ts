@@ -134,6 +134,7 @@ export function runDatabaseBackup(opts?: { destDir?: string; databaseUrl?: strin
     let settled = false;
     let dumpCompleted = false;
     let outputCompleted = false;
+    let finalizing = false;
 
     const done = (r: BackupResult) => {
       if (!settled) {
@@ -143,7 +144,8 @@ export function runDatabaseBackup(opts?: { destDir?: string; databaseUrl?: strin
     };
 
     const finalizeSuccess = async () => {
-      if (settled || !dumpCompleted || !outputCompleted) return;
+      if (settled || finalizing || !dumpCompleted || !outputCompleted) return;
+      finalizing = true;
       const offsite = await copyBackupOffsite(outFile);
       if (offsite.attempted && !offsite.success && isOffsiteBackupRequired()) {
         done({
