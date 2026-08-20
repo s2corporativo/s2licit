@@ -11,7 +11,7 @@ function makeQueryBuilder(data: unknown[]): any {
 
 let productsData: any[] = [];
 let exceptionsData: any[] = [];
-const insertedExceptions: any[] = [];
+const insertedValues: any[] = [];
 
 const mockFrom = vi.fn((table: unknown) => {
   if (table === duplicateExceptions) return makeQueryBuilder(exceptionsData);
@@ -20,7 +20,7 @@ const mockFrom = vi.fn((table: unknown) => {
 });
 const mockSelect = vi.fn(() => ({ from: mockFrom }));
 const mockValues = vi.fn((vals: any) => {
-  insertedExceptions.push(vals);
+  insertedValues.push(vals);
   return Promise.resolve({});
 });
 const mockInsert = vi.fn(() => ({ values: mockValues }));
@@ -40,17 +40,24 @@ describe("duplicatesRouter", () => {
     vi.clearAllMocks();
     productsData = [];
     exceptionsData = [];
-    insertedExceptions.length = 0;
+    insertedValues.length = 0;
   });
 
   describe("markAsNotDuplicate", () => {
-    it("persiste o par na tabela de exceções quando ainda não existe", async () => {
+    it("persiste o par na tabela de exceções e registra auditoria quando ainda não existe", async () => {
       exceptionsData = [];
 
       const result = await caller().markAsNotDuplicate({ productId1: 1, productId2: 2 });
 
       expect(result.success).toBe(true);
-      expect(insertedExceptions).toEqual([{ productId1: 1, productId2: 2 }]);
+      expect(insertedValues).toContainEqual({ productId1: 1, productId2: 2 });
+      expect(insertedValues).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          action: "product_duplicate_exception",
+          entity: "products",
+          entityId: 1,
+        }),
+      ]));
     });
 
     it("não insere duplicado quando o par já existe (em qualquer ordem)", async () => {
@@ -58,12 +65,12 @@ describe("duplicatesRouter", () => {
 
       await caller().markAsNotDuplicate({ productId1: 2, productId2: 1 });
 
-      expect(insertedExceptions).toEqual([]);
+      expect(insertedValues).toEqual([]);
     });
 
     it("rejeita marcar um produto como não duplicado dele mesmo", async () => {
       await expect(caller().markAsNotDuplicate({ productId1: 5, productId2: 5 })).rejects.toThrow();
-      expect(insertedExceptions).toEqual([]);
+      expect(insertedValues).toEqual([]);
     });
   });
 
