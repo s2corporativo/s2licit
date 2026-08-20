@@ -15,6 +15,10 @@ import {
   refreshStaleQuotationPrices,
   runQuotationBulkAction,
 } from "../services/quotationOptimizationService";
+import {
+  getQuotationTimeline,
+  getSmartMarginSuggestions,
+} from "../services/quotationInsightsService";
 
 const feedbackKind = z.enum([
   "match_approved",
@@ -57,6 +61,14 @@ export const quotationDecisionRouter = router({
     .query(({ input }) => getCommercialProtection(input.quotationId)),
 
   commercialIntelligence: protectedProcedure.query(() => getCommercialIntelligence()),
+
+  timeline: protectedProcedure
+    .input(z.object({ quotationId: z.number().int().positive() }))
+    .query(({ input }) => getQuotationTimeline(input.quotationId)),
+
+  smartMargins: protectedProcedure
+    .input(z.object({ quotationId: z.number().int().positive() }))
+    .query(({ input }) => getSmartMarginSuggestions(input.quotationId)),
 
   feedback: editorProcedure
     .input(z.object({

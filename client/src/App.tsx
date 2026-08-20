@@ -23,7 +23,8 @@ const ImportarPlanilha = lazy(() => import("./pages/ImportarPlanilha"));
 const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
 const Propostas = lazy(() => import("./pages/Propostas"));
 const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
-const Produtos = lazy(() => import("./pages/Produtos"));
+const Produtos = lazy(() => import("./pages/ProdutosModern"));
+const ProdutosLegado = lazy(() => import("./pages/Produtos"));
 const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
@@ -65,6 +66,7 @@ const Login = lazy(() => import("./pages/Login"));
 const Manual = lazy(() => import("./pages/Manual"));
 const Diagnostico = lazy(() => import("./pages/Diagnostico"));
 const CentroOperacional = lazy(() => import("./pages/CentroOperacional"));
+const InteligenciaLicitacoes = lazy(() => import("./pages/InteligenciaLicitacoes"));
 
 function PageLoading() {
   return <div className="min-h-[60vh] flex items-center justify-center"><div className="w-8 h-1 bg-blue-800 animate-pulse rounded" /></div>;
@@ -81,6 +83,7 @@ function Router() {
               <Switch>
                 <Route path="/" component={Dashboard} />
                 <Route path="/dashboard"><Redirect to="/" /></Route>
+                <Route path="/inteligencia"><RequireAuth message="Acesse a Inteligência Comercial após fazer login." minRole="editor"><InteligenciaLicitacoes /></RequireAuth></Route>
                 <Route path="/agenda" component={Agenda} />
                 <Route path="/desempenho" component={Desempenho} />
                 <Route path="/funil" component={Funil} />
@@ -95,6 +98,7 @@ function Router() {
                 <Route path="/comparacao" component={Comparacao} />
                 <Route path="/categorias" component={Categorias} />
                 <Route path="/produtos" component={Produtos} />
+                <Route path="/produtos-legado" component={ProdutosLegado} />
                 <Route path="/equivalencias" component={Equivalencias} />
                 <Route path="/qualidade"><RequireAuth message="Acesse o Dashboard de Qualidade após fazer login." minRole="editor"><DataQualityDashboard /></RequireAuth></Route>
                 <Route path="/fornecedores"><RequireAuth message="Gerencie fornecedores após fazer login." minRole="editor"><Fornecedores /></RequireAuth></Route>
