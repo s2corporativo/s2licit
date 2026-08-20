@@ -33,12 +33,10 @@ describe("shouldAutoConfirm", () => {
     expect(shouldAutoConfirm(item({ matchMethod: "catmat", matchScore: "1" }))).toBe(true);
   });
 
-  it("confirma match por nome somente acima do limiar de alta confiança", () => {
-    expect(shouldAutoConfirm(item({ matchScore: "0.95" }), 0.82)).toBe(true);
-    expect(shouldAutoConfirm(item({ matchScore: "0.90" }), 0.82)).toBe(true);
-    expect(shouldAutoConfirm(item({ matchScore: "0.80" }), 0.82)).toBe(false);
-    // O limiar padrão (0.82) é mais exigente que o de entrada na revisão (0.68):
-    // sugestões medianas ficam para revisão humana.
+  it("nunca auto-confirma match baseado somente em similaridade de nome", () => {
+    expect(shouldAutoConfirm(item({ matchScore: "1" }))).toBe(false);
+    expect(shouldAutoConfirm(item({ matchScore: "0.95" }))).toBe(false);
+    expect(shouldAutoConfirm(item({ matchScore: "0.90" }))).toBe(false);
     expect(shouldAutoConfirm(item({ matchScore: "0.70" }))).toBe(false);
   });
 
@@ -47,10 +45,10 @@ describe("shouldAutoConfirm", () => {
   });
 
   it("bloqueia sem produto casado ou sem preço de custo positivo", () => {
-    expect(shouldAutoConfirm(item({ produtoMatchId: null }))).toBe(false);
-    expect(shouldAutoConfirm(item({ precoSugerido: null }))).toBe(false);
-    expect(shouldAutoConfirm(item({ precoSugerido: "0" }))).toBe(false);
-    expect(shouldAutoConfirm(item({ precoSugerido: "-5" }))).toBe(false);
+    expect(shouldAutoConfirm(item({ produtoMatchId: null, matchMethod: "catmas" }))).toBe(false);
+    expect(shouldAutoConfirm(item({ precoSugerido: null, matchMethod: "catmas" }))).toBe(false);
+    expect(shouldAutoConfirm(item({ precoSugerido: "0", matchMethod: "catmas" }))).toBe(false);
+    expect(shouldAutoConfirm(item({ precoSugerido: "-5", matchMethod: "catmas" }))).toBe(false);
   });
 
   it("match manual ou nenhum é decisão humana — nunca automático", () => {
@@ -60,10 +58,11 @@ describe("shouldAutoConfirm", () => {
 });
 
 describe("configuração por ambiente", () => {
-  it("limiar padrão 0.82; valores fora de [0.5, 1] são ignorados", () => {
+  it("mantém o threshold legado apenas por compatibilidade, sem liberar match por nome", () => {
     expect(autoConfirmThreshold()).toBe(0.82);
     process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "0.90";
     expect(autoConfirmThreshold()).toBe(0.90);
+    expect(shouldAutoConfirm(item({ matchMethod: "nome", matchScore: "1" }))).toBe(false);
     process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "0.2";
     expect(autoConfirmThreshold()).toBe(0.82);
     process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD = "abc";
