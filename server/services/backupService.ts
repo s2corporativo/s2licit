@@ -13,6 +13,11 @@ import { spawn } from "node:child_process";
 import { createWriteStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { createGzip } from "node:zlib";
 import path from "node:path";
+import {
+  copyBackupOffsite,
+  isOffsiteBackupRequired,
+  type OffsiteCopyResult,
+} from "./backupOffsiteService";
 
 export interface ParsedDbUrl {
   database: string;
@@ -99,6 +104,7 @@ export interface BackupResult {
   success: boolean;
   file?: string;
   error?: string;
+  offsite?: OffsiteCopyResult;
 }
 
 /** Executa o backup (impuro). Resolve com o resultado, nunca lança. */
@@ -126,6 +132,10 @@ export function runDatabaseBackup(opts?: { destDir?: string; databaseUrl?: strin
     const out = createWriteStream(outFile);
     let stderr = "";
     let settled = false;
+    let dumpCompleted = false;
+    let outputCompleted = false;
+    let finalizing = false;
+
     const done = (r: BackupResult) => {
       if (!settled) {
         settled = true;
@@ -133,12 +143,37 @@ export function runDatabaseBackup(opts?: { destDir?: string; databaseUrl?: strin
       }
     };
 
+    const finalizeSuccess = async () => {
+      if (settled || finalizing || !dumpCompleted || !outputCompleted) return;
+      finalizing = true;
+      const offsite = await copyBackupOffsite(outFile);
+      if (offsite.attempted && !offsite.success && isOffsiteBackupRequired()) {
+        done({
+          success: false,
+          file: outFile,
+          offsite,
+          error: `Backup local concluído, mas a cópia externa obrigatória falhou: ${offsite.error ?? "erro desconhecido"}`,
+        });
+        return;
+      }
+      done({ success: true, file: outFile, offsite });
+    };
+
     dump.stderr.on("data", (d) => { stderr += d.toString(); });
     dump.on("error", (err) => done({ success: false, error: `mysqldump indisponível: ${err.message}` }));
     dump.on("close", (code) => {
-      if (code !== 0) done({ success: false, error: `mysqldump saiu com código ${code}. ${stderr.trim()}` });
+      if (code !== 0) {
+        done({ success: false, error: `mysqldump saiu com código ${code}. ${stderr.trim()}` });
+        return;
+      }
+      dumpCompleted = true;
+      void finalizeSuccess();
     });
-    out.on("finish", () => done({ success: true, file: outFile }));
+    gzip.on("error", (err) => done({ success: false, error: `Erro ao comprimir backup: ${err.message}` }));
+    out.on("finish", () => {
+      outputCompleted = true;
+      void finalizeSuccess();
+    });
     out.on("error", (err) => done({ success: false, error: `Erro ao gravar backup: ${err.message}` }));
 
     dump.stdout.pipe(gzip).pipe(out);

@@ -5,6 +5,7 @@ import {
   isObsoleteMigrationStatement,
   normalizeMysqlIdentifiers,
   shortenMysqlIdentifier,
+  shouldReconcileMigrationDrift,
   splitMigrationStatements,
 } from "./migrate-production.mjs";
 
@@ -103,5 +104,14 @@ describe("migrate-production", () => {
     expect(isIgnorableMigrationError({ errno: 1045, code: "ER_ACCESS_DENIED_ERROR" })).toBe(false);
     expect(isIgnorableMigrationError({ errno: 1059, code: "ER_TOO_LONG_IDENT" })).toBe(false);
     expect(isIgnorableMigrationError({ errno: 1170, code: "ER_BLOB_KEY_WITHOUT_LENGTH" })).toBe(false);
+  });
+
+  it("bloqueia reconciliação de drift por padrão", () => {
+    expect(shouldReconcileMigrationDrift({})).toBe(false);
+    expect(shouldReconcileMigrationDrift({ MIGRATION_ALLOW_DRIFT_RECONCILE: "false" })).toBe(false);
+  });
+
+  it("só permite reconciliação de drift por opt-in explícito", () => {
+    expect(shouldReconcileMigrationDrift({ MIGRATION_ALLOW_DRIFT_RECONCILE: "true" })).toBe(true);
   });
 });
