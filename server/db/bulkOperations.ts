@@ -1,11 +1,24 @@
-import { inArray, sql } from "drizzle-orm";
+import { and, inArray, isNull, sql } from "drizzle-orm";
 import { products } from "../../drizzle/schema";
 import { getDb } from "./_client";
 
-/**
- * Campos permitidos na edição em lote (alinhados ao schema Zod de bulkUpdate).
- * freightValue e taxValue são decimais; o helper converte string→number quando aplicável.
- */
+const BULK_CHUNK_SIZE = 500;
+
+function uniqueIds(ids: number[]): number[] {
+  return Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
+}
+
+function chunks<T>(items: T[], size = BULK_CHUNK_SIZE): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < items.length; i += size) result.push(items.slice(i, i + size));
+  return result;
+}
+
+function affectedRows(result: unknown): number {
+  return Number((result as any)?.[0]?.affectedRows ?? 0);
+}
+
+/** Campos permitidos na edição em lote (alinhados ao schema Zod de bulkUpdate). */
 export type BulkUpdateData = Partial<{
   supplierId: number;
   categoryId: number;
@@ -26,7 +39,7 @@ export type BulkUpdateData = Partial<{
   productUrl: string;
   stock: string;
   isActive: "yes" | "no";
-  priceAdjustPercent: number; // positive = increase, negative = decrease
+  priceAdjustPercent: number;
   fichaTecnica: string | null;
   codigoFornecedor: string | null;
   ean: string | null;
@@ -40,11 +53,6 @@ export type BulkUpdateData = Partial<{
   taxValue: string | number | null;
 }>;
 
-/**
- * Campos cujos valores podem ser limpos (SET NULL / valor vazio) de forma
- * explícita, sem confundir "vazio" com "não alterar". Recebidos como
- * `clearFields: string[]` no router.
- */
 const CLEARABLE_FIELDS = [
   "name",
   "code",
@@ -70,79 +78,101 @@ const CLEARABLE_FIELDS = [
   "fichaTecnica",
   "price",
   "priceUnit",
+  "freightValue",
+  "taxValue",
 ] as const;
 
 /**
- * Edição em lote ATUAL + LIMPEZA EXPLÍCITA de campos, totalmente set-based
- * (sem loop produto a produto). priceAdjustPercent também é set-based.
- * Retorna o número de produtos atualizados.
+ * Edição em lote set-based. Para catálogos grandes usa chunks de 500 dentro
+ * de UMA transação: evita listas IN gigantes sem perder atomicidade.
  */
 export async function bulkUpdateProducts(
   ids: number[],
   data: BulkUpdateData,
-  opts?: { clearFields?: string[] }
+  opts?: { clearFields?: string[] },
 ): Promise<number> {
   const db = await getDb();
-  if (!db || ids.length === 0) return 0;
+  const targetIds = uniqueIds(ids);
+  if (!db || targetIds.length === 0) return 0;
 
   const setRows: Record<string, unknown> = {};
-
-  // Campos com valor informado (alteração)
   for (const [key, value] of Object.entries(data)) {
-    if (value === undefined || value === null) continue;
-    if (key === "priceAdjustPercent") continue; // tratado separadamente (set-based)
+    if (value === undefined || value === null || key === "priceAdjustPercent") continue;
     if (key === "freightValue" || key === "taxValue") {
       const n = typeof value === "number" ? value : parseFloat(String(value).replace(",", "."));
-      setRows[key] = isNaN(n) ? null : n;
+      if (!Number.isFinite(n)) throw new Error(`Valor inválido para ${key}`);
+      setRows[key] = n;
     } else {
       setRows[key] = value;
     }
   }
 
-  // Limpeza explícita de campos (NULL), apenas campos permitidos
-  const clearFields = (opts?.clearFields ?? []).filter((f) =>
-    (CLEARABLE_FIELDS as readonly string[]).includes(f)
+  const clearFields = (opts?.clearFields ?? []).filter((field) =>
+    (CLEARABLE_FIELDS as readonly string[]).includes(field),
   );
-  for (const f of clearFields) {
-    setRows[f] = null;
-  }
+  for (const field of clearFields) setRows[field] = null;
 
-  if (Object.keys(setRows).length > 0) {
-    await db.update(products).set(setRows as any).where(inArray(products.id, ids));
-  }
+  const factor = data.priceAdjustPercent !== undefined && data.priceAdjustPercent !== 0
+    ? 1 + data.priceAdjustPercent / 100
+    : null;
+  if (factor !== null && factor <= 0) throw new Error("Ajuste percentual resultaria em preço zero ou negativo.");
 
-  // Ajuste percentual de preço set-based (uma única instrução SQL)
-  if (data.priceAdjustPercent !== undefined && data.priceAdjustPercent !== 0) {
-    const factor = 1 + data.priceAdjustPercent / 100;
-    await db
-      .update(products)
-      .set({ price: sql`ROUND(${products.price} * ${factor}, 2)` })
-      .where(inArray(products.id, ids));
-  }
+  await db.transaction(async (tx) => {
+    for (const group of chunks(targetIds)) {
+      if (Object.keys(setRows).length > 0) {
+        await tx.update(products).set(setRows as any).where(inArray(products.id, group));
+      }
+      if (factor !== null) {
+        await tx
+          .update(products)
+          .set({ price: sql`ROUND(${products.price} * ${factor}, 2)` })
+          .where(inArray(products.id, group));
+      }
+    }
+  });
 
-  return ids.length;
+  return targetIds.length;
 }
 
-/**
- * Arquivamento em massa (soft-delete): preserva preços, histórico e referências.
- */
+/** Arquivamento reversível: preserva histórico e referências. */
 export async function bulkArchiveProducts(ids: number[]): Promise<number> {
   const db = await getDb();
-  if (!db || ids.length === 0) return 0;
-  await db.update(products).set({ isActive: "no" }).where(inArray(products.id, ids));
-  return ids.length;
+  const targetIds = uniqueIds(ids);
+  if (!db || targetIds.length === 0) return 0;
+
+  let affected = 0;
+  await db.transaction(async (tx) => {
+    for (const group of chunks(targetIds)) {
+      const result = await tx
+        .update(products)
+        .set({ isActive: "no", deletedAt: new Date() })
+        .where(inArray(products.id, group));
+      affected += affectedRows(result);
+    }
+  });
+  return affected;
 }
 
 /**
- * Reativação em lote de produtos arquivados.
+ * Reativação em lote. Produtos desativados por merge canônico NÃO podem ser
+ * reativados por esta ação, pois mantêm mergedIntoId apontando para o mestre.
  */
 export async function bulkReactivateProducts(ids: number[]): Promise<number> {
   const db = await getDb();
-  if (!db || ids.length === 0) return 0;
-  await db.update(products).set({ isActive: "yes" }).where(inArray(products.id, ids));
-  return ids.length;
+  const targetIds = uniqueIds(ids);
+  if (!db || targetIds.length === 0) return 0;
+
+  let affected = 0;
+  await db.transaction(async (tx) => {
+    for (const group of chunks(targetIds)) {
+      const result = await tx
+        .update(products)
+        .set({ isActive: "yes", deletedAt: null })
+        .where(and(inArray(products.id, group), isNull(products.mergedIntoId)));
+      affected += affectedRows(result);
+    }
+  });
+  return affected;
 }
 
-// Qualidade server-side (critério de "incompleto") é implementada em
-// server/db/products.ts (listProducts.incomplete) para preservar total/paginação
-// corretos no list, e o mesmo critério QUALITY_FIELDS do frontend Produtos.tsx.
+export const __bulkTest = { uniqueIds, chunks, CLEARABLE_FIELDS, BULK_CHUNK_SIZE };
