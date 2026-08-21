@@ -59,6 +59,7 @@ import { buscaGlobalRouter } from "./routers/buscaGlobal";
 import { diagnosticoRouter } from "./routers/diagnostico";
 import { operationalGovernanceRouter } from "./routers/operationalGovernance";
 import { productsRouter } from "./routers/productsGroup";
+import { productBulkRouter } from "./routers/productBulk";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 
@@ -120,6 +121,7 @@ export const appRouter = router({
 
   // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
+  productBulk: productBulkRouter,
 
   // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: equivalencesRouter,
