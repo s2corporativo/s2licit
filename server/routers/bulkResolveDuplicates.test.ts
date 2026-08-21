@@ -20,19 +20,22 @@ vi.mock("../services/auditService", () => ({
   recordAudit: vi.fn(async () => {}),
 }));
 
-// Mock do trpc: cada procedimento expõe o handler final (mutation retorna o
-// handler), e router({...}) registra os handlers pelos nomes das chaves,
-// permitindo invocá-los diretamente em { input, ctx } como o tRPC executa.
+// Mock do tRPC: os procedimentos protegidos e de editor expõem o handler final
+// para este teste unitário de lógica. O RBAC real de editor é coberto
+// separadamente em productBulkRbac.test.ts; aqui não devemos enfraquecer a
+// procedure só para manter o harness legado funcionando.
 vi.mock("../_core/trpc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../_core/trpc")>();
+  const mockProcedure = {
+    input: (_schema: any) => ({
+      mutation: (handler: any) => handler,
+      query: (handler: any) => handler,
+    }),
+  };
   return {
     ...actual,
-    protectedProcedure: {
-      input: (_schema: any) => ({
-        mutation: (handler: any) => handler,
-        query: (handler: any) => handler,
-      }),
-    },
+    protectedProcedure: mockProcedure,
+    editorProcedure: mockProcedure,
     router: (defs: any) => registerRouter(defs),
   };
 });
@@ -74,7 +77,6 @@ describe("bulkResolveDuplicates (lógica)", () => {
     ]);
     db.mergeProductGroup.mockResolvedValue({ merged: 1, redirected: 0 });
 
-    // Seleção inclui apenas o grupo 1 completo
     const result = await callEndpoint("bulkResolveDuplicates", { ids: [10, 11, 99] });
 
     expect(result.groups).toBe(1);
