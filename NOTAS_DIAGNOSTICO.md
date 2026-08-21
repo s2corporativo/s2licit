@@ -317,7 +317,7 @@ PRÓXIMO: (a) corrigir rematch (limitar itens) → fix no código + rebuild VPS;
 - Depois do push: criar PR, mergear (autorização do usuário), aplicar na VPS via rsync/rebuild, e finalmente retestar RBAC (mutations viewer → FORBIDDEN) + relatório Módulo 04.
 - Estado VPS: app container com dist novo (md5 e31da8a3) mas SATURADO (rematch carregando catálogo inteiro 27435 produtos + embeddings; CPU 103%, healthz timeout). Ollama 79% CPU constante (embedding local, normal?). Fix rematch + rebuild vai resolver a saturação.
 - RBAC pendente: a trava está no bundle; viewer3 foi apagado pelo cleanup. Recriar viewer e testar mutation após rebuild com fix rematch.
-- Credencial VPS: sshpass -p 'Fam04061427@' ssh root@13.140.167.153 (usuário forneceu hoje).
+- Credencial VPS: [REDACTED — credenciais não devem ser registradas em documentação ou Git]
 - Backup atual: /root/backups/s2-2026-08-16.sql.gz (53MB) feito antes do último rebuild.
 
 ## Módulo 04 — APPLY_OK (13:35 UTC)
@@ -329,7 +329,7 @@ CONCLUSÃO DO MÓDULO 04: homologado após correções. Correções aplicadas: (
 
 ## Módulo 05 — ESCOPO OFICIAL (PROMPT 05 — Multi-Entidade)
 Testar isolamento entre: órgãos públicos, empresas, consórcios, fornecedores. Validar: propostas, documentos, lances, contratos, histórico. Vazamento entre entidades = CRÍTICO. Não avançar ao próximo módulo.
-Contexto: o S2 Licít tem módulos de propostas (email_quotations/proposals), fornecedores (suppliers), órgãos solicitantes (requesting_orgs). O isolamento multi-entidade pode se referir a: dados de propostas/documentos/lances/contratos/histórico de cada fornecedor visíveis apenas ao seu dono/órgão. Mapear no código como as consultas filtram por entidade/fornecedor (tenant). VPS: sshpass -p 'Fam04061427@' root@13.140.167.153. Produção: main atualizada + fix rematch aplicado, stable (healthz <10ms, CPU 0%). Scripts de teste anteriores: /tmp/rbac-test3.sh (usar como modelo, porta 3001, viewer admin login via ADMIN_PASSWORD).
+VPS: [REDACTED — autenticação SSH não deve ser registrada em documentação ou Git]
 Credenciais GitHub renovadas (GH_TOKEN ok, push OK).
 Backup VPS: /root/backups/s2-apply-2026-08-16-1327.sql.gz (55MB).
 
@@ -434,7 +434,7 @@ Novo pedido do usuário (3 tarefas em sequência):
 2. Fix UX "Cotação bloqueada: confirme o match de 1 item(ns) antes de gerar ou enviar o orçamento" — usuário quer SOLUÇÃO SIMPLIFICADA (provavelmente desativar o bloqueio ou auto-confirmar matches únicos). Localizar texto no client/src e no server.
 3. Módulo 06 auditoria — Dados Sensíveis e Exposição de Informações (escopo em /home/ubuntu/upload/Pasted_content_77.txt, grep "06").
 Estado: Ollama otimizado (override.conf: THREADS=4, PARALLEL=1; iptables drop na 11434 exceto 172.24.0.0/16 + 127.0.0.1). CPU ollama 14,7%. S2 main = commit com fix rematch (PRs #113/#114 merged). Token GH renovado.
-Acesso VPS: sshpass -p 'Fam04061427@' ssh root@13.140.167.153. App: docker sistema-s2-app, porta local 3001 (mapeada 8088 público). Login admin: adm@vetmg.com.br (senha = ADMIN_PASSWORD do .env; NÃO logar senha).
+VPS: [REDACTED — autenticação SSH não deve ser registrada em documentação ou Git]
 Deploy padrão validado: baixar tarball da main via gh API → scp → rsync /opt/s2licit (preservar .env/backups) → docker compose build app → up -d --force-recreate → validar healthz. Backup banco: mysqldump (scripts/backup.sh não existe em /opt/s2licit).
 Gates: pnpm lint + npx tsc --noEmit + pnpm run build + npx vitest run (728 testes).
 PRs: criar branch fix/*, commit, push, gh pr create, gh pr merge (autorizado pelo usuário — branch protection permite com admin? main protegida exigiu antes que PR estivesse mergado... usar gh pr merge --admin).
