@@ -16,46 +16,59 @@ const navGroups: NavGroup[] = [
   {
     label: "Início",
     items: [
+      { href: "/pendencias", icon: CalendarClock, label: "Central de pendências" },
       { href: "/", icon: LayoutDashboard, label: "Visão geral" },
-      { href: "/inteligencia", icon: BrainCircuit, label: "Inteligência comercial", minRole: "editor" },
-      { href: "/agenda", icon: CalendarClock, label: "Agenda e pendências" },
-      { href: "/funil", icon: Activity, label: "Funil de trabalho" },
+      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
     ],
   },
   {
-    label: "Oportunidades",
+    label: "1. Entrada",
     items: [
-      { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
-      { href: "/agenticseek", icon: Bot, label: "AgenticSeek", minRole: "editor" },
-      { href: "/cotacoes-recebidas", icon: FileText, label: "Cotações recebidas", minRole: "editor" },
-      { href: "/edital", icon: FileScan, label: "Analisar oportunidade", minRole: "editor" },
+      { href: "/cotacoes-recebidas", icon: FileText, label: "E-mails e cotações", minRole: "editor" },
+      { href: "/edital", icon: FileScan, label: "Editais e documentos", minRole: "editor" },
+      { href: "/captura-inteligente", icon: FileScan, label: "Captura inteligente", minRole: "editor" },
+      { href: "/captura-revisao", icon: ShieldCheck, label: "Revisão de captura", minRole: "editor" },
     ],
   },
   {
-    label: "Propostas",
+    label: "2. Oportunidades",
+    items: [
+      { href: "/funil", icon: Activity, label: "Funil e dossiês" },
+      { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
+      { href: "/inteligencia", icon: BrainCircuit, label: "Inteligência comercial", minRole: "editor" },
+      { href: "/agenticseek", icon: Bot, label: "AgenticSeek", minRole: "editor" },
+    ],
+  },
+  {
+    label: "3. Produtos",
+    items: [
+      { href: "/produtos", icon: Package, label: "Produtos e preços" },
+      { href: "/busca-global", icon: Search, label: "Busca e equivalências" },
+      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
+      { href: "/enriquecimento", icon: Sparkles, label: "Qualidade do catálogo" },
+    ],
+  },
+  {
+    label: "4. Propostas",
     items: [
       { href: "/propostas", icon: FileText, label: "Central de propostas", minRole: "editor" },
       { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
-      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
     ],
   },
   {
-    label: "Execução",
+    label: "5. Contratos e fornecimento",
     items: [
-      { href: "/centro-operacional", icon: PackageCheck, label: "Operação e entregas", minRole: "editor" },
+      { href: "/centro-operacional", icon: PackageCheck, label: "Contratos e operação", minRole: "editor" },
+      { href: "/pos-venda", icon: PackageCheck, label: "Compras e entregas" },
       { href: "/financeiro", icon: CircleDollarSign, label: "Financeiro", minRole: "editor" },
-      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
     ],
   },
   {
-    label: "Catálogo",
+    label: "6. Documentos da empresa",
     items: [
-      { href: "/produtos", icon: Package, label: "Produtos e preços" },
-      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
-      { href: "/captura-inteligente", icon: FileScan, label: "Captura inteligente", minRole: "editor" },
-      { href: "/captura-revisao", icon: ShieldCheck, label: "Revisão de captura", minRole: "editor" },
-      { href: "/busca-global", icon: Search, label: "Busca e equivalências" },
-      { href: "/enriquecimento", icon: Sparkles, label: "Qualidade do catálogo" },
+      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
+      { href: "/certidoes", icon: FileText, label: "Certidões e vencimentos", minRole: "admin" },
+      { href: "/diligencias", icon: FileText, label: "Diligências e recursos", minRole: "editor" },
     ],
   },
   {
@@ -85,6 +98,7 @@ function currentPageLabel(location: string): string {
     const item = group.items.find((entry) => isPathActive(location, entry.href));
     if (item) return item.label;
   }
+  if (cleanPath(location).startsWith("/oportunidades/")) return "Dossiê da oportunidade";
   return "S2 Licit";
 }
 

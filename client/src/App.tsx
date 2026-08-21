@@ -16,6 +16,8 @@ const SegurancaMFA = lazy(() => import("./pages/SegurancaMFA"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Logs = lazy(() => import("./pages/Logs"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const CentralPendencias = lazy(() => import("./pages/CentralPendencias"));
+const DossieOportunidade = lazy(() => import("./pages/DossieOportunidade"));
 const Categorias = lazy(() => import("./pages/Categorias"));
 const Equivalencias = lazy(() => import("./pages/Equivalencias"));
 const Fornecedores = lazy(() => import("./pages/Fornecedores"));
@@ -83,6 +85,8 @@ function Router() {
               <Switch>
                 <Route path="/" component={Dashboard} />
                 <Route path="/dashboard"><Redirect to="/" /></Route>
+                <Route path="/pendencias" component={CentralPendencias} />
+                <Route path="/oportunidades/:id/dossie" component={DossieOportunidade} />
                 <Route path="/inteligencia"><RequireAuth message="Acesse a Inteligência Comercial após fazer login." minRole="editor"><InteligenciaLicitacoes /></RequireAuth></Route>
                 <Route path="/agenda" component={Agenda} />
                 <Route path="/desempenho" component={Desempenho} />
