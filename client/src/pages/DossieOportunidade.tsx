@@ -3,12 +3,9 @@ import { trpc } from "@/lib/trpc";
 import {
   ArrowLeft,
   ArrowRight,
-  BadgeCheck,
   Banknote,
   Boxes,
-  Building2,
   CalendarClock,
-  CheckCircle2,
   CircleDollarSign,
   FileCheck2,
   FileSearch,
