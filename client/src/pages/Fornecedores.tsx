@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useConfirm } from "@/hooks/useConfirm";
-import { AlertTriangle, Building2, Check, Pencil, Plus, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, Building2, Check, FileCheck, Pencil, Plus, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
 type SupplierForm = {
@@ -41,6 +41,25 @@ const emptySanctionForm: SanctionForm = {
   observacoes: "",
 };
 
+type CertidaoForm = {
+  tipo: string;
+  orgaoEmissor: string;
+  numero: string;
+  dataValidade: string;
+};
+
+const emptyCertidaoForm: CertidaoForm = {
+  tipo: "",
+  orgaoEmissor: "",
+  numero: "",
+  dataValidade: "",
+};
+
+function diasAte(dataValidade: string): number {
+  const ms = new Date(dataValidade).getTime() - Date.now();
+  return Math.floor(ms / (24 * 60 * 60 * 1000));
+}
+
 export default function Fornecedores() {
   const { confirm, confirmDialog } = useConfirm();
   const utils = trpc.useUtils();
@@ -50,10 +69,16 @@ export default function Fornecedores() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [showSanctionForm, setShowSanctionForm] = useState(false);
   const [sanctionForm, setSanctionForm] = useState<SanctionForm>(emptySanctionForm);
+  const [showCertidaoForm, setShowCertidaoForm] = useState(false);
+  const [certidaoForm, setCertidaoForm] = useState<CertidaoForm>(emptyCertidaoForm);
 
   const { data: suppliers, isLoading } = trpc.suppliers.list.useQuery({ activeOnly: false });
   const sanctionsListQuery = trpc.sanctions.list.useQuery(
     { supplierId: selectedSupplierId ?? undefined },
+    { enabled: selectedSupplierId != null },
+  );
+  const certidoesQuery = trpc.certidoes.bySupplier.useQuery(
+    { supplierId: selectedSupplierId ?? 0 },
     { enabled: selectedSupplierId != null },
   );
 
@@ -104,6 +129,22 @@ export default function Fornecedores() {
     },
     onError: (e) => alert(e.message),
   });
+  const createCertidaoMutation = trpc.certidoes.create.useMutation({
+    onSuccess: () => {
+      utils.certidoes.bySupplier.invalidate();
+      utils.certidoes.alertas.invalidate();
+      setShowCertidaoForm(false);
+      setCertidaoForm(emptyCertidaoForm);
+    },
+    onError: (e) => alert(e.message),
+  });
+  const removeCertidaoMutation = trpc.certidoes.remove.useMutation({
+    onSuccess: () => {
+      utils.certidoes.bySupplier.invalidate();
+      utils.certidoes.alertas.invalidate();
+    },
+    onError: (e) => alert(e.message),
+  });
 
   const handleEdit = (supplier: any) => {
     setEditId(supplier.id);
@@ -140,6 +181,18 @@ export default function Fornecedores() {
     });
   };
 
+  const handleSubmitCertidao = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSupplierId || !certidaoForm.tipo.trim() || !certidaoForm.dataValidade) return;
+    createCertidaoMutation.mutate({
+      supplierId: selectedSupplierId,
+      tipo: certidaoForm.tipo.trim(),
+      orgaoEmissor: certidaoForm.orgaoEmissor.trim() || null,
+      numero: certidaoForm.numero.trim() || null,
+      dataValidade: certidaoForm.dataValidade,
+    });
+  };
+
   const selectedSupplier = suppliers?.find((supplier) => supplier.id === selectedSupplierId);
 
   return (
@@ -149,7 +202,7 @@ export default function Fornecedores() {
           <span className="its-bar" />
           <h1 className="text-3xl font-black tracking-tight text-gray-900">Fornecedores</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Contatos, situação cadastral e sanções dos fornecedores usados nas cotações.
+            Contatos, situação cadastral, sanções e regularidade fiscal dos fornecedores usados nas cotações.
           </p>
         </div>
         <button
@@ -387,6 +440,117 @@ export default function Fornecedores() {
                 className="flex items-center gap-2 bg-blue-800 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50"
               >
                 <Check size={14} /> Registrar sanção
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
+      {selectedSupplierId != null && (
+        <div className="mb-6 border border-gray-900 p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 text-sm font-black text-gray-900">
+              <FileCheck size={15} /> Regularidade Fiscal — {selectedSupplier?.name ?? "Fornecedor"}
+            </h2>
+          </div>
+
+          {certidoesQuery.isLoading ? (
+            <p className="text-xs text-gray-400">Carregando certidões...</p>
+          ) : certidoesQuery.data?.length ? (
+            <div className="mb-4 space-y-2">
+              {certidoesQuery.data.map((certidao) => {
+                const dias = diasAte(certidao.dataValidade as unknown as string);
+                const situacao = dias < 0
+                  ? { label: "Vencida", boxCls: "border-red-200 bg-red-50", textCls: "text-red-700" }
+                  : dias <= 30
+                    ? { label: `Vence em ${dias}d`, boxCls: "border-amber-200 bg-amber-50", textCls: "text-amber-700" }
+                    : { label: "Válida", boxCls: "border-green-200 bg-green-50", textCls: "text-green-700" };
+                return (
+                  <div
+                    key={certidao.id}
+                    className={`flex items-start justify-between gap-3 border px-4 py-3 ${situacao.boxCls}`}
+                  >
+                    <div className="text-xs">
+                      <div className="font-bold text-gray-900">{certidao.tipo}</div>
+                      <div className="mt-1 text-gray-600">
+                        {certidao.orgaoEmissor || "—"}{certidao.numero ? ` · Nº ${certidao.numero}` : ""}
+                      </div>
+                      <div className={`mt-1 font-semibold ${situacao.textCls}`}>
+                        {situacao.label} ({new Date(certidao.dataValidade).toLocaleDateString("pt-BR")})
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Remover esta certidão?",
+                          description: "A certidão será desativada e sairá da lista de regularidade fiscal do fornecedor.",
+                          confirmLabel: "Remover",
+                        });
+                        if (ok) removeCertidaoMutation.mutate({ id: certidao.id });
+                      }}
+                      className="shrink-0 text-gray-400 hover:text-red-600"
+                      aria-label={`Remover certidão ${certidao.tipo}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mb-4 text-xs text-gray-400">Nenhuma certidão cadastrada para este fornecedor.</p>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowCertidaoForm((value) => !value)}
+            className="mb-3 flex items-center gap-2 bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+          >
+            <Plus size={14} /> {showCertidaoForm ? "Cancelar" : "Adicionar certidão"}
+          </button>
+
+          {showCertidaoForm && (
+            <form onSubmit={handleSubmitCertidao} className="border-t border-gray-200 pt-4">
+              <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label="Tipo *" className="md:col-span-2">
+                  <input
+                    value={certidaoForm.tipo}
+                    onChange={(e) => setCertidaoForm((current) => ({ ...current, tipo: e.target.value }))}
+                    placeholder="Ex: CND Federal, FGTS, Trabalhista"
+                    required
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Órgão emissor">
+                  <input
+                    value={certidaoForm.orgaoEmissor}
+                    onChange={(e) => setCertidaoForm((current) => ({ ...current, orgaoEmissor: e.target.value }))}
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Número">
+                  <input
+                    value={certidaoForm.numero}
+                    onChange={(e) => setCertidaoForm((current) => ({ ...current, numero: e.target.value }))}
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+                <Field label="Data de validade *">
+                  <input
+                    type="date"
+                    value={certidaoForm.dataValidade}
+                    onChange={(e) => setCertidaoForm((current) => ({ ...current, dataValidade: e.target.value }))}
+                    required
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  />
+                </Field>
+              </div>
+              <button
+                type="submit"
+                disabled={createCertidaoMutation.isPending}
+                className="flex items-center gap-2 bg-blue-800 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50"
+              >
+                <Check size={14} /> Adicionar certidão
               </button>
             </form>
           )}

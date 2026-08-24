@@ -472,6 +472,9 @@ export const proposalItems = mysqlTable(
     presentation: varchar("presentation", { length: 256 }),
     unit: varchar("unit", { length: 64 }),
     supplierName: varchar("supplierName", { length: 256 }),
+    // Nullable: substitui gradualmente supplierName (texto livre) por FK rastreável.
+    // Itens antigos/sem correspondência exata continuam válidos sem vínculo.
+    supplierId: int("supplierId").references(() => suppliers.id, { onDelete: "set null" }),
     unitPrice: decimal("unitPrice", { precision: 12, scale: 2 }),   // Preço de custo (do sistema)
     costPrice: decimal("costPrice", { precision: 12, scale: 2 }),     // Preço de custo explícito
     editalRefPrice: decimal("editalRefPrice", { precision: 12, scale: 2 }), // Preço de referência do edital
@@ -487,6 +490,7 @@ export const proposalItems = mysqlTable(
   },
   (table) => [
     index("idx_pitems_proposal").on(table.proposalId),
+    index("idx_pitems_supplier").on(table.supplierId),
   ]
 );
 
@@ -1659,6 +1663,8 @@ export const certidoes = mysqlTable(
     arquivoUrl: text("arquivoUrl"),
     observacoes: text("observacoes"),
     ativa: boolean("ativa").notNull().default(true),
+    // Nullable: certidões institucionais (sem fornecedor) continuam válidas sem vínculo.
+    supplierId: int("supplierId").references(() => suppliers.id, { onDelete: "set null" }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -1666,6 +1672,7 @@ export const certidoes = mysqlTable(
     index("idx_certidoes_validade").on(table.dataValidade),
     index("idx_certidoes_tipo").on(table.tipo),
     index("idx_certidoes_ativa").on(table.ativa),
+    index("idx_certidoes_supplier").on(table.supplierId),
   ]
 );
 export type Certidao = typeof certidoes.$inferSelect;

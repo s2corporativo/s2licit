@@ -3,8 +3,9 @@ import { getDb, getCompanySettings } from "../db";
 import { products } from "../../drizzle/schema";
 import { getActiveSanctionsByProductIds } from "../db/sanctions";
 import { getActiveCategoryPricingRules } from "../db/categoryPricingQueries";
-import { calcLandedCost } from "../db/landedCost";
+import { calcLandedCost, recordPriceHistory } from "../db/landedCost";
 import { getPriceHistory } from "../db/supplierPrices";
+import { logger } from "../_core/logger";
 import { getEmailQuotationWithItems } from "./emailQuotationSyncService";
 import {
   calculateQuotationTotals,
@@ -360,6 +361,41 @@ export interface PricedQuotationResult {
   manualPriceItems: number;
 }
 
+/**
+ * Registra no histórico de preços por fornecedor (Ressalva 3, Módulo 06) o
+ * custo capturado ao gerar o orçamento — gatilho "cotação recebida". Só
+ * grava quando o custo veio do match/catálogo (nunca do próprio histórico,
+ * para não realimentar o mesmo valor em loop) e há fornecedor identificado.
+ * Melhor esforço: uma falha aqui nunca deve impedir a geração do orçamento.
+ */
+async function recordQuotationPriceHistory(
+  rawItems: NonNullable<Awaited<ReturnType<typeof getEmailQuotationWithItems>>>["items"],
+  previewItems: PricingPreviewItem[],
+): Promise<void> {
+  for (let i = 0; i < previewItems.length; i++) {
+    const preview = previewItems[i];
+    const raw = rawItems[i];
+    if (!raw || preview.produtoMatchId == null || raw.productSupplierId == null) continue;
+    if (preview.costSource !== "match" && preview.costSource !== "catalog") continue;
+    if (preview.baseCost == null) continue;
+    try {
+      await recordPriceHistory({
+        productId: preview.produtoMatchId,
+        supplierId: raw.productSupplierId,
+        price: String(preview.baseCost),
+        freightValue: preview.freightValue ? String(preview.freightValue) : null,
+        taxValue: preview.taxValue ? String(preview.taxValue) : null,
+        origem: "cotacao_recebida",
+      });
+    } catch (err) {
+      logger.warn(
+        "[emailQuotationResponseService] Falha ao registrar histórico de preço:",
+        (err as Error).message,
+      );
+    }
+  }
+}
+
 export async function priceQuotationItems(
   quotationId: number,
   options?: { marginPercent?: number },
@@ -411,6 +447,8 @@ export async function priceQuotationItems(
     marginPercent: item.marginPercent!,
     pricingMode: item.pricingMode as "automatic" | "manual",
   }));
+
+  await recordQuotationPriceHistory(data.items, preview.items);
 
   return {
     quotation: data.quotation,

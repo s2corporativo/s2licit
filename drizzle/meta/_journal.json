@@ -25,6 +25,8 @@
     { "idx": 20, "version": "5", "when": 1786582550000, "tag": "0020_rag_motor_equivalencias", "breakpoints": true },
     { "idx": 21, "version": "5", "when": 1786582600000, "tag": "0021_supplier_sanctions", "breakpoints": true },
     { "idx": 22, "version": "5", "when": 1786896000000, "tag": "0022_quotation_item_pricing", "breakpoints": true },
-    { "idx": 23, "version": "5", "when": 1787151000000, "tag": "0023_agenticseek_module", "breakpoints": true }
+    { "idx": 23, "version": "5", "when": 1787151000000, "tag": "0023_agenticseek_module", "breakpoints": true },
+    { "idx": 24, "version": "5", "when": 1787200000000, "tag": "0024_certidoes_supplier_id", "breakpoints": true },
+    { "idx": 25, "version": "5", "when": 1787200100000, "tag": "0025_proposal_items_supplier_id", "breakpoints": true }
   ]
 }

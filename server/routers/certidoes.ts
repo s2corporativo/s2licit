@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { certidoes } from "../../drizzle/schema";
@@ -30,14 +30,39 @@ const CertidaoInput = z.object({
   dataValidade: z.string(),                         // ISO date (obrigatória)
   arquivoUrl: z.string().optional().nullable(),
   observacoes: z.string().optional().nullable(),
+  // Nullable: ausente = certidão institucional; presente = certidão do fornecedor.
+  supplierId: z.number().int().positive().optional().nullable(),
 });
 
 export const certidoesRouter = router({
-  list: protectedProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) return [];
-    return db.select().from(certidoes).where(eq(certidoes.ativa, true)).orderBy(asc(certidoes.dataValidade));
-  }),
+  /** Lista certidões ativas. supplierId filtra por fornecedor; sem filtro, retorna todas (institucionais e de fornecedores). */
+  list: protectedProcedure
+    .input(z.object({ supplierId: z.number().int().positive().optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const supplierFilter = input?.supplierId != null
+        ? eq(certidoes.supplierId, input.supplierId)
+        : undefined;
+      return db
+        .select()
+        .from(certidoes)
+        .where(and(eq(certidoes.ativa, true), supplierFilter))
+        .orderBy(asc(certidoes.dataValidade));
+    }),
+
+  /** Certidões (regularidade fiscal) de um fornecedor específico. */
+  bySupplier: protectedProcedure
+    .input(z.object({ supplierId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db
+        .select()
+        .from(certidoes)
+        .where(and(eq(certidoes.ativa, true), eq(certidoes.supplierId, input.supplierId)))
+        .orderBy(asc(certidoes.dataValidade));
+    }),
 
   /** Alertas: certidões vencidas ou vencendo em até N dias. */
   alertas: protectedProcedure
@@ -70,6 +95,7 @@ export const certidoesRouter = router({
       dataValidade: new Date(input.dataValidade),
       arquivoUrl: input.arquivoUrl ?? null,
       observacoes: input.observacoes ?? null,
+      supplierId: input.supplierId ?? null,
     });
     return { id: (res as any).insertId as number };
   }),
