@@ -472,6 +472,11 @@ export const proposalItems = mysqlTable(
     presentation: varchar("presentation", { length: 256 }),
     unit: varchar("unit", { length: 64 }),
     supplierName: varchar("supplierName", { length: 256 }),
+    // FK ao lado do texto, não no lugar dele: `supplierName` continua sendo o
+    // que foi digitado/importado; `supplierId` é a chave de agregação que
+    // permite responder de quantas licitações o fornecedor participou.
+    // Nullable porque nome de texto livre nem sempre casa um cadastro.
+    supplierId: int("supplierId").references(() => suppliers.id, { onDelete: "set null" }),
     unitPrice: decimal("unitPrice", { precision: 12, scale: 2 }),   // Preço de custo (do sistema)
     costPrice: decimal("costPrice", { precision: 12, scale: 2 }),     // Preço de custo explícito
     editalRefPrice: decimal("editalRefPrice", { precision: 12, scale: 2 }), // Preço de referência do edital
@@ -487,6 +492,7 @@ export const proposalItems = mysqlTable(
   },
   (table) => [
     index("idx_pitems_proposal").on(table.proposalId),
+    index("idx_proposal_items_supplier").on(table.supplierId),
   ]
 );
 

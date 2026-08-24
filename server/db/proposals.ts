@@ -1,6 +1,26 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
-import { proposalItems, proposalStatusHistory, proposals, type InsertProposal, type InsertProposalItem } from "../../drizzle/schema";
+import { proposalItems, proposalStatusHistory, proposals, suppliers, type InsertProposal, type InsertProposalItem } from "../../drizzle/schema";
 import { getDb } from "./_client";
+import { resolverFornecedorPorNome } from "../services/supplierNameResolver";
+
+/**
+ * Resolve `supplierName` (texto livre) para a FK `supplierId`, quando o nome
+ * casa exatamente um fornecedor cadastrado. Ressalva 4 do Módulo 06.
+ *
+ * Best-effort de propósito: nome sem correspondência ou ambíguo mantém
+ * `supplierId` nulo e preserva o texto. Vincular errado é pior que não
+ * vincular, porque este campo alimenta o relatório de participação.
+ * Respeita `supplierId` já informado explicitamente pelo chamador.
+ */
+async function comSupplierIdResolvido<T extends { supplierName?: string | null; supplierId?: number | null }>(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  data: T,
+): Promise<T> {
+  if (data.supplierId != null || !data.supplierName) return data;
+  const cadastrados = await db.select({ id: suppliers.id, name: suppliers.name }).from(suppliers);
+  const supplierId = resolverFornecedorPorNome(data.supplierName, cadastrados);
+  return supplierId == null ? data : { ...data, supplierId };
+}
 
 export async function listProposals() {
   const db = await getDb();
@@ -84,8 +104,9 @@ export async function addProposalItem(data: InsertProposalItem) {
   const total = data.unitPrice && data.quantity
     ? (parseFloat(String(data.unitPrice)) * data.quantity).toFixed(2)
     : null;
+  const dados = await comSupplierIdResolvido(db, data);
   const [result] = await db.insert(proposalItems).values({
-    ...data,
+    ...dados,
     itemNumber: nextNum,
     totalPrice: total as any,
     sortOrder: nextNum,
