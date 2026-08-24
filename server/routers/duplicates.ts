@@ -8,6 +8,32 @@ import { recordAudit } from "../services/auditService";
 
 type ProductRow = typeof products.$inferSelect;
 
+/**
+ * Teto de catálogo carregado em memória por varredura de duplicidade.
+ * O container roda com 2 GB compartilhados com o Chromium, e a varredura sem
+ * alvo é O(n²) dentro de cada bucket — acima deste volume a resposta certa é
+ * recusar com instrução, nunca truncar em silêncio (truncar devolveria "sem
+ * duplicados" para pares que existem).
+ */
+const MAX_CATALOGO_EM_MEMORIA = 20000;
+
+async function carregarCatalogoAtivo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  const linhas = await db
+    .select()
+    .from(products)
+    .where(eq(products.isActive, "yes"))
+    .limit(MAX_CATALOGO_EM_MEMORIA + 1);
+
+  if (linhas.length > MAX_CATALOGO_EM_MEMORIA) {
+    throw new Error(
+      `Catálogo ativo acima de ${MAX_CATALOGO_EM_MEMORIA} produtos: a varredura global de ` +
+        "duplicidade foi recusada para não esgotar a memória do processo. " +
+        "Informe productId para comparar um produto específico contra todo o catálogo.",
+    );
+  }
+  return linhas;
+}
+
 type DuplicateProduct = {
   id: number;
   name: string;
@@ -209,10 +235,7 @@ export const duplicatesRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
 
-      const allProducts = await db
-        .select()
-        .from(products)
-        .where(eq(products.isActive, "yes"));
+      const allProducts = await carregarCatalogoAtivo(db);
       const exceptions = await loadExceptionPairs(db);
 
       if (input.productId) {
@@ -347,10 +370,7 @@ export const duplicatesRouter = router({
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
-      const allProducts = await db
-        .select()
-        .from(products)
-        .where(eq(products.isActive, "yes"));
+      const allProducts = await carregarCatalogoAtivo(db);
       const exceptions = await loadExceptionPairs(db);
       const groups = blockedDuplicateGroups(allProducts, exceptions, input.minSimilarity);
       const start = (input.page - 1) * input.pageSize;
@@ -375,10 +395,7 @@ export const duplicatesRouter = router({
   getDuplicateStats: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("DB indisponível");
-    const allProducts = await db
-      .select()
-      .from(products)
-      .where(eq(products.isActive, "yes"));
+    const allProducts = await carregarCatalogoAtivo(db);
     const exceptions = await loadExceptionPairs(db);
     const groups = blockedDuplicateGroups(allProducts, exceptions, 0.7);
     const totalDuplicateProducts = groups.reduce((sum, group) => sum + group.products.length, 0);

@@ -29,15 +29,22 @@ Configurações não sensíveis recomendadas como **Repository Variables**:
 
 ## E-mail
 
-A configuração simplificada já utilizada pelo projeto é:
+O recebimento e o envio são configurados separadamente. Não existe forma
+simplificada: `EMAIL_USER` e `EMAIL_PASSWORD` **não são lidos por nenhum ponto do
+código** e não derivam as variáveis abaixo — defina cada bloco explicitamente.
 
-- `EMAIL_USER`;
-- `EMAIL_PASSWORD`.
+Recebimento de cotações (`isImapConfigured()` exige as três primeiras):
 
-Quando esses dois secrets existem, o deploy configura automaticamente Gmail IMAP e SMTP. Também são aceitas configurações avançadas separadas:
+- `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` — obrigatórias;
+- `IMAP_PORT`, `IMAP_TLS`, `IMAP_MAILBOX` — opcionais.
 
-- `IMAP_HOST`, `IMAP_PORT`, `IMAP_USER`, `IMAP_PASSWORD`, `IMAP_TLS`, `IMAP_MAILBOX`;
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_SECURE`, `SMTP_FROM`.
+Envio de propostas (`isSmtpConfigured()` exige as três primeiras):
+
+- `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` — obrigatórias;
+- `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM` — opcionais.
+
+Sem as obrigatórias de um bloco, aquele canal fica desabilitado e a tela de
+Integrações o exibe como não configurado.
 
 ## WhatsApp
 

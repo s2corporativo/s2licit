@@ -22,8 +22,9 @@
     { "idx": 17, "version": "5", "when": 1786403169929, "tag": "0017_fine_black_bolt", "breakpoints": true },
     { "idx": 18, "version": "5", "when": 1786404899126, "tag": "0018_motionless_major_mapleleaf", "breakpoints": true },
     { "idx": 19, "version": "5", "when": 1786582515421, "tag": "0019_optimal_stone_men", "breakpoints": true },
-    { "idx": 20, "version": "5", "when": 1786582600000, "tag": "0021_supplier_sanctions", "breakpoints": true },
-    { "idx": 21, "version": "5", "when": 1786896000000, "tag": "0022_quotation_item_pricing", "breakpoints": true },
-    { "idx": 22, "version": "5", "when": 1787151000000, "tag": "0023_agenticseek_module", "breakpoints": true }
+    { "idx": 20, "version": "5", "when": 1786582550000, "tag": "0020_rag_motor_equivalencias", "breakpoints": true },
+    { "idx": 21, "version": "5", "when": 1786582600000, "tag": "0021_supplier_sanctions", "breakpoints": true },
+    { "idx": 22, "version": "5", "when": 1786896000000, "tag": "0022_quotation_item_pricing", "breakpoints": true },
+    { "idx": 23, "version": "5", "when": 1787151000000, "tag": "0023_agenticseek_module", "breakpoints": true }
   ]
 }

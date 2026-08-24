@@ -1,8 +1,9 @@
 #!/bin/bash
+: "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no ambiente; a senha nao e versionada}"
 # Módulo 05: aplicar main ef564ef na VPS
 set -u
 echo "=== backup do banco ==="
-mysqldump -uroot -p500e56204ec8981ba5f3bfb9496ba21aeb7766bc8c143e58c75f65d99c6dfbe2 --single-transaction sistema_s2 2>/dev/null | gzip > "/root/backups/s2-m05-$(date +%Y-%m-%d-%H%M).sql.gz" && ls -la /root/backups/s2-m05-*.sql.gz | tail -1
+mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction sistema_s2 2>/dev/null | gzip > "/root/backups/s2-m05-$(date +%Y-%m-%d-%H%M).sql.gz" && ls -la /root/backups/s2-m05-*.sql.gz | tail -1
 
 echo "=== atualizar /opt/s2licit (preserva .env, backups, uploads) ==="
 cd /opt && rm -rf /tmp/s2new && mkdir /tmp/s2new && tar xzf /tmp/s2licit-main.tar.gz -C /tmp/s2new --strip-components=1
