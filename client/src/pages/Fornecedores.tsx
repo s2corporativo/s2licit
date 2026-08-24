@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useConfirm } from "@/hooks/useConfirm";
-import { AlertTriangle, Building2, Check, Pencil, Plus, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, Building2, Check, FileCheck2, Pencil, Plus, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
 type SupplierForm = {
@@ -52,6 +52,11 @@ export default function Fornecedores() {
   const [sanctionForm, setSanctionForm] = useState<SanctionForm>(emptySanctionForm);
 
   const { data: suppliers, isLoading } = trpc.suppliers.list.useQuery({ activeOnly: false });
+  // Regularidade fiscal do fornecedor selecionado (Ressalva 2 do Módulo 06).
+  const regularidadeQuery = trpc.certidoes.bySupplier.useQuery(
+    { supplierId: selectedSupplierId ?? 0 },
+    { enabled: selectedSupplierId != null },
+  );
   const sanctionsListQuery = trpc.sanctions.list.useQuery(
     { supplierId: selectedSupplierId ?? undefined },
     { enabled: selectedSupplierId != null },
@@ -304,6 +309,65 @@ export default function Fornecedores() {
           ) : (
             <p className="mb-4 text-xs text-gray-400">Nenhuma sanção registrada para este fornecedor.</p>
           )}
+
+          {/* Regularidade fiscal — certidões vinculadas a ESTE fornecedor.
+              Antes a tabela de certidões era global e não sabia responder
+              "este fornecedor está habilitado?", que é o que a licitação exige. */}
+          <div className="mb-4 border-t border-gray-200 pt-4">
+            <h3 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-gray-900">
+              <FileCheck2 size={14} /> Regularidade fiscal
+            </h3>
+            {regularidadeQuery.isLoading ? (
+              <p className="text-xs text-gray-400">Carregando certidões...</p>
+            ) : !regularidadeQuery.data?.certidoes.length ? (
+              <p className="text-xs text-gray-500">
+                Nenhuma certidão vinculada. <strong>Sem certidão não há prova de regularidade</strong> — o
+                fornecedor não se habilita.
+              </p>
+            ) : (
+              <>
+                <div
+                  className={`mb-3 inline-block px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${
+                    regularidadeQuery.data.regular
+                      ? "bg-green-100 text-green-900"
+                      : "bg-red-100 text-red-900"
+                  }`}
+                >
+                  {regularidadeQuery.data.regular ? "Regular" : "Irregular"}
+                  {regularidadeQuery.data.vencidas > 0 && ` · ${regularidadeQuery.data.vencidas} vencida(s)`}
+                  {regularidadeQuery.data.vencendo > 0 && ` · ${regularidadeQuery.data.vencendo} vencendo`}
+                </div>
+                <div className="space-y-2">
+                  {regularidadeQuery.data.certidoes.map((c: any) => (
+                    <div
+                      key={c.id}
+                      className={`flex items-start justify-between gap-3 border px-4 py-2 text-xs ${
+                        c.status === "vencida"
+                          ? "border-red-300 bg-red-50"
+                          : c.status === "vence_em_breve"
+                            ? "border-amber-300 bg-amber-50"
+                            : "border-gray-200 bg-gray-50"
+                      }`}
+                    >
+                      <div>
+                        <div className="font-bold text-gray-900">
+                          {c.tipo}
+                          {c.orgaoEmissor ? <span className="font-normal text-gray-500"> · {c.orgaoEmissor}</span> : null}
+                        </div>
+                        <div className="mt-1 text-gray-500">
+                          Validade: {new Date(c.dataValidade).toLocaleDateString("pt-BR")}
+                          {c.numero ? ` · nº ${c.numero}` : ""}
+                        </div>
+                      </div>
+                      <span className="shrink-0 font-bold uppercase tracking-widest text-[10px] text-gray-600">
+                        {c.status === "vence_em_breve" ? "vence em breve" : c.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
 
           <button
             type="button"

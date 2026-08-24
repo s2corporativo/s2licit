@@ -1659,6 +1659,10 @@ export const certidoes = mysqlTable(
     arquivoUrl: text("arquivoUrl"),
     observacoes: text("observacoes"),
     ativa: boolean("ativa").notNull().default(true),
+    // Nullable de propósito: certidões institucionais do escritório não têm
+    // fornecedor. ON DELETE SET NULL porque excluir o fornecedor não pode
+    // apagar o documento fiscal, que tem valor probatório e prazo de guarda.
+    supplierId: int("supplierId").references(() => suppliers.id, { onDelete: "set null" }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
@@ -1666,6 +1670,7 @@ export const certidoes = mysqlTable(
     index("idx_certidoes_validade").on(table.dataValidade),
     index("idx_certidoes_tipo").on(table.tipo),
     index("idx_certidoes_ativa").on(table.ativa),
+    index("idx_certidoes_supplier").on(table.supplierId),
   ]
 );
 export type Certidao = typeof certidoes.$inferSelect;
