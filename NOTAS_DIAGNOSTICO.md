@@ -154,7 +154,7 @@ CONCLUSÃO: o sistema Docker S2 ESTÁ FUNCIONAL agora (readyz ok). O que degrada
 
 **Sandbox local (/home/ubuntu/s2licit):** repo main = commit 8c56b3c (PR #112 MERGED). Gates verdes: lint OK, tsc OK, build OK, vitest 728/730. Branch local main sincronizada. Relatório entregue: /home/ubuntu/s2licit/RELATORIO-DIAGNOSTICO-S2LICIT.md.
 
-**VPS (ssh root@13.140.167.153, senha via sshpass "Fam04061427@"):**
+**VPS (ssh root@13.140.167.153, autenticação via chave SSH configurada — senha não versionada, ver cofre de credenciais):**
 - Hostname: vmi3364111, load alto por causa do loop pnpm manual.
 - /opt/s2licit: git em 04654e6 (antes do merge) — precisa `git pull` (main remota = 8c56b3c). Backups .env: .env.backup-manus-1786554655, .env.bak-0541, .env.bak-2026-08-12, .env.before-db-recovery.20260810-232720, .env.pre-rag-20260814.
 - Docker: container `sistema-s2-app` (healthy, porta 3001 local, started 2026-08-15 21:58 UTC), `sistema-s2-db` MySQL 8.0 (up 5 dias). Portas 3000 e 3001 = docker-proxy.
@@ -617,7 +617,7 @@ Acesso real do usuário = https://s2.s2corporativo.com.br (nginx 443, domínio v
 - router padrão: z, TRPCError de @trpc/server, eq/asc drizzle-orm, adminProcedure/protectedProcedure/editorProcedure de ../_core/trpc, recordAudit de ../services/auditService.
 - db barrel: server/db.ts tem `export * from "./db/{modulo}";`
 - routers barrel: server/routers.ts linha ~113: `suppliers: suppliersRouter,` — adicionar `sanctions: sanctionsRouter,`
-- Deploy VPS: ssh root@13.140.167.153 senha Fam04061427@; código /opt/sistema-s2; containers sistema-s2-app/sistema-s2-db; banco via docker exec sistema-s2-db bash -c "mysql -u $MYSQL_USER -p$MYSQL_PASSWORD sistema_s2 -e ..."
+- Deploy VPS: ssh root@13.140.167.153 (autenticação via chave SSH — senha não versionada, ver cofre de credenciais); código /opt/sistema-s2; containers sistema-s2-app/sistema-s2-db; banco via docker exec sistema-s2-db bash -c "mysql -u $MYSQL_USER -p$MYSQL_PASSWORD sistema_s2 -e ..."
 - URL pública: https://s2.s2corporativo.com.br (nginx 443)
 
 
