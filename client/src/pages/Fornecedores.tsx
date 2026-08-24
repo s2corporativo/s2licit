@@ -1,5 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { hasMinimumRole } from "@/lib/access";
 import { AlertTriangle, Building2, Check, FileCheck, Pencil, Plus, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 
@@ -66,6 +68,10 @@ function diasAte(dataValidade: string): number {
 
 export default function Fornecedores() {
   const { confirm, confirmDialog } = useConfirm();
+  const { user } = useAuth();
+  // certidoes.create/remove são adminProcedure — sem isso, editor vê os
+  // controles e recebe FORBIDDEN garantido ao usar.
+  const isAdmin = hasMinimumRole(user?.role, "admin");
   const utils = trpc.useUtils();
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -519,20 +525,22 @@ export default function Fornecedores() {
                         {situacao.label} ({new Date(certidao.dataValidade).toLocaleDateString("pt-BR")})
                       </div>
                     </div>
-                    <button
-                      onClick={async () => {
-                        const ok = await confirm({
-                          title: "Remover esta certidão?",
-                          description: "A certidão será desativada e sairá da lista de regularidade fiscal do fornecedor.",
-                          confirmLabel: "Remover",
-                        });
-                        if (ok) removeCertidaoMutation.mutate({ id: certidao.id });
-                      }}
-                      className="shrink-0 text-gray-400 hover:text-red-600"
-                      aria-label={`Remover certidão ${certidao.tipo}`}
-                    >
-                      <X size={14} />
-                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: "Remover esta certidão?",
+                            description: "A certidão será desativada e sairá da lista de regularidade fiscal do fornecedor.",
+                            confirmLabel: "Remover",
+                          });
+                          if (ok) removeCertidaoMutation.mutate({ id: certidao.id });
+                        }}
+                        className="shrink-0 text-gray-400 hover:text-red-600"
+                        aria-label={`Remover certidão ${certidao.tipo}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -541,15 +549,17 @@ export default function Fornecedores() {
             <p className="mb-4 text-xs text-gray-400">Nenhuma certidão cadastrada para este fornecedor.</p>
           )}
 
-          <button
-            type="button"
-            onClick={() => setShowCertidaoForm((value) => !value)}
-            className="mb-3 flex items-center gap-2 bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
-          >
-            <Plus size={14} /> {showCertidaoForm ? "Cancelar" : "Adicionar certidão"}
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowCertidaoForm((value) => !value)}
+              className="mb-3 flex items-center gap-2 bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+            >
+              <Plus size={14} /> {showCertidaoForm ? "Cancelar" : "Adicionar certidão"}
+            </button>
+          )}
 
-          {showCertidaoForm && (
+          {isAdmin && showCertidaoForm && (
             <form onSubmit={handleSubmitCertidao} className="border-t border-gray-200 pt-4">
               <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Field label="Tipo *" className="md:col-span-2">
@@ -638,6 +648,8 @@ export default function Fornecedores() {
                       onClick={() => {
                         setSelectedSupplierId((current) => current === supplier.id ? null : supplier.id);
                         setShowSanctionForm(false);
+                        setShowCertidaoForm(false);
+                        setCertidaoForm(emptyCertidaoForm);
                       }}
                       className={`flex items-center gap-1 border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${selectedSupplierId === supplier.id ? "border-blue-800 bg-blue-50 text-blue-800" : "border-gray-200 text-gray-500"}`}
                     >

@@ -5,6 +5,15 @@ vi.mock("../db/landedCost", () => ({
   recordPriceHistory: mockRecordPriceHistory,
 }));
 
+// Sem histórico anterior por padrão — cada teste que precisar simular
+// deduplicação (mesmo valor já gravado) sobrescreve com mockResolvedValueOnce.
+const mockGetPriceHistory = vi.hoisted(() =>
+  vi.fn(async (): Promise<Array<{ origem: string | null; price: string | null; freightValue: string | null; taxValue: string | null }>> => []),
+);
+vi.mock("../db/supplierPrices", () => ({
+  getPriceHistory: mockGetPriceHistory,
+}));
+
 import {
   applyMargin,
   resolveItemMarginPercent,
@@ -59,10 +68,12 @@ describe("resolveItemMarginPercent (margem por categoria)", () => {
 describe("recordQuotationPriceHistory (Ressalva 3, Módulo 06 — gatilho cotação recebida)", () => {
   beforeEach(() => {
     mockRecordPriceHistory.mockClear();
+    mockGetPriceHistory.mockClear();
+    mockGetPriceHistory.mockResolvedValue([]);
   });
 
-  function raw(productSupplierId: number | null) {
-    return { productSupplierId } as any;
+  function raw(productSupplierId: number | null, id = 1) {
+    return { id, productSupplierId } as any;
   }
 
   function preview(overrides: Partial<Record<string, unknown>> = {}) {
@@ -134,9 +145,43 @@ describe("recordQuotationPriceHistory (Ressalva 3, Módulo 06 — gatilho cotaç
 
   it("processa múltiplos itens, gravando só os elegíveis", async () => {
     await recordQuotationPriceHistory(
-      [raw(7), raw(null), raw(9)],
-      [preview({ costSource: "match" }), preview({ costSource: "match" }), preview({ costSource: "history" })],
+      [raw(7, 1), raw(null, 2), raw(9, 3)],
+      [
+        preview({ quotationItemId: 1, costSource: "match" }),
+        preview({ quotationItemId: 2, costSource: "match" }),
+        preview({ quotationItemId: 3, costSource: "history" }),
+      ],
     );
+    expect(mockRecordPriceHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("não repete a gravação quando o último registro já tem exatamente o mesmo valor (regeneração de PDF)", async () => {
+    mockGetPriceHistory.mockResolvedValueOnce([
+      { origem: "cotacao_recebida", price: "42.50", freightValue: "3.00", taxValue: "2.00" },
+    ]);
+
+    await recordQuotationPriceHistory([raw(7)], [preview({ costSource: "match" })]);
+
+    expect(mockRecordPriceHistory).not.toHaveBeenCalled();
+  });
+
+  it("grava de novo quando o custo mudou desde o último registro", async () => {
+    mockGetPriceHistory.mockResolvedValueOnce([
+      { origem: "cotacao_recebida", price: "99.00", freightValue: "3.00", taxValue: "2.00" },
+    ]);
+
+    await recordQuotationPriceHistory([raw(7)], [preview({ costSource: "match" })]);
+
+    expect(mockRecordPriceHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("grava de novo quando o último registro veio de outra origem (import/scraping/manual)", async () => {
+    mockGetPriceHistory.mockResolvedValueOnce([
+      { origem: "import", price: "42.50", freightValue: "3.00", taxValue: "2.00" },
+    ]);
+
+    await recordQuotationPriceHistory([raw(7)], [preview({ costSource: "match" })]);
+
     expect(mockRecordPriceHistory).toHaveBeenCalledTimes(1);
   });
 });

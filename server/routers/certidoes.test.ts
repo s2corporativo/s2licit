@@ -62,12 +62,15 @@ describe("certidoesRouter — vínculo com fornecedor (Ressalva 2, Módulo 06)",
     lastWhereCondition = undefined;
   });
 
-  it("list sem filtro retorna certidões institucionais e de fornecedores juntas", async () => {
-    certidoesData = [{ id: 1, supplierId: null }, { id: 2, supplierId: 7 }];
+  it("list sem filtro consulta só certidões institucionais (supplierId NULL), não mistura com as de fornecedor", async () => {
+    certidoesData = [{ id: 1, supplierId: null }];
 
     const result = await caller().list(undefined);
 
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(1);
+    // A condição combina ativa=true com supplierId IS NULL — Certidoes.tsx
+    // (habilitação da própria empresa) não pode listar documento de fornecedor.
+    expect(lastWhereCondition).toBeDefined();
   });
 
   it("list com supplierId filtra pela condição de fornecedor (não retorna tudo)", async () => {
@@ -99,5 +102,13 @@ describe("certidoesRouter — vínculo com fornecedor (Ressalva 2, Módulo 06)",
     await expect(caller().list(undefined)).resolves.toEqual([]);
     vi.mocked(getDb).mockResolvedValueOnce(null as never);
     await expect(caller().bySupplier({ supplierId: 1 })).resolves.toEqual([]);
+  });
+
+  it("alertas consulta só certidões institucionais, não as de fornecedor", async () => {
+    certidoesData = [{ id: 1, supplierId: null, ativa: true, dataValidade: "2020-01-01" }];
+
+    await caller().alertas({ diasAlerta: 30 });
+
+    expect(lastWhereCondition).toBeDefined();
   });
 });

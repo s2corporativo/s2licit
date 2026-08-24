@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { certidoes } from "../../drizzle/schema";
@@ -35,7 +35,13 @@ const CertidaoInput = z.object({
 });
 
 export const certidoesRouter = router({
-  /** Lista certidões ativas. supplierId filtra por fornecedor; sem filtro, retorna todas (institucionais e de fornecedores). */
+  /**
+   * Lista certidões ativas. supplierId filtra por um fornecedor específico;
+   * sem filtro, retorna só as institucionais (supplierId NULL) — é o que a
+   * tela de habilitação da empresa (Certidoes.tsx) lista, e ela não espera
+   * ver documento de fornecedor misturado. Para o painel por fornecedor, use
+   * `bySupplier`.
+   */
   list: protectedProcedure
     .input(z.object({ supplierId: z.number().int().positive().optional() }).optional())
     .query(async ({ input }) => {
@@ -43,7 +49,7 @@ export const certidoesRouter = router({
       if (!db) return [];
       const supplierFilter = input?.supplierId != null
         ? eq(certidoes.supplierId, input.supplierId)
-        : undefined;
+        : isNull(certidoes.supplierId);
       return db
         .select()
         .from(certidoes)
@@ -64,14 +70,19 @@ export const certidoesRouter = router({
         .orderBy(asc(certidoes.dataValidade));
     }),
 
-  /** Alertas: certidões vencidas ou vencendo em até N dias. */
+  /**
+   * Alertas: certidões institucionais vencidas ou vencendo em até N dias.
+   * Só institucionais (supplierId NULL) — os consumidores (Certidoes.tsx,
+   * CentralPendencias.tsx) tratam isto como a habilitação da própria empresa;
+   * o painel por fornecedor calcula seu próprio status a partir de `bySupplier`.
+   */
   alertas: protectedProcedure
     .input(z.object({ diasAlerta: z.number().int().min(1).max(180).default(30) }).optional())
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return { vencidas: [], vencendo: [] };
       const diasAlerta = input?.diasAlerta ?? 30;
-      const rows = await db.select().from(certidoes).where(eq(certidoes.ativa, true));
+      const rows = await db.select().from(certidoes).where(and(eq(certidoes.ativa, true), isNull(certidoes.supplierId)));
       const hoje = new Date();
       const vencidas: typeof rows = [];
       const vencendo: typeof rows = [];

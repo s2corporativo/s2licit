@@ -349,6 +349,8 @@ export interface PricedQuotationItem {
   totalPrice: number;
   marginPercent: number;
   pricingMode: "automatic" | "manual";
+  supplierId: number | null;
+  supplierName: string | null;
 }
 
 export interface PricedQuotationResult {
@@ -359,6 +361,13 @@ export interface PricedQuotationResult {
   effectiveMarginPercent: number;
   categoryOverrides: number;
   manualPriceItems: number;
+}
+
+/** Compara valor armazenado (string decimal ou null) com o número prestes a ser gravado. */
+function numerosIguais(armazenado: string | null | undefined, novo: number | null | undefined): boolean {
+  const a = armazenado != null ? Number(armazenado) : 0;
+  const b = novo != null ? Number(novo) : 0;
+  return Math.abs(a - b) < 0.005;
 }
 
 /**
@@ -372,13 +381,31 @@ export async function recordQuotationPriceHistory(
   rawItems: NonNullable<Awaited<ReturnType<typeof getEmailQuotationWithItems>>>["items"],
   previewItems: PricingPreviewItem[],
 ): Promise<void> {
-  for (let i = 0; i < previewItems.length; i++) {
-    const preview = previewItems[i];
-    const raw = rawItems[i];
+  // Pareado por quotationItemId, não por posição: rawItems e previewItems vêm
+  // de duas execuções independentes da mesma consulta (sem ORDER BY), então a
+  // ordem entre elas não é garantida — pareamento por índice já misturou
+  // custo/fornecedor de itens diferentes quando a ordem divergiu.
+  const rawById = new Map(rawItems.map((item) => [item.id, item]));
+  for (const preview of previewItems) {
+    const raw = rawById.get(preview.quotationItemId);
     if (!raw || preview.produtoMatchId == null || raw.productSupplierId == null) continue;
     if (preview.costSource !== "match" && preview.costSource !== "catalog") continue;
     if (preview.baseCost == null) continue;
     try {
+      // Idempotência de melhor esforço: regenerar o PDF do orçamento ou
+      // preparar a proposta a partir da mesma cotação chama esta função de
+      // novo — sem isso, cada chamada gravava outra observação idêntica.
+      // Não há quotationId em price_history para uma chave única real; a
+      // aproximação é não repetir quando o último registro deste produto+
+      // fornecedor já veio de cotação e tem exatamente os mesmos valores.
+      const [ultimo] = await getPriceHistory(preview.produtoMatchId, raw.productSupplierId, 1);
+      const valoresIguais = ultimo
+        && ultimo.origem === "cotacao_recebida"
+        && numerosIguais(ultimo.price, preview.baseCost)
+        && numerosIguais(ultimo.freightValue, preview.freightValue)
+        && numerosIguais(ultimo.taxValue, preview.taxValue);
+      if (valoresIguais) continue;
+
       await recordPriceHistory({
         productId: preview.produtoMatchId,
         supplierId: raw.productSupplierId,
@@ -435,18 +462,27 @@ export async function priceQuotationItems(
     }
   }
 
-  const items: PricedQuotationItem[] = preview.items.map((item) => ({
-    quotationItemId: item.quotationItemId,
-    produtoMatchId: item.produtoMatchId,
-    descricao: item.descricao,
-    quantidade: item.quantidade,
-    unidade: item.unidade,
-    custoUnitario: item.custoUnitario!,
-    unitPrice: item.unitPrice!,
-    totalPrice: item.totalPrice!,
-    marginPercent: item.marginPercent!,
-    pricingMode: item.pricingMode as "automatic" | "manual",
-  }));
+  // Pareado por id (quotationItemId), não por posição — mesmo motivo de
+  // recordQuotationPriceHistory: data.items e preview.items vêm de duas
+  // buscas independentes da mesma consulta sem ORDER BY.
+  const rawItemsById = new Map(data.items.map((raw) => [raw.id, raw]));
+  const items: PricedQuotationItem[] = preview.items.map((item) => {
+    const raw = rawItemsById.get(item.quotationItemId);
+    return {
+      quotationItemId: item.quotationItemId,
+      produtoMatchId: item.produtoMatchId,
+      descricao: item.descricao,
+      quantidade: item.quantidade,
+      unidade: item.unidade,
+      custoUnitario: item.custoUnitario!,
+      unitPrice: item.unitPrice!,
+      totalPrice: item.totalPrice!,
+      marginPercent: item.marginPercent!,
+      pricingMode: item.pricingMode as "automatic" | "manual",
+      supplierId: raw?.productSupplierId ?? null,
+      supplierName: raw?.supplierName ?? null,
+    };
+  });
 
   await recordQuotationPriceHistory(data.items, preview.items);
 
