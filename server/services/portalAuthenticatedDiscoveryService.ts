@@ -259,7 +259,7 @@ export async function fetchAuthenticatedPortalHtml(
     // descoberta autenticada percorre as listagens da área logada do
     // fornecedor (Agrega/Yii2) e combina os HTMLs em um único documento
     // com marcadores de origem, para o parser de cotações do Agrega.
-    const listUrls = isFunarbeProviderPortal(source) ? FUNARBE_PROVIDER_LIST_URLS : [url];
+    const listUrls = isFunarbeProviderPortal(source) ? Array.from(FUNARBE_PROVIDER_LIST_URLS) : [url];
 
     let autenticado = false;
     if (sessaoValida) {

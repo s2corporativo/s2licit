@@ -29,14 +29,16 @@ const WITH_DEADLINE_HTML = `
 </table></body></html>`;
 
 describe("Funarbe Provider Portal", () => {
-  it("mantém somente rotas de descoberta de novas oportunidades", () => {
+  it("inclui rotas de descoberta incluindo status de cotações respondidas", () => {
     expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
       "https://fornecedor.funarbe.org.br/compra-produtos-diversos",
     );
     expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
       "https://fornecedor.funarbe.org.br/pedidos-compra",
     );
-    expect(FUNARBE_PROVIDER_LIST_URLS.some((url) => url.includes("aguardando-confirmacao"))).toBe(false);
+    expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
+      "https://fornecedor.funarbe.org.br/cotacao-aguardando-confirmacao",
+    );
   });
 
   it("extrai pedido e link sem inventar prazo a partir de previsão de entrega", () => {

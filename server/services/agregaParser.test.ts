@@ -77,8 +77,9 @@ describe("parseAgregaListHtml", () => {
     expect(primeira!.portalUrl).toContain("/compra-produtos-diversos/view?id=10421");
     expect(primeira!.bodyText).toContain("Origem: Portal do Fornecedor Funarbe");
     expect(primeira!.bodyText).toContain("Projeto de Pesquisa XYZ");
-    // "Previsão de entrega" 20/09/2026 vira prazo de resposta (23:59:59)
-    expect(primeira!.prazoResposta?.toISOString().startsWith("2026-09-20")).toBe(true);
+    // Não inventa prazo a partir de "Previsão de entrega" (logística):
+    // só preenche prazoResposta quando coluna declara explicitamente prazo/limite
+    expect(primeira!.prazoResposta).toBeNull();
     expect(primeira!.items[0].descricao).toContain("Projeto de Pesquisa XYZ");
   });
 

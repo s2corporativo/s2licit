@@ -143,7 +143,30 @@ export function parseAgregaListHtml(
       const valor = column("valor");
       const previsaoEntrega =
         column("previsão de entrega") || column("previsao de entrega") || "";
-      const prazo = parsePtBrDate(previsaoEntrega) || parsePtBrDate(valor || "");
+
+      const hasExplicitDeadlineColumn = headerCells.some((header) => {
+        const normalized = header.toLowerCase();
+        return (
+          normalized.includes("prazo") ||
+          normalized.includes("data limite") ||
+          normalized.includes("data-limite") ||
+          normalized.includes("encerramento") ||
+          normalized.includes("fim cotacao") ||
+          normalized.includes("fim da cotacao")
+        );
+      });
+
+      const prazo = hasExplicitDeadlineColumn
+        ? parsePtBrDate(
+            column("prazo") ||
+              column("data limite") ||
+              column("data-limite") ||
+              column("encerramento") ||
+              column("fim cotacao") ||
+              column("fim da cotacao") ||
+              "",
+          )
+        : null;
 
       const href = rowActionUrl(row, listUrl, document);
       const externalId = processo.replace(/[^\w./-]/g, "").slice(0, 80) || processo;
@@ -199,7 +222,7 @@ export function combineAgregaListHtmls(
 
 /**
  * Varre o documento combinado e devolve as oportunidades de cada listagem,
- * deduplicando por (externalId, origem) — a mesma cotação pode aparecer em
+ * deduplicando por externalId — a mesma cotação pode aparecer em
  * mais de uma listagem (/pedidos-compra inclui todos os tipos de compra).
  */
 export function parseAgregaCombinedHtml(
@@ -220,10 +243,9 @@ export function parseAgregaCombinedHtml(
       nextMarker ? nextMarker.index : undefined,
     );
     for (const opportunity of parseAgregaListHtml(slice, marker.url)) {
-      const key = `${opportunity.externalId}::${marker.url}`;
-      const existing = all.get(key);
+      const existing = all.get(opportunity.externalId);
       if (!existing || opportunity.items.length > existing.items.length) {
-        all.set(key, opportunity);
+        all.set(opportunity.externalId, opportunity);
       }
     }
   }

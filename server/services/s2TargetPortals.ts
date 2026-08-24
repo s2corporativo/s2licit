@@ -9,16 +9,7 @@ export const S2_TARGET_PORTALS = [
 
 export type S2TargetPortal = (typeof S2_TARGET_PORTALS)[number];
 
-export const FUNARBE_PROVIDER_BASE_URL = "https://fornecedor.funarbe.org.br";
-/**
- * Rotas de descoberta de novas cotações na área autenticada da Funarbe.
- * A tela de "aguardando confirmação" não entra aqui porque representa
- * cotações já respondidas/pós-venda e não deve voltar para a fila comercial.
- */
-export const FUNARBE_PROVIDER_LIST_URLS = [
-  `${FUNARBE_PROVIDER_BASE_URL}/compra-produtos-diversos`,
-  `${FUNARBE_PROVIDER_BASE_URL}/pedidos-compra`,
-] as const;
+export { FUNARBE_PROVIDER_BASE_URL, FUNARBE_PROVIDER_LIST_URLS } from "./funarbeProviderPortal";
 
 export interface S2TargetPortalDefinition {
   portal: S2TargetPortal;
@@ -77,19 +68,6 @@ export const S2_TARGET_PORTAL_DEFINITIONS: Record<S2TargetPortal, S2TargetPortal
     discovery: "public_rendered",
   },
 };
-
-/**
- * Portal do FORNECEDOR da Funarbe (plataforma Agrega/Yii2): só expõe as
- * cotações ao fornecedor logado. O mural público continua em publicUrl;
- * estas rotas são usadas apenas pela descoberta autenticada, depois do login.
- */
-export const FUNARBE_PROVIDER_BASE_URL = "https://fornecedor.funarbe.org.br";
-
-export const FUNARBE_PROVIDER_LIST_URLS: string[] = [
-  `${FUNARBE_PROVIDER_BASE_URL}/compra-produtos-diversos`,
-  `${FUNARBE_PROVIDER_BASE_URL}/pedidos-compra`,
-  `${FUNARBE_PROVIDER_BASE_URL}/cotacao-aguardando-confirmacao`,
-];
 
 export function isS2TargetPortal(value: string): value is S2TargetPortal {
   return (S2_TARGET_PORTALS as readonly string[]).includes(value);
