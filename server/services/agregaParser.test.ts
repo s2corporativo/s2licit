@@ -160,15 +160,14 @@ describe("combineAgregaListHtmls / parseAgregaCombinedHtml", () => {
 });
 
 describe("constantes do portal fornecedor", () => {
-  it("aponta as rotas reais da área autenticada verificadas em 13/08/2026", () => {
+  it("aponta as rotas de DESCOBERTA (novas cotações) verificadas em 13/08/2026", () => {
     expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
       "https://fornecedor.funarbe.org.br/compra-produtos-diversos",
     );
     expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
       "https://fornecedor.funarbe.org.br/pedidos-compra",
     );
-    expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
-      "https://fornecedor.funarbe.org.br/cotacao-aguardando-confirmacao",
-    );
+    // cotacao-aguardando-confirmacao é rastreio de status, não descoberta
+    expect(FUNARBE_PROVIDER_LIST_URLS).toHaveLength(2);
   });
 });

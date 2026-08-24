@@ -21,11 +21,14 @@ import { S2TargetPortal } from "./s2TargetPortals";
 
 export const FUNARBE_PROVIDER_BASE_URL = "https://fornecedor.funarbe.org.br";
 
+// Rotas de NOVAS cotações abertas para resposta (descoberta autenticada)
 export const FUNARBE_PROVIDER_LIST_URLS: string[] = [
   `${FUNARBE_PROVIDER_BASE_URL}/compra-produtos-diversos`,
   `${FUNARBE_PROVIDER_BASE_URL}/pedidos-compra`,
-  `${FUNARBE_PROVIDER_BASE_URL}/cotacao-aguardando-confirmacao`,
 ];
+
+// Rota de RASTREIO: cotações JÁ respondidas aguardando confirmação (fora da descoberta, só para status)
+export const FUNARBE_PROVIDER_STATUS_TRACKING_URL = `${FUNARBE_PROVIDER_BASE_URL}/cotacao-aguardando-confirmacao`;
 
 function normalizeText(value: string | null | undefined): string {
   return (value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
@@ -40,16 +43,27 @@ function parsePtBrNumber(value: string | null | undefined): number | null {
 }
 
 function parsePtBrDate(value: string | null | undefined): Date | null {
-  const match = normalizeText(value).match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
-  if (!match) return null;
-  const [, day, month, year] = match;
+  const normalized = normalizeText(value);
+  const dateMatch = normalized.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+  if (!dateMatch) return null;
+  const [, day, month, year] = dateMatch;
+
+  // Tenta extrair hora/minuto se presentes (ex.: "20/08/2026 18:00")
+  let hours = 23, minutes = 59, seconds = 59;
+  const timeMatch = normalized.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (timeMatch) {
+    hours = Number(timeMatch[1]);
+    minutes = Number(timeMatch[2]);
+    seconds = timeMatch[3] ? Number(timeMatch[3]) : 0;
+  }
+
   const date = new Date(
     Number(year),
     Number(month) - 1,
     Number(day),
-    23,
-    59,
-    59,
+    hours,
+    minutes,
+    seconds,
   );
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -93,7 +107,7 @@ export function parseAgregaListHtml(
   const opportunities: S2PortalOpportunityLike[] = [];
 
   for (const grid of Array.from(document.querySelectorAll("table"))) {
-    const headerRow = grid.querySelector("thead tr, tr th");
+    const headerRow = grid.querySelector("thead tr");
     const headerCells = headerRow
       ? Array.from(headerRow.querySelectorAll("th")).map((th) =>
           normalizeText(th.textContent ?? th.getAttribute("data-label") ?? ""),
@@ -129,6 +143,8 @@ export function parseAgregaListHtml(
       const descricao = [
         column("projeto"),
         column("item"),
+        column("descricao"),
+        column("objeto"),
         column("comprador"),
         column("documento fiscal"),
       ]
@@ -140,6 +156,8 @@ export function parseAgregaListHtml(
       const quantidade = parsePtBrNumber(
         column("quantidade") || column("qtd"),
       );
+      const unidade =
+        column("unidade") || column("unidade de medida") || column("un") || "UN";
       const valor = column("valor");
       const previsaoEntrega =
         column("previsão de entrega") || column("previsao de entrega") || "";
@@ -194,7 +212,7 @@ export function parseAgregaListHtml(
           .filter(Boolean)
           .join("\n"),
         items: descricao.length >= 12
-          ? [{ numeroItem: 1, descricao, quantidade, unidade: "UN", codigoExterno: null }]
+          ? [{ numeroItem: 1, descricao, quantidade, unidade, codigoExterno: null }]
           : [],
       });
     }
@@ -238,8 +256,9 @@ export function parseAgregaCombinedHtml(
   for (let markerIndex = 0; markerIndex < sources.length; markerIndex++) {
     const marker = sources[markerIndex];
     const nextMarker = sources[markerIndex + 1];
+    // Offset: "<!-- FUNARBE_PROVIDER_LIST:" (24) + URL length + " -->" (4)
     const slice = combinedHtml.slice(
-      marker.index + marker.url.length + 40,
+      marker.index + 24 + marker.url.length + 4,
       nextMarker ? nextMarker.index : undefined,
     );
     for (const opportunity of parseAgregaListHtml(slice, marker.url)) {

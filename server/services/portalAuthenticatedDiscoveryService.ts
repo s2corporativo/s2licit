@@ -53,16 +53,18 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const limited = Math.max(Math.min(Math.floor(concurrency), 8), 1);
   const results: R[] = new Array(items.length);
-  const batches: T[] = [];
-  let batchIndex = -1;
+  const batches: T[][] = [];
   for (const item of items) {
-    if (batches.length % limited === 0) batches.push([] as unknown as T);
-    batches[batches.length - 1] = item;
+    // Cria batch novo quando o atual tiver atingido o limite
+    if (batches.length === 0 || batches[batches.length - 1].length >= limited) {
+      batches.push([]);
+    }
+    batches[batches.length - 1].push(item);
   }
-  const promises = batches.map(async (batch, index) => {
-    const batchResults = await Promise.all((batch as unknown as T[]).map((item) => operation(item)));
+  const promises = batches.map(async (batch, batchIndex) => {
+    const batchResults = await Promise.all(batch.map((item) => operation(item)));
     batchResults.forEach((result, resultIndex) => {
-      results[index * limited + resultIndex] = result;
+      results[batchIndex * limited + resultIndex] = result;
     });
   });
   await Promise.all(promises);
@@ -293,17 +295,24 @@ export async function fetchAuthenticatedPortalHtml(
       else await resetLoginFailures(credential.id);
     }
 
-    const pages = await mapWithConcurrency(listUrls, 2, async (targetUrl) => {
-      try {
-        const html = await agente.coletarHtml(targetUrl);
-        return { url: targetUrl, html };
-      } catch (error) {
-        logger.warn(
-          `[PortalAuthDiscovery] ${source}: falha ao coletar ${targetUrl} — ${(error as Error).message}`,
-        );
-        return { url: targetUrl, html: "" };
-      }
-    });
+    // Funarbe: serializar a coleta de URLs para evitar conflitos de navegação
+    // na página Puppeteer compartilhada (coletarHtml chama page.goto que pode se
+    // cancelar mutuamente em concorrência).
+    const pages = await mapWithConcurrency(
+      listUrls,
+      isFunarbeProviderPortal(source) ? 1 : 2,
+      async (targetUrl) => {
+        try {
+          const html = await agente.coletarHtml(targetUrl);
+          return { url: targetUrl, html };
+        } catch (error) {
+          logger.warn(
+            `[PortalAuthDiscovery] ${source}: falha ao coletar ${targetUrl} — ${(error as Error).message}`,
+          );
+          return { url: targetUrl, html: "" };
+        }
+      },
+    );
 
     const combined = combineAgregaListHtmls(
       pages.filter((page) => page.html.trim() !== ""),
