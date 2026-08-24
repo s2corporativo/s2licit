@@ -10,8 +10,9 @@ import {
   type PortalSessionCookie,
   type PortalType,
 } from "./propostaAgent";
-// Efeito colateral necessário: registra CEMIG/FIEMG/COPASA/FUNARBE com as
-// configurações reais de login usadas pela operação S2 em PORTAL_CONFIGS.
+// Efeito colateral necessário: registra CEMIG/FIEMG/COPASA com as
+// configurações reais de login usadas pela operação S2 em PORTAL_CONFIGS
+// (o mapa base em propostaAgent.ts é só um fallback tipado).
 import "./s2PortalAgentExtension";
 import {
   FUNARBE_PROVIDER_LIST_URLS,
@@ -27,10 +28,50 @@ import { logger } from "../_core/logger";
 /**
  * Descoberta autenticada de cotações nos portais-alvo (Funarbe, Compras MG,
  * FIEMG, Fundep, COPASA, CEMIG), usando as credenciais cadastradas no cofre.
- * CAPTCHA nunca é resolvido: o fluxo interrompe e pede intervenção humana.
+ *
+ * Complementa o radar público: quando o mural aberto não lista as cotações
+ * (portais que só exibem processos ao fornecedor logado), o robô entra com o
+ * login/senha do cofre, coleta o HTML da área autenticada e devolve para os
+ * mesmos parsers do radar. Conformidade preservada: CAPTCHA nunca é resolvido —
+ * detectado, interrompe e pede intervenção humana.
+ *
+ * Reuso de sessão: a sessão (cookies) fica salva e criptografada junto da
+ * credencial; enquanto válida, evita um novo login a cada execução do radar
+ * — menos exposição a CAPTCHA e menor risco de bloqueio de conta por
+ * tentativas repetidas.
+ *
+ * Desligável com PORTAL_AUTH_DISCOVERY_ENABLED=false.
  */
 
 const DEFAULT_SESSION_TTL_HOURS = 6;
+
+/** Executa uma operação assíncrona por item, limitando o paralelismo. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  operation: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const limited = Math.max(Math.min(Math.floor(concurrency), 8), 1);
+  const results: R[] = new Array(items.length);
+  const batches: T[] = [];
+  let batchIndex = -1;
+  for (const item of items) {
+    if (batches.length % limited === 0) batches.push([] as unknown as T);
+    batches[batches.length - 1] = item;
+  }
+  const promises = batches.map(async (batch, index) => {
+    const batchResults = await Promise.all((batch as unknown as T[]).map((item) => operation(item)));
+    batchResults.forEach((result, resultIndex) => {
+      results[index * limited + resultIndex] = result;
+    });
+  });
+  await Promise.all(promises);
+  return results;
+}
+// Depois de N falhas de login CONSECUTIVAS, para de tentar — a maioria dos
+// portais de fornecedor bloqueia a conta após um pequeno número de
+// tentativas, e uma conta bloqueada também impede o operador humano.
+// Reseta ao logar com sucesso, ou recadastrando a credencial no cofre.
 const LOGIN_FAIL_THRESHOLD = 3;
 
 export function isPortalAuthDiscoveryEnabled(): boolean {
@@ -58,6 +99,12 @@ export function portalTypeForSource(source: S2TargetPortal): PortalType | null {
   }
 }
 
+/**
+ * Valida a forma do valor decifrado antes de confiar nele como sessão
+ * restaurável — um JSON válido mas com formato errado (registro antigo,
+ * corrupção parcial) não pode virar cookies aplicados ao navegador sem
+ * checagem: `restaurarSessao` só recebe candidatos já validados aqui.
+ */
 function isValidCookieArray(value: unknown): value is PortalSessionCookie[] {
   if (!Array.isArray(value)) return false;
   return value.every(
@@ -81,6 +128,7 @@ export interface DecryptedPortalCredential {
   loginFailCount: number;
 }
 
+/** Busca a credencial ativa mais recente do cofre para um portal. */
 export async function getPortalCredentialForPortal(
   portal: PortalType,
 ): Promise<DecryptedPortalCredential | null> {
@@ -100,7 +148,7 @@ export async function getPortalCredentialForPortal(
       const parsed = JSON.parse(credentialEncryptionService.decrypt(row.sessaoCookies));
       sessaoCookies = isValidCookieArray(parsed) ? parsed : null;
     } catch {
-      sessaoCookies = null;
+      sessaoCookies = null; // sessão corrompida/formato antigo — cai no login completo
     }
   }
 
@@ -117,6 +165,7 @@ export async function getPortalCredentialForPortal(
   };
 }
 
+/** Persiste a sessão (cookies) da credencial, criptografada, com validade, e zera o contador de falhas. */
 async function saveSession(credentialId: number, cookies: PortalSessionCookie[]): Promise<void> {
   const db = await getDb();
   if (!db) return;
@@ -134,12 +183,18 @@ async function saveSession(credentialId: number, cookies: PortalSessionCookie[])
   }
 }
 
+/** Login bem-sucedido sem cookies aproveitáveis (ex.: fluxo custom) — ainda assim zera o contador de falhas. */
 async function resetLoginFailures(credentialId: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.update(portalCredentials).set({ loginFailCount: 0 }).where(eq(portalCredentials.id, credentialId));
 }
 
+/**
+ * Incrementa atomicamente (no próprio banco, sem ler-then-escrever) o
+ * contador de falhas CONSECUTIVAS de login rejeitado da credencial. Chamadas
+ * concorrentes não perdem incrementos nem atrasam o bloqueio.
+ */
 async function recordLoginFailure(credentialId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
@@ -155,15 +210,17 @@ async function recordLoginFailure(credentialId: number): Promise<number> {
   return row?.loginFailCount ?? 0;
 }
 
+/** Só a rejeição CONFIRMADA de credencial deve contar para o bloqueio — CAPTCHA, timeout e mudança de seletor não provam senha errada. */
 function isFalhaDeCredencial(err: unknown): boolean {
   return err instanceof CredencialInvalidaError;
 }
 
 /**
- * Coleta a área autenticada. Na Funarbe, percorre sequencialmente as páginas
- * de novas oportunidades usando a MESMA sessão do navegador. Navegação
- * concorrente na mesma Page do Puppeteer é intencionalmente evitada porque
- * uma chamada poderia cancelar a navegação da outra e produzir HTML trocado.
+ * Faz login no portal com a credencial do cofre (reaproveitando sessão salva
+ * e válida quando possível) e devolve o HTML da página de oportunidades da
+ * área autenticada. Retorna null quando a descoberta autenticada está
+ * desligada ou não há credencial cadastrada para o portal. Lança erro em
+ * falha de login/CAPTCHA — o chamador registra o aviso e segue.
  */
 export async function fetchAuthenticatedPortalHtml(
   source: S2TargetPortal,
@@ -181,6 +238,9 @@ export async function fetchAuthenticatedPortalHtml(
     credential.sessaoExpiraEm != null &&
     new Date(credential.sessaoExpiraEm).getTime() > Date.now();
 
+  // Credencial bloqueada: só a sessão salva pode ser usada — nenhuma NOVA
+  // tentativa de login até o operador corrigir (recadastrar a credencial no
+  // cofre, o que cria uma linha nova com o contador zerado).
   if (!sessaoValida && credential.loginFailCount >= LOGIN_FAIL_THRESHOLD) {
     logger.warn(
       `[PortalAuthDiscovery] ${source}: credencial bloqueada após ${credential.loginFailCount} falha(s) de login ` +
@@ -189,23 +249,24 @@ export async function fetchAuthenticatedPortalHtml(
     return null;
   }
 
-  const publicOrConfiguredUrl = getS2PortalUrl(source);
+  const url = getS2PortalUrl(source);
   const agente = new PropostaAgente();
   try {
     await agente.init();
 
+    // Funarbe: o mural público (compras.funarbe.org.br) e o portal do
+    // fornecedor (fornecedor.funarbe.org.br) são sistemas distintos. A
+    // descoberta autenticada percorre as listagens da área logada do
+    // fornecedor (Agrega/Yii2) e combina os HTMLs em um único documento
+    // com marcadores de origem, para o parser de cotações do Agrega.
+    const listUrls = isFunarbeProviderPortal(source) ? FUNARBE_PROVIDER_LIST_URLS : [url];
+
     let autenticado = false;
     if (sessaoValida) {
       autenticado = await agente.restaurarSessao(
-        {
-          portal: portalType,
-          loginUrl: credential.loginUrl,
-          email: credential.usuario,
-          password: credential.senha,
-          cnpj: credential.cnpj,
-        },
+        { portal: portalType, loginUrl: credential.loginUrl, email: credential.usuario, password: credential.senha, cnpj: credential.cnpj },
         credential.sessaoCookies!,
-        credential.loginUrl || PORTAL_CONFIGS[portalType].loginUrl || publicOrConfiguredUrl,
+        credential.loginUrl || PORTAL_CONFIGS[portalType].loginUrl || url,
       );
     }
 
@@ -232,23 +293,22 @@ export async function fetchAuthenticatedPortalHtml(
       else await resetLoginFailures(credential.id);
     }
 
-    if (!isFunarbeProviderPortal(source)) {
-      return await agente.coletarHtml(publicOrConfiguredUrl);
-    }
-
-    const pages: Array<{ url: string; html: string }> = [];
-    for (const targetUrl of FUNARBE_PROVIDER_LIST_URLS) {
+    const pages = await mapWithConcurrency(listUrls, 2, async (targetUrl) => {
       try {
         const html = await agente.coletarHtml(targetUrl);
-        if (html.trim()) pages.push({ url: targetUrl, html });
+        return { url: targetUrl, html };
       } catch (error) {
         logger.warn(
-          `[PortalAuthDiscovery] funarbe: falha ao coletar ${targetUrl} — ${(error as Error).message}`,
+          `[PortalAuthDiscovery] ${source}: falha ao coletar ${targetUrl} — ${(error as Error).message}`,
         );
+        return { url: targetUrl, html: "" };
       }
-    }
-    const combined = combineAgregaListHtmls(pages);
-    return combined || null;
+    });
+
+    const combined = combineAgregaListHtmls(
+      pages.filter((page) => page.html.trim() !== ""),
+    );
+    return combined.length > 0 ? combined : null;
   } catch (err) {
     if (err instanceof CaptchaRequerIntervencaoError) {
       logger.warn(
@@ -269,8 +329,10 @@ export interface PortalLoginHealth {
 }
 
 /**
- * Teste de fumaça: só tenta logar, sem coletar oportunidades nem preencher
- * proposta. Não reaproveita sessão antiga para detectar quebra de seletor.
+ * Teste de fumaça: só tenta logar (sem coletar nem preencher nada) e reporta
+ * se o login ainda funciona. Não usa nem altera a sessão salva — é uma
+ * verificação independente, para não mascarar uma quebra de seletor por uma
+ * sessão antiga ainda válida.
  */
 export async function checkPortalLoginHealth(source: S2TargetPortal): Promise<PortalLoginHealth> {
   const portalType = portalTypeForSource(source);
@@ -283,6 +345,8 @@ export async function checkPortalLoginHealth(source: S2TargetPortal): Promise<Po
     return { source, hasCredential: false, ok: false, detail: "Sem credencial cadastrada no cofre." };
   }
 
+  // Mesma política de bloqueio da descoberta: uma credencial já bloqueada não
+  // pode receber mais tentativas de login pelo teste de fumaça semanal.
   if (credential.loginFailCount >= LOGIN_FAIL_THRESHOLD) {
     return {
       source,

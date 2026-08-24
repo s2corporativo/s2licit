@@ -78,6 +78,19 @@ export const S2_TARGET_PORTAL_DEFINITIONS: Record<S2TargetPortal, S2TargetPortal
   },
 };
 
+/**
+ * Portal do FORNECEDOR da Funarbe (plataforma Agrega/Yii2): só expõe as
+ * cotações ao fornecedor logado. O mural público continua em publicUrl;
+ * estas rotas são usadas apenas pela descoberta autenticada, depois do login.
+ */
+export const FUNARBE_PROVIDER_BASE_URL = "https://fornecedor.funarbe.org.br";
+
+export const FUNARBE_PROVIDER_LIST_URLS: string[] = [
+  `${FUNARBE_PROVIDER_BASE_URL}/compra-produtos-diversos`,
+  `${FUNARBE_PROVIDER_BASE_URL}/pedidos-compra`,
+  `${FUNARBE_PROVIDER_BASE_URL}/cotacao-aguardando-confirmacao`,
+];
+
 export function isS2TargetPortal(value: string): value is S2TargetPortal {
   return (S2_TARGET_PORTALS as readonly string[]).includes(value);
 }

@@ -3,7 +3,6 @@ import {
   type PortalConfig,
 } from "./propostaAgent";
 import {
-  FUNARBE_PROVIDER_BASE_URL,
   S2_TARGET_PORTALS,
   type S2TargetPortal,
 } from "./s2TargetPortals";
@@ -83,20 +82,29 @@ const fiemgConfig: PortalConfig = {
 
 const funarbeFornecedorConfig: PortalConfig = {
   nome: "FUNARBE / Portal do Fornecedor (Agrega)",
-  loginUrl: `${FUNARBE_PROVIDER_BASE_URL}/`,
+  loginUrl: "https://fornecedor.funarbe.org.br/",
   notasImportantes:
-    "A descoberta pública continua em compras.funarbe.org.br; cotações destinadas ao fornecedor são lidas na área autenticada fornecedor.funarbe.org.br. " +
-    "Seletores verificados em 13/08/2026. O agente não resolve CAPTCHA/2FA e a captura autenticada é somente de leitura.",
+    "Portal do fornecedor da Fundação Arthur Bernardes (plataforma Agrega/Yii2). " +
+    "Login: campo 'Email ou Login' (#loginform-email) + senha (#loginform-senha) + botão 'Entrar'. " +
+    "Seletores validados diretamente no portal em 13/08/2026 — sem CAPTCHA identificado na data. " +
+    "Após o login, a descoberta de cotações percorre as listagens da área autenticada " +
+    "(/compra-produtos-diversos, /pedidos-compra, /cotacao-aguardando-confirmacao). " +
+    "O robô é somente de leitura: nunca preenche, envia ou altera propostas.",
   estrategia: "form_padrao",
   seletores: {
-    loginCpfCnpj:
-      '#loginform-email, input[name*="email"], input[placeholder*="Email ou Login"], input[placeholder*="login"]',
-    loginSenha:
-      '#loginform-senha, input[name*="senha"], input[type="password"]',
-    loginBotao:
-      'button[type="submit"], input[type="submit"], input[value="Entrar"]',
+    loginCpfCnpj: "#loginform-email, input[placeholder*='Email ou Login'], input[placeholder*='usu']",
+    loginSenha: "#loginform-senha, input[name*='senha'], input[type='password']",
+    loginBotao: 'button[type="submit"], input[type="submit"], input[value="Entrar"]',
     loginSucesso: "boa tarde",
+    buscaProcesso: "",
+    buscaBotao: "",
     tabelaItens: "table tbody tr",
+    inputPreco: "",
+    inputMarca: "",
+    inputValidade: "",
+    botaoSalvar: "",
+    botaoEnviar: "",
+    confirmacaoEnvio: "",
   },
 };
 
@@ -114,6 +122,9 @@ export const S2_PORTAL_CONFIGS: Record<S2TargetPortal, PortalConfig> = {
   copasa: copasaConfig,
   cemig: cemigConfig,
   fundep: PORTAL_CONFIGS.fundep,
+  // O radar público continua usando compras.funarbe.org.br (mural da Funarbe);
+  // a descoberta AUTENTICADA usa o portal do fornecedor (Agrega) definido
+  // aqui, com os seletores de login validados em 13/08/2026.
   funarbe: funarbeFornecedorConfig,
   comprasmg: PORTAL_CONFIGS.comprasmg,
   fiemg: fiemgConfig,
