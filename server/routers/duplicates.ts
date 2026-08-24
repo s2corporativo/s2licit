@@ -6,7 +6,11 @@ import { eq, or, and } from "drizzle-orm";
 import { jaroWinklerSimilarity as canonicalJaroWinklerSimilarity } from "../matching/productMatcher";
 import { recordAudit } from "../services/auditService";
 
-type ProductRow = typeof products.$inferSelect;
+// Só os campos usados pela detecção de duplicidade — nunca as colunas TEXT
+// (description, informacaoTecnica, fichaTecnica), que podem ser grandes e
+// tornariam a varredura direcionada (sem teto de linhas) sujeita à mesma
+// exaustão de memória que o teto de 20k existe para evitar na global.
+type ProductRow = Pick<typeof products.$inferSelect, "id" | "name" | "concentration" | "presentation" | "manufacturer">;
 
 /**
  * Teto de catálogo carregado em memória por varredura de duplicidade.
@@ -25,7 +29,13 @@ const MAX_CATALOGO_EM_MEMORIA = 20000;
  */
 async function carregarCatalogoAtivo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, comTeto = true) {
   const query = db
-    .select()
+    .select({
+      id: products.id,
+      name: products.name,
+      concentration: products.concentration,
+      presentation: products.presentation,
+      manufacturer: products.manufacturer,
+    })
     .from(products)
     .where(eq(products.isActive, "yes"));
 
