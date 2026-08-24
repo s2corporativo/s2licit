@@ -36,8 +36,8 @@ const FLOW: FlowStep[] = [
     instruction:
       "Consulte o Radar de licitações ou as cotações recebidas e envie a opção escolhida ao Funil. O sistema evita duplicar a mesma oportunidade.",
     links: [
-      { href: "/radar-pncp", label: "Radar de licitações" },
-      { href: "/cotacoes-recebidas", label: "Cotações" },
+      { href: "/radar-pncp", label: "Radar de licitações", minRole: "editor" },
+      { href: "/cotacoes-recebidas", label: "Cotações", minRole: "editor" },
       { href: "/edital", label: "Importar edital", minRole: "editor" },
     ],
   },
@@ -58,7 +58,7 @@ const FLOW: FlowStep[] = [
       "No card aprovado, clique em revisar edital. Vincule cada item ao catálogo, confirme custo e preço de venda; o sistema bloqueia itens incompletos. A margem usada em todo o sistema é a margem sobre a venda: preço = custo ÷ (1 − margem).",
     links: [
       { href: "/edital", label: "Importar edital", minRole: "editor" },
-      { href: "/propostas", label: "Revisar propostas" },
+      { href: "/propostas", label: "Revisar propostas", minRole: "editor" },
       { href: "/custo-total", label: "Custo total e fretes" },
     ],
   },
@@ -69,7 +69,7 @@ const FLOW: FlowStep[] = [
       "Confira os documentos de habilitação (os que provam que a empresa pode contratar com o governo), mantenha as certidões válidas e use a Sala de Disputa para acompanhar os limites de preço aprovados.",
     links: [
       { href: "/documentos-habilitacao", label: "Habilitação", minRole: "editor" },
-      { href: "/certidoes", label: "Certidões", minRole: "editor" },
+      { href: "/certidoes", label: "Certidões", minRole: "admin" },
       { href: "/sala-disputa", label: "Sala de disputa", minRole: "editor" },
     ],
   },
@@ -80,7 +80,7 @@ const FLOW: FlowStep[] = [
       "Registre pedidos, entregas, notas e contas no Pós-venda. Use o Financeiro para acompanhar o resultado.",
     links: [
       { href: "/pos-venda", label: "Pós-venda" },
-      { href: "/financeiro", label: "Financeiro" },
+      { href: "/financeiro", label: "Financeiro", minRole: "editor" },
     ],
   },
   {
@@ -143,9 +143,9 @@ const ADVANCED_GROUPS: Array<{ label: string; links: ManualLink[] }> = [
   {
     label: "Documentação e apoio",
     links: [
-      { href: "/certidoes", label: "Certidões", minRole: "editor" },
+      { href: "/certidoes", label: "Certidões", minRole: "admin" },
       { href: "/diligencias", label: "Diligências e recursos", minRole: "editor" },
-      { href: "/portais-licitacao", label: "Portais de licitação", minRole: "editor" },
+      { href: "/portais-licitacao", label: "Portais de licitação", minRole: "admin" },
       { href: "/agente-proposta", label: "Agente de proposta", minRole: "editor" },
     ],
   },
@@ -157,7 +157,7 @@ const ADVANCED_GROUPS: Array<{ label: string; links: ManualLink[] }> = [
       { href: "/seguranca", label: "Segurança da conta (verificação em duas etapas)" },
       { href: "/logs", label: "Logs de auditoria", minRole: "admin" },
       { href: "/central-ia", label: "Inteligência artificial", minRole: "admin" },
-      { href: "/diagnostico", label: "Diagnóstico", minRole: "editor" },
+      { href: "/diagnostico", label: "Diagnóstico", minRole: "admin" },
       { href: "/admin/database-health", label: "Integridade do banco", minRole: "admin" },
     ],
   },
