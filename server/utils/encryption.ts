@@ -10,6 +10,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync, timingSafeEq
 
 const ALGO = "aes-256-gcm";
 const SALT = "s2-scraper-salt-v1";
+const GCM_AUTH_TAG_LENGTH = 16; // 128 bits; rejeita tags GCM truncadas.
 
 function getDerivedKey(): Buffer {
   const secret = process.env.ENCRYPTION_KEY;
@@ -43,7 +44,7 @@ function isLegacyBase64(value: string): boolean {
 export function encryptPassword(plaintext: string): string {
   const key = getDerivedKey();
   const iv = randomBytes(12); // 96-bit IV recomendado para GCM
-  const cipher = createCipheriv(ALGO, key, iv);
+  const cipher = createCipheriv(ALGO, key, iv, { authTagLength: GCM_AUTH_TAG_LENGTH });
   const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
@@ -79,7 +80,10 @@ export function decryptPassword(encrypted: string): string {
     const iv = Buffer.from(ivHex, "hex");
     const tag = Buffer.from(tagHex, "hex");
     const data = Buffer.from(dataHex, "hex");
-    const decipher = createDecipheriv(ALGO, key, iv);
+    if (iv.length !== 12 || tag.length !== GCM_AUTH_TAG_LENGTH) {
+      throw new Error("IV/tag GCM com tamanho inválido");
+    }
+    const decipher = createDecipheriv(ALGO, key, iv, { authTagLength: GCM_AUTH_TAG_LENGTH });
     decipher.setAuthTag(tag);
     return decipher.update(data).toString("utf-8") + decipher.final("utf-8");
   } catch {

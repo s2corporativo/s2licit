@@ -18,15 +18,6 @@
 - **Nunca** rode `drizzle-kit generate` em produção/container — geração é
   passo de desenvolvimento; produção só aplica migrações commitadas.
 
-## Pastas históricas (não são aplicadas automaticamente)
-
-- **`drizzle/legacy/`** — as migrações antigas (0000–0020 geradas +
-  journal antigo + `0_scraper_tables.sql`). Mantidas só como histórico;
-  o consolidado 0000 atual já cobre todo o schema.
-- **`drizzle/migrations/`** — migrações escritas à mão (0001–0061) da fase
-  em que o journal estava desatualizado. Também cobertas pelo consolidado.
-  Úteis apenas para atualizar manualmente um banco antigo pré-consolidação.
-
 ## Banco existente de antes da consolidação
 
 Um banco criado pelo fluxo antigo já tem as tabelas, mas não tem o registro

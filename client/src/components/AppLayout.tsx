@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { getRoleLabel, hasMinimumRole, type Role } from "@/lib/access";
 import {
-  Activity, BookOpen, Bot, Building2, CalendarClock, ChevronDown, CircleDollarSign,
+  Activity, BookOpen, Bot, BrainCircuit, Building2, CalendarClock, ChevronDown, CircleDollarSign,
   FileScan, FileText, Gavel, LayoutDashboard, LogOut, Menu, Package, PackageCheck,
   Radar, Search, Settings, ShieldCheck, Sparkles, Users, X
 } from "lucide-react";
@@ -16,44 +16,59 @@ const navGroups: NavGroup[] = [
   {
     label: "Início",
     items: [
+      { href: "/pendencias", icon: CalendarClock, label: "Central de pendências" },
       { href: "/", icon: LayoutDashboard, label: "Visão geral" },
-      { href: "/agenda", icon: CalendarClock, label: "Agenda e pendências" },
-      { href: "/funil", icon: Activity, label: "Funil de trabalho" },
+      { href: "/agenda", icon: CalendarClock, label: "Agenda" },
     ],
   },
   {
-    label: "Oportunidades",
+    label: "1. Entrada",
     items: [
-      { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
-      { href: "/cotacoes-recebidas", icon: FileText, label: "Cotações recebidas", minRole: "editor" },
-      { href: "/edital", icon: FileScan, label: "Analisar oportunidade", minRole: "editor" },
+      { href: "/cotacoes-recebidas", icon: FileText, label: "E-mails e cotações", minRole: "editor" },
+      { href: "/edital", icon: FileScan, label: "Editais e documentos", minRole: "editor" },
+      { href: "/captura-inteligente", icon: FileScan, label: "Captura inteligente", minRole: "editor" },
+      { href: "/captura-revisao", icon: ShieldCheck, label: "Revisão de captura", minRole: "editor" },
     ],
   },
   {
-    label: "Propostas",
+    label: "2. Oportunidades",
+    items: [
+      { href: "/funil", icon: Activity, label: "Funil e dossiês" },
+      { href: "/radar-pncp", icon: Radar, label: "Radar de licitações", minRole: "editor" },
+      { href: "/inteligencia", icon: BrainCircuit, label: "Inteligência comercial", minRole: "editor" },
+      { href: "/agenticseek", icon: Bot, label: "AgenticSeek", minRole: "editor" },
+    ],
+  },
+  {
+    label: "3. Produtos",
+    items: [
+      { href: "/produtos", icon: Package, label: "Produtos e preços" },
+      { href: "/busca-global", icon: Search, label: "Busca e equivalências" },
+      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
+      { href: "/enriquecimento", icon: Sparkles, label: "Qualidade do catálogo" },
+    ],
+  },
+  {
+    label: "4. Propostas",
     items: [
       { href: "/propostas", icon: FileText, label: "Central de propostas", minRole: "editor" },
       { href: "/sala-disputa", icon: Gavel, label: "Sala de disputa", minRole: "editor" },
-      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
     ],
   },
   {
-    label: "Execução",
+    label: "5. Contratos e fornecimento",
     items: [
-      { href: "/centro-operacional", icon: PackageCheck, label: "Operação e entregas", minRole: "editor" },
+      { href: "/centro-operacional", icon: PackageCheck, label: "Contratos e operação", minRole: "editor" },
+      { href: "/pos-venda", icon: PackageCheck, label: "Compras e entregas" },
       { href: "/financeiro", icon: CircleDollarSign, label: "Financeiro", minRole: "editor" },
-      { href: "/pos-venda", icon: PackageCheck, label: "Pós-venda" },
     ],
   },
   {
-    label: "Catálogo",
+    label: "6. Documentos da empresa",
     items: [
-      { href: "/produtos", icon: Package, label: "Produtos e preços" },
-      { href: "/fornecedores", icon: Building2, label: "Fornecedores", minRole: "editor" },
-      { href: "/captura-inteligente", icon: FileScan, label: "Captura inteligente", minRole: "editor" },
-      { href: "/captura-revisao", icon: ShieldCheck, label: "Revisão de captura", minRole: "editor" },
-      { href: "/busca-global", icon: Search, label: "Busca e equivalências" },
-      { href: "/enriquecimento", icon: Sparkles, label: "Qualidade do catálogo" },
+      { href: "/documentos-habilitacao", icon: ShieldCheck, label: "Habilitação", minRole: "editor" },
+      { href: "/certidoes", icon: FileText, label: "Certidões e vencimentos", minRole: "admin" },
+      { href: "/diligencias", icon: FileText, label: "Diligências e recursos", minRole: "editor" },
     ],
   },
   {
@@ -83,14 +98,16 @@ function currentPageLabel(location: string): string {
     const item = group.items.find((entry) => isPathActive(location, entry.href));
     if (item) return item.label;
   }
+  if (cleanPath(location).startsWith("/oportunidades/")) return "Dossiê da oportunidade";
   return "S2 Licit";
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const { user, isAuthenticated, loading, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ Administração: true });
+  const [aiCommand, setAiCommand] = useState("");
 
   const visibleGroups = useMemo(
     () =>
@@ -112,6 +129,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  const runAiCommand = (event: React.FormEvent) => {
+    event.preventDefault();
+    const prompt = aiCommand.trim();
+    if (!prompt) return;
+    setAiCommand("");
+    navigate(`/agente?prompt=${encodeURIComponent(prompt)}`);
+  };
 
   const sidebar = (
     <aside className="flex h-full w-[248px] shrink-0 flex-col border-r border-slate-200 bg-white text-slate-900">
@@ -185,9 +210,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {isAuthenticated && (
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 sm:px-6">
             <button className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu size={19} /></button>
-            <div className="min-w-0"><p className="m-0 truncate text-sm font-extrabold text-slate-900">{currentPageLabel(location)}</p></div>
-            <Link href="/busca-global" className="ml-auto flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500 no-underline hover:border-slate-300 hover:bg-white">
-              <Search size={14} /><span className="hidden sm:inline">Buscar no sistema</span>
+            <div className="min-w-0 shrink-0"><p className="m-0 truncate text-sm font-extrabold text-slate-900">{currentPageLabel(location)}</p></div>
+            <form onSubmit={runAiCommand} className="ml-auto hidden min-w-0 max-w-xl flex-1 items-center sm:flex">
+              <div className="flex w-full items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 focus-within:border-violet-400 focus-within:bg-white">
+                <Sparkles size={14} className="shrink-0 text-violet-700" />
+                <input value={aiCommand} onChange={(event) => setAiCommand(event.target.value)} placeholder="Pergunte ao S2Licit: produtos, preços, cotações, margens..." className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none placeholder:text-slate-400" />
+                <button type="submit" disabled={!aiCommand.trim()} className="rounded-lg bg-slate-950 px-2.5 py-1 text-[10px] font-black text-white disabled:opacity-30">IA</button>
+              </div>
+            </form>
+            <Link href="/agente" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 no-underline hover:bg-slate-50 sm:hidden"><Bot size={14} /></Link>
+            <Link href="/busca-global" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-500 no-underline hover:border-slate-300 hover:bg-white">
+              <Search size={14} /><span className="hidden xl:inline">Buscar</span>
             </Link>
           </header>
         )}

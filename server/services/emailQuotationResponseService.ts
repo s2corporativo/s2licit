@@ -3,6 +3,8 @@ import { getDb, getCompanySettings } from "../db";
 import { products } from "../../drizzle/schema";
 import { getActiveSanctionsByProductIds } from "../db/sanctions";
 import { getActiveCategoryPricingRules } from "../db/categoryPricingQueries";
+import { calcLandedCost } from "../db/landedCost";
+import { getPriceHistory } from "../db/supplierPrices";
 import { getEmailQuotationWithItems } from "./emailQuotationSyncService";
 import {
   calculateQuotationTotals,
@@ -71,6 +73,80 @@ function actualMarginPercent(cost: number, sale: number): number {
   return ((sale - cost) / sale) * 100;
 }
 
+function positiveOrZero(value: string | number | null | undefined): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+type CostComponents = {
+  baseCost: number | null;
+  freightValue: number;
+  taxValue: number;
+  landedCost: number | null;
+  costSource: "match" | "catalog" | "history" | "none";
+  costUpdatedAt: Date | null;
+};
+
+/**
+ * Resolve o custo auditável do item. O preço capturado no momento do match
+ * continua tendo prioridade para não alterar silenciosamente uma cotação já
+ * em revisão. Frete/tributos usam o histórico do mesmo fornecedor quando
+ * disponível e caem nos campos atuais do produto como fallback.
+ */
+async function resolveCostComponents(item: Awaited<ReturnType<typeof getEmailQuotationWithItems>> extends infer T
+  ? T extends { items: Array<infer I> } ? I : never
+  : never): Promise<CostComponents> {
+  if (!item || item.produtoMatchId == null) {
+    return { baseCost: null, freightValue: 0, taxValue: 0, landedCost: null, costSource: "none", costUpdatedAt: null };
+  }
+
+  let latestHistory: any | null = null;
+  if (item.productSupplierId != null) {
+    try {
+      const history = await getPriceHistory(item.produtoMatchId, item.productSupplierId, 1);
+      latestHistory = history[0] ?? null;
+    } catch {
+      latestHistory = null;
+    }
+  }
+
+  const matchCost = Number(item.precoSugerido);
+  const catalogCost = Number(item.productPrice);
+  const historyCost = Number(latestHistory?.price);
+
+  const baseCost = Number.isFinite(matchCost) && matchCost > 0
+    ? matchCost
+    : Number.isFinite(historyCost) && historyCost > 0
+      ? historyCost
+      : Number.isFinite(catalogCost) && catalogCost > 0
+        ? catalogCost
+        : null;
+
+  const costSource: CostComponents["costSource"] =
+    Number.isFinite(matchCost) && matchCost > 0
+      ? "match"
+      : Number.isFinite(historyCost) && historyCost > 0
+        ? "history"
+        : Number.isFinite(catalogCost) && catalogCost > 0
+          ? "catalog"
+          : "none";
+
+  const freightValue = positiveOrZero(latestHistory?.freightValue ?? item.productFreightValue);
+  const taxValue = positiveOrZero(latestHistory?.taxValue ?? item.productTaxValue);
+  const landed = baseCost == null
+    ? null
+    : calcLandedCost(String(baseCost), String(freightValue), String(taxValue));
+
+  return {
+    baseCost,
+    freightValue,
+    taxValue,
+    landedCost: landed != null ? Number(landed.toFixed(4)) : null,
+    costSource,
+    costUpdatedAt: latestHistory?.recordedAt ? new Date(latestHistory.recordedAt) : null,
+  };
+}
+
 export interface PricingPreviewItem {
   quotationItemId: number;
   produtoMatchId: number | null;
@@ -79,7 +155,12 @@ export interface PricingPreviewItem {
   supplierName: string | null;
   quantidade: number;
   unidade: string | null;
+  baseCost: number | null;
+  freightValue: number;
+  taxValue: number;
   custoUnitario: number | null;
+  costSource: "match" | "catalog" | "history" | "none";
+  costUpdatedAt: Date | null;
   unitPrice: number | null;
   totalCost: number | null;
   totalPrice: number | null;
@@ -94,6 +175,9 @@ export interface QuotationPricingPreview {
   items: PricingPreviewItem[];
   defaultMarginPercent: number;
   totalCost: number;
+  totalBaseCost: number;
+  totalFreight: number;
+  totalTaxes: number;
   totalSale: number;
   totalProfit: number;
   effectiveMarginPercent: number;
@@ -105,8 +189,8 @@ export interface QuotationPricingPreview {
 }
 
 /**
- * Preview tolerante a itens incompletos. A tela mostra custo, venda, margem e
- * totais antes de gerar a proposta, sem obrigar o operador a sair da cotação.
+ * Preview tolerante a itens incompletos. A tela mostra preço de aquisição,
+ * frete, tributos, custo real, venda, margem e totais antes da proposta.
  */
 export async function previewQuotationPricing(
   quotationId: number,
@@ -126,14 +210,16 @@ export async function previewQuotationPricing(
 
   const marginRulesByCategory = await loadActiveMarginRulesByCategory();
   const categoryByProductId = await loadProductCategories(data.items.map((item) => item.produtoMatchId));
+  const costComponents = await Promise.all(data.items.map((item) => resolveCostComponents(item as any)));
 
   let unmatchedItems = 0;
   let itemsSemCusto = 0;
   let manualPriceItems = 0;
   let categoryOverrides = 0;
 
-  const items: PricingPreviewItem[] = data.items.map((item) => {
+  const items: PricingPreviewItem[] = data.items.map((item, index) => {
     const quantidade = quantityOf(item.quantidade);
+    const cost = costComponents[index];
     if (item.produtoMatchId == null) {
       unmatchedItems++;
       return {
@@ -144,7 +230,12 @@ export async function previewQuotationPricing(
         supplierName: item.supplierName ?? null,
         quantidade,
         unidade: item.unidade,
+        baseCost: null,
+        freightValue: 0,
+        taxValue: 0,
         custoUnitario: null,
+        costSource: "none",
+        costUpdatedAt: null,
         unitPrice: null,
         totalCost: null,
         totalPrice: null,
@@ -156,8 +247,8 @@ export async function previewQuotationPricing(
       };
     }
 
-    const costCandidate = Number(item.precoSugerido ?? item.productPrice);
-    if (!Number.isFinite(costCandidate) || costCandidate <= 0) {
+    const costCandidate = cost.landedCost;
+    if (costCandidate == null || !Number.isFinite(costCandidate) || costCandidate <= 0) {
       itemsSemCusto++;
       return {
         quotationItemId: item.id,
@@ -167,7 +258,12 @@ export async function previewQuotationPricing(
         supplierName: item.supplierName ?? null,
         quantidade,
         unidade: item.unidade,
+        baseCost: cost.baseCost,
+        freightValue: cost.freightValue,
+        taxValue: cost.taxValue,
         custoUnitario: null,
+        costSource: cost.costSource,
+        costUpdatedAt: cost.costUpdatedAt,
         unitPrice: null,
         totalCost: null,
         totalPrice: null,
@@ -198,7 +294,12 @@ export async function previewQuotationPricing(
       supplierName: item.supplierName ?? null,
       quantidade,
       unidade: item.unidade,
+      baseCost: cost.baseCost != null ? Number(cost.baseCost.toFixed(4)) : null,
+      freightValue: Number(cost.freightValue.toFixed(4)),
+      taxValue: Number(cost.taxValue.toFixed(4)),
       custoUnitario: Number(costCandidate.toFixed(4)),
+      costSource: cost.costSource,
+      costUpdatedAt: cost.costUpdatedAt,
       unitPrice,
       totalCost: Number((costCandidate * quantidade).toFixed(2)),
       totalPrice: Number((unitPrice * quantidade).toFixed(2)),
@@ -211,6 +312,9 @@ export async function previewQuotationPricing(
   });
 
   const totalCost = items.reduce((sum, item) => sum + (item.totalCost ?? 0), 0);
+  const totalBaseCost = items.reduce((sum, item) => sum + ((item.baseCost ?? 0) * item.quantidade), 0);
+  const totalFreight = items.reduce((sum, item) => sum + (item.freightValue * item.quantidade), 0);
+  const totalTaxes = items.reduce((sum, item) => sum + (item.taxValue * item.quantidade), 0);
   const totalSale = items.reduce((sum, item) => sum + (item.totalPrice ?? 0), 0);
   const totalProfit = totalSale - totalCost;
   const effectiveMarginPercent = totalSale > 0 ? (totalProfit / totalSale) * 100 : 0;
@@ -219,6 +323,9 @@ export async function previewQuotationPricing(
     items,
     defaultMarginPercent,
     totalCost: Number(totalCost.toFixed(2)),
+    totalBaseCost: Number(totalBaseCost.toFixed(2)),
+    totalFreight: Number(totalFreight.toFixed(2)),
+    totalTaxes: Number(totalTaxes.toFixed(2)),
     totalSale: Number(totalSale.toFixed(2)),
     totalProfit: Number(totalProfit.toFixed(2)),
     effectiveMarginPercent: Number(effectiveMarginPercent.toFixed(2)),
@@ -273,8 +380,6 @@ export async function priceQuotationItems(
     );
   }
 
-  // Mantém a proteção acrescentada no módulo de fornecedores: orçamento não
-  // é gerado silenciosamente com fornecedor que possua sanção ativa.
   const matchedProductIds = data.items
     .map((item) => item.produtoMatchId)
     .filter((id): id is number => id != null);

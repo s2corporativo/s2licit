@@ -38,7 +38,9 @@ import { mfaRouter } from "./routers/mfaRouter";
 import { usersRouter } from "./routers/usersRouter";
 import { intelligentCaptureRouter } from "./routers/intelligentCaptureRouter";
 import { pncpRadarRouter } from "./routers/pncpRadar";
+import { agenticSeekRouter } from "./routers/agenticSeekRouter";
 import { emailQuotationsRouter } from "./routers/emailQuotations";
+import { quotationDecisionRouter } from "./routers/quotationDecision";
 import { certidoesRouter } from "./routers/certidoes";
 import { aiRouter } from "./routers/ai";
 import { emailConfigRouter } from "./routers/emailConfig";
@@ -57,6 +59,7 @@ import { buscaGlobalRouter } from "./routers/buscaGlobal";
 import { diagnosticoRouter } from "./routers/diagnostico";
 import { operationalGovernanceRouter } from "./routers/operationalGovernance";
 import { productsRouter } from "./routers/productsGroup";
+import { productBulkRouter } from "./routers/productBulk";
 import { importsRouter } from "./routers/importsGroup";
 import { enrichmentRouter as enrichmentInlineRouter } from "./routers/enrichmentGroup";
 
@@ -86,7 +89,9 @@ export const appRouter = router({
   documents: documentGovernanceRouter,
   workflow: workflowRouter,
   pncpRadar: pncpRadarRouter,
+  agenticSeek: agenticSeekRouter,
   emailQuotations: emailQuotationsRouter,
+  quotationDecision: quotationDecisionRouter,
   certidoes: certidoesRouter,
   ai: aiRouter,
   emailConfig: emailConfigRouter,
@@ -116,6 +121,7 @@ export const appRouter = router({
 
   // ─── Products ─────────────────────────────────────────────────────────────
   products: productsRouter,
+  productBulk: productBulkRouter,
 
   // ─── Equivalences ─────────────────────────────────────────────────────────
   equivalences: equivalencesRouter,

@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   isIgnorableMigrationError,
   isObsoleteMigrationStatement,
   normalizeMysqlIdentifiers,
   shortenMysqlIdentifier,
+  shouldReconcileMigrationDrift,
   splitMigrationStatements,
 } from "./migrate-production.mjs";
 
@@ -14,6 +16,20 @@ describe("migrate-production", () => {
         "CREATE TABLE a (id int);--> statement-breakpoint\nALTER TABLE a ADD name text;",
       ),
     ).toEqual(["CREATE TABLE a (id int);", "ALTER TABLE a ADD name text;"]);
+  });
+
+  it("mantém a migration AgenticSeek em dois statements MySQL independentes", () => {
+    const sql = readFileSync(new URL("../drizzle/0023_agenticseek_module.sql", import.meta.url), "utf8");
+    const statements = splitMigrationStatements(sql);
+
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toContain("CREATE TABLE IF NOT EXISTS agenticseek_buscas");
+    expect(statements[1]).toContain("CREATE TABLE IF NOT EXISTS agenticseek_resultados");
+    expect(
+      statements.every(
+        (statement) => (statement.match(/^\s*CREATE\s+TABLE\b/gim) ?? []).length === 1,
+      ),
+    ).toBe(true);
   });
 
   it("remove comandos vazios", () => {
@@ -88,5 +104,14 @@ describe("migrate-production", () => {
     expect(isIgnorableMigrationError({ errno: 1045, code: "ER_ACCESS_DENIED_ERROR" })).toBe(false);
     expect(isIgnorableMigrationError({ errno: 1059, code: "ER_TOO_LONG_IDENT" })).toBe(false);
     expect(isIgnorableMigrationError({ errno: 1170, code: "ER_BLOB_KEY_WITHOUT_LENGTH" })).toBe(false);
+  });
+
+  it("bloqueia reconciliação de drift por padrão", () => {
+    expect(shouldReconcileMigrationDrift({})).toBe(false);
+    expect(shouldReconcileMigrationDrift({ MIGRATION_ALLOW_DRIFT_RECONCILE: "false" })).toBe(false);
+  });
+
+  it("só permite reconciliação de drift por opt-in explícito", () => {
+    expect(shouldReconcileMigrationDrift({ MIGRATION_ALLOW_DRIFT_RECONCILE: "true" })).toBe(true);
   });
 });

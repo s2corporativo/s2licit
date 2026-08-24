@@ -1,11 +1,16 @@
 // Teste de decodificação das senhas dos scrapers com a chave atual.
-// Implementação idêntica ao credentialEncryptionService (GCM 3 partes, CBC 2 partes).
+// Implementação alinhada ao credentialEncryptionService (GCM 3 partes, CBC 2 partes).
 import crypto from "crypto";
 import mysql from "mysql2/promise";
 
 const conn = await mysql.createConnection(process.env.DATABASE_URL);
 const secret = process.env.ENCRYPTION_KEY;
-console.log("ENCRYPTION_KEY presente:", !!secret, "| len:", secret ? secret.length : 0);
+if (!secret || secret.length < 16) {
+  throw new Error("ENCRYPTION_KEY ausente ou curta demais para testar as credenciais");
+}
+console.log("ENCRYPTION_KEY presente: true | len:", secret.length);
+
+const GCM_AUTH_TAG_LENGTH = 16;
 
 function decrypt(encrypted) {
   const parts = encrypted.split(":");
@@ -13,7 +18,18 @@ function decrypt(encrypted) {
     // AES-256-GCM: iv:tag:data
     const [ivHex, tagHex, dataHex] = parts;
     const key = crypto.scryptSync(secret, "s2-scraper-salt-v1", 32);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(ivHex, "hex"), Buffer.from(tagHex, "hex"));
+    const iv = Buffer.from(ivHex, "hex");
+    const tag = Buffer.from(tagHex, "hex");
+    if (iv.length !== 12 || tag.length !== GCM_AUTH_TAG_LENGTH) {
+      throw new Error("IV/tag GCM com tamanho inválido");
+    }
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      key,
+      iv,
+      { authTagLength: GCM_AUTH_TAG_LENGTH },
+    );
+    decipher.setAuthTag(tag);
     return decipher.update(dataHex, "hex", "utf8") + decipher.final("utf8");
   }
   if (parts.length === 2) {

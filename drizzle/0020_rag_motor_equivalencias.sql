@@ -8,7 +8,7 @@
 -- antes do cálculo de distância. Sem dependência de extensão externa.
 -- ─────────────────────────────────────────────────────────────────────────────
 
-CREATE TABLE `product_embeddings` (
+CREATE TABLE IF NOT EXISTS `product_embeddings` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`productId` int NOT NULL,
 	`provider` varchar(32) NOT NULL DEFAULT 'nomic-embed-text',
@@ -24,7 +24,7 @@ CREATE TABLE `product_embeddings` (
 );
 --> statement-breakpoint
 
-CREATE TABLE `rag_config` (
+CREATE TABLE IF NOT EXISTS `rag_config` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`key` varchar(64) NOT NULL,
 	`value` varchar(512) NOT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE `rag_config` (
 --> statement-breakpoint
 
 -- ─── Configuração padrão ────────────────────────────────────────────────────
-INSERT INTO `rag_config` (`key`, `value`, `description`) VALUES
+INSERT IGNORE INTO `rag_config` (`key`, `value`, `description`) VALUES
 	('rag.enabled', 'true', 'Habilita/desabilita o Motor de Equivalências RAG'),
 	('rag.embeddingProvider', 'local', 'local = Ollama na mesma VPS; remote = Ollama remoto (URL via RAG_OLLAMA_URL); groq = Groq'),
 	('rag.ollamaUrl', 'http://localhost:11434', 'URL base do Ollama (http://host:11434)'),

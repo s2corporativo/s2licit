@@ -43,7 +43,7 @@ export function getIntegrationStatuses(): IntegrationStatus[] {
       detail: isImapConfigured()
         ? `Leitura automática habilitada para ${process.env.IMAP_USER ?? "a conta configurada"}.`
         : "A leitura automática de e-mails está desabilitada.",
-      expectedConfiguration: ["EMAIL_USER", "EMAIL_PASSWORD"],
+      expectedConfiguration: ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"],
       mode: process.env.IMAP_HOST,
     },
     {
@@ -53,7 +53,7 @@ export function getIntegrationStatuses(): IntegrationStatus[] {
       detail: isSmtpConfigured()
         ? `Envio habilitado com remetente ${process.env.SMTP_FROM || process.env.SMTP_USER}.`
         : "O envio automático de propostas por e-mail está desabilitado.",
-      expectedConfiguration: ["EMAIL_USER", "EMAIL_PASSWORD"],
+      expectedConfiguration: ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"],
       mode: process.env.SMTP_HOST,
     },
     {

@@ -2,629 +2,94 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { usePermission } from "@/components/RequireAuth";
 import {
-  AlertCircle,
-  Bot,
-  Check,
-  ChevronLeft,
-  ExternalLink,
-  FileText,
-  Globe2,
-  KanbanSquare,
-  Loader2,
-  MailCheck,
-  MoreHorizontal,
-  RefreshCw,
-  Search,
-  Sparkles,
-  X,
+  AlertCircle, Bot, BrainCircuit, Check, CheckCircle2, ChevronLeft, FileText,
+  Gauge, Globe2, KanbanSquare, LayoutList, Loader2, MailCheck, MoreHorizontal,
+  PackagePlus, RefreshCw, Rows3, Search, ShieldAlert, Sparkles, Target,
+  TrendingUp, Truck, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
 const PORTAL_SOURCES = ["copasa", "cemig", "fundep", "funarbe", "comprasmg", "fiemg"] as const;
-
-const STATUS_LABELS: Record<string, { label: string; className: string }> = {
-  nova: { label: "Nova", className: "bg-blue-50 text-blue-700" },
-  processando: { label: "Processando", className: "bg-amber-50 text-amber-700" },
-  revisao: { label: "Em revisão", className: "bg-violet-50 text-violet-700" },
-  respondida: { label: "Respondida", className: "bg-emerald-50 text-emerald-700" },
-  descartada: { label: "Descartada", className: "bg-gray-100 text-gray-600" },
-  erro: { label: "Erro", className: "bg-red-50 text-red-700" },
+const STATUS: Record<string, { label: string; cls: string }> = {
+  nova: { label: "Nova", cls: "bg-blue-50 text-blue-700" },
+  processando: { label: "Processando", cls: "bg-amber-50 text-amber-700" },
+  revisao: { label: "Em revisão", cls: "bg-violet-50 text-violet-700" },
+  respondida: { label: "Respondida", cls: "bg-emerald-50 text-emerald-700" },
+  descartada: { label: "Descartada", cls: "bg-gray-100 text-gray-600" },
+  erro: { label: "Erro", cls: "bg-red-50 text-red-700" },
 };
+const money = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—"; };
+const pct = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? `${(n <= 1 ? n * 100 : n).toFixed(0)}%` : "—"; };
+const freshLabel = (s?: string, d?: number | null) => s === "fresh" ? `Atual · ${d ?? 0}d` : s === "attention" ? `${d ?? "?"}d` : s === "stale" ? `Vencido · ${d ?? "?"}d` : "Sem data";
+const risk = (v?: string) => v === "red" ? { label: "Alto risco", dot: "bg-red-500", cls: "border-red-200 bg-red-50 text-red-700" } : v === "yellow" ? { label: "Revisar", dot: "bg-amber-400", cls: "border-amber-200 bg-amber-50 text-amber-700" } : { label: "Seguro", dot: "bg-emerald-500", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+const initialId = () => { if (typeof window === "undefined") return null; const id = Number(new URLSearchParams(window.location.search).get("cotacao")); return Number.isInteger(id) && id > 0 ? id : null; };
 
-function money(value: number | string | null | undefined) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function initialQuotationId(): number | null {
-  if (typeof window === "undefined") return null;
-  const raw = new URLSearchParams(window.location.search).get("cotacao");
-  const id = raw ? Number(raw) : NaN;
-  return Number.isInteger(id) && id > 0 ? id : null;
-}
+type ProtectionData = {
+  alerts: Array<{ severity: "red" | "yellow" | "info"; code: string; message: string; itemId?: number }>;
+  red: number; yellow: number; info: number; predictedWinningValue: number | null; historicalSamples: number; canProceed: boolean;
+};
 
 export default function CotacoesRecebidas() {
   const isAdmin = usePermission("admin");
   const canEdit = usePermission("editor");
   const utils = trpc.useUtils();
-  const [selectedId, setSelectedId] = useState<number | null>(initialQuotationId);
+  const [selectedId, setSelectedId] = useState<number | null>(initialId);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("abertas");
+  const [status, setStatus] = useState("abertas");
+  const list = trpc.emailQuotations.list.useQuery({});
+  const emailStatus = trpc.emailQuotations.status.useQuery();
+  const deadlines = trpc.emailQuotations.prazosProximos.useQuery({ diasAlerta: 3 });
+  const intelligence = trpc.quotationDecision.commercialIntelligence.useQuery();
+  const detail = trpc.emailQuotations.get.useQuery({ id: selectedId ?? 0 }, { enabled: selectedId != null });
+  const sync = trpc.emailQuotations.sync.useMutation({ onSuccess: (r) => { toast.success(`${r.imported} cotação(ões) importada(s).`); utils.emailQuotations.list.invalidate(); }, onError: (e) => toast.error(e.message) });
+  const portals = trpc.portalOpportunitySync.sync.useMutation({ onSuccess: (r) => { toast.success(`${r.imported} oportunidade(s) encontrada(s).`); utils.emailQuotations.list.invalidate(); }, onError: (e) => toast.error(e.message) });
+  const rows = useMemo(() => { const term = search.trim().toLowerCase(); return (list.data ?? []).filter((q) => { if (status === "abertas" && ["respondida", "descartada"].includes(q.status)) return false; if (!["abertas", "todas"].includes(status) && q.status !== status) return false; return !term || [q.subject, q.orgao, q.fromName, q.fromAddress].filter(Boolean).some((v) => String(v).toLowerCase().includes(term)); }); }, [list.data, search, status]);
+  const choose = (id: number) => { setSelectedId(id); const url = new URL(window.location.href); url.searchParams.set("cotacao", String(id)); window.history.replaceState({}, "", url.toString()); };
 
-  const statusQuery = trpc.emailQuotations.status.useQuery();
-  const listQuery = trpc.emailQuotations.list.useQuery({});
-  const prazosQuery = trpc.emailQuotations.prazosProximos.useQuery({ diasAlerta: 3 });
-  const detailQuery = trpc.emailQuotations.get.useQuery(
-    { id: selectedId ?? 0 },
-    { enabled: selectedId != null },
-  );
-
-  const pipelineMutation = trpc.emailQuotations.autoPipeline.useMutation({
-    onSuccess: (res) => {
-      toast.success(`${res.proposalsGenerated} proposta(s) processada(s); ${res.blocked} aguardando revisão.`);
-      utils.emailQuotations.list.invalidate();
-      if (selectedId) utils.emailQuotations.get.invalidate({ id: selectedId });
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const syncMutation = trpc.emailQuotations.sync.useMutation({
-    onSuccess: (res) => {
-      if (!res.imapConfigured) return toast.error("E-mail ainda não configurado.");
-      toast.success(`${res.imported} cotação(ões) importada(s).`);
-      utils.emailQuotations.list.invalidate();
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const portalSyncMutation = trpc.portalOpportunitySync.sync.useMutation({
-    onSuccess: (res) => {
-      toast.success(`${res.imported} nova(s) oportunidade(s) encontrada(s) nos portais.`);
-      utils.emailQuotations.list.invalidate();
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("pt-BR");
-    return (listQuery.data ?? []).filter((q) => {
-      if (statusFilter === "abertas" && ["respondida", "descartada"].includes(q.status)) return false;
-      if (statusFilter !== "todas" && statusFilter !== "abertas" && q.status !== statusFilter) return false;
-      if (!term) return true;
-      return [q.subject, q.orgao, q.fromName, q.fromAddress]
-        .filter(Boolean)
-        .some((v) => String(v).toLocaleLowerCase("pt-BR").includes(term));
-    });
-  }, [listQuery.data, search, statusFilter]);
-
-  const selectQuotation = (id: number) => {
-    setSelectedId(id);
-    const url = new URL(window.location.href);
-    url.searchParams.set("cotacao", String(id));
-    window.history.replaceState({}, "", url.toString());
-  };
-
-  return (
-    <div className="mx-auto max-w-[1700px] p-4 lg:p-6">
-      <header className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <MailCheck className="h-6 w-6 text-blue-600" />
-            <h1 className="text-2xl font-bold tracking-tight text-gray-950">Cotações recebidas</h1>
-          </div>
-          <p className="mt-1 text-sm text-gray-500">Selecione a cotação, vincule o produto, confira o custo e defina a venda.</p>
-        </div>
-        {isAdmin && (
-          <details className="relative self-start lg:self-auto">
-            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-              <RefreshCw className="h-4 w-4" /> Atualizar dados
-            </summary>
-            <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
-              <button
-                onClick={() => syncMutation.mutate({ limit: 25 })}
-                disabled={syncMutation.isPending}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
-              >
-                {syncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailCheck className="h-4 w-4" />}
-                Sincronizar e-mail
-              </button>
-              <button
-                onClick={() => portalSyncMutation.mutate({ sources: [...PORTAL_SOURCES] })}
-                disabled={portalSyncMutation.isPending}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
-              >
-                {portalSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe2 className="h-4 w-4" />}
-                Buscar portais
-              </button>
-              <button
-                onClick={() => pipelineMutation.mutate()}
-                disabled={pipelineMutation.isPending || statusQuery.data?.autoPipelineEnabled === false}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50"
-              >
-                {pipelineMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                Processar automação
-              </button>
-            </div>
-          </details>
-        )}
-      </header>
-
-      {prazosQuery.data && (prazosQuery.data.vencidos.length > 0 || prazosQuery.data.proximos.length > 0) && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>
-            <strong>{prazosQuery.data.vencidos.length}</strong> vencida(s) e <strong>{prazosQuery.data.proximos.length}</strong> vencendo em até 3 dias.
-          </span>
-        </div>
-      )}
-
-      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className={`${selectedId ? "hidden lg:block" : "block"} overflow-hidden rounded-xl border border-gray-200 bg-white`}>
-          <div className="border-b border-gray-100 p-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar órgão ou cotação"
-                className="h-10 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400"
-              />
-            </div>
-            <div className="mt-2 flex gap-1 overflow-x-auto">
-              {[{ v: "abertas", l: "Abertas" }, { v: "revisao", l: "Revisão" }, { v: "respondida", l: "Respondidas" }, { v: "todas", l: "Todas" }].map((f) => (
-                <button
-                  key={f.v}
-                  onClick={() => setStatusFilter(f.v)}
-                  className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusFilter === f.v ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600"}`}
-                >
-                  {f.l}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="max-h-[72vh] overflow-y-auto">
-            {listQuery.isLoading ? (
-              <div className="p-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-gray-400" /></div>
-            ) : filtered.length === 0 ? (
-              <div className="p-8 text-center text-sm text-gray-400">Nenhuma cotação neste filtro.</div>
-            ) : filtered.map((q) => {
-              const st = STATUS_LABELS[q.status] ?? STATUS_LABELS.nova;
-              return (
-                <button
-                  key={q.id}
-                  onClick={() => selectQuotation(q.id)}
-                  className={`w-full border-b border-gray-100 px-3 py-3 text-left transition hover:bg-blue-50 ${selectedId === q.id ? "bg-blue-50" : ""}`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="line-clamp-2 text-sm font-semibold text-gray-900">{q.subject || "Cotação sem assunto"}</span>
-                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${st.className}`}>{st.label}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-xs text-gray-500">
-                    <span className="truncate">{q.orgao || q.fromName || q.fromAddress || "Origem não identificada"}</span>
-                    <span className="shrink-0 font-medium">{q.matchedItems}/{q.totalItems}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </aside>
-
-        <main className="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white">
-          {selectedId == null ? (
-            <div className="flex min-h-[520px] flex-col items-center justify-center px-6 text-center">
-              <MailCheck className="mb-3 h-10 w-10 text-gray-300" />
-              <p className="font-semibold text-gray-700">Selecione uma cotação</p>
-              <p className="mt-1 max-w-md text-sm text-gray-400">O trabalho de match e precificação será feito integralmente aqui, sem sair desta tela.</p>
-            </div>
-          ) : detailQuery.isLoading ? (
-            <div className="flex min-h-[520px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
-          ) : detailQuery.data ? (
-            <QuotationDetail
-              data={detailQuery.data as DetailData}
-              canEdit={canEdit}
-              onBack={() => setSelectedId(null)}
-              onChanged={() => {
-                utils.emailQuotations.get.invalidate({ id: selectedId });
-                utils.emailQuotations.pricingPreview.invalidate({ id: selectedId });
-                utils.emailQuotations.list.invalidate();
-              }}
-            />
-          ) : null}
-        </main>
-      </div>
-    </div>
-  );
+  return <div className="mx-auto max-w-[1840px] p-4 lg:p-6">
+    <header className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex items-center gap-2"><BrainCircuit className="h-6 w-6 text-blue-600" /><h1 className="text-2xl font-bold">Cotações recebidas</h1></div><p className="mt-1 text-sm text-gray-500">Decisão por exceção, aprendizado contínuo e proteção comercial.</p></div>{isAdmin && <details className="relative"><summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-sm font-bold"><RefreshCw className="h-4 w-4" /> Atualizar fontes</summary><div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border bg-white p-2 shadow-xl"><button onClick={() => sync.mutate({ limit: 25 })} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-gray-50"><MailCheck className="h-4 w-4" /> E-mail</button><button onClick={() => portals.mutate({ sources: [...PORTAL_SOURCES] })} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-gray-50"><Globe2 className="h-4 w-4" /> Portais</button></div></details>}</header>
+    <IntelligencePanel data={intelligence.data} loading={intelligence.isLoading} />
+    {deadlines.data && (deadlines.data.vencidos.length > 0 || deadlines.data.proximos.length > 0) && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><strong>{deadlines.data.vencidos.length}</strong> vencida(s) · <strong>{deadlines.data.proximos.length}</strong> vencendo em até 3 dias.</div>}
+    <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]"><aside className={`${selectedId ? "hidden lg:block" : "block"} overflow-hidden rounded-xl border bg-white`}><div className="border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar cotação" className="h-10 w-full rounded-lg border pl-9 pr-3 text-sm" /></div><div className="mt-2 flex gap-1 overflow-auto">{[["abertas", "Abertas"], ["revisao", "Revisão"], ["respondida", "Respondidas"], ["todas", "Todas"]].map(([value, label]) => <button key={value} onClick={() => setStatus(value)} className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${status === value ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600"}`}>{label}</button>)}</div></div><div className="max-h-[72vh] overflow-y-auto">{list.isLoading ? <Loader2 className="mx-auto my-10 h-5 w-5 animate-spin" /> : rows.map((q) => { const st = STATUS[q.status] ?? STATUS.nova; return <button key={q.id} onClick={() => choose(q.id)} className={`w-full border-b px-3 py-3 text-left hover:bg-blue-50 ${selectedId === q.id ? "bg-blue-50" : ""}`}><div className="flex justify-between gap-2"><span className="line-clamp-2 text-sm font-semibold">{q.subject || "Cotação sem assunto"}</span><span className={`h-fit rounded-full px-2 py-0.5 text-[10px] font-bold ${st.cls}`}>{st.label}</span></div><div className="mt-1 flex justify-between text-xs text-gray-500"><span className="truncate">{q.orgao || q.fromName || q.fromAddress}</span><span>{q.matchedItems}/{q.totalItems}</span></div></button>; })}</div></aside><main className="min-w-0 overflow-hidden rounded-xl border bg-white">{selectedId == null ? <Empty /> : detail.isLoading ? <div className="flex min-h-[560px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div> : detail.data ? <Workspace data={detail.data} canEdit={canEdit} smtp={emailStatus.data?.smtpConfigured === true} onBack={() => setSelectedId(null)} onChanged={() => { utils.emailQuotations.get.invalidate({ id: selectedId }); utils.emailQuotations.list.invalidate(); utils.emailQuotations.pricingPreview.invalidate({ id: selectedId }); utils.quotationDecision.summary.invalidate({ quotationId: selectedId }); utils.quotationDecision.protection.invalidate({ quotationId: selectedId }); utils.quotationDecision.commercialIntelligence.invalidate(); }} /> : null}</main></div>
+  </div>;
 }
 
-type DetailItem = {
-  id: number;
-  numeroItem: number | null;
-  descricao: string;
-  quantidade: string | null;
-  unidade: string | null;
-  codigoCatalogo: string | null;
-  produtoMatchId: number | null;
-  matchScore: string | null;
-  matchMethod: string;
-  matchConfirmado: boolean;
-  matchAuto: boolean;
-  precoSugerido: string | null;
-  precoVendaManual: string | null;
-  productName: string | null;
-  productManufacturer: string | null;
-  productPresentation: string | null;
-  productConcentration: string | null;
-  productPrice: string | null;
-  productCode: string | null;
-  supplierName: string | null;
-  categoryName: string | null;
-};
+function IntelligencePanel({ data, loading }: { data: any; loading: boolean }) { return <details className="mb-4 rounded-xl border bg-white"><summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3"><span className="flex items-center gap-2 text-sm font-bold"><TrendingUp className="h-4 w-4 text-blue-600" /> Inteligência comercial</span>{loading && <Loader2 className="h-4 w-4 animate-spin" />}</summary>{data && <div className="border-t bg-gray-50/50 p-4"><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"><Summary label="Decididas" value={String(data.overview.decided)} /><Summary label="Win rate" value={`${data.overview.winRate.toFixed(1)}%`} tone="green" /><Summary label="Margem média" value={`${data.overview.avgMargin.toFixed(1)}%`} /><Summary label="Gap nas perdas" value={data.overview.avgLossGap == null ? "—" : `${data.overview.avgLossGap.toFixed(1)}%`} /></div><div className="mt-3 grid gap-3 lg:grid-cols-3"><Rank title="Produtos mais vencedores" rows={data.topProducts} /><Rank title="Fornecedores mais vencedores" rows={data.topSuppliers} /><div className="rounded-lg border bg-white p-3"><Label>Preços prioritários</Label><div className="mt-2 space-y-2">{(data.priorityPriceUpdates ?? []).slice(0, 5).map((r: any) => <div key={r.productId} className="flex justify-between gap-2 text-xs"><span className="truncate font-semibold">{r.name}</span><span className="shrink-0 text-gray-500">{r.wins} vit. · {freshLabel(r.freshness, r.daysOld)}</span></div>)}</div></div></div></div>}</details>; }
+function Rank({ title, rows = [] }: { title: string; rows?: any[] }) { return <div className="rounded-lg border bg-white p-3"><Label>{title}</Label><div className="mt-2 space-y-2">{rows.slice(0, 5).map((r: any, i: number) => <div key={r.id} className="flex justify-between gap-2 text-xs"><span className="truncate"><strong>#{i + 1}</strong> {r.name}</span><span className="shrink-0 text-gray-500">{r.wins} vit. · {r.winRate.toFixed(0)}%</span></div>)}</div></div>; }
+function Empty() { return <div className="flex min-h-[560px] flex-col items-center justify-center text-center"><BrainCircuit className="mb-3 h-10 w-10 text-gray-300" /><strong>Selecione uma cotação</strong><span className="mt-1 text-sm text-gray-400">A análise combina custo, fornecedor, histórico, risco e feedback.</span></div>; }
 
-type DetailData = {
-  quotation: {
-    id: number;
-    messageId: string | null;
-    subject: string | null;
-    orgao: string | null;
-    fromName: string | null;
-    fromAddress?: string | null;
-    status: string;
-    bodyText: string | null;
-    prazoResposta: string | Date | null;
-    propostaPdfUrl: string | null;
-    propostaGeradaEm: string | Date | null;
-    propostaMargemPercent: string | null;
-  };
-  items: DetailItem[];
-};
-
-function QuotationDetail({ data, canEdit, onChanged, onBack }: { data: DetailData; canEdit: boolean; onChanged: () => void; onBack: () => void }) {
-  const [, navigate] = useLocation();
-  const { quotation, items } = data;
-  const utils = trpc.useUtils();
-  const [pickerItem, setPickerItem] = useState<DetailItem | null>(null);
-  const [saleDrafts, setSaleDrafts] = useState<Record<number, string>>({});
-
-  const previewQuery = trpc.emailQuotations.pricingPreview.useQuery({ id: quotation.id });
-  const previewById = useMemo(() => new Map((previewQuery.data?.items ?? []).map((p) => [p.quotationItemId, p])), [previewQuery.data]);
-
-  useEffect(() => {
-    if (!previewQuery.data) return;
-    setSaleDrafts((current) => {
-      const next = { ...current };
-      for (const p of previewQuery.data.items) {
-        if (next[p.quotationItemId] === undefined && p.unitPrice != null) next[p.quotationItemId] = p.unitPrice.toFixed(2);
-      }
-      return next;
-    });
-  }, [previewQuery.data]);
-
-  const matchMutation = trpc.emailQuotations.setItemMatch.useMutation({
-    onSuccess: () => { toast.success("Produto vinculado."); setPickerItem(null); onChanged(); },
-    onError: (e) => toast.error(e.message),
-  });
-  const saleMutation = trpc.emailQuotations.setItemSalePrice.useMutation({
-    onSuccess: () => { toast.success("Preço atualizado."); onChanged(); },
-    onError: (e) => toast.error(e.message),
-  });
-  const prazoMutation = trpc.emailQuotations.setPrazo.useMutation({
-    onSuccess: onChanged,
-    onError: (e) => toast.error(e.message),
-  });
-  const statusMutation = trpc.emailQuotations.setStatus.useMutation({
-    onSuccess: () => { toast.success("Status atualizado."); onChanged(); },
-    onError: (e) => toast.error(e.message),
-  });
-  const orcamentoMutation = trpc.emailQuotations.gerarOrcamento.useMutation({
-    onSuccess: (res) => {
-      window.open(res.pdfUrl, "_blank");
-      toast.success(`Proposta gerada: ${money(res.total)} · margem efetiva ${res.effectiveMarginPercent}%.`);
-      onChanged();
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const statusInfo = trpc.emailQuotations.status.useQuery();
-  const responderMutation = trpc.emailQuotations.responderPorEmail.useMutation({
-    onSuccess: (res) => { toast.success(`Proposta enviada para ${res.to}.`); onChanged(); },
-    onError: (e) => toast.error(e.message),
-  });
-  const funnelMutation = trpc.funil.criarDeCotacao.useMutation({
-    onSuccess: ({ id, jaExistia }) => {
-      toast.success(jaExistia ? "Oportunidade já existia no Funil." : "Oportunidade criada no Funil.");
-      navigate(`/funil?oportunidade=${id}`);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const prepararPortalMutation = trpc.emailQuotations.prepararParaPortal.useMutation({
-    onSuccess: async (res) => {
-      await utils.proposals.list.invalidate();
-      navigate(`/agente-proposta?propostaId=${res.proposalId}`);
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const isPortalSourced = (quotation.messageId ?? "").startsWith("portal:");
-  const canGenerate = previewQuery.data?.canGenerate === true;
-
-  const saveSale = (itemId: number) => {
-    const raw = saleDrafts[itemId]?.replace(",", ".").trim();
-    if (!raw) return saleMutation.mutate({ itemId, salePrice: null });
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) return toast.error("Informe um preço de venda válido.");
-    saleMutation.mutate({ itemId, salePrice: value });
-  };
-
-  const restoreAutomatic = (itemId: number) => {
-    saleMutation.mutate({ itemId, salePrice: null }, {
-      onSuccess: async () => {
-        setSaleDrafts((prev) => { const next = { ...prev }; delete next[itemId]; return next; });
-        await utils.emailQuotations.pricingPreview.invalidate({ id: quotation.id });
-        onChanged();
-      },
-    });
-  };
-
-  return (
-    <div>
-      <div className="border-b border-gray-100 p-4 lg:p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <button onClick={onBack} className="mb-2 inline-flex items-center gap-1 text-xs font-semibold text-gray-500 lg:hidden">
-              <ChevronLeft className="h-4 w-4" /> Voltar às cotações
-            </button>
-            <h2 className="text-lg font-bold text-gray-950">{quotation.subject || "Cotação sem assunto"}</h2>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
-              <span>{quotation.orgao || quotation.fromName || "Origem não identificada"}</span>
-              <label className="flex items-center gap-1.5">
-                <span className="text-xs">Prazo:</span>
-                <input
-                  type="date"
-                  defaultValue={quotation.prazoResposta ? String(quotation.prazoResposta).slice(0, 10) : ""}
-                  onChange={(e) => prazoMutation.mutate({ id: quotation.id, prazoResposta: e.target.value || null })}
-                  disabled={!canEdit}
-                  className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-700"
-                />
-              </label>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              onClick={() => orcamentoMutation.mutate({ id: quotation.id })}
-              disabled={!canEdit || !canGenerate || orcamentoMutation.isPending}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
-              title={!canGenerate ? "Selecione todos os produtos e confirme os custos antes de gerar" : undefined}
-            >
-              {orcamentoMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-              Gerar proposta
-            </button>
-            {canEdit && (
-              <details className="relative">
-                <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-50"><MoreHorizontal className="h-5 w-5" /></summary>
-                <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
-                  {statusInfo.data?.smtpConfigured && (
-                    <button onClick={() => responderMutation.mutate({ id: quotation.id })} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50">Gerar e enviar por e-mail</button>
-                  )}
-                  {isPortalSourced && (
-                    <button onClick={() => prepararPortalMutation.mutate({ id: quotation.id })} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"><Bot className="h-4 w-4" /> Preencher no portal</button>
-                  )}
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Esta ação cria uma oportunidade real no Funil. Deseja continuar?")) funnelMutation.mutate({ quotationId: quotation.id });
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
-                  ><KanbanSquare className="h-4 w-4" /> Enviar ao Funil (cria oportunidade)</button>
-                  <button onClick={() => statusMutation.mutate({ id: quotation.id, status: "respondida" })} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50">Marcar como respondida</button>
-                  <button onClick={() => statusMutation.mutate({ id: quotation.id, status: "descartada" })} className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">Descartar cotação</button>
-                </div>
-              </details>
-            )}
-          </div>
-        </div>
-
-        {quotation.propostaGeradaEm && quotation.propostaPdfUrl && (
-          <a href={quotation.propostaPdfUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700">
-            <Sparkles className="h-3.5 w-3.5" /> Ver proposta já gerada <ExternalLink className="h-3 w-3" />
-          </a>
-        )}
-      </div>
-
-      {previewQuery.data && (
-        <div className="grid grid-cols-2 gap-2 border-b border-gray-100 bg-gray-50/60 p-3 md:grid-cols-4 lg:p-4">
-          <Summary label="Custo total" value={money(previewQuery.data.totalCost)} />
-          <Summary label="Venda total" value={money(previewQuery.data.totalSale)} strong />
-          <Summary label="Lucro estimado" value={money(previewQuery.data.totalProfit)} />
-          <Summary label="Margem real" value={`${previewQuery.data.effectiveMarginPercent.toFixed(2)}%`} />
-        </div>
-      )}
-
-      {previewQuery.data && !previewQuery.data.canGenerate && (
-        <div className="mx-4 mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {previewQuery.data.unmatchedItems > 0 && <span><strong>{previewQuery.data.unmatchedItems}</strong> item(ns) sem produto.</span>}
-          {previewQuery.data.itemsSemCusto > 0 && <span><strong>{previewQuery.data.itemsSemCusto}</strong> item(ns) sem custo.</span>}
-        </div>
-      )}
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1050px] text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 bg-white text-left text-[11px] font-bold uppercase tracking-wide text-gray-500">
-              <th className="px-4 py-3 w-[30%]">Item solicitado</th>
-              <th className="px-3 py-3">Qtd.</th>
-              <th className="px-3 py-3 w-[29%]">Produto selecionado</th>
-              <th className="px-3 py-3 text-right">Custo</th>
-              <th className="px-3 py-3 w-[135px]">Venda</th>
-              <th className="px-3 py-3 text-right">Margem</th>
-              <th className="px-4 py-3 text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {items.map((item) => {
-              const p = previewById.get(item.id);
-              return (
-                <tr key={item.id} className="align-top hover:bg-gray-50/60">
-                  <td className="px-4 py-3">
-                    <div className="font-medium leading-5 text-gray-900">{item.descricao}</div>
-                    <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-gray-400">
-                      {item.numeroItem != null && <span>Item {item.numeroItem}</span>}
-                      {item.codigoCatalogo && <span>Cód. {item.codigoCatalogo}</span>}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 whitespace-nowrap text-gray-700">{item.quantidade ?? "—"} {item.unidade ?? ""}</td>
-                  <td className="px-3 py-3">
-                    {item.produtoMatchId ? (
-                      <div>
-                        <div className="flex items-start gap-2">
-                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Check className="h-3 w-3" /></span>
-                          <div className="min-w-0">
-                            <div className="font-semibold leading-5 text-gray-900">{item.productName || `Produto #${item.produtoMatchId}`}</div>
-                            <div className="mt-0.5 text-xs text-gray-500">{[item.productManufacturer, item.productConcentration, item.productPresentation].filter(Boolean).join(" · ")}</div>
-                            <div className="mt-0.5 text-xs font-medium text-gray-500">{item.supplierName || "Fornecedor não informado"}</div>
-                          </div>
-                        </div>
-                        {canEdit && <button onClick={() => setPickerItem(item)} className="mt-2 text-xs font-semibold text-blue-700 hover:underline">Trocar produto</button>}
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => canEdit && setPickerItem(item)}
-                        disabled={!canEdit}
-                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                      ><Search className="h-3.5 w-3.5" /> Selecionar produto</button>
-                    )}
-                  </td>
-                  <td className="px-3 py-3 text-right font-semibold text-gray-800">{p?.custoUnitario != null ? money(p.custoUnitario) : "—"}</td>
-                  <td className="px-3 py-3">
-                    {p?.unitPrice != null ? (
-                      <div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-gray-400">R$</span>
-                          <input
-                            value={saleDrafts[item.id] ?? p.unitPrice.toFixed(2)}
-                            onChange={(e) => setSaleDrafts((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                            onBlur={() => saveSale(item.id)}
-                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                            disabled={!canEdit}
-                            className="w-24 rounded-md border border-gray-200 px-2 py-1.5 text-right font-semibold outline-none focus:border-blue-400 disabled:bg-gray-50"
-                          />
-                        </div>
-                        <div className="mt-1 flex items-center gap-1">
-                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase ${p.pricingMode === "manual" ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-500"}`}>{p.pricingMode === "manual" ? "Manual" : "Automático"}</span>
-                          {canEdit && p.pricingMode === "manual" && <button onClick={() => restoreAutomatic(item.id)} className="text-[10px] text-gray-500 hover:underline">usar margem</button>}
-                        </div>
-                      </div>
-                    ) : <span className="text-gray-400">—</span>}
-                  </td>
-                  <td className={`px-3 py-3 text-right font-semibold ${p?.belowCost ? "text-red-600" : "text-gray-700"}`}>{p?.marginPercent != null ? `${p.marginPercent.toFixed(2)}%` : "—"}</td>
-                  <td className="px-4 py-3 text-right font-bold text-gray-900">{p?.totalPrice != null ? money(p.totalPrice) : "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {items.length === 0 && <div className="p-10 text-center text-sm text-gray-400">Nenhum item foi extraído desta cotação.</div>}
-
-      {pickerItem && (
-        <ProductPicker
-          item={pickerItem}
-          onClose={() => setPickerItem(null)}
-          onSelect={(product) => matchMutation.mutate({ itemId: pickerItem.id, produtoMatchId: product.id, precoSugerido: product.price ?? null })}
-          pending={matchMutation.isPending}
-        />
-      )}
-    </div>
-  );
+function Workspace({ data, canEdit, smtp, onBack, onChanged }: any) {
+  const [, navigate] = useLocation(); const utils = trpc.useUtils(); const q = data.quotation; const items = data.items as any[];
+  const [filter, setFilter] = useState("all"); const [compact, setCompact] = useState(items.length >= 25); const [selected, setSelected] = useState<number[]>([]); const [picker, setPicker] = useState<any | null>(null); const [create, setCreate] = useState<any | null>(null); const [sale, setSale] = useState<Record<number, string>>({}); const [autoRefreshed, setAutoRefreshed] = useState<number | null>(null);
+  const preview = trpc.emailQuotations.pricingPreview.useQuery({ id: q.id }); const decision = trpc.quotationDecision.summary.useQuery({ quotationId: q.id }); const protectionQuery = trpc.quotationDecision.protection.useQuery({ quotationId: q.id }); const protection: ProtectionData | undefined = protectionQuery.data;
+  const pMap = useMemo(() => new Map((preview.data?.items ?? []).map((x) => [x.quotationItemId, x])), [preview.data]); const dMap = useMemo(() => new Map((decision.data?.items ?? []).map((x) => [x.itemId, x])), [decision.data]);
+  const resolve = trpc.quotationDecision.resolve.useMutation({ onSuccess: (r) => { toast.success(`${r.autoResolved} resolvido(s); ${r.summary.totals.needsReview} para revisão.`); onChanged(); }, onError: (e) => toast.error(e.message) });
+  const refresh = trpc.quotationDecision.refreshPrices.useMutation({ onSuccess: (r) => { if (r.initiated) toast.success(`${r.initiated} fonte(s) atualizando preços.`); }, onError: (e) => toast.error(e.message) }); const bulk = trpc.quotationDecision.bulkAction.useMutation({ onSuccess: (r) => { toast.success(`${r.affected} registro(s) afetado(s).`); onChanged(); }, onError: (e) => toast.error(e.message) }); const feedback = trpc.quotationDecision.feedback.useMutation();
+  const match = trpc.emailQuotations.setItemMatch.useMutation({ onSuccess: () => { setPicker(null); onChanged(); }, onError: (e) => toast.error(e.message) }); const salePrice = trpc.emailQuotations.setItemSalePrice.useMutation({ onSuccess: onChanged, onError: (e) => toast.error(e.message) }); const deadline = trpc.emailQuotations.setPrazo.useMutation({ onSuccess: onChanged }); const statusMut = trpc.emailQuotations.setStatus.useMutation({ onSuccess: onChanged }); const proposal = trpc.emailQuotations.gerarOrcamento.useMutation({ onSuccess: (r) => { window.open(r.pdfUrl, "_blank"); toast.success(`Proposta gerada: ${money(r.total)}.`); onChanged(); }, onError: (e) => toast.error(e.message) }); const email = trpc.emailQuotations.responderPorEmail.useMutation({ onSuccess: (r) => toast.success(`Enviada para ${r.to}.`), onError: (e) => toast.error(e.message) }); const funnel = trpc.funil.criarDeCotacao.useMutation({ onSuccess: ({ id }) => navigate(`/funil?oportunidade=${id}`) }); const portal = trpc.emailQuotations.prepararParaPortal.useMutation({ onSuccess: async (r) => { await utils.proposals.list.invalidate(); navigate(`/agente-proposta?propostaId=${r.proposalId}`); } });
+  useEffect(() => { setCompact(items.length >= 25); setSelected([]); }, [q.id]);
+  useEffect(() => { if (!preview.data) return; setSale((old) => { const next = { ...old }; preview.data.items.forEach((x) => { if (next[x.quotationItemId] === undefined && x.unitPrice != null) next[x.quotationItemId] = x.unitPrice.toFixed(2); }); return next; }); }, [preview.data]);
+  useEffect(() => { if (!canEdit || !decision.data || autoRefreshed === q.id || refresh.isPending) return; setAutoRefreshed(q.id); if (decision.data.items.some((i) => ["stale", "unknown"].includes(i.priceFreshness))) refresh.mutate({ quotationId: q.id }); }, [canEdit, decision.data, autoRefreshed, q.id]);
+  const totals = decision.data?.totals; const visible = items.filter((item) => filter === "all" || dMap.get(item.id)?.risk === filter); const targetIds = selected.length ? selected : visible.map((item) => item.id); const log = (input: any) => feedback.mutate({ quotationId: q.id, ...input });
+  const chooseProduct = (item: any, product: any, kind: "product_selected" | "match_approved" = "product_selected") => { log({ itemId: item.id, kind, productId: Number(product.id), supplierId: product.supplierId ?? null, previousProductId: item.produtoMatchId ?? null, previousSupplierId: item.productSupplierId ?? null }); match.mutate({ itemId: item.id, produtoMatchId: Number(product.id), precoSugerido: product.price ?? undefined }); };
+  const saveSale = (item: any) => { const value = Number((sale[item.id] ?? "").replace(",", ".")); if (!Number.isFinite(value) || value <= 0) return toast.error("Preço de venda inválido."); log({ itemId: item.id, kind: "sale_adjusted", value }); salePrice.mutate({ itemId: item.id, salePrice: value }); };
+  const applyMargin = () => { const raw = window.prompt("Margem para os itens selecionados (%)", String(preview.data?.defaultMarginPercent ?? 15)); if (raw == null) return; const value = Number(raw.replace(",", ".")); if (!Number.isFinite(value) || value < 0 || value >= 100) return toast.error("Margem inválida."); bulk.mutate({ quotationId: q.id, itemIds: targetIds, action: "apply_margin", value }); };
+  return <div><div className="border-b p-4"><div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between"><div><button onClick={onBack} className="mb-2 inline-flex items-center gap-1 text-xs lg:hidden"><ChevronLeft className="h-4 w-4" /> Voltar</button><h2 className="text-lg font-bold">{q.subject || "Cotação"}</h2><div className="mt-1 flex gap-3 text-sm text-gray-500"><span>{q.orgao || q.fromName}</span><input type="date" defaultValue={q.prazoResposta ? String(q.prazoResposta).slice(0, 10) : ""} onChange={(e) => deadline.mutate({ id: q.id, prazoResposta: e.target.value || null })} disabled={!canEdit} className="rounded border px-2 text-xs" /></div></div><div className="flex flex-wrap gap-2"><Button onClick={() => decision.refetch()}><Globe2 className="h-4 w-4" /> Pesquisar</Button><Button onClick={() => refresh.mutate({ quotationId: q.id })} disabled={!canEdit}><RefreshCw className="h-4 w-4" /> Atualizar preços</Button><Button dark onClick={() => resolve.mutate({ quotationId: q.id })} disabled={!canEdit}><Sparkles className="h-4 w-4" /> Resolver com IA</Button><button onClick={() => proposal.mutate({ id: q.id })} disabled={!canEdit || totals?.canGenerate !== true || protection?.canProceed === false} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white disabled:opacity-40"><FileText className="h-4 w-4" /> Gerar proposta</button>{canEdit && <Actions smtp={smtp} portal={String(q.messageId ?? "").startsWith("portal:")} onEmail={() => email.mutate({ id: q.id })} onPortal={() => portal.mutate({ id: q.id })} onFunnel={() => funnel.mutate({ quotationId: q.id })} onAnswered={() => statusMut.mutate({ id: q.id, status: "respondida" })} onDiscard={() => statusMut.mutate({ id: q.id, status: "descartada" })} />}</div></div></div>
+    <ProtectionBanner data={protection} />
+    {totals && <div className="border-b bg-gray-50 p-3"><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8"><Summary label="Resolvidos" value={`${totals.resolved}/${totals.totalItems}`} tone="green" /><Summary label="Revisar" value={String(totals.needsReview)} tone="yellow" /><Summary label="Bloqueados" value={String(totals.blocked)} tone="red" /><Summary label="Custo" value={money(totals.totalCost)} /><Summary label="Frete" value={money(totals.totalFreight)} /><Summary label="Tributos" value={money(totals.totalTaxes)} /><Summary label="Venda" value={money(totals.totalSale)} /><Summary label="Lucro/margem" value={`${money(totals.totalProfit)} · ${totals.effectiveMarginPercent.toFixed(1)}%`} /></div><div className="mt-2 flex flex-wrap justify-between gap-2"><div className="flex gap-1">{[["all", "Todos"], ["red", "Críticos"], ["yellow", "Revisar"], ["green", "Seguros"]].map(([v, label]) => <button key={v} onClick={() => setFilter(v)} className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${filter === v ? "bg-gray-900 text-white" : "border bg-white"}`}>{label}</button>)}</div><button onClick={() => setCompact((v) => !v)} className="inline-flex items-center gap-1 rounded-full border bg-white px-2.5 py-1 text-[11px] font-bold">{compact ? <LayoutList className="h-3 w-3" /> : <Rows3 className="h-3 w-3" />}{compact ? "Cartões" : "Modo rápido"}</button></div></div>}
+    {compact && canEdit && <div className="flex flex-wrap items-center gap-2 border-b p-3"><span className="text-xs text-gray-500">{selected.length ? `${selected.length} selecionado(s)` : "Ação sobre itens visíveis"}</span><Button small onClick={() => bulk.mutate({ quotationId: q.id, itemIds: targetIds, action: "approve_safe" })}>Aprovar seguros</Button><Button small onClick={() => bulk.mutate({ quotationId: q.id, itemIds: targetIds, action: "use_best_supplier" })}>Melhor fornecedor</Button><Button small onClick={applyMargin}>Aplicar margem</Button><Button small onClick={() => bulk.mutate({ quotationId: q.id, itemIds: targetIds, action: "refresh_prices" })}>Atualizar custos</Button></div>}
+    {compact ? <FastTable items={visible} dMap={dMap} pMap={pMap} selected={selected} setSelected={setSelected} /> : <div className="space-y-3 p-4">{visible.map((item) => <ItemCard key={item.id} item={item} d={dMap.get(item.id)} p={pMap.get(item.id)} canEdit={canEdit} draft={sale[item.id]} setDraft={(value: string) => setSale((old) => ({ ...old, [item.id]: value }))} save={() => saveSale(item)} approve={() => chooseProduct(item, { id: item.produtoMatchId, price: item.precoSugerido ?? item.productPrice, supplierId: item.productSupplierId }, "match_approved")} useMemory={(m: any) => chooseProduct(item, { id: m.productId, price: m.lastCost, supplierId: m.supplierId })} rejectMemory={(m: any) => log({ itemId: item.id, kind: "product_rejected", productId: m.productId, supplierId: m.supplierId })} useSupplier={(s: any) => { log({ itemId: item.id, kind: "supplier_selected", productId: item.produtoMatchId, supplierId: s.supplierId, previousSupplierId: item.productSupplierId, value: s.effectivePrice }); match.mutate({ itemId: item.id, produtoMatchId: item.produtoMatchId, precoSugerido: String(s.effectivePrice) }); }} rejectSupplier={(s: any) => log({ itemId: item.id, kind: "supplier_rejected", productId: item.produtoMatchId, supplierId: s.supplierId })} onPick={() => setPicker(item)} onCreate={() => setCreate(item)} />)}</div>}
+    {picker && <ProductPicker item={picker} onClose={() => setPicker(null)} onUse={(product: any) => chooseProduct(picker, product)} />}{create && <QuickCreate item={create} onClose={() => setCreate(null)} onCreated={(product: any) => { chooseProduct(create, product); setCreate(null); }} />}</div>;
 }
 
-function Summary({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
-      <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</div>
-      <div className={`mt-0.5 text-base ${strong ? "font-extrabold text-blue-700" : "font-bold text-gray-900"}`}>{value}</div>
-    </div>
-  );
-}
-
-type PickerProduct = {
-  id: number;
-  name: string;
-  price: string | null;
-  manufacturer: string | null;
-  concentration: string | null;
-  presentation: string | null;
-  supplierName: string | null;
-  categoryName: string | null;
-  code: string | null;
-};
-
-function ProductPicker({ item, onClose, onSelect, pending }: { item: DetailItem; onClose: () => void; onSelect: (product: PickerProduct) => void; pending: boolean }) {
-  const [query, setQuery] = useState("");
-  const effectiveQuery = query.trim();
-  const productsQuery = trpc.products.list.useQuery(
-    {
-      search: effectiveQuery || item.descricao.slice(0, 120),
-      searchField: "all",
-      isActive: "yes",
-      limit: 30,
-      sortBy: "price",
-      sortDir: "asc",
-    },
-    { enabled: true },
-  );
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="border-b border-gray-100 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="font-bold text-gray-950">Selecionar produto para o match</h3>
-              <p className="mt-0.5 line-clamp-2 text-sm text-gray-500">{item.descricao}</p>
-            </div>
-            <button onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button>
-          </div>
-          <div className="relative mt-3">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Digite nome, código, princípio ativo, marca ou apresentação"
-              className="h-11 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-blue-400"
-            />
-          </div>
-        </div>
-        <div className="overflow-y-auto p-3">
-          {productsQuery.isLoading ? (
-            <div className="p-12 text-center"><Loader2 className="mx-auto h-6 w-6 animate-spin text-gray-400" /></div>
-          ) : productsQuery.data?.items?.length ? (
-            <div className="divide-y divide-gray-100 rounded-xl border border-gray-100">
-              {productsQuery.data.items.map((product) => (
-                <button
-                  key={product.id}
-                  onClick={() => onSelect(product as PickerProduct)}
-                  disabled={pending}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_140px_110px] items-center gap-4 px-4 py-3 text-left hover:bg-blue-50 disabled:opacity-50"
-                >
-                  <div className="min-w-0">
-                    <div className="font-semibold text-gray-900">{product.name}</div>
-                    <div className="mt-0.5 text-xs text-gray-500">{[product.manufacturer, product.concentration, product.presentation].filter(Boolean).join(" · ") || "Sem detalhes adicionais"}</div>
-                    <div className="mt-0.5 text-xs text-gray-400">{product.supplierName || "Fornecedor não informado"}{product.code ? ` · cód. ${product.code}` : ""}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-bold uppercase text-gray-400">Custo</div>
-                    <div className="font-bold text-gray-900">{money(product.price)}</div>
-                  </div>
-                  <span className="justify-self-end rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white">Selecionar</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="p-12 text-center text-sm text-gray-400">Nenhum produto encontrado. Simplifique os termos da busca.</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+function ProtectionBanner({ data }: { data?: ProtectionData }) { if (!data || data.alerts.length === 0) return null; return <div className={`border-b p-3 ${data.red ? "bg-red-50" : "bg-amber-50"}`}><div className="flex gap-2"><ShieldAlert className="h-4 w-4 shrink-0" /><div><strong className="text-sm">Proteção comercial: {data.red} crítico(s), {data.yellow} atenção</strong>{data.alerts.slice(0, 4).map((a, i) => <div key={`${a.code}-${i}`} className="text-xs text-gray-700">{a.message}</div>)}{data.predictedWinningValue != null && <div className="mt-1 text-[11px] text-gray-500">Mediana vencedora do órgão: {money(data.predictedWinningValue)} · {data.historicalSamples} amostra(s)</div>}</div></div></div>; }
+function FastTable({ items, dMap, pMap, selected, setSelected }: any) { const all = items.length > 0 && selected.length === items.length; const toggle = (id: number) => setSelected((old: number[]) => old.includes(id) ? old.filter((x) => x !== id) : [...old, id]); return <div className="overflow-auto"><table className="w-full min-w-[1050px] text-sm"><thead className="bg-gray-50 text-left text-[10px] uppercase text-gray-500"><tr><th className="p-2"><input type="checkbox" checked={all} onChange={() => setSelected(all ? [] : items.map((x: any) => x.id))} /></th><th>Risco</th><th>Solicitado</th><th>Match</th><th>Fornecedor</th><th className="text-right">Custo</th><th className="text-right">Venda</th><th className="text-right">Margem</th><th>Preço</th></tr></thead><tbody>{items.map((item: any) => { const d = dMap.get(item.id); const p = pMap.get(item.id); const r = risk(d?.risk); return <tr key={item.id} className="border-t"><td className="p-2"><input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggle(item.id)} /></td><td><span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${r.cls}`}>{r.label}</span></td><td className="max-w-[280px] p-2 text-xs font-semibold">{item.descricao}</td><td className="max-w-[220px] p-2 text-xs">{item.productName || "Sem match"}</td><td className="p-2 text-xs">{d?.supplierRanking?.[0]?.supplierName || item.supplierName || "—"}</td><td className="p-2 text-right font-bold">{money(p?.custoUnitario)}</td><td className="p-2 text-right font-bold">{money(p?.unitPrice)}</td><td className="p-2 text-right">{p?.marginPercent == null ? "—" : `${Number(p.marginPercent).toFixed(1)}%`}</td><td className="p-2 text-xs text-gray-500">{freshLabel(d?.priceFreshness, d?.priceAgeDays)}</td></tr>; })}</tbody></table></div>; }
+function ItemCard({ item, d, p, canEdit, draft, setDraft, save, approve, useMemory, rejectMemory, useSupplier, rejectSupplier, onPick, onCreate }: any) { const r = risk(d?.risk); const memory = d?.memory?.[0]; const score = trpc.quotationDecision.supplierScore.useQuery({ productId: item.produtoMatchId ?? 1 }, { enabled: item.produtoMatchId != null }); const supplier = score.data?.[0] ?? d?.supplierRanking?.[0]; return <section className="rounded-xl border"><div className="flex justify-between border-b px-4 py-2"><span className="flex items-center gap-2 text-xs font-bold"><span className={`h-2.5 w-2.5 rounded-full ${r.dot}`} /> Item {item.numeroItem ?? item.id}<span className={`rounded-full border px-2 py-0.5 text-[10px] ${r.cls}`}>{r.label}</span></span><span className="text-[10px] text-gray-400">{freshLabel(d?.priceFreshness, d?.priceAgeDays)}</span></div><div className="grid xl:grid-cols-[1fr_1.1fr_1.35fr]"><div className="border-b p-4 xl:border-b-0 xl:border-r"><Label>Solicitado</Label><div className="mt-2 text-sm font-semibold">{item.descricao}</div>{d?.riskReasons?.slice(0, 3).map((reason: string) => <div key={reason} className="mt-1 flex gap-1 text-[11px] text-gray-600"><AlertCircle className="h-3 w-3" />{reason}</div>)}</div><div className="border-b p-4 xl:border-b-0 xl:border-r"><Label>Match e aprendizado</Label><div className="mt-2 font-bold">{item.productName || "Sem produto"}</div><div className="text-xs text-gray-500">{item.supplierName || "Fornecedor não informado"} · confiança {pct(item.matchScore)}</div>{memory && memory.productId !== item.produtoMatchId && <div className="mt-3 rounded-lg bg-blue-50 p-2 text-xs"><strong>Memória:</strong> {memory.productName} · {pct(memory.confidence)}{canEdit && <div className="mt-2 flex gap-1"><Button small onClick={() => useMemory(memory)}>Usar</Button><Button small onClick={() => rejectMemory(memory)}>Não sugerir</Button></div>}</div>}{canEdit && <div className="mt-3 flex gap-1">{item.produtoMatchId && !item.matchConfirmado && <Button small dark onClick={approve}><CheckCircle2 className="h-3 w-3" /> Aprovar</Button>}<Button small onClick={onPick}><Search className="h-3 w-3" /> Trocar</Button><Button small onClick={onCreate}><PackagePlus className="h-3 w-3" /> Criar</Button></div>}</div><div className="p-4"><div className="flex justify-between"><Label>Decisão econômica</Label>{supplier && <span className="rounded-full bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-700">Score {supplier.finalScore ?? supplier.score}/100</span>}</div><div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5"><Metric label="Produto" value={money(p?.baseCost)} /><Metric label="Frete" value={money(p?.freightValue)} icon={<Truck className="h-3 w-3" />} /><Metric label="Tributos" value={money(p?.taxValue)} /><Metric label="Custo" value={money(p?.custoUnitario)} strong /><Metric label="Margem" value={p?.marginPercent == null ? "—" : `${Number(p.marginPercent).toFixed(1)}%`} /></div><div className="mt-3 grid gap-2 sm:grid-cols-[150px_1fr]"><label><Label>Venda</Label><input value={draft ?? (p?.unitPrice != null ? Number(p.unitPrice).toFixed(2) : "")} onChange={(e) => setDraft(e.target.value)} onBlur={save} disabled={!canEdit} className="mt-1 h-10 w-full rounded-lg border px-3 text-right font-bold" /></label><div className="grid grid-cols-2 gap-2"><div className="rounded-lg bg-emerald-50 p-2"><span className="flex items-center gap-1 text-[9px] font-bold uppercase text-emerald-700"><Target className="h-3 w-3" /> Compra máxima</span><strong className="mt-1 block text-sm text-emerald-800">{money(d?.maxPurchasePrice)}</strong></div><div className="rounded-lg bg-gray-50 p-2"><Label>Total</Label><strong className="mt-1 block text-sm">{money(p?.totalPrice)}</strong></div></div></div>{supplier && <div className="mt-3 rounded-lg bg-indigo-50 p-2 text-xs"><div className="flex items-center gap-1 font-bold text-indigo-700"><Gauge className="h-3.5 w-3.5" /> {supplier.supplierName || "Fornecedor"}</div><div className="text-gray-600">custo {money(supplier.landedCost)} · win {supplier.winRate ?? "—"}% · confiabilidade {supplier.reliability ?? "—"}</div>{canEdit && <div className="mt-2 flex gap-1"><Button small onClick={() => useSupplier(supplier)}>Usar fornecedor</Button><Button small onClick={() => rejectSupplier(supplier)}>Rejeitar</Button></div>}</div>}</div></div></section>; }
+function ProductPicker({ item, onClose, onUse }: any) { const [query, setQuery] = useState(item.productName || item.descricao.slice(0, 80)); const products = trpc.products.list.useQuery({ search: query, searchField: "all", isActive: "yes", limit: 50, sortBy: "price", sortDir: "asc" }); return <Modal title="Trocar produto" onClose={onClose}><div className="p-3"><input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-lg border px-3 text-sm" /><div className="mt-3 max-h-[60vh] space-y-2 overflow-auto">{(products.data?.items ?? []).map((product: any) => <button key={product.id} onClick={() => onUse(product)} className="flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left hover:bg-blue-50"><span><strong className="block text-sm">{product.name}</strong><span className="text-xs text-gray-500">{product.supplierName || "—"} · {product.manufacturer || "—"}</span></span><strong>{money(product.price)}</strong></button>)}</div></div></Modal>; }
+function QuickCreate({ item, onClose, onCreated }: any) { const suppliers = trpc.suppliers.list.useQuery({ activeOnly: true }); const categories = trpc.categories.list.useQuery(); const [form, setForm] = useState({ name: item.descricao.slice(0, 300), supplierId: "", categoryId: "", price: "" }); const create = trpc.products.create.useMutation({ onSuccess: (r: any) => { const id = Number(r?.insertId); if (!id) return toast.error("Produto criado sem ID."); onCreated({ id, price: form.price || null, supplierId: Number(form.supplierId) }); }, onError: (e) => toast.error(e.message) }); return <Modal title="Criar produto" onClose={onClose}><form onSubmit={(e) => { e.preventDefault(); const supplierId = Number(form.supplierId); const categoryId = Number(form.categoryId); if (!supplierId || !categoryId) return toast.error("Selecione fornecedor e categoria."); create.mutate({ name: form.name, supplierId, categoryId, price: form.price || null, unit: item.unidade || null, isActive: "yes" }); }} className="grid gap-3 p-4 sm:grid-cols-2"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="h-10 rounded-lg border px-3 sm:col-span-2" /><select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })} className="h-10 rounded-lg border px-3"><option value="">Fornecedor</option>{(suppliers.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className="h-10 rounded-lg border px-3"><option value="">Categoria</option>{(categories.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select><input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Custo" className="h-10 rounded-lg border px-3" /><button type="submit" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 font-bold text-white"><Check className="h-4 w-4" /> Criar e vincular</button></form></Modal>; }
+function Actions({ smtp, portal, onEmail, onPortal, onFunnel, onAnswered, onDiscard }: any) { return <details className="relative"><summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border"><MoreHorizontal className="h-5 w-5" /></summary><div className="absolute right-0 z-30 mt-2 w-60 rounded-xl border bg-white p-2 shadow-xl">{smtp && <button onClick={onEmail} className="w-full rounded p-2 text-left text-sm hover:bg-gray-50">Enviar por e-mail</button>}{portal && <button onClick={onPortal} className="flex w-full items-center gap-2 rounded p-2 text-sm hover:bg-gray-50"><Bot className="h-4 w-4" /> Preencher portal</button>}<button onClick={onFunnel} className="flex w-full items-center gap-2 rounded p-2 text-sm hover:bg-gray-50"><KanbanSquare className="h-4 w-4" /> Funil</button><button onClick={onAnswered} className="w-full rounded p-2 text-left text-sm hover:bg-gray-50">Marcar respondida</button><button onClick={onDiscard} className="w-full rounded p-2 text-left text-sm text-red-600 hover:bg-red-50">Descartar</button></div></details>; }
+function Summary({ label, value, tone }: { label: string; value: string; tone?: string }) { const cls = tone === "green" ? "bg-emerald-50 border-emerald-100" : tone === "yellow" ? "bg-amber-50 border-amber-100" : tone === "red" ? "bg-red-50 border-red-100" : "bg-white"; return <div className={`rounded-lg border px-3 py-2 ${cls}`}><Label>{label}</Label><div className="mt-0.5 text-sm font-bold">{value}</div></div>; }
+function Metric({ label, value, icon, strong }: { label: string; value: string; icon?: React.ReactNode; strong?: boolean }) { return <div className="rounded-lg bg-gray-50 p-2"><Label>{icon}{label}</Label><div className={`mt-1 text-sm font-bold ${strong ? "text-blue-700" : ""}`}>{value}</div></div>; }
+function Label({ children }: { children: React.ReactNode }) { return <span className="text-[9px] font-bold uppercase tracking-wide text-gray-500">{children}</span>; }
+function Button({ children, onClick, dark, small, disabled }: { children: React.ReactNode; onClick: () => void; dark?: boolean; small?: boolean; disabled?: boolean }) { return <button onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-1 rounded-lg border font-bold disabled:opacity-40 ${small ? "px-2.5 py-1.5 text-xs" : "h-10 px-3 text-sm"} ${dark ? "border-gray-900 bg-gray-900 text-white" : "bg-white"}`}>{children}</button>; }
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}><div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b p-4"><strong>{title}</strong><button onClick={onClose}><X className="h-5 w-5" /></button></div>{children}</div></div>; }

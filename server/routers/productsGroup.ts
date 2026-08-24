@@ -25,7 +25,7 @@ import {
   products, categories, suppliers,
 } from "../../drizzle/schema";
 import { or, like, sql, eq, asc, and } from "drizzle-orm";
-import { protectedProcedure, router } from "../_core/trpc";
+import { editorProcedure, protectedProcedure, router } from "../_core/trpc";
 import { recordAudit } from "../services/auditService";
 
 export const productsRouter = router({
@@ -150,7 +150,7 @@ export const productsRouter = router({
         return result;
       }),
 
-    bulkUpdate: protectedProcedure
+    bulkUpdate: editorProcedure
       .input(
         z.object({
           ids: z.array(z.number()).min(1),
@@ -232,7 +232,7 @@ export const productsRouter = router({
      * referências. DELETE físico continua disponível apenas em delete
      * individual (ação pontual), nunca como operação comum da UI.
      */
-    bulkArchive: protectedProcedure
+    bulkArchive: editorProcedure
       .input(z.object({ ids: z.array(z.number()).min(1) }))
       .mutation(async ({ input, ctx }) => {
         const archived = await bulkArchiveProducts(input.ids);
@@ -249,7 +249,7 @@ export const productsRouter = router({
     /**
      * Reativação em lote de produtos arquivados (isActive = yes).
      */
-    bulkReactivate: protectedProcedure
+    bulkReactivate: editorProcedure
       .input(z.object({ ids: z.array(z.number()).min(1) }))
       .mutation(async ({ input, ctx }) => {
         const reactivated = await bulkReactivateProducts(input.ids);
@@ -272,7 +272,7 @@ export const productsRouter = router({
      * transacional (soft-delete + mergedIntoId + redirecionamento de
      * propostas, ofertas e preços).
      */
-    bulkResolveDuplicates: protectedProcedure
+    bulkResolveDuplicates: editorProcedure
       .input(z.object({ ids: z.array(z.number()).min(1) }))
       .mutation(async ({ input, ctx }) => {
         const groups = await findDuplicateGroups({ threshold: 0.82, limit: 500 });

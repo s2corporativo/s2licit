@@ -16,6 +16,8 @@ const SegurancaMFA = lazy(() => import("./pages/SegurancaMFA"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Logs = lazy(() => import("./pages/Logs"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const CentralPendencias = lazy(() => import("./pages/CentralPendencias"));
+const DossieOportunidade = lazy(() => import("./pages/DossieOportunidade"));
 const Categorias = lazy(() => import("./pages/Categorias"));
 const Equivalencias = lazy(() => import("./pages/Equivalencias"));
 const Fornecedores = lazy(() => import("./pages/Fornecedores"));
@@ -23,7 +25,8 @@ const ImportarPlanilha = lazy(() => import("./pages/ImportarPlanilha"));
 const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
 const Propostas = lazy(() => import("./pages/Propostas"));
 const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
-const Produtos = lazy(() => import("./pages/Produtos"));
+const Produtos = lazy(() => import("./pages/ProdutosModern"));
+const ProdutosLegado = lazy(() => import("./pages/Produtos"));
 const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
@@ -47,6 +50,7 @@ const DiligenciasPage = lazy(() => import("./pages/Diligencias"));
 const DocumentosHabilitacaoPage = lazy(() => import("./pages/DocumentosHabilitacao"));
 const CotacoesRecebidas = lazy(() => import("./pages/CotacoesRecebidas"));
 const RadarPncp = lazy(() => import("./pages/RadarPncp"));
+const AgenticSeek = lazy(() => import("./pages/AgenticSeek"));
 const Certidoes = lazy(() => import("./pages/Certidoes"));
 const CentralIA = lazy(() => import("./pages/CentralIA"));
 const SalaDisputa = lazy(() => import("./pages/SalaDisputa"));
@@ -64,6 +68,7 @@ const Login = lazy(() => import("./pages/Login"));
 const Manual = lazy(() => import("./pages/Manual"));
 const Diagnostico = lazy(() => import("./pages/Diagnostico"));
 const CentroOperacional = lazy(() => import("./pages/CentroOperacional"));
+const InteligenciaLicitacoes = lazy(() => import("./pages/InteligenciaLicitacoes"));
 
 function PageLoading() {
   return <div className="min-h-[60vh] flex items-center justify-center"><div className="w-8 h-1 bg-blue-800 animate-pulse rounded" /></div>;
@@ -80,6 +85,9 @@ function Router() {
               <Switch>
                 <Route path="/" component={Dashboard} />
                 <Route path="/dashboard"><Redirect to="/" /></Route>
+                <Route path="/pendencias" component={CentralPendencias} />
+                <Route path="/oportunidades/:id/dossie" component={DossieOportunidade} />
+                <Route path="/inteligencia"><RequireAuth message="Acesse a Inteligência Comercial após fazer login." minRole="editor"><InteligenciaLicitacoes /></RequireAuth></Route>
                 <Route path="/agenda" component={Agenda} />
                 <Route path="/desempenho" component={Desempenho} />
                 <Route path="/funil" component={Funil} />
@@ -94,6 +102,7 @@ function Router() {
                 <Route path="/comparacao" component={Comparacao} />
                 <Route path="/categorias" component={Categorias} />
                 <Route path="/produtos" component={Produtos} />
+                <Route path="/produtos-legado" component={ProdutosLegado} />
                 <Route path="/equivalencias" component={Equivalencias} />
                 <Route path="/qualidade"><RequireAuth message="Acesse o Dashboard de Qualidade após fazer login." minRole="editor"><DataQualityDashboard /></RequireAuth></Route>
                 <Route path="/fornecedores"><RequireAuth message="Gerencie fornecedores após fazer login." minRole="editor"><Fornecedores /></RequireAuth></Route>
@@ -112,6 +121,7 @@ function Router() {
                 <Route path="/central-operacional"><Redirect to="/funil" /></Route>
                 <Route path="/cotacoes-recebidas"><RequireAuth message="Acesse as cotações recebidas após fazer login." minRole="editor"><CotacoesRecebidas /></RequireAuth></Route>
                 <Route path="/radar-pncp"><RequireAuth message="Acesse o radar de oportunidades após fazer login." minRole="editor"><RadarPncp /></RequireAuth></Route>
+                <Route path="/agenticseek"><RequireAuth message="Faça login para acessar o AgenticSeek." minRole="editor"><AgenticSeek /></RequireAuth></Route>
                 <Route path="/certidoes"><RequireAuth message="Acesse as certidões após fazer login." minRole="admin"><Certidoes /></RequireAuth></Route>
                 <Route path="/central-ia"><RequireAuth message="Acesse a Central de IA após fazer login." minRole="admin"><CentralIA /></RequireAuth></Route>
                 <Route path="/integracoes"><RequireAuth message="Acesse as integrações após fazer login." minRole="admin"><Integracoes /></RequireAuth></Route>

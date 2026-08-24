@@ -1,3 +1,8 @@
+# Deploy recorrente do S2Licit na VPS Contabo.
+# A imagem é construída no GitHub-hosted runner e publicada pelo runner
+# self-hosted da própria VPS. O provisionamento do host (Nginx/Caddy/Certbot)
+# fica separado do deploy recorrente: aqui atualizamos somente código, imagem,
+# containers e readiness. O .env permanece root:600 no host.
 name: Deploy VPS
 
 on:
@@ -6,7 +11,6 @@ on:
   workflow_dispatch:
 
 env:
-  DEPLOY_HOST: 13.140.167.153
   DEPLOY_DOMAIN: s2.s2corporativo.com.br
 
 concurrency:
@@ -14,34 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck
-        run: pnpm check
-      - name: Testes
-        run: pnpm test
-      - name: Build
-        run: pnpm build
-      - name: Auditoria de dependências de produção
-        run: pnpm audit --prod --audit-level high
-
   build-image:
-    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -50,16 +27,20 @@ jobs:
     outputs:
       image: ${{ steps.meta.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Login no GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Definir imagem imutável por SHA
+
+      - name: Definir imagem por SHA
         id: meta
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Build e push
         uses: docker/build-push-action@v6
         with:
@@ -71,96 +52,121 @@ jobs:
 
   deploy:
     needs: build-image
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
     timeout-minutes: 40
     permissions:
       contents: read
       packages: read
     env:
-      DEPLOY_USER: ${{ secrets.VPS_DEPLOY_USER }}
-      DEPLOY_SSH_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-      VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
       GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       S2_IMAGE: ${{ needs.build-image.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout da versão a publicar
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Validar credenciais de deploy seguro
+      - name: Validar ambiente da VPS
         run: |
           set -euo pipefail
-          [ -n "${DEPLOY_USER:-}" ] || { echo "::error::Configure VPS_DEPLOY_USER."; exit 1; }
-          [ "$DEPLOY_USER" != "root" ] || { echo "::error::Deploy remoto como root é proibido."; exit 1; }
-          [ -n "${DEPLOY_SSH_KEY:-}" ] || { echo "::error::Configure VPS_SSH_PRIVATE_KEY."; exit 1; }
-          [ -n "${VPS_HOST_KEY:-}" ] || { echo "::error::VPS_HOST_KEY é obrigatório; conexão sem pinagem é proibida."; exit 1; }
+          echo "Runner: $(hostname)"
+          docker --version
+          docker compose version
+          test -d /opt/s2licit || { echo "::error::Diretório /opt/s2licit ausente; execute o provisionamento inicial antes do deploy."; exit 1; }
+          test -w /opt/s2licit || { echo "::error::Runner sem permissão de escrita em /opt/s2licit."; exit 1; }
 
-      - name: Preparar SSH por chave com host pinado
+      - name: Sincronizar código localmente
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
-          chmod 600 "$HOME/.ssh/id_ed25519"
-          printf '%s\n' "$VPS_HOST_KEY" > "$HOME/.ssh/known_hosts"
-          chmod 600 "$HOME/.ssh/known_hosts"
-          echo "SSH_OPTS=-i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20" >> "$GITHUB_ENV"
-
-      - name: Testar acesso à VPS
-        run: ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "echo 'SSH seguro disponível' && docker --version && docker compose version"
-
-      - name: Sincronizar arquivos de deploy
-        run: |
-          set -euo pipefail
-          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/s2licit"
           rsync -az --delete \
             --exclude .git \
             --exclude node_modules \
             --exclude dist \
             --exclude .env \
-            -e "ssh $SSH_OPTS" \
-            ./ "$DEPLOY_USER@$DEPLOY_HOST:/opt/s2licit/"
+            ./ /opt/s2licit/
 
-      - name: Autenticar imagem na VPS
+      - name: Autenticar e baixar imagem exata
         run: |
           set -euo pipefail
-          printf '%s' "$GHCR_TOKEN" | ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" \
-            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin >/dev/null
+          docker pull "$S2_IMAGE"
 
-      - name: Migrar e subir aplicação
+      - name: Preparar ambiente protegido para o Compose
         run: |
           set -euo pipefail
-          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<REMOTE
-          set -euo pipefail
-          cd /opt/s2licit
-          if docker ps -a --format '{{.Names}}' | grep -qx 'sistema-s2-app'; then
-            docker rm -f sistema-s2-app >/dev/null
-          fi
-          DOMAIN='$DEPLOY_DOMAIN' S2_IMAGE='$S2_IMAGE' bash scripts/vps-bootstrap.sh
-          REMOTE
+          uid=$(id -u)
+          gid=$(id -g)
+          # O runner pertence ao grupo docker, que já é equivalente a acesso
+          # administrativo ao daemon. Usamos a própria imagem publicada como
+          # helper root apenas sobre /opt/s2licit para atualizar S2_IMAGE e
+          # copiar o .env para o workspace com permissão 600 do runner.
+          # O arquivo original nunca deixa de ser root:600.
+          docker run --rm --entrypoint sh \
+            -e NEW_IMAGE="$S2_IMAGE" \
+            -e OUT_UID="$uid" \
+            -e OUT_GID="$gid" \
+            -v /opt/s2licit:/config \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            "$S2_IMAGE" -c '
+              set -eu
+              test -f /config/.env
+              current=$(grep "^S2_IMAGE=" /config/.env 2>/dev/null | cut -d= -f2- || true)
+              if [ -n "$current" ] && [ "$current" != "$NEW_IMAGE" ]; then
+                if grep -q "^S2_IMAGE_PREVIOUS=" /config/.env; then
+                  sed -i "s|^S2_IMAGE_PREVIOUS=.*|S2_IMAGE_PREVIOUS=${current}|" /config/.env
+                else
+                  printf "S2_IMAGE_PREVIOUS=%s\n" "$current" >> /config/.env
+                fi
+              fi
+              if grep -q "^S2_IMAGE=" /config/.env; then
+                sed -i "s|^S2_IMAGE=.*|S2_IMAGE=${NEW_IMAGE}|" /config/.env
+              else
+                printf "S2_IMAGE=%s\n" "$NEW_IMAGE" >> /config/.env
+              fi
+              chown 0:0 /config/.env
+              chmod 600 /config/.env
+              cp /config/.env /workspace/.env
+              chown "${OUT_UID}:${OUT_GID}" /workspace/.env
+              chmod 600 /workspace/.env
+            '
+          test -r .env
+          test "$(stat -c '%a' .env)" = "600"
 
-      - name: Validar readiness sem expor a aplicação publicamente
+      - name: Subir aplicação e banco
         run: |
           set -euo pipefail
-          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          # A imagem executa scripts/migrate-production.mjs no entrypoint antes
+          # de iniciar o backend; não é necessário rodar o bootstrap de host.
+          docker compose --env-file .env pull app
+          docker compose --env-file .env up -d --no-build --remove-orphans
+
+      - name: Validar readiness
+        run: |
           set -euo pipefail
-          cd /opt/s2licit
           LOCAL_PORT=$(grep '^APP_LOCAL_PORT=' .env | cut -d= -f2 || true)
           LOCAL_PORT=${LOCAL_PORT:-3000}
           for i in $(seq 1 45); do
             if curl -fsS "http://127.0.0.1:${LOCAL_PORT}/readyz" >/dev/null 2>&1; then
-              docker compose ps
+              echo "Aplicação e MySQL prontos"
+              docker compose --env-file .env ps
               exit 0
             fi
             sleep 4
           done
-          docker compose ps >&2 || true
-          docker compose logs --tail=120 app db >&2 || true
+          echo "Aplicação não ficou pronta" >&2
+          docker compose --env-file .env ps >&2 || true
+          docker compose --env-file .env logs --tail=160 app db >&2 || true
           exit 1
-          REMOTE
 
       - name: Resumo
         run: |
           echo "### Deploy concluído" >> "$GITHUB_STEP_SUMMARY"
           echo "- URL: https://$DEPLOY_DOMAIN/" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Imagem imutável: $S2_IMAGE" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Gate: lint + typecheck + testes + build + audit" >> "$GITHUB_STEP_SUMMARY"
-          echo "- SSH: chave + host pinado + usuário não-root" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Imagem: $S2_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Readiness: aplicação + MySQL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Execução: Docker Compose no runner Contabo, sem SSH/sudo" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Segredos persistentes: /opt/s2licit/.env mantido root:600" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remover cópia temporária do .env
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/.env"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+: "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no ambiente; a senha nao e versionada}"
 # Teste RBAC em produção — usa node (fetch nativo) da VPS, sem expor senhas.
 # Pré-condição: usuário s2licit_qa_rbac_viewer@example.invalid (role viewer) criado
 # com o MESMO hash do admin (mesma senha ADMIN_PASSWORD).
@@ -38,5 +39,5 @@ echo "admin:  $(trpc_call 'proposals.create' '{"title":"S2LICIT_QA_RBAC_PROPOSTA
 echo
 
 echo "=== 5. LIMPEZA ==="
-docker exec sistema-s2-db mysql -uroot -p500e56204ec8981ba5f3bfb9496ba21aeb7766bc8c143e58c75f65d99c6dfbe2 sistema_s2 -e "DELETE FROM users WHERE email='s2licit_qa_rbac_viewer@example.invalid'; SELECT id,email,role FROM users;" 2>/dev/null
+docker exec sistema-s2-db mysql -uroot -p"$MYSQL_ROOT_PASSWORD" sistema_s2 -e "DELETE FROM users WHERE email='s2licit_qa_rbac_viewer@example.invalid'; SELECT id,email,role FROM users;" 2>/dev/null
 echo "=== FIM ==="

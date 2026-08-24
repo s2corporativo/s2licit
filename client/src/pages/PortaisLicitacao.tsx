@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { usePermission } from "@/components/RequireAuth";
-import { KeyRound, ExternalLink, Plus, Trash2, Loader2, ShieldCheck } from "lucide-react";
+import { KeyRound, ExternalLink, Plus, Trash2, Loader2, ShieldCheck, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 export default function PortaisLicitacao() {
@@ -11,6 +11,7 @@ export default function PortaisLicitacao() {
   const listQuery = trpc.portalCredentials.list.useQuery();
 
   const [form, setForm] = useState({ portal: "", apelido: "", usuario: "", senha: "", cnpj: "", loginUrl: "" });
+  const [testingPortal, setTestingPortal] = useState<string | null>(null);
 
   const salvar = trpc.portalCredentials.salvar.useMutation({
     onSuccess: () => {
@@ -24,6 +25,14 @@ export default function PortaisLicitacao() {
     onSuccess: () => { toast.success("Credencial removida."); utils.portalCredentials.list.invalidate(); },
     onError: (e) => toast.error(e.message),
   });
+  const testarAcesso = trpc.portalCredentials.testarAcesso.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) toast.success(`${result.source.toUpperCase()}: acesso confirmado.`, { description: result.detail });
+      else toast.error(`${result.source.toUpperCase()}: acesso não confirmado.`, { description: result.detail });
+    },
+    onError: (e) => toast.error("Falha ao testar o acesso.", { description: e.message }),
+    onSettled: () => setTestingPortal(null),
+  });
 
   const portalInfo = (p: string) => portaisQuery.data?.find((x) => x.portal === p);
 
@@ -35,13 +44,18 @@ export default function PortaisLicitacao() {
     window.open(url, "_blank", "noopener");
   };
 
+  const testar = (portal: string) => {
+    setTestingPortal(portal);
+    testarAcesso.mutate({ portal: portal as any });
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-2">
         <KeyRound className="w-7 h-7 text-blue-600" />
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Portais de Licitação</h1>
-          <p className="text-sm text-gray-500">Cofre de acessos (senha criptografada) — Funarbe, Fundep, COPASA, Compras MG e outros</p>
+          <p className="text-sm text-gray-500">Cofre de acessos (senha criptografada) — COPASA, CEMIG, Fundep, Funarbe, Compras MG e FIEMG</p>
         </div>
       </div>
 
@@ -49,8 +63,8 @@ export default function PortaisLicitacao() {
         <ShieldCheck className="w-5 h-5 mt-0.5 shrink-0" />
         <div>
           As senhas ficam <strong>criptografadas</strong> e nunca aparecem na tela. "Abrir portal" copia seu
-          usuário e abre a página de login numa nova aba. O envio automático de propostas roda no modo
-          <strong> semi-automático</strong> (o robô loga e preenche; você confere e envia).
+          usuário e abre a página de login numa nova aba. <strong>Testar acesso</strong> valida somente a autenticação,
+          sem coletar oportunidades ou enviar proposta. CAPTCHA/MFA continuam exigindo intervenção humana.
         </div>
       </div>
 
@@ -74,7 +88,7 @@ export default function PortaisLicitacao() {
           <button
             onClick={() => {
               if (!form.portal || !form.usuario || !form.senha) { toast.error("Portal, usuário e senha são obrigatórios."); return; }
-              salvar.mutate({ portal: form.portal, apelido: form.apelido || undefined, usuario: form.usuario, senha: form.senha, cnpj: form.cnpj || undefined, loginUrl: form.loginUrl || undefined });
+              salvar.mutate({ portal: form.portal as any, apelido: form.apelido || undefined, usuario: form.usuario, senha: form.senha, cnpj: form.cnpj || undefined, loginUrl: form.loginUrl || undefined });
             }}
             disabled={salvar.isPending}
             className="mt-3 flex items-center gap-1 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 disabled:opacity-60"
@@ -107,6 +121,16 @@ export default function PortaisLicitacao() {
                   </td>
                   <td className="px-4 py-2 text-gray-600">{c.usuario}</td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {isAdmin && (
+                      <button
+                        onClick={() => testar(c.portal)}
+                        disabled={testarAcesso.isPending}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900 mr-3 disabled:opacity-50"
+                      >
+                        {testingPortal === c.portal && testarAcesso.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Testar acesso
+                      </button>
+                    )}
                     <button onClick={() => abrirPortal(c)} className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:text-blue-900 mr-3">
                       <ExternalLink className="w-3.5 h-3.5" /> Abrir portal
                     </button>

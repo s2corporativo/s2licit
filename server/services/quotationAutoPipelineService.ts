@@ -14,10 +14,11 @@ import { logger } from "../_core/logger";
  *
  * Depois que uma cotação entra na fila (via e-mail ou radar de portais), este
  * serviço:
- *   1. Auto-confirma itens com match determinístico (CATMAS/CATMAT, score 1)
- *      ou similaridade de nome acima do limiar de alta confiança — desde que
- *      haja preço de custo positivo. Cada confirmação automática fica marcada
- *      (matchAuto=true) para a trilha de auditoria.
+ *   1. Auto-confirma SOMENTE itens com match determinístico por código de
+ *      catálogo (CATMAS/CATMAT) e preço de custo positivo. Similaridade de
+ *      nome permanece apenas como sugestão para revisão humana, mesmo com
+ *      score alto. Cada confirmação automática fica marcada (matchAuto=true)
+ *      para a trilha de auditoria.
  *   2. Se TODOS os itens da cotação ficarem confirmados e precificados, gera o
  *      PDF da proposta automaticamente e o armazena (propostaPdfUrl), pronto
  *      para revisão e envio em um clique.
@@ -29,19 +30,24 @@ import { logger } from "../_core/logger";
  * Tudo idempotente: cotações com proposta já gerada são puladas.
  */
 
-const DEFAULT_AUTO_CONFIRM_THRESHOLD = 0.82;
+const LEGACY_AUTO_CONFIRM_THRESHOLD = 0.82;
 
+/**
+ * Mantido por compatibilidade com o endpoint de status e instalações antigas.
+ * Desde a política determinística, este valor NÃO autoriza match por nome:
+ * similaridade textual é sempre sugestão para revisão humana.
+ */
 export function autoConfirmThreshold(): number {
   const raw = Number(process.env.QUOTATION_AUTO_CONFIRM_THRESHOLD);
   if (Number.isFinite(raw) && raw >= 0.5 && raw <= 1) return raw;
-  return DEFAULT_AUTO_CONFIRM_THRESHOLD;
+  return LEGACY_AUTO_CONFIRM_THRESHOLD;
 }
 
 /**
  * Limiar MÍNIMO de similaridade de nome para o match por nome sequer entrar
  * no catálogo de candidatos da revisão (abaixo disso, o item não recebe match
- * algum). Deve ficar abaixo do limiar de auto-confirmação — itens entre os
- * dois limiares aparecem na fila com o melhor candidato para confirmação humana.
+ * algum). Match por nome nunca é auto-confirmado: o limiar controla somente a
+ * qualidade das sugestões apresentadas ao operador.
  */
 export function nameMatchThreshold(): number {
   const raw = Number(process.env.QUOTATION_NAME_MATCH_THRESHOLD);
@@ -84,24 +90,16 @@ export interface AutoConfirmCandidate {
  *  - Já confirmado → não (nada a fazer).
  *  - Sem produto casado ou sem preço de custo positivo → não.
  *  - Match por código de catálogo (CATMAS/CATMAT) é determinístico → sim.
- *  - Match por nome exige score ≥ limiar de alta confiança → sim.
- *  - Match manual/nenhum nunca é auto-confirmado (decisão humana pendente).
+ *  - Match por nome, independentemente do score, exige revisão humana → não.
+ *  - Match manual/nenhum nunca é auto-confirmado.
  */
-export function shouldAutoConfirm(
-  item: AutoConfirmCandidate,
-  threshold = autoConfirmThreshold(),
-): boolean {
+export function shouldAutoConfirm(item: AutoConfirmCandidate): boolean {
   if (item.matchConfirmado) return false;
   if (item.produtoMatchId == null) return false;
   const preco = Number(item.precoSugerido);
   if (!Number.isFinite(preco) || preco <= 0) return false;
 
-  if (item.matchMethod === "catmas" || item.matchMethod === "catmat") return true;
-  if (item.matchMethod === "nome") {
-    const score = Number(item.matchScore);
-    return Number.isFinite(score) && score >= threshold;
-  }
-  return false;
+  return item.matchMethod === "catmas" || item.matchMethod === "catmat";
 }
 
 export interface AutoPipelineQuotationResult {
@@ -191,18 +189,15 @@ export async function runAutoPipelineForQuotation(
       return result;
     }
 
-    // 1. Auto-confirmação dos matches de alta confiança
-    const threshold = autoConfirmThreshold();
+    // 1. Auto-confirmação exclusivamente de matches determinísticos por código.
     for (const item of items) {
-      if (!shouldAutoConfirm(item, threshold)) continue;
+      if (!shouldAutoConfirm(item)) continue;
       await db
         .update(emailQuotationItems)
         .set({ matchConfirmado: true, matchAuto: true })
         .where(eq(emailQuotationItems.id, item.id));
       item.matchConfirmado = true;
       result.autoConfirmedItems++;
-      // Trilha de auditoria: base para calibrar o limiar (quantas confirmações
-      // automáticas depois são corrigidas manualmente pelo operador).
       await recordAudit({
         action: "AUTO_MATCH_CONFIRMED",
         entity: "email_quotation_items",
@@ -217,7 +212,7 @@ export async function runAutoPipelineForQuotation(
       (item) => item.produtoMatchId == null || item.matchConfirmado !== true,
     );
     if (pendentes.length > 0) {
-      result.blockedReason = `${pendentes.length} item(ns) aguardando revisão humana (match ausente ou abaixo do limiar).`;
+      result.blockedReason = `${pendentes.length} item(ns) aguardando revisão humana (match ausente ou não determinístico).`;
       return result;
     }
     const semPreco = items.filter((item) => {

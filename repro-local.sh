@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reproduz localmente a violação RBAC: servidor real + viewer + mutation.
 set -uo pipefail
-cd /home/ubuntu/s2licit
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export COMPOSE_PROJECT_NAME=s2test
 
 # criar .env mínimo para o stack local
@@ -32,7 +32,7 @@ echo "=== criar viewer ==="
 insert_viewer "INSERT INTO users (openId,name,email,role,loginMethod,passwordHash,disabled,failedLoginAttempts,mfaEnabled) SELECT 'local:s2licit_qa_viewer@test.local','QA','s2licit_qa_viewer@test.local','viewer','local',passwordHash,0,0,0 FROM users WHERE role='admin' LIMIT 1;"
 insert_viewer "SELECT id,email,role FROM users;" | grep -E "qa_viewer|email" || true
 
-PASS=$(grep -m1 '^ADMIN_PASSWORD=' /home/ubuntu/ejc/.env 2>/dev/null || echo "Fam04061427@")
+PASS="${ADMIN_PASSWORD:?defina ADMIN_PASSWORD no ambiente; nao ha senha padrao}"
 # o app local registra admin via ensureAdminUser? verificar login do admin local primeiro
 login() {
   curl -sS -m 20 -D - -X POST "http://127.0.0.1:8088/api/auth/login" -H 'Content-Type: application/json' \

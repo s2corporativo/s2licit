@@ -3,6 +3,7 @@ import {
   type PortalConfig,
 } from "./propostaAgent";
 import {
+  FUNARBE_PROVIDER_BASE_URL,
   S2_TARGET_PORTALS,
   type S2TargetPortal,
 } from "./s2TargetPortals";
@@ -80,6 +81,25 @@ const fiemgConfig: PortalConfig = {
   },
 };
 
+const funarbeFornecedorConfig: PortalConfig = {
+  nome: "FUNARBE / Portal do Fornecedor (Agrega)",
+  loginUrl: `${FUNARBE_PROVIDER_BASE_URL}/`,
+  notasImportantes:
+    "A descoberta pública continua em compras.funarbe.org.br; cotações destinadas ao fornecedor são lidas na área autenticada fornecedor.funarbe.org.br. " +
+    "Seletores verificados em 13/08/2026. O agente não resolve CAPTCHA/2FA e a captura autenticada é somente de leitura.",
+  estrategia: "form_padrao",
+  seletores: {
+    loginCpfCnpj:
+      '#loginform-email, input[name*="email"], input[placeholder*="Email ou Login"], input[placeholder*="login"]',
+    loginSenha:
+      '#loginform-senha, input[name*="senha"], input[type="password"]',
+    loginBotao:
+      'button[type="submit"], input[type="submit"], input[value="Entrar"]',
+    loginSucesso: "boa tarde",
+    tabelaItens: "table tbody tr",
+  },
+};
+
 const copasaConfig: PortalConfig = {
   ...PORTAL_CONFIGS.copasa,
   nome: "COPASA / Portal do Fornecedor",
@@ -94,7 +114,7 @@ export const S2_PORTAL_CONFIGS: Record<S2TargetPortal, PortalConfig> = {
   copasa: copasaConfig,
   cemig: cemigConfig,
   fundep: PORTAL_CONFIGS.fundep,
-  funarbe: PORTAL_CONFIGS.funarbe,
+  funarbe: funarbeFornecedorConfig,
   comprasmg: PORTAL_CONFIGS.comprasmg,
   fiemg: fiemgConfig,
 };

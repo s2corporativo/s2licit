@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
+: "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no ambiente; a senha nao e versionada}"
 # Teste RBAC definitivo — reproduzir mutation viewer e validar FORBIDDEN em adminProcedure.
 BASE=http://127.0.0.1:3000
 PASS=$(grep -m1 '^ADMIN_PASSWORD=' /opt/s2licit/.env | cut -d= -f2)
-SQL='docker exec sistema-s2-db mysql -uroot -p500e56204ec8981ba5f3bfb9496ba21aeb7766bc8c143e58c75f65d99c6dfbe2 sistema_s2'
+SQL="docker exec sistema-s2-db mysql -uroot -p$MYSQL_ROOT_PASSWORD sistema_s2"
 
 cleanup() {
   $SQL -e "DELETE FROM users WHERE email='s2licit_qa_rbac_viewer@example.invalid'; DELETE FROM proposals WHERE title LIKE 'S2LICIT_QA_RBAC%';" 2>/dev/null

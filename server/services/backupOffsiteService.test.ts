@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { copyBackupOffsite } from "./backupOffsiteService";
+import {
+  isOffsiteBackupConfigured,
+  isOffsiteBackupRequired,
+} from "./backupOffsiteService";
 
 describe("backupOffsiteService", () => {
-  it("não tenta copiar quando comando externo não foi configurado", async () => {
-    const old = process.env.BACKUP_OFFSITE_COMMAND;
-    delete process.env.BACKUP_OFFSITE_COMMAND;
-    try {
-      await expect(copyBackupOffsite("/tmp/x.sql.gz")).resolves.toEqual({ attempted: false, success: false });
-    } finally {
-      process.env.BACKUP_OFFSITE_COMMAND = old;
-    }
+  it("não exige destino externo quando nenhum comando foi configurado", () => {
+    expect(isOffsiteBackupConfigured({})).toBe(false);
+    expect(isOffsiteBackupRequired({})).toBe(false);
+  });
+
+  it("considera a cópia externa obrigatória por padrão quando configurada", () => {
+    const env = { BACKUP_OFFSITE_COMMAND: "rclone copy $BACKUP_FILE remote:s2" };
+    expect(isOffsiteBackupConfigured(env)).toBe(true);
+    expect(isOffsiteBackupRequired(env)).toBe(true);
+  });
+
+  it("permite best-effort somente por configuração explícita", () => {
+    const env = {
+      BACKUP_OFFSITE_COMMAND: "rclone copy $BACKUP_FILE remote:s2",
+      BACKUP_OFFSITE_REQUIRED: "false",
+    };
+    expect(isOffsiteBackupRequired(env)).toBe(false);
   });
 });

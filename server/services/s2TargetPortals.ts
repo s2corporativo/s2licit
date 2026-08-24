@@ -9,6 +9,17 @@ export const S2_TARGET_PORTALS = [
 
 export type S2TargetPortal = (typeof S2_TARGET_PORTALS)[number];
 
+export const FUNARBE_PROVIDER_BASE_URL = "https://fornecedor.funarbe.org.br";
+/**
+ * Rotas de descoberta de novas cotações na área autenticada da Funarbe.
+ * A tela de "aguardando confirmação" não entra aqui porque representa
+ * cotações já respondidas/pós-venda e não deve voltar para a fila comercial.
+ */
+export const FUNARBE_PROVIDER_LIST_URLS = [
+  `${FUNARBE_PROVIDER_BASE_URL}/compra-produtos-diversos`,
+  `${FUNARBE_PROVIDER_BASE_URL}/pedidos-compra`,
+] as const;
+
 export interface S2TargetPortalDefinition {
   portal: S2TargetPortal;
   label: string;

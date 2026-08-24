@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
+: "${MYSQL_ROOT_PASSWORD:?defina MYSQL_ROOT_PASSWORD no ambiente; a senha nao e versionada}"
 # Teste decisivo: isolar por que mutations protectedProcedure passam para viewer.
 set -uo pipefail
-SQL='docker exec sistema-s2-db mysql -uroot -p500e56204ec8981ba5f3bfb9496ba21aeb7766bc8c143e58c75f65d99c6dfbe2 sistema_s2'
+SQL="docker exec sistema-s2-db mysql -uroot -p$MYSQL_ROOT_PASSWORD sistema_s2"
 BASE=http://127.0.0.1:3001
 PASS=$(grep -m1 '^ADMIN_PASSWORD=' /opt/s2licit/.env | cut -d= -f2)
 
