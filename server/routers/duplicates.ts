@@ -17,12 +17,21 @@ type ProductRow = typeof products.$inferSelect;
  */
 const MAX_CATALOGO_EM_MEMORIA = 20000;
 
-async function carregarCatalogoAtivo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
-  const linhas = await db
+/**
+ * `comTeto: false` é só para a varredura com `productId` (O(n), um produto
+ * contra o catálogo inteiro) — o teto existe para a varredura global O(n²)
+ * sem alvo, que é a que esgota memória. Aplicar o mesmo teto ao caminho com
+ * alvo quebraria a própria alternativa que a mensagem de erro recomenda.
+ */
+async function carregarCatalogoAtivo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, comTeto = true) {
+  const query = db
     .select()
     .from(products)
-    .where(eq(products.isActive, "yes"))
-    .limit(MAX_CATALOGO_EM_MEMORIA + 1);
+    .where(eq(products.isActive, "yes"));
+
+  if (!comTeto) return query;
+
+  const linhas = await query.limit(MAX_CATALOGO_EM_MEMORIA + 1);
 
   if (linhas.length > MAX_CATALOGO_EM_MEMORIA) {
     throw new Error(
@@ -235,7 +244,7 @@ export const duplicatesRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
 
-      const allProducts = await carregarCatalogoAtivo(db);
+      const allProducts = await carregarCatalogoAtivo(db, !input.productId);
       const exceptions = await loadExceptionPairs(db);
 
       if (input.productId) {

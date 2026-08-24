@@ -1,5 +1,5 @@
 -- ─────────────────────────────────────────────────────────────────────────────
--- Migration 0020 — RAG: Motor de Equivalências por Vetores (MySQL 8.0)
+-- Migration 0024 — RAG: Motor de Equivalências por Vetores (MySQL 8.0)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Armazena embeddings (768 dim — nomic-embed-text) em coluna JSON com índices
 -- espaciais aproximados via busca linear com LIMITE (topK <= 100). A busca

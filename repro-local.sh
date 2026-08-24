@@ -4,6 +4,11 @@ set -uo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export COMPOSE_PROJECT_NAME=s2test
 
+# Senha do admin local de teste — fixa e isolada deste repro (stack efêmera,
+# projeto de compose próprio). Usada tanto no .env do container quanto no
+# login abaixo: os dois precisam bater, não é segredo de ambiente real.
+ADMIN_PASSWORD_LOCAL="LocalQA2026!"
+
 # criar .env mínimo para o stack local
 cat > .env.test <<EOF
 MYSQL_ROOT_PASSWORD=rootpw123
@@ -14,7 +19,7 @@ DATABASE_URL=mysql://s2:s2pw123@db:3306/sistema_s2
 COOKIE_SECRET=local-test-secret-min-32-characters-ok
 APP_ID=s2licit
 NODE_ENV=production
-ADMIN_PASSWORD=LocalQA2026!
+ADMIN_PASSWORD=${ADMIN_PASSWORD_LOCAL}
 PORT=3000
 EOF
 cp .env.test .env
@@ -32,7 +37,7 @@ echo "=== criar viewer ==="
 insert_viewer "INSERT INTO users (openId,name,email,role,loginMethod,passwordHash,disabled,failedLoginAttempts,mfaEnabled) SELECT 'local:s2licit_qa_viewer@test.local','QA','s2licit_qa_viewer@test.local','viewer','local',passwordHash,0,0,0 FROM users WHERE role='admin' LIMIT 1;"
 insert_viewer "SELECT id,email,role FROM users;" | grep -E "qa_viewer|email" || true
 
-PASS="${ADMIN_PASSWORD:?defina ADMIN_PASSWORD no ambiente; nao ha senha padrao}"
+PASS="$ADMIN_PASSWORD_LOCAL"
 # o app local registra admin via ensureAdminUser? verificar login do admin local primeiro
 login() {
   curl -sS -m 20 -D - -X POST "http://127.0.0.1:8088/api/auth/login" -H 'Content-Type: application/json' \

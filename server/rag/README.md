@@ -13,7 +13,7 @@ Recuperação aumentada por contexto (RAG) para busca semântica de equivalênci
 | Busca | `search.ts` | 3 estágios: recuperação vetorial (topK), pré-filtro por score mínimo, justificativa técnica opcional via LLM |
 | API | `routers/rag.ts` | Endpoints tRPC sob `rag.*` (status, buscar, reindexAll, reindexOne, cleanOrphans, config) |
 
-## Banco (migration `0020_rag_motor_equivalencias.sql`)
+## Banco (migration `0024_rag_motor_equivalencias.sql`)
 
 - `product_embeddings` — vetor JSON (768 dim), digest canônico auditável, versão do pipeline.
 - `rag_config` — pares chave/valor lidos por `ragConfig.get()`.
@@ -22,7 +22,7 @@ O S2 roda MySQL 8.0, sem extensão vetorial nativa: a similaridade é calculada 
 
 ## Ativação (sequência operacional)
 
-1. Aplicar a migration `0020_rag_motor_equivalencias.sql` no banco de produção.
+1. Aplicar a migration `0024_rag_motor_equivalencias.sql` no banco de produção.
 2. Instalar o Ollama na VPS do S2 e baixar o modelo: `ollama pull nomic-embed-text` (Opção A — recomendada) **ou** apontar `RAG_OLLAMA_URL` para um Ollama remoto (Opção B) **ou** definir `RAG_GROQ_API_KEY` (Opção C — paga por uso).
 3. Ativar o motor pelo painel (admin) ou via env: `RAG_EMBEDDING_PROVIDER=local`.
 4. Rodar `reindexAll` pela primeira vez (editor+). Reindexar após atualizações de produto ocorre automaticamente quando `rag.reindexOnUpdate=true`.
