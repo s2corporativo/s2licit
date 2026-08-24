@@ -29,6 +29,8 @@ type SanctionForm = {
   dataFim: string;
   referenciaLegal: string;
   observacoes: string;
+  abrangencia: "" | "municipal" | "estadual" | "federal" | "nacional";
+  arquivoUrl: string;
 };
 
 const emptySanctionForm: SanctionForm = {
@@ -39,6 +41,8 @@ const emptySanctionForm: SanctionForm = {
   dataFim: "",
   referenciaLegal: "",
   observacoes: "",
+  abrangencia: "",
+  arquivoUrl: "",
 };
 
 type CertidaoForm = {
@@ -178,6 +182,8 @@ export default function Fornecedores() {
       dataFim: sanctionForm.dataFim || null,
       referenciaLegal: sanctionForm.referenciaLegal.trim() || null,
       observacoes: sanctionForm.observacoes.trim() || null,
+      abrangencia: sanctionForm.abrangencia || null,
+      arquivoUrl: sanctionForm.arquivoUrl.trim() || null,
     });
   };
 
@@ -329,12 +335,25 @@ export default function Fornecedores() {
                     </div>
                     <div className="mt-1 text-gray-600">
                       {sanction.orgao}{sanction.processo ? ` · Processo ${sanction.processo}` : ""}{sanction.referenciaLegal ? ` · ${sanction.referenciaLegal}` : ""}
+                      {sanction.abrangencia ? ` · Abrangência: ${String(sanction.abrangencia).toUpperCase()}` : ""}
                     </div>
                     <div className="mt-1 text-gray-400">
                       {new Date(sanction.dataInicio).toLocaleDateString("pt-BR")}
                       {sanction.dataFim ? ` → ${new Date(sanction.dataFim).toLocaleDateString("pt-BR")}` : " → sem prazo definido"}
                     </div>
                     {sanction.observacoes && <div className="mt-1 italic text-gray-500">{sanction.observacoes}</div>}
+                    {sanction.arquivoUrl && (
+                      <div className="mt-1">
+                        <a
+                          href={sanction.arquivoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-800 underline"
+                        >
+                          Documento comprobatório
+                        </a>
+                      </div>
+                    )}
                   </div>
                   {sanction.status === "ativa" && (
                     <button
@@ -419,6 +438,27 @@ export default function Fornecedores() {
                     onChange={(e) => setSanctionForm((current) => ({ ...current, referenciaLegal: e.target.value }))}
                     className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
                     placeholder="Lei 14.133/21, art. 155..."
+                  />
+                </Field>
+                <Field label="Abrangência">
+                  <select
+                    value={sanctionForm.abrangencia}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, abrangencia: e.target.value as SanctionForm["abrangencia"] }))}
+                    className="w-full border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                  >
+                    <option value="">Não informada</option>
+                    <option value="municipal">Municipal</option>
+                    <option value="estadual">Estadual</option>
+                    <option value="federal">Federal</option>
+                    <option value="nacional">Nacional (toda a Administração Pública)</option>
+                  </select>
+                </Field>
+                <Field label="Documento comprobatório (URL)">
+                  <input
+                    value={sanctionForm.arquivoUrl}
+                    onChange={(e) => setSanctionForm((current) => ({ ...current, arquivoUrl: e.target.value }))}
+                    className="w-full border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none"
+                    placeholder="https://..."
                   />
                 </Field>
                 <Field label="Observações" className="md:col-span-2">

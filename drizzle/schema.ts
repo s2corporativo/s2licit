@@ -92,6 +92,9 @@ export const supplierSanctions = mysqlTable(
     observacoes: text("observacoes"),
     criadoPor: varchar("criadoPor", { length: 256 }),
     status: varchar("status", { length: 16 }).notNull().default("ativa"), // ativa | revogada | expirada
+    // Âmbito federativo do efeito (Lei 14.133/21, art. 156 §5º): municipal | estadual | federal | nacional.
+    abrangencia: varchar("abrangencia", { length: 16 }),
+    arquivoUrl: text("arquivoUrl"), // documento comprobatório da sanção
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
