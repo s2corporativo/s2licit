@@ -368,7 +368,7 @@ export interface PricedQuotationResult {
  * para não realimentar o mesmo valor em loop) e há fornecedor identificado.
  * Melhor esforço: uma falha aqui nunca deve impedir a geração do orçamento.
  */
-async function recordQuotationPriceHistory(
+export async function recordQuotationPriceHistory(
   rawItems: NonNullable<Awaited<ReturnType<typeof getEmailQuotationWithItems>>>["items"],
   previewItems: PricingPreviewItem[],
 ): Promise<void> {
