@@ -119,6 +119,39 @@ describe("duplicatesRouter", () => {
       expect(result).toHaveLength(1);
       expect(result[0].products.map((p) => p.id)).toContain(1002);
     });
+
+    it("varredura global recusa catálogo acima do teto de memória", async () => {
+      productsData = Array.from({ length: 20001 }, (_, index) => ({
+        id: index + 1,
+        name: `Produto ${index + 1}`,
+        concentration: null,
+        presentation: null,
+        manufacturer: null,
+        isActive: "yes",
+      }));
+
+      await expect(caller().detectDuplicates({ minSimilarity: 0.7, limit: 100 })).rejects.toThrow(/acima de 20000/);
+    });
+
+    it("modo direcionado não é bloqueado pelo teto de memória da varredura global", async () => {
+      productsData = Array.from({ length: 20001 }, (_, index) => ({
+        id: index + 1,
+        name: `Produto totalmente distinto ${index + 1}`,
+        concentration: null,
+        presentation: null,
+        manufacturer: null,
+        isActive: "yes",
+      }));
+      productsData.push(
+        { id: 30001, name: "Eletrodo combinado de pH DME-CV1", concentration: null, presentation: null, manufacturer: "Digimed", isActive: "yes" },
+        { id: 30002, name: "Eletrodo combinado pH DME CV1", concentration: null, presentation: null, manufacturer: "Digimed", isActive: "yes" },
+      );
+
+      const result = await caller().detectDuplicates({ productId: 30001, minSimilarity: 0.78, limit: 20 });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].products.map((p) => p.id)).toContain(30002);
+    });
   });
 
   describe("listDuplicateGroups", () => {

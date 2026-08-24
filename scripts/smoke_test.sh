@@ -13,7 +13,7 @@ fi
 
 echo "3. Verificando Health Check do Backend (com retry)..."
 # Tenta 5 vezes, com intervalo de 5s entre tentativas
-if ! curl -fsS --retry 5 --retry-delay 5 --retry-connrefused http://localhost:${APP_PORT:-3000}/readyz > /dev/null; then
+if ! curl -fsS --retry 5 --retry-delay 5 --retry-connrefused http://localhost:${APP_LOCAL_PORT:-3000}/readyz > /dev/null; then
   echo "ERRO: Backend não respondeu HTTP 200."
   docker compose logs app --tail 20
   exit 1
