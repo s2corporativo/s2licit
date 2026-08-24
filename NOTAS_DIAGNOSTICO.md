@@ -154,7 +154,7 @@ CONCLUSÃO: o sistema Docker S2 ESTÁ FUNCIONAL agora (readyz ok). O que degrada
 
 **Sandbox local (/home/ubuntu/s2licit):** repo main = commit 8c56b3c (PR #112 MERGED). Gates verdes: lint OK, tsc OK, build OK, vitest 728/730. Branch local main sincronizada. Relatório entregue: /home/ubuntu/s2licit/RELATORIO-DIAGNOSTICO-S2LICIT.md.
 
-**VPS (ssh root@13.140.167.153, senha via sshpass "Fam04061427@"):**
+**VPS (ssh root@13.140.167.153, autenticacao por chave SSH):**
 - Hostname: vmi3364111, load alto por causa do loop pnpm manual.
 - /opt/s2licit: git em 04654e6 (antes do merge) — precisa `git pull` (main remota = 8c56b3c). Backups .env: .env.backup-manus-1786554655, .env.bak-0541, .env.bak-2026-08-12, .env.before-db-recovery.20260810-232720, .env.pre-rag-20260814.
 - Docker: container `sistema-s2-app` (healthy, porta 3001 local, started 2026-08-15 21:58 UTC), `sistema-s2-db` MySQL 8.0 (up 5 dias). Portas 3000 e 3001 = docker-proxy.
@@ -317,7 +317,7 @@ PRÓXIMO: (a) corrigir rematch (limitar itens) → fix no código + rebuild VPS;
 - Depois do push: criar PR, mergear (autorização do usuário), aplicar na VPS via rsync/rebuild, e finalmente retestar RBAC (mutations viewer → FORBIDDEN) + relatório Módulo 04.
 - Estado VPS: app container com dist novo (md5 e31da8a3) mas SATURADO (rematch carregando catálogo inteiro 27435 produtos + embeddings; CPU 103%, healthz timeout). Ollama 79% CPU constante (embedding local, normal?). Fix rematch + rebuild vai resolver a saturação.
 - RBAC pendente: a trava está no bundle; viewer3 foi apagado pelo cleanup. Recriar viewer e testar mutation após rebuild com fix rematch.
-- Credencial VPS: sshpass -p 'Fam04061427@' ssh root@13.140.167.153 (usuário forneceu hoje).
+- Credencial VPS: ssh root@13.140.167.153 (usuário forneceu hoje).
 - Backup atual: /root/backups/s2-2026-08-16.sql.gz (53MB) feito antes do último rebuild.
 
 ## Módulo 04 — APPLY_OK (13:35 UTC)
@@ -329,7 +329,7 @@ CONCLUSÃO DO MÓDULO 04: homologado após correções. Correções aplicadas: (
 
 ## Módulo 05 — ESCOPO OFICIAL (PROMPT 05 — Multi-Entidade)
 Testar isolamento entre: órgãos públicos, empresas, consórcios, fornecedores. Validar: propostas, documentos, lances, contratos, histórico. Vazamento entre entidades = CRÍTICO. Não avançar ao próximo módulo.
-Contexto: o S2 Licít tem módulos de propostas (email_quotations/proposals), fornecedores (suppliers), órgãos solicitantes (requesting_orgs). O isolamento multi-entidade pode se referir a: dados de propostas/documentos/lances/contratos/histórico de cada fornecedor visíveis apenas ao seu dono/órgão. Mapear no código como as consultas filtram por entidade/fornecedor (tenant). VPS: sshpass -p 'Fam04061427@' root@13.140.167.153. Produção: main atualizada + fix rematch aplicado, stable (healthz <10ms, CPU 0%). Scripts de teste anteriores: /tmp/rbac-test3.sh (usar como modelo, porta 3001, viewer admin login via ADMIN_PASSWORD).
+Contexto: o S2 Licít tem módulos de propostas (email_quotations/proposals), fornecedores (suppliers), órgãos solicitantes (requesting_orgs). O isolamento multi-entidade pode se referir a: dados de propostas/documentos/lances/contratos/histórico de cada fornecedor visíveis apenas ao seu dono/órgão. Mapear no código como as consultas filtram por entidade/fornecedor (tenant). VPS: ssh root@13.140.167.153. Produção: main atualizada + fix rematch aplicado, stable (healthz <10ms, CPU 0%). Scripts de teste anteriores: /tmp/rbac-test3.sh (usar como modelo, porta 3001, viewer admin login via ADMIN_PASSWORD).
 Credenciais GitHub renovadas (GH_TOKEN ok, push OK).
 Backup VPS: /root/backups/s2-apply-2026-08-16-1327.sql.gz (55MB).
 
@@ -365,7 +365,7 @@ Também: agendamento do rematch é 2h — com 25 itens/exec e 1.819 pendentes, l
 
 ## Módulo 05 — aplicação na VPS (14:35 UTC)
 PR #114 merged (main ef564ef). Aplicação em curso na VPS. PROBLEMA: backup mysqldump gerou 20 bytes — a conexão SSH com mysql (-p com 500e... embutido) falhou ou o gzip pegou erro. VERIFICAR: backup anterior válido existe (/root/backups/s2-apply-2026-08-16-1327.sql.gz 55MB). Ação: após o deploy, refazer backup correto com credencial via variável/flag --defaults-extra-file ou mysql -e no container do db (que funcionou antes). Build em curso (6 processos).
-Senha do MySQL root: 500e56204ec8981ba5f3bfb9496ba21aeb7766bc8c143e58c75f65d99c6dfbe2 (usada com sucesso via docker exec antes).
+Senha do MySQL root: <REDIGIDO: senha root do MySQL — ver gestor de segredos> (usada com sucesso via docker exec antes).
 
 ## Módulo 05 — checkpoint FINAL (14:45 UTC)
 - PR #114 merged: main = ef564ef (progresso por item + limite 15 itens/exec no rematch)
@@ -434,7 +434,7 @@ Novo pedido do usuário (3 tarefas em sequência):
 2. Fix UX "Cotação bloqueada: confirme o match de 1 item(ns) antes de gerar ou enviar o orçamento" — usuário quer SOLUÇÃO SIMPLIFICADA (provavelmente desativar o bloqueio ou auto-confirmar matches únicos). Localizar texto no client/src e no server.
 3. Módulo 06 auditoria — Dados Sensíveis e Exposição de Informações (escopo em /home/ubuntu/upload/Pasted_content_77.txt, grep "06").
 Estado: Ollama otimizado (override.conf: THREADS=4, PARALLEL=1; iptables drop na 11434 exceto 172.24.0.0/16 + 127.0.0.1). CPU ollama 14,7%. S2 main = commit com fix rematch (PRs #113/#114 merged). Token GH renovado.
-Acesso VPS: sshpass -p 'Fam04061427@' ssh root@13.140.167.153. App: docker sistema-s2-app, porta local 3001 (mapeada 8088 público). Login admin: adm@vetmg.com.br (senha = ADMIN_PASSWORD do .env; NÃO logar senha).
+Acesso VPS: ssh root@13.140.167.153. App: docker sistema-s2-app, porta local 3001 (mapeada 8088 público). Login admin: adm@vetmg.com.br (senha = ADMIN_PASSWORD do .env; NÃO logar senha).
 Deploy padrão validado: baixar tarball da main via gh API → scp → rsync /opt/s2licit (preservar .env/backups) → docker compose build app → up -d --force-recreate → validar healthz. Backup banco: mysqldump (scripts/backup.sh não existe em /opt/s2licit).
 Gates: pnpm lint + npx tsc --noEmit + pnpm run build + npx vitest run (728 testes).
 PRs: criar branch fix/*, commit, push, gh pr create, gh pr merge (autorizado pelo usuário — branch protection permite com admin? main protegida exigiu antes que PR estivesse mergado... usar gh pr merge --admin).
@@ -617,7 +617,7 @@ Acesso real do usuário = https://s2.s2corporativo.com.br (nginx 443, domínio v
 - router padrão: z, TRPCError de @trpc/server, eq/asc drizzle-orm, adminProcedure/protectedProcedure/editorProcedure de ../_core/trpc, recordAudit de ../services/auditService.
 - db barrel: server/db.ts tem `export * from "./db/{modulo}";`
 - routers barrel: server/routers.ts linha ~113: `suppliers: suppliersRouter,` — adicionar `sanctions: sanctionsRouter,`
-- Deploy VPS: ssh root@13.140.167.153 senha Fam04061427@; código /opt/sistema-s2; containers sistema-s2-app/sistema-s2-db; banco via docker exec sistema-s2-db bash -c "mysql -u $MYSQL_USER -p$MYSQL_PASSWORD sistema_s2 -e ..."
+- Deploy VPS: ssh root@13.140.167.153 autenticacao por chave SSH; código /opt/sistema-s2; containers sistema-s2-app/sistema-s2-db; banco via docker exec sistema-s2-db bash -c "mysql -u $MYSQL_USER -p$MYSQL_PASSWORD sistema_s2 -e ..."
 - URL pública: https://s2.s2corporativo.com.br (nginx 443)
 
 

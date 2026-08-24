@@ -141,7 +141,7 @@ export async function autoLinkImageUrls(imageUrls: string[]): Promise<
     .where(eq(products.isActive, "yes"))
     .limit(10000);
 
-  const { stringSimilarity } = await import("../fuzzy.js");
+  const { stringSimilarity } = await import("../fuzzy");
 
   const results = imageUrls.map((url) => {
     const tokens = extractTokensFromUrl(url);
