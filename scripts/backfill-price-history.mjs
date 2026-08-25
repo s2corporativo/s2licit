@@ -13,15 +13,18 @@
  * Segurança:
  * - dry-run por padrão;
  * - somente preço positivo;
- * - preserva a data real da oferta como `data` e `recordedAt`;
- * - revalida a ausência de histórico no mesmo INSERT que grava a linha;
- * - grava em transação e faz rollback em falha.
+ * - usa `createdAt` da oferta como timestamp CONSERVADOR da linha de base;
+ *   `updatedAt` não é usado porque também muda por link/imagem/código/estoque;
+ * - escrita em um único INSERT ... SELECT com NOT EXISTS;
+ * - execuções do backfill são serializadas por lock nomeado do MySQL;
+ * - transação SERIALIZABLE e rollback em falha.
  */
 
 import { createPool } from "mysql2/promise";
 
 const APLICAR = process.argv.includes("--aplicar");
 const URL = process.env.DATABASE_URL;
+const BACKFILL_LOCK = "s2licit_price_history_backfill";
 
 if (!URL) {
   console.error("DATABASE_URL não definida no ambiente. Abortando sem tocar no banco.");
@@ -36,7 +39,7 @@ try {
       o.productId,
       o.supplierId,
       o.price,
-      COALESCE(o.updatedAt, o.createdAt) AS observedAt
+      o.createdAt AS observedAt
     FROM product_supplier_offers o
     LEFT JOIN price_history h
       ON h.productId = o.productId AND h.supplierId = o.supplierId
@@ -56,7 +59,7 @@ try {
     console.log("\nDRY-RUN — nada foi gravado. Amostra dos 5 primeiros:");
     for (const c of candidatos.slice(0, 5)) {
       console.log(
-        `  produto=${c.productId} fornecedor=${c.supplierId} preço=${c.price} observadoEm=${c.observedAt ?? "n/d"}`,
+        `  produto=${c.productId} fornecedor=${c.supplierId} preço=${c.price} observadoAté=${c.observedAt ?? "n/d"}`,
       );
     }
     console.log("\nPara gravar: node scripts/backfill-price-history.mjs --aplicar");
@@ -64,52 +67,59 @@ try {
   }
 
   const conn = await pool.getConnection();
+  let lockAdquirido = false;
   try {
-    await conn.beginTransaction();
-    let gravados = 0;
-
-    for (const c of candidatos) {
-      // Revalida oferta, preço e ausência de histórico no MESMO statement de
-      // escrita. Isso evita usar o snapshot do scan inicial caso a oferta ou o
-      // histórico mudem enquanto o operador confirma/aplica o backfill.
-      const [res] = await conn.query(
-        `INSERT INTO price_history
-           (productId, supplierId, price, origem, data, recordedAt)
-         SELECT
-           o.productId,
-           o.supplierId,
-           o.price,
-           'backfill_linha_base',
-           COALESCE(o.updatedAt, o.createdAt),
-           COALESCE(o.updatedAt, o.createdAt)
-         FROM product_supplier_offers o
-         WHERE o.productId = ?
-           AND o.supplierId = ?
-           AND o.price IS NOT NULL
-           AND CAST(o.price AS DECIMAL(15,4)) > 0
-           AND NOT EXISTS (
-             SELECT 1
-             FROM price_history h
-             WHERE h.productId = o.productId
-               AND h.supplierId = o.supplierId
-           )`,
-        [c.productId, c.supplierId],
-      );
-      if (res.affectedRows === 1) gravados++;
+    const [lockRows] = await conn.query("SELECT GET_LOCK(?, 30) AS acquired", [BACKFILL_LOCK]);
+    lockAdquirido = Number(lockRows?.[0]?.acquired ?? 0) === 1;
+    if (!lockAdquirido) {
+      throw new Error("Não foi possível obter o lock exclusivo do backfill em 30 segundos.");
     }
 
+    await conn.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    await conn.beginTransaction();
+
+    // Reavalia TODOS os candidatos dentro da transação e grava em um único
+    // statement. `createdAt` é deliberadamente conservador: se o preço tiver
+    // sido atualizado depois por um fluxo que não registra a data específica da
+    // cotação, a linha de base fica mais antiga (exige revalidação), nunca mais
+    // recente do que podemos provar.
+    const [res] = await conn.query(`
+      INSERT INTO price_history
+        (productId, supplierId, price, origem, data, recordedAt)
+      SELECT
+        o.productId,
+        o.supplierId,
+        o.price,
+        'backfill_linha_base',
+        o.createdAt,
+        o.createdAt
+      FROM product_supplier_offers o
+      WHERE o.price IS NOT NULL
+        AND CAST(o.price AS DECIMAL(15,4)) > 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM price_history h
+          WHERE h.productId = o.productId
+            AND h.supplierId = o.supplierId
+        )
+    `);
+
     await conn.commit();
+    const gravados = Number(res.affectedRows ?? 0);
     console.log(`\n${gravados} registro(s) de linha de base gravados.`);
     if (gravados < candidatos.length) {
       console.log(
-        `${candidatos.length - gravados} candidato(s) foram ignorados porque a oferta/histórico mudou durante a execução.`,
+        `${candidatos.length - gravados} candidato(s) do dry-scan já não precisavam de backfill no momento da escrita.`,
       );
     }
   } catch (err) {
-    await conn.rollback();
+    await conn.rollback().catch(() => undefined);
     console.error("Falha no backfill — transação revertida, nada foi gravado.");
     throw err;
   } finally {
+    if (lockAdquirido) {
+      await conn.query("SELECT RELEASE_LOCK(?)", [BACKFILL_LOCK]).catch(() => undefined);
+    }
     conn.release();
   }
 } finally {
