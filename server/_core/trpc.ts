@@ -10,10 +10,20 @@ const t = initTRPC.context<TrpcContext>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-// Hierarquia única de autorização do backend.
-// Leitura: qualquer usuário autenticado.
-// Escrita: editor ou admin, mesmo quando a rota antiga ainda usa protectedProcedure.
 const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
+
+/**
+ * Rotas legadas do systemRouter que alteram estado global, catálogo ou jobs.
+ * Enquanto não forem individualmente migradas para adminProcedure, a proteção
+ * central impede que Editor execute operação de infraestrutura/saneamento.
+ */
+const ADMIN_ONLY_MUTATION_PATHS = new Set([
+  "system.resetJobLock",
+  "system.forceResync",
+  "system.fixCatalogIntegrity",
+  "system.clearJobErrors",
+  "system.reclassifyProductsByAI",
+]);
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -30,6 +40,17 @@ const requireUser = t.middleware(async opts => {
     });
   }
 
+  if (
+    opts.type === "mutation" &&
+    ADMIN_ONLY_MUTATION_PATHS.has(opts.path) &&
+    rank < ROLE_RANK.admin
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Esta operação de administração/saneamento exige perfil Administrador",
+    });
+  }
+
   return next({
     ctx: {
       ...ctx,
@@ -42,8 +63,7 @@ export const protectedProcedure = t.procedure.use(requireUser);
 
 /**
  * Só exige autenticação (qualquer papel), SEM a trava de mutation por perfil.
- * Para self-service do próprio usuário (ex.: ativar/desativar o próprio MFA),
- * onde user/viewer também precisam poder alterar seus próprios dados.
+ * Para self-service do próprio usuário (ex.: ativar/desativar o próprio MFA).
  */
 const requireAuthenticated = t.middleware(async opts => {
   const { ctx, next } = opts;

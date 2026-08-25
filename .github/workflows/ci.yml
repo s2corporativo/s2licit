@@ -33,6 +33,9 @@ jobs:
       - name: Instalar dependências
         run: pnpm install --frozen-lockfile
 
+      - name: Gate estático da auditoria
+        run: node scripts/validate-audit-fixes.mjs
+
       - name: Lint
         run: pnpm lint
 
