@@ -11,6 +11,7 @@ import { getSessionCookieOptions } from "./cookies";
 import { ENV } from "./env";
 import { sdk } from "./sdk";
 import { logger } from "./logger";
+import { schemaBootDdlEnabled } from "../services/schemaBootPolicy";
 
 /**
  * Política de bloqueio de conta (§16): após MAX_FAILED_LOGINS tentativas
@@ -18,40 +19,29 @@ import { logger } from "./logger";
  * zera em qualquer login bem-sucedido.
  */
 export const MAX_FAILED_LOGINS = 5;
-export const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutos
+export const LOCKOUT_MS = 15 * 60 * 1000;
 
-/** Estado do bloqueio após uma tentativa inválida (função pura, testável). */
 export function nextLockoutState(
   currentFailed: number,
   now: number,
 ): { failedLoginAttempts: number; lockedUntil: Date | null } {
   const failed = (currentFailed ?? 0) + 1;
   if (failed >= MAX_FAILED_LOGINS) {
-    // Bloqueia e reinicia o contador para a próxima janela.
     return { failedLoginAttempts: 0, lockedUntil: new Date(now + LOCKOUT_MS) };
   }
   return { failedLoginAttempts: failed, lockedUntil: null };
 }
 
-/** A conta está bloqueada agora? (função pura, testável). */
 export function isAccountLocked(lockedUntil: Date | null | undefined, now: number): boolean {
   return lockedUntil != null && new Date(lockedUntil).getTime() > now;
 }
 
-/**
- * Autenticação local por e-mail e senha.
- *
- * Substitui o OAuth da plataforma Manus como modo padrão de login. A sessão
- * emitida é o mesmo JWT httpOnly usado pelo fluxo OAuth (sdk.signSession),
- * então o restante do sistema (context, protectedProcedure) não muda.
- */
-
 const LOCAL_OPEN_ID_PREFIX = "local:";
 
 /**
- * Garante que a coluna users.passwordHash exista. O histórico de migrações
- * do projeto tem três esquemas paralelos e nem todo ambiente os executa;
- * este guard torna o login local independente desse estado.
+ * Valida a existência de users.passwordHash. Em produção, coluna ausente é
+ * erro fatal de migration; não alteramos mais schema silenciosamente no boot.
+ * Desenvolvimento pode manter o fallback quando SCHEMA_BOOT_DDL_ENABLED=true.
  */
 export async function ensurePasswordColumn(): Promise<void> {
   const db = await getDb();
@@ -61,16 +51,15 @@ export async function ensurePasswordColumn(): Promise<void> {
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'passwordHash'`
   );
   const total = Number((rows as any)[0]?.total ?? 0);
-  if (total === 0) {
-    await db.execute(sql`ALTER TABLE users ADD COLUMN passwordHash VARCHAR(255) NULL`);
-    logger.info("[LocalAuth] Coluna users.passwordHash criada.");
+  if (total > 0) return;
+  if (!schemaBootDdlEnabled()) {
+    throw new Error("[LocalAuth] users.passwordHash ausente. Aplique uma migration versionada antes de iniciar a produção.");
   }
+  await db.execute(sql`ALTER TABLE users ADD COLUMN passwordHash VARCHAR(255) NULL`);
+  logger.info("[LocalAuth] Coluna users.passwordHash criada em desenvolvimento.");
 }
 
-/**
- * Cria (ou atualiza a senha de) o administrador inicial a partir de
- * ADMIN_EMAIL/ADMIN_PASSWORD. Chamado uma vez no boot.
- */
+/** Cria/atualiza o administrador inicial a partir do ambiente. */
 export async function ensureAdminUser(): Promise<void> {
   if (!ENV.adminEmail || !ENV.adminPassword) return;
   const db = await getDb();
@@ -91,16 +80,12 @@ export async function ensureAdminUser(): Promise<void> {
     });
     logger.info(`[LocalAuth] Usuário administrador criado: ${email}`);
   } else if (!existing[0].passwordHash) {
-    await db
-      .update(users)
+    await db.update(users)
       .set({ passwordHash, role: "admin", loginMethod: "local" })
       .where(eq(users.id, existing[0].id));
     logger.info(`[LocalAuth] Senha definida para o administrador existente: ${email}`);
   } else if (!credentialEncryptionService.verifyPassword(ENV.adminPassword, existing[0].passwordHash)) {
-    // ADMIN_PASSWORD do ambiente é a fonte de verdade: se mudou, sincroniza.
-    // (Sistema de uso interno single-user — trocar a senha = trocar o env e reiniciar.)
-    await db
-      .update(users)
+    await db.update(users)
       .set({ passwordHash })
       .where(eq(users.id, existing[0].id));
     logger.info(`[LocalAuth] Senha do administrador sincronizada com ADMIN_PASSWORD: ${email}`);
@@ -118,7 +103,6 @@ function readBody(req: Request): { email?: string; password?: string; name?: str
 }
 
 export function registerLocalAuthRoutes(app: Express) {
-  // POST /api/auth/login — protegido pelo authRateLimiter (10/min por IP)
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
       const { email, password, token } = readBody(req);
@@ -138,7 +122,6 @@ export function registerLocalAuthRoutes(app: Express) {
       const now = Date.now();
       const origin = requestOrigin(req);
 
-      // Conta bloqueada por tentativas inválidas: nega antes de verificar a senha.
       if (user && isAccountLocked(user.lockedUntil, now)) {
         const retryAfter = Math.ceil((new Date(user.lockedUntil!).getTime() - now) / 1000);
         res.setHeader("Retry-After", String(Math.max(1, retryAfter)));
@@ -151,7 +134,6 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
-      // Conta desativada: bloqueia o login (mesmo com senha correta).
       if (user?.disabled) {
         await recordAudit({
           userId: user.id, action: "login_bloqueado", entity: "auth", entityId: user.id,
@@ -161,8 +143,6 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
-      // Mensagem idêntica para usuário inexistente e senha errada
-      // (não revelar quais e-mails existem).
       if (!user?.passwordHash || !credentialEncryptionService.verifyPassword(password, user.passwordHash)) {
         if (user) {
           const lock = nextLockoutState(user.failedLoginAttempts ?? 0, now);
@@ -186,18 +166,14 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
-      // MFA (TOTP): se ativado, exige o código antes de emitir a sessão (§16).
       if (user.mfaEnabled) {
         if (!token) {
           res.status(401).json({ error: "Código de verificação (MFA) necessário.", mfaRequired: true });
           return;
         }
         let secret: string | null = null;
-        try {
-          secret = user.mfaSecret ? decryptPassword(user.mfaSecret) : null;
-        } catch {
-          secret = null;
-        }
+        try { secret = user.mfaSecret ? decryptPassword(user.mfaSecret) : null; }
+        catch { secret = null; }
         if (!secret || !verifyTotp(secret, token, Date.now())) {
           const lock = nextLockoutState(user.failedLoginAttempts ?? 0, now);
           await db.update(users)
@@ -212,31 +188,36 @@ export function registerLocalAuthRoutes(app: Express) {
         }
       }
 
-      // Sucesso: zera o contador de tentativas e desbloqueia.
       await db.update(users)
         .set({ lastSignedIn: new Date(), failedLoginAttempts: 0, lockedUntil: null })
         .where(eq(users.id, user.id));
 
       const sessionToken = await sdk.createSessionToken(user.openId, {
-        name: user.name ?? "",
+        name: user.name ?? undefined,
         expiresInMs: SESSION_TTL_MS,
-        sessionVersion: (user as { sessionVersion?: number }).sessionVersion ?? 0,
+        sessionVersion: user.sessionVersion ?? 0,
       });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: SESSION_TTL_MS });
 
       await recordAudit({
         userId: user.id, action: "login_sucesso", entity: "auth", entityId: user.id,
-        origin: "login", summary: `Login bem-sucedido (${user.role})`, ...origin,
+        origin: "login", summary: "Login local bem-sucedido", ...origin,
       });
 
       res.json({
         success: true,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role },
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          mfaEnabled: user.mfaEnabled,
+        },
       });
-    } catch (err) {
-      logger.error("[LocalAuth] Falha no login:", err);
-      res.status(500).json({ error: "Erro interno ao processar o login." });
+    } catch (error) {
+      logger.error("[LocalAuth] Falha no login:", error);
+      res.status(500).json({ error: "Falha interna de autenticação." });
     }
   });
 }

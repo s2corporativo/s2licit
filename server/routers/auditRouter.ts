@@ -1,14 +1,16 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { auditLogs } from "../../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
 import { checkDatabaseIntegrity, checkForeignKeyIntegrity, getDatabaseStats } from "../db.audit";
 import { requestOrigin } from "../services/auditService";
+import { isSensitiveAuditAction } from "../services/auditTrustPolicy";
 
 export const auditRouter = router({
   getLogs: adminProcedure
-    .input(z.object({ limit: z.number().default(100), offset: z.number().default(0), entity: z.string().optional() }))
+    .input(z.object({ limit: z.number().min(1).max(1000).default(100), offset: z.number().min(0).default(0), entity: z.string().optional() }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database connection failed");
@@ -17,21 +19,34 @@ export const auditRouter = router({
       const rows = input.entity
         ? await base.where(eq(auditLogs.entity, input.entity)).orderBy(desc(auditLogs.createdAt)).limit(input.limit).offset(input.offset)
         : await base.orderBy(desc(auditLogs.createdAt)).limit(input.limit).offset(input.offset);
-      return rows;
+      return rows.map((row) => ({
+        ...row,
+        trustLevel: row.origin === "client" ? "client" as const : "server" as const,
+      }));
     }),
 
+  /**
+   * Telemetria originada no navegador. Não pode registrar ações sensíveis nem
+   * escolher uma origem que se confunda com evento server-side confiável.
+   */
   logAction: protectedProcedure
     .input(
       z.object({
-        action: z.string(),
-        entity: z.string(),
+        action: z.string().min(1).max(128),
+        entity: z.string().min(1).max(128),
         entityId: z.number().optional(),
-        origin: z.string().optional(),
-        summary: z.string().optional(),
+        summary: z.string().max(2000).optional(),
         changes: z.record(z.string(), z.any()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (isSensitiveAuditAction(input.action)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Eventos operacionais sensíveis devem ser gerados exclusivamente pelo servidor.",
+        });
+      }
+
       const db = await getDb();
       if (!db) throw new Error("Database connection failed");
 
@@ -41,24 +56,16 @@ export const auditRouter = router({
         action: input.action,
         entity: input.entity,
         entityId: input.entityId,
-        origin: input.origin ?? "manual",
+        origin: "client",
         summary: input.summary ?? null,
         changes: (input.changes ?? null) as any,
         ipAddress: origin.ipAddress,
         userAgent: origin.userAgent,
       });
-      return { success: true };
+      return { success: true, trustLevel: "client" as const };
     }),
 
-  checkDatabaseIntegrity: adminProcedure.query(async () => {
-    return await checkDatabaseIntegrity();
-  }),
-
-  checkForeignKeys: adminProcedure.query(async () => {
-    return await checkForeignKeyIntegrity();
-  }),
-
-  getDatabaseStats: adminProcedure.query(async () => {
-    return await getDatabaseStats();
-  }),
+  checkDatabaseIntegrity: adminProcedure.query(async () => checkDatabaseIntegrity()),
+  checkForeignKeys: adminProcedure.query(async () => checkForeignKeyIntegrity()),
+  getDatabaseStats: adminProcedure.query(async () => getDatabaseStats()),
 });

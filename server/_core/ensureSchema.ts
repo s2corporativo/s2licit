@@ -1,11 +1,22 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { logger } from "./logger";
+import { schemaBootDdlEnabled } from "../services/schemaBootPolicy";
+
+let warnedDdlDisabled = false;
+function canAlterSchema(): boolean {
+  const enabled = schemaBootDdlEnabled();
+  if (!enabled && !warnedDdlDisabled) {
+    warnedDdlDisabled = true;
+    logger.info("[Schema] DDL de boot desativado: migrations são a fonte única do schema em produção.");
+  }
+  return enabled;
+}
 
 /**
- * Garante colunas adicionadas fora do fluxo de migração do drizzle, de forma
- * idempotente no boot (mesmo padrão de ensurePasswordColumn). Assim a coluna
- * existe em produção sem depender do journal de migrações ter rodado.
+ * Em produção esta função é VALIDADORA: consulta a coluna e registra erro se
+ * faltar, mas não altera o banco. Em desenvolvimento pode manter o fallback
+ * legado quando SCHEMA_BOOT_DDL_ENABLED=true.
  */
 async function ensureColumn(table: string, column: string, definition: string): Promise<void> {
   const db = await getDb();
@@ -15,32 +26,22 @@ async function ensureColumn(table: string, column: string, definition: string): 
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${table} AND COLUMN_NAME = ${column}`,
   );
   const total = Number((rows as any)[0]?.total ?? 0);
-  if (total === 0) {
-    // table/column vêm de literais internos (não de input do usuário).
-    await db.execute(sql.raw(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`));
-    logger.info(`[Schema] Coluna ${table}.${column} criada.`);
+  if (total > 0) return;
+  if (!canAlterSchema()) {
+    logger.error(`[Schema] Coluna ausente: ${table}.${column}. Crie/aplique uma migration versionada.`);
+    return;
   }
+  await db.execute(sql.raw(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`));
+  logger.info(`[Schema] Coluna ${table}.${column} criada em modo de desenvolvimento.`);
 }
 
-/**
- * Colunas regulatórias/técnicas de produto usadas na equivalência veterinária
- * (via de administração e prazo de validade). Fecha o gap em que a equivalência
- * de medicamento não considerava via nem validade.
- */
 export async function ensureProductColumns(): Promise<void> {
   try {
     await ensureColumn("products", "viaAdministracao", "VARCHAR(128) NULL");
     await ensureColumn("products", "validadeMeses", "INT NULL");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas de produto:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar colunas de produto:", err); }
 }
 
-/**
- * Colunas de segurança de autenticação e auditoria (§16, §18):
- * bloqueio de conta por tentativas inválidas e rastreabilidade de origem
- * (IP / user-agent) na trilha de auditoria.
- */
 export async function ensureAuthSecurityColumns(): Promise<void> {
   try {
     await ensureColumn("users", "failedLoginAttempts", "INT NOT NULL DEFAULT 0");
@@ -51,72 +52,40 @@ export async function ensureAuthSecurityColumns(): Promise<void> {
     await ensureColumn("users", "sessionVersion", "INT NOT NULL DEFAULT 0");
     await ensureColumn("audit_logs", "ipAddress", "VARCHAR(64) NULL");
     await ensureColumn("audit_logs", "userAgent", "VARCHAR(512) NULL");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas de segurança/auditoria:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar colunas de segurança/auditoria:", err); }
 }
 
-/** Configuração de validade da consulta de preço (§13). */
 export async function ensureCompanySettingsColumns(): Promise<void> {
   try {
     await ensureColumn("company_settings", "priceValidityPreset", "VARCHAR(16) NULL DEFAULT '24h'");
     await ensureColumn("company_settings", "priceValidityCustomHours", "INT NULL");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas de company_settings:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar company_settings:", err); }
 }
 
-/** Campos ampliados coletados do fornecedor (§7): promocional e estoque. */
 export async function ensureOfferColumns(): Promise<void> {
   try {
     await ensureColumn("product_supplier_offers", "promoPrice", "DECIMAL(12,2) NULL");
     await ensureColumn("product_supplier_offers", "stock", "INT NULL");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas de ofertas:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar colunas de ofertas:", err); }
 }
 
-/**
- * Colunas do conector de fornecedores:
- * - supplier_sessions.localStorage: reuso de sessão de SPAs que guardam o token
- *   de autenticação no localStorage (não só em cookies), criptografado no cofre.
- * - scraper_logs.evidenceUrl: print da tela capturado quando a raspagem falha,
- *   para diagnosticar mudança de layout sem expor a senha (§9).
- */
 export async function ensureScraperColumns(): Promise<void> {
   try {
     await ensureColumn("supplier_sessions", "localStorage", "TEXT NULL");
     await ensureColumn("scraper_logs", "evidenceUrl", "VARCHAR(512) NULL");
-    // Governança de ToS: DEFAULT TRUE aqui de propósito — configs que JÁ
-    // operavam antes da coluna existir são consideradas aprovadas
-    // (grandfathering); novos cadastros pela UI nascem com false e exigem a
-    // confirmação explícita do operador.
     await ensureColumn("scraper_configs", "tosAprovado", "BOOLEAN NOT NULL DEFAULT TRUE");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas do conector de fornecedores:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar colunas do scraper:", err); }
 }
 
-/**
- * Colunas do pipeline automático de cotação→proposta: PDF gerado, carimbo de
- * geração, margem aplicada e trilha de confirmação automática de match.
- */
 export async function ensureQuotationAutomationColumns(): Promise<void> {
   try {
     await ensureColumn("email_quotations", "propostaPdfUrl", "TEXT NULL");
     await ensureColumn("email_quotations", "propostaGeradaEm", "TIMESTAMP NULL");
     await ensureColumn("email_quotations", "propostaMargemPercent", "DECIMAL(5,2) NULL");
     await ensureColumn("email_quotation_items", "matchAuto", "BOOLEAN NOT NULL DEFAULT FALSE");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas do pipeline de proposta automática:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar colunas de proposta automática:", err); }
 }
 
-/**
- * Inclui "image" no enum sourceType de email_quotations (anexo fotografado/
- * escaneado de um pedido de cotação passa por OCR, como já ocorre na captura
- * inteligente). Idempotente: só altera se o valor ainda não existe.
- */
 export async function ensureEmailQuotationImageSourceType(): Promise<void> {
   try {
     const db = await getDb();
@@ -127,22 +96,18 @@ export async function ensureEmailQuotationImageSourceType(): Promise<void> {
     );
     const tipo = String((rows as any)[0]?.t ?? "");
     if (!tipo || tipo.includes("'image'")) return;
-    await db.execute(
-      sql.raw(
-        "ALTER TABLE `email_quotations` MODIFY COLUMN `sourceType` " +
-          "ENUM('spreadsheet','pdf','docx','image','body','manual') NOT NULL DEFAULT 'body'",
-      ),
-    );
-    logger.info("[Schema] Enum email_quotations.sourceType estendido com 'image'.");
-  } catch (err) {
-    logger.error("[Schema] Falha ao estender email_quotations.sourceType:", err);
-  }
+    if (!canAlterSchema()) {
+      logger.error("[Schema] email_quotations.sourceType sem 'image'. Corrija via migration.");
+      return;
+    }
+    await db.execute(sql.raw(
+      "ALTER TABLE `email_quotations` MODIFY COLUMN `sourceType` " +
+      "ENUM('spreadsheet','pdf','docx','image','body','manual') NOT NULL DEFAULT 'body'",
+    ));
+    logger.info("[Schema] Enum email_quotations.sourceType ajustado em desenvolvimento.");
+  } catch (err) { logger.error("[Schema] Falha ao validar email_quotations.sourceType:", err); }
 }
 
-/**
- * Reuso de sessão autenticada nos portais (cookies criptografados + validade)
- * e vínculo proposta↔cotação (idempotência do "preencher no portal").
- */
 export async function ensurePortalSessionColumns(): Promise<void> {
   try {
     await ensureColumn("portal_credentials", "sessaoCookies", "TEXT NULL");
@@ -150,16 +115,9 @@ export async function ensurePortalSessionColumns(): Promise<void> {
     await ensureColumn("portal_credentials", "loginFailCount", "INT NOT NULL DEFAULT 0");
     await ensureColumn("proposals", "emailQuotationId", "INT NULL");
     await ensureUniqueIndex("proposals", "emailQuotationId", "uq_proposals_email_quotation");
-  } catch (err) {
-    logger.error("[Schema] Falha ao garantir colunas de sessão de portal:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar colunas de sessão de portal:", err); }
 }
 
-/**
- * Garante um índice único de coluna única, idempotente. Não fatal: se já
- * existirem propostas duplicadas para o mesmo valor (corrida antes desta
- * correção), a criação falha e fica só registrada — não trava o boot.
- */
 async function ensureUniqueIndex(table: string, column: string, indexName: string): Promise<void> {
   const db = await getDb();
   if (!db) return;
@@ -169,24 +127,14 @@ async function ensureUniqueIndex(table: string, column: string, indexName: strin
   );
   const total = Number((rows as any)[0]?.total ?? 0);
   if (total > 0) return;
-  try {
-    await db.execute(
-      sql.raw(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${indexName}\` (\`${column}\`)`),
-    );
-    logger.info(`[Schema] Índice único ${indexName} criado em ${table}.${column}.`);
-  } catch (err) {
-    logger.error(
-      `[Schema] Não foi possível criar índice único ${indexName} em ${table}.${column} ` +
-        `(provável duplicata pré-existente — revisar manualmente):`,
-      err,
-    );
+  if (!canAlterSchema()) {
+    logger.error(`[Schema] Índice ausente: ${indexName} em ${table}.${column}. Corrija via migration.`);
+    return;
   }
+  await db.execute(sql.raw(`ALTER TABLE \`${table}\` ADD UNIQUE INDEX \`${indexName}\` (\`${column}\`)`));
+  logger.info(`[Schema] Índice ${indexName} criado em desenvolvimento.`);
 }
 
-/**
- * IPI/PIS/COFINS como tipos de 1ª classe no Motor Tributário (§9). Estende o
- * enum tax_rules.tipo de forma idempotente (só altera se ainda não os inclui).
- */
 export async function ensureTaxRuleTypes(): Promise<void> {
   try {
     const db = await getDb();
@@ -196,28 +144,23 @@ export async function ensureTaxRuleTypes(): Promise<void> {
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tax_rules' AND COLUMN_NAME = 'tipo'`,
     );
     const tipo = String((rows as any)[0]?.t ?? "");
-    if (!tipo) return; // tabela ainda não criada
+    if (!tipo) return;
     if (tipo.includes("'ipi'") && tipo.includes("'pis'") && tipo.includes("'cofins'")) return;
-    await db.execute(
-      sql.raw(
-        "ALTER TABLE `tax_rules` MODIFY COLUMN `tipo` " +
-          "ENUM('simples_efetiva','icms','difal','st','fcp','iss','ipi','pis','cofins','outro') NOT NULL",
-      ),
-    );
-    logger.info("[Schema] Enum tax_rules.tipo estendido com IPI/PIS/COFINS.");
-  } catch (err) {
-    logger.error("[Schema] Falha ao estender tax_rules.tipo:", err);
-  }
+    if (!canAlterSchema()) {
+      logger.error("[Schema] tax_rules.tipo sem IPI/PIS/COFINS. Corrija via migration.");
+      return;
+    }
+    await db.execute(sql.raw(
+      "ALTER TABLE `tax_rules` MODIFY COLUMN `tipo` " +
+      "ENUM('simples_efetiva','icms','difal','st','fcp','iss','ipi','pis','cofins','outro') NOT NULL",
+    ));
+    logger.info("[Schema] tax_rules.tipo ajustado em desenvolvimento.");
+  } catch (err) { logger.error("[Schema] Falha ao validar tax_rules.tipo:", err); }
 }
 
-/**
- * Inclui "image" no enum sourceType das tabelas de captura (§2 — OCR de imagem
- * digitalizada). Idempotente: só altera se o valor ainda não existe.
- */
 export async function ensureCaptureSourceTypes(): Promise<void> {
   const tabelas = ["captured_product_batches", "captured_product_source_logs"];
-  const enumDef =
-    "ENUM('url','html','pdf','spreadsheet','xml','docx','text','image') NOT NULL";
+  const enumDef = "ENUM('url','html','pdf','spreadsheet','xml','docx','text','image') NOT NULL";
   try {
     const db = await getDb();
     if (!db) return;
@@ -228,10 +171,12 @@ export async function ensureCaptureSourceTypes(): Promise<void> {
       );
       const tipo = String((rows as any)[0]?.t ?? "");
       if (!tipo || tipo.includes("'image'")) continue;
+      if (!canAlterSchema()) {
+        logger.error(`[Schema] ${tabela}.sourceType sem 'image'. Corrija via migration.`);
+        continue;
+      }
       await db.execute(sql.raw(`ALTER TABLE \`${tabela}\` MODIFY COLUMN \`sourceType\` ${enumDef}`));
-      logger.info(`[Schema] Enum ${tabela}.sourceType estendido com 'image'.`);
+      logger.info(`[Schema] ${tabela}.sourceType ajustado em desenvolvimento.`);
     }
-  } catch (err) {
-    logger.error("[Schema] Falha ao estender sourceType das tabelas de captura:", err);
-  }
+  } catch (err) { logger.error("[Schema] Falha ao validar sourceType de captura:", err); }
 }

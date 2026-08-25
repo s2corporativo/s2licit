@@ -27,6 +27,7 @@ import { storagePut, localUploadDir } from "../storage";
 import multer from "multer";
 import { apiRateLimiter, authRateLimiter } from "./rateLimit";
 import { logger, installProcessErrorHandlers } from "./logger";
+import { safeHealthFailure } from "../services/safeHealthPayload";
 
 const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
 
@@ -48,18 +49,10 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  // Crash e rejeição não tratada ficam registrados de forma estruturada.
   installProcessErrorHandlers();
 
-  // Falhas de schema são fatais: nunca disponibilizar a aplicação parcialmente migrada.
-  //
-  // A ORDEM aqui importa: todas as colunas precisam existir ANTES de qualquer
-  // consulta via ORM. O drizzle `db.select().from(users)` projeta TODAS as
-  // colunas declaradas no schema (incluindo mfaEnabled/mfaSecret/failedLoginAttempts/
-  // lockedUntil), então rodar ensureAdminUser() — que lê e grava `users` pelo ORM —
-  // antes de ensureAuthSecurityColumns() criar essas colunas quebra o boot em bancos
-  // legados com "Unknown column". Por isso ensureAdminUser() roda por último, depois
-  // de todas as funções ensure*Columns() reconciliarem o schema.
+  // Em produção as funções ensure* são validadores; migrations são a fonte
+  // única de DDL. Em desenvolvimento o fallback idempotente pode ser habilitado.
   await ensurePasswordColumn();
   await ensureProductColumns();
   await ensureAuthSecurityColumns();
@@ -71,18 +64,13 @@ async function startServer() {
   await ensureQuotationAutomationColumns();
   await ensurePortalSessionColumns();
   await ensureEmailQuotationImageSourceType();
-  // ensureAdminUser() por último: lê/grava `users` pelo ORM (projeta todas as
-  // colunas), então precisa que todas as ensure*Columns já tenham rodado.
   await ensureAdminUser();
-  // Cadastro-base dos fornecedores com scraper pronto (Tambasa, Bartofil, etc.),
-  // para já aparecerem na tela "Agente de preços". Credenciais ficam no cofre.
   await ensureFornecedoresIniciais();
 
   const app = express();
   const server = createServer(app);
   app.set("trust proxy", 1);
   app.use(compression());
-  // Cabeçalhos de segurança básicos em todas as respostas.
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
@@ -92,9 +80,6 @@ async function startServer() {
     }
     next();
   });
-  // Corpo grande (planilhas/PDFs em base64) só é aceito no endpoint tRPC, que
-  // exige autenticação nas mutations; o restante da superfície fica em 2mb
-  // para reduzir a janela de DoS por memória.
   app.use("/api/trpc", express.json({ limit: "50mb" }));
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ limit: "2mb", extended: true }));
@@ -113,11 +98,10 @@ async function startServer() {
       await db.execute(sql`SELECT 1`);
       res.json({ status: "ready", database: "ok", uptime: process.uptime() });
     } catch (error) {
-      res.status(503).json({
-        status: "not_ready",
-        database: "error",
-        error: error instanceof Error ? error.message : "Falha de prontidão",
-      });
+      // Detalhe fica somente no logger; endpoint público não vaza mensagem SQL,
+      // host ou informação de infraestrutura.
+      logger.error("[Readiness] Banco/aplicação não prontos:", error);
+      res.status(503).json(safeHealthFailure());
     }
   });
 
@@ -240,7 +224,6 @@ async function startServer() {
     }
   });
 
-  // Exportação da proposta em Excel (§11) — mesma máscara do PDF (sem custo/margem).
   app.get("/api/proposals/:id/xlsx", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -355,12 +338,10 @@ async function startServer() {
 
   server.listen(port, () => {
     logger.info(`Server running on http://localhost:${port}/`);
-    // Grava a porta real para o INICIAR.bat abrir o navegador no endereço certo
-    // (em dev a porta pode variar quando a 3000 está ocupada).
     try {
       fs.writeFileSync(path.resolve(process.cwd(), ".port"), String(port));
     } catch {
-      /* informativo apenas — nunca impede o boot */
+      /* informativo apenas */
     }
   });
 

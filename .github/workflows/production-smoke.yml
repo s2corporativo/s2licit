@@ -1,11 +1,8 @@
 name: Smoke de produção
 
-# AGENDADO PAUSADO em 12/08/2026: runners da conta em limitação GitHub
-# (startup_failure em todos os runs desde 10/08). Manter ativo só gera runs
-# falsos que nunca executam. Reativar após a limitação ser liberada.
 on:
-  # schedule:
-  #   - cron: "17 9 * * *"
+  schedule:
+    - cron: "17 9 * * *"
   workflow_dispatch:
     inputs:
       base_url:
@@ -26,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SMOKE_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || vars.S2_BASE_URL }}
+  SMOKE_BASE_URL: ${{ inputs.base_url != '' && inputs.base_url || vars.S2_BASE_URL || 'https://s2.s2corporativo.com.br' }}
   SMOKE_ROUTES: ${{ inputs.routes != '' && inputs.routes || vars.SMOKE_ROUTES }}
   SMOKE_USER_EMAIL: ${{ secrets.SMOKE_USER_EMAIL }}
   SMOKE_USER_PASSWORD: ${{ secrets.SMOKE_USER_PASSWORD }}
@@ -35,52 +32,39 @@ env:
 
 jobs:
   smoke:
-    # Runner auto-hospedado na VPS Contabo (labels: self-hosted, Linux, X64,
-    # s2licit, contabo). Não depende mais dos runners hospedados do GitHub.
-    runs-on: [self-hosted, Linux, X64, s2licit, contabo]
+    # Hosted runner evita depender da saúde do mesmo host que está sendo testado.
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
 
-      - name: Habilitar pnpm
-        run: corepack enable
-
-      - name: Instalar dependências
-        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=silent
-
-      - name: Localizar ou instalar navegador do runner
+      - name: Instalar Chromium
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium-browser >/dev/null 2>&1 || sudo apt-get install -y -qq chromium >/dev/null 2>&1
           for candidate in /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser; do
             if [ -x "$candidate" ]; then
               echo "PUPPETEER_EXECUTABLE_PATH=$candidate" >> "$GITHUB_ENV"
-              echo "Navegador: $candidate"
               exit 0
             fi
           done
-          # Runner auto-hospedado sem Chrome: instala Chromium em tempo de execução
-          export DEBIAN_FRONTEND=noninteractive
-          if command -v apt-get >/dev/null; then
-            apt-get update -q && apt-get install -y -q chromium-browser >/dev/null 2>&1 || apt-get install -y -q chromium >/dev/null 2>&1
-          fi
-          if [ -x /usr/bin/chromium ]; then
-            echo "PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium" >> "$GITHUB_ENV"
-            echo "Chromium instalado em /usr/bin/chromium"
-          else
-            echo "Nenhum Chrome/Chromium disponível no runner" >&2
-            exit 1
-          fi
+          echo "Nenhum navegador disponível" >&2
+          exit 1
 
       - name: Validar secrets obrigatórios
         run: |
-          if [ -z "$SMOKE_USER_EMAIL" ] || [ -z "$SMOKE_USER_PASSWORD" ]; then
-            echo "::error::Configure SMOKE_USER_EMAIL e SMOKE_USER_PASSWORD com uma conta dedicada de papel editor."
-            exit 1
-          fi
+          [ -n "$SMOKE_USER_EMAIL" ] && [ -n "$SMOKE_USER_PASSWORD" ] || {
+            echo "::error::Configure SMOKE_USER_EMAIL e SMOKE_USER_PASSWORD com conta dedicada de perfil editor.";
+            exit 1;
+          }
 
       - name: Executar smoke autenticado
         id: smoke
@@ -106,58 +90,28 @@ jobs:
           script: |
             const title = "🚨 Smoke de produção do S2 Licit falhou";
             const { owner, repo } = context.repo;
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              owner,
-              repo,
-              state: "open",
-              per_page: 100,
-            });
+            const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: "open", per_page: 100 });
             const incident = issues.find((issue) => !issue.pull_request && issue.title === title);
             const failed = process.env.OUTCOME !== "success";
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             const checkedAt = new Date().toISOString();
-
             if (failed) {
               const body = [
                 "O smoke autenticado falhou ao validar a produção.",
                 "",
                 `- URL: ${process.env.BASE_URL}`,
                 `- Verificado em: ${checkedAt}`,
-                `- Workflow e evidências: ${runUrl}`,
+                `- Workflow/evidências: ${runUrl}`,
                 "",
-                "O artefato do workflow contém `summary.json` e capturas das rotas já validadas.",
-                "Verificar login, permissões da conta de smoke, erros do navegador, backend, banco e rotas críticas.",
+                "Verificar login, RBAC, backend, banco, rotas críticas e geração de proposta.",
               ].join("\n");
-
-              if (incident) {
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: incident.number,
-                  body,
-                });
-              } else {
-                await github.rest.issues.create({ owner, repo, title, body });
-              }
-              return;
+              if (incident) await github.rest.issues.createComment({ owner, repo, issue_number: incident.number, body });
+              else await github.rest.issues.create({ owner, repo, title, body });
+            } else if (incident) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: incident.number, body: `✅ Smoke voltou a passar em ${checkedAt}. Evidências: ${runUrl}` });
+              await github.rest.issues.update({ owner, repo, issue_number: incident.number, state: "closed", state_reason: "completed" });
             }
 
-            if (incident) {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: incident.number,
-                body: `✅ Smoke de produção voltou a passar em ${checkedAt}. Evidências: ${runUrl}`,
-              });
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: incident.number,
-                state: "closed",
-                state_reason: "completed",
-              });
-            }
-
-      - name: Falhar o workflow quando o smoke falhar
+      - name: Falhar quando o smoke falhar
         if: steps.smoke.outcome != 'success'
         run: exit 1

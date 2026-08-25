@@ -2,11 +2,13 @@ import { inArray, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { priceHistory, companySettings } from "../../drizzle/schema";
 import { ttlDeConfiguracao, avaliarValidadeLote } from "./priceValidityService";
+import { undatedCostBlocksAutomation } from "./costAutomationPolicy";
 
 /**
- * Frescor de preço por produto (spec §13): compara a data da última consulta
- * (último registro em price_history) com a validade configurada e marca os
- * preços vencidos — insumo do badge "preço vencido" na tela de revisão.
+ * Frescor de preço por produto. `consultadoEm=0` representa explicitamente
+ * custo sem histórico datado quando a política exige confirmação humana. Isso
+ * faz os consumidores legados que testam `consultadoEm != null && vencido`
+ * bloquearem a automação sem confundir ausência de histórico com preço fresco.
  */
 export interface FrescorPreco {
   productId: number;
@@ -37,8 +39,19 @@ export async function avaliarFrescorPrecos(
   for (const r of rows) if (r.ultima) ultimaPorProduto.set(r.productId, r.ultima as Date);
 
   const itens = ids.map((id) => ({ id, consultadoEm: ultimaPorProduto.get(id) ?? null }));
-  return avaliarValidadeLote(itens, ttl, agora).map((a) => {
+  const avaliados = avaliarValidadeLote(itens, ttl, agora);
+  const blockUndated = undatedCostBlocksAutomation();
+
+  return avaliados.map((a) => {
     const consulta = ultimaPorProduto.get(a.id);
+    if (!consulta && blockUndated) {
+      return {
+        productId: a.id,
+        consultadoEm: 0,
+        vencido: true,
+        restanteMs: 0,
+      };
+    }
     return {
       productId: a.id,
       consultadoEm: consulta ? new Date(consulta).getTime() : null,

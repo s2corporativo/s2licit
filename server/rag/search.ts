@@ -1,26 +1,10 @@
 /**
- * search.ts — Busca de Equivalências RAG (recuperação + justificativa).
- * ─────────────────────────────────────────────────────────────────────────────
- * Pipeline em 3 estágios, seguindo o padrão dos engines do S2:
- *
- *   1. RECUPERAÇÃO VETORIAL — embedding da consulta vs embeddings indexados;
- *      topK candidatos por similaridade de cosseno (pré-filtro por tipo de
- *      catálogo quando informado).
- *   2. PRÉ-FILTRO DETERMINÍSTICO — descarta candidatos com score < minScore
- *      e ordena por score decrescente.
- *   3. JUSTIFICATIVA POR IA (opcional) — o gateway _core/llm gera a
- *      justificativa técnica de cada equivalência sugerida (princípio ativo,
- *      concentração, via, fabricante) em JSON estruturado, com limite de
- *      tokens para controlar custo.
- *
- * Frases de segurança (padrão do escritório): quando o vetor da consulta não
- * retorna candidatos acima do limiar, a resposta é "TR tecnicamente
- * insuficiente para correspondência segura" — nunca um equivalente inventado.
- *
- * O estágio 3 usa o gateway existente (Anthropic/Groq/auto + registro em
- * ai_usage_daily) — não cria canal paralelo de custos.
+ * Busca de Equivalências RAG.
+ * Recuperação vetorial produz candidatos; não autoriza equivalência técnica
+ * automática. A confirmação automática exige guarda determinística estruturada
+ * no fluxo chamador.
  */
-import { sql, and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { products, productEmbeddings } from "../../drizzle/schema";
 import { embedText } from "./embedding";
@@ -28,6 +12,7 @@ import { buildQueryDigest, cosineSimilarity } from "./digest";
 import { getRagConfig } from "./ragConfig";
 import { invokeLLM } from "../_core/llm";
 import { logger } from "../_core/logger";
+import { RAG_SCAN_BATCH_SIZE, RAG_SCAN_HARD_CAP } from "../services/ragRetrievalPolicy";
 
 export type EquivalenciaResultado = {
   productId: number;
@@ -40,6 +25,7 @@ export type EquivalenciaResultado = {
   tipoCatalogo: string | null;
   score: number;
   justificativa: string | null;
+  /** Sempre false no RAG puro: sem validação técnica estruturada, é candidato. */
   autoMatch: boolean;
 };
 
@@ -51,115 +37,117 @@ export type BuscaRagResult = {
   fraseSeguranca: string | null;
   erro: string | null;
   tempoMs: number;
+  scanTruncated?: boolean;
 };
 
 const FRASE_INSUFICIENTE = "TR tecnicamente insuficiente para correspondência segura.";
 const FRASE_MOTOR_DESLIGADO = "Motor de Equivalências RAG desativado na configuração.";
 
-/**
- * Cache em memória de embeddings de consulta (digest → vetor). Reduz o tempo
- * de busca de consultas repetidas: o gargalo local (~7 s/embed no Ollama CPU)
- * cai para milissegundos quando o mesmo digest é reutilizado. Limite de
- * entradas e TTL de 30 min mantêm a memória sob controle.
- */
 const QUERY_EMBED_CACHE = new Map<string, { vector: number[]; model: string; ts: number }>();
 const QUERY_EMBED_CACHE_TTL_MS = 30 * 60 * 1000;
 const QUERY_EMBED_CACHE_MAX = 500;
 
-/** Invalida o cache de consultas quando a base indexada muda (reindexação). */
 export function clearQueryEmbedCache(): void {
   QUERY_EMBED_CACHE.clear();
 }
 
 async function embedQueryCached(queryDigest: string): Promise<{ vector: number[]; model: string }> {
-  // Purge expirados a cada acesso (manutenção simples, sem timer).
   const now = Date.now();
-  let purged = false;
   for (const [key, entry] of QUERY_EMBED_CACHE) {
-    if (now - entry.ts > QUERY_EMBED_CACHE_TTL_MS) {
-      QUERY_EMBED_CACHE.delete(key);
-      purged = true;
-    }
+    if (now - entry.ts > QUERY_EMBED_CACHE_TTL_MS) QUERY_EMBED_CACHE.delete(key);
   }
-  void purged;
   const cached = QUERY_EMBED_CACHE.get(queryDigest);
   if (cached) return { vector: cached.vector, model: cached.model };
   const result = await embedText(queryDigest);
   if (QUERY_EMBED_CACHE.size >= QUERY_EMBED_CACHE_MAX) {
-    // Remove a entrada mais antiga antes de inserir.
     const oldest = QUERY_EMBED_CACHE.keys().next().value;
     if (oldest !== undefined) QUERY_EMBED_CACHE.delete(oldest);
   }
   QUERY_EMBED_CACHE.set(queryDigest, { vector: result.vector, model: result.model, ts: now });
-  return { vector: result.vector, model: result.model };
+  return result;
+}
+
+interface RetrievalResult {
+  candidates: Array<{ productId: number; score: number; model: string }>;
+  scanned: number;
+  truncated: boolean;
 }
 
 /**
- * Amostra ampliada: carrega até SAMPLE_WINDOW candidatos do banco e retorna
- * apenas o topK por score. O SELECT sem ORDER não garante ordem determinística,
- * então a janela larga evita que a busca dependa de uma fatia aleatória do
- * banco (limitação do MySQL 8.0 sem índice vetorial). Janela = max(topK*20,
- * 500), limitada a SAMPLE_CAP para não sobrecarregar memória/cálculo.
+ * Recuperação determinística e paginada por productId. A versão anterior fazia
+ * `.limit(4000)` sem ORDER BY e podia nunca enxergar o melhor produto. Agora o
+ * conjunto elegível é percorrido em lotes até acabar ou atingir hard-cap
+ * explícito. Se atingir o cap, o resultado sinaliza `truncated`.
  */
-const SAMPLE_WINDOW_FACTOR = 20;
-const SAMPLE_MIN = 500;
-const SAMPLE_CAP = 4000;
-
-function sampleWindow(topK: number): number {
-  return Math.min(SAMPLE_CAP, Math.max(SAMPLE_MIN, topK * SAMPLE_WINDOW_FACTOR));
-}
-
-/** Recuperação vetorial bruta (estágio 1). */
 async function retrieveCandidates(
   queryVector: number[],
   topK: number,
-  tipoCatalogo?: string
-): Promise<Array<{ productId: number; score: number; model: string }>> {
+  tipoCatalogo?: string,
+): Promise<RetrievalResult> {
   const db = await getDb();
-  if (!db) return [];
-  // Carrega candidatos com digest e embedding (JSON → array) em janela ampliada.
-  const where = tipoCatalogo
-    ? and(
-        eq(products.isActive, "yes"),
-        sql`${products.deletedAt} IS NULL`,
-        eq(products.tipoCatalogo, tipoCatalogo as never)
-      )
-    : and(eq(products.isActive, "yes"), sql`${products.deletedAt} IS NULL`);
-  const rows = await db
-    .select({
-      productId: productEmbeddings.productId,
-      embedding: productEmbeddings.embedding,
-      model: productEmbeddings.model,
-      tipoCatalogo: products.tipoCatalogo,
-    })
-    .from(productEmbeddings)
-    .innerJoin(products, eq(products.id, productEmbeddings.productId))
-    .where(where)
-    .limit(sampleWindow(topK));
-  const scored = rows
-    .map((row) => {
+  if (!db) return { candidates: [], scanned: 0, truncated: false };
+
+  let lastProductId = 0;
+  let scanned = 0;
+  let exhausted = false;
+  const best: Array<{ productId: number; score: number; model: string }> = [];
+
+  while (!exhausted && scanned < RAG_SCAN_HARD_CAP) {
+    const remaining = RAG_SCAN_HARD_CAP - scanned;
+    const limit = Math.min(RAG_SCAN_BATCH_SIZE, remaining);
+    const conditions = [
+      eq(products.isActive, "yes"),
+      sql`${products.deletedAt} IS NULL`,
+      gt(productEmbeddings.productId, lastProductId),
+    ];
+    if (tipoCatalogo) conditions.push(eq(products.tipoCatalogo, tipoCatalogo as never));
+
+    const rows = await db
+      .select({
+        productId: productEmbeddings.productId,
+        embedding: productEmbeddings.embedding,
+        model: productEmbeddings.model,
+      })
+      .from(productEmbeddings)
+      .innerJoin(products, eq(products.id, productEmbeddings.productId))
+      .where(and(...conditions))
+      .orderBy(productEmbeddings.productId)
+      .limit(limit);
+
+    if (rows.length === 0) break;
+    scanned += rows.length;
+    lastProductId = rows[rows.length - 1]!.productId;
+    exhausted = rows.length < limit;
+
+    for (const row of rows) {
       const vec = Array.isArray(row.embedding) ? (row.embedding as number[]) : null;
-      if (!vec) return null;
+      if (!vec) continue;
       try {
-        return { productId: row.productId, score: cosineSimilarity(queryVector, vec), model: row.model };
+        best.push({ productId: row.productId, score: cosineSimilarity(queryVector, vec), model: row.model });
       } catch {
-        return null;
+        // Embedding incompatível/corrompido não derruba a busca.
       }
-    })
-    .filter((s): s is NonNullable<typeof s> => s !== null)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
-  return scored;
+    }
+
+    // Mantém apenas uma margem dos melhores para limitar memória entre lotes.
+    if (best.length > Math.max(topK * 5, 500)) {
+      best.sort((a, b) => b.score - a.score);
+      best.splice(Math.max(topK * 3, 300));
+    }
+  }
+
+  best.sort((a, b) => b.score - a.score);
+  return {
+    candidates: best.slice(0, topK),
+    scanned,
+    truncated: !exhausted && scanned >= RAG_SCAN_HARD_CAP,
+  };
 }
 
-/** Monta a justificativa técnica via gateway de IA (estágio 3, opcional). */
-async function   justificar(
-    consulta: string,
-    equivalente: EquivalenciaResultado
-  ): Promise<string | null> {
+async function justificar(consulta: string, equivalente: EquivalenciaResultado): Promise<string | null> {
   try {
     const prompt = `Você é um analista técnico de licitações e medicamentos veterinários/humanos.
-Dada a consulta "${consulta}", justifique em UMA frase técnica e objetiva (máx. 40 palavras, português) por que o produto abaixo é um equivalente candidato, citando princípio ativo, concentração, forma farmacêutica, via de administração e fabricante quando disponíveis. Se algum campo for nulo, não invente — apenas omita.
+Dada a consulta "${consulta}", justifique em UMA frase técnica e objetiva (máx. 40 palavras, português) por que o produto abaixo é um candidato, citando apenas campos existentes. Não declare equivalência definitiva e não invente dados.
 
 Produto: ${equivalente.nome}
 Princípio ativo: ${equivalente.principioAtivo ?? "não informado"}
@@ -167,11 +155,8 @@ Concentração: ${equivalente.concentracao ?? "não informada"}
 Forma farmacêutica: ${equivalente.formaFarmaceutica ?? "não informada"}
 Via: ${equivalente.via ?? "não informada"}
 Fabricante: ${equivalente.fabricante ?? "não informado"}
-Score de similaridade semântica: ${equivalente.score.toFixed(3)}`;
-    const result = await invokeLLM({
-      messages: [{ role: "user", content: prompt }],
-      maxTokens: 150,
-    });
+Score semântico: ${equivalente.score.toFixed(3)}`;
+    const result = await invokeLLM({ messages: [{ role: "user", content: prompt }], maxTokens: 150 });
     const content = result.choices?.[0]?.message?.content;
     return typeof content === "string" ? content.trim() : null;
   } catch (error) {
@@ -180,17 +165,9 @@ Score de similaridade semântica: ${equivalente.score.toFixed(3)}`;
   }
 }
 
-/**
- * Busca de equivalências por descrição livre / TR.
- * Se o motor estiver desligado, retorna {habilitado: false} sem erro.
- */
 export async function buscarEquivalencias(
   query: string,
-  options: {
-    tipoCatalogo?: string;
-    topK?: number;
-    comJustificativa?: boolean;
-  } = {}
+  options: { tipoCatalogo?: string; topK?: number; comJustificativa?: boolean } = {},
 ): Promise<BuscaRagResult> {
   const start = Date.now();
   const config = await getRagConfig();
@@ -204,20 +181,19 @@ export async function buscarEquivalencias(
       fraseSeguranca: FRASE_MOTOR_DESLIGADO,
       erro: null,
       tempoMs: Date.now() - start,
+      scanTruncated: false,
     };
   }
 
   const topK = options.topK ?? config.topK;
   const maxResults = config.maxResults;
   const minScore = config.minScore;
-  const autoMatchScore = config.autoMatchScore;
 
   try {
     const queryDigest = buildQueryDigest(query);
     const embedResult = await embedQueryCached(queryDigest);
-    const candidates = await retrieveCandidates(embedResult.vector, topK, options.tipoCatalogo);
-
-    const aceitaveis = candidates.filter((c) => c.score >= minScore).slice(0, maxResults);
+    const retrieval = await retrieveCandidates(embedResult.vector, topK, options.tipoCatalogo);
+    const aceitaveis = retrieval.candidates.filter((c) => c.score >= minScore).slice(0, maxResults);
     const db = await getDb();
 
     let resultados: EquivalenciaResultado[] = [];
@@ -251,29 +227,33 @@ export async function buscarEquivalencias(
           tipoCatalogo: row?.tipoCatalogo ?? null,
           score: c.score,
           justificativa: null,
-          autoMatch: c.score >= autoMatchScore,
+          // Sem TR estruturado para comparar atributos obrigatórios, RAG puro
+          // nunca decide equivalência automaticamente.
+          autoMatch: false,
         };
       });
     }
 
     if (options.comJustificativa && resultados.length > 0) {
-      // Justificativas em paralelo com limite de concorrência (controle de custo).
       const limite = Math.min(resultados.length, 5);
-      await Promise.all(
-        resultados.slice(0, limite).map(async (eq_) => {
-          eq_.justificativa = await justificar(query, eq_);
-        })
-      );
+      await Promise.all(resultados.slice(0, limite).map(async (eq_) => {
+        eq_.justificativa = await justificar(query, eq_);
+      }));
     }
+
+    const truncationWarning = retrieval.truncated
+      ? "Busca vetorial atingiu o limite de varredura; resultado é candidato e exige revisão."
+      : null;
 
     return {
       consulta: query,
       habilitado: true,
-      candidatosVetoriais: candidates.length,
+      candidatosVetoriais: retrieval.scanned,
       resultados,
-      fraseSeguranca: resultados.length === 0 ? FRASE_INSUFICIENTE : null,
+      fraseSeguranca: resultados.length === 0 ? FRASE_INSUFICIENTE : truncationWarning,
       erro: null,
       tempoMs: Date.now() - start,
+      scanTruncated: retrieval.truncated,
     };
   } catch (error) {
     logger.error("[rag.search] busca falhou: %s", String(error));
@@ -285,6 +265,7 @@ export async function buscarEquivalencias(
       fraseSeguranca: FRASE_INSUFICIENTE,
       erro: String(error),
       tempoMs: Date.now() - start,
+      scanTruncated: false,
     };
   }
 }
