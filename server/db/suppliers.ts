@@ -12,42 +12,14 @@ export type SupplierContactFields = {
 
 export type SupplierWrite = InsertSupplier & SupplierContactFields;
 
-let contactColumnsEnsured = false;
-
 /**
- * O formulário de fornecedores já expunha estes campos, mas o schema Drizzle
- * legado continha somente name/isActive. Em produção isso fazia os valores
- * extras serem descartados silenciosamente. A reconciliação abaixo é
- * idempotente: cria somente as colunas ausentes e tolera ER_DUP_FIELDNAME em
- * bancos que já tenham sido corrigidos manualmente.
+ * Os campos de contato são formalizados pela migration
+ * `0029_supplier_contact_columns`. O módulo de aplicação nunca executa DDL:
+ * migrations são a única fonte de alterações estruturais do banco.
+ *
+ * Enquanto o schema Drizzle legado não tipa estes cinco campos, a seleção e as
+ * escritas permanecem explícitas via SQL, sem criar/alterar colunas em runtime.
  */
-async function ensureSupplierContactColumns() {
-  if (contactColumnsEnsured) return;
-  const db = await getDb();
-  if (!db) return;
-
-  const statements = [
-    "ALTER TABLE suppliers ADD COLUMN code VARCHAR(128) NULL AFTER name",
-    "ALTER TABLE suppliers ADD COLUMN contact VARCHAR(256) NULL AFTER code",
-    "ALTER TABLE suppliers ADD COLUMN email VARCHAR(320) NULL AFTER contact",
-    "ALTER TABLE suppliers ADD COLUMN phone VARCHAR(64) NULL AFTER email",
-    "ALTER TABLE suppliers ADD COLUMN notes TEXT NULL AFTER phone",
-  ];
-
-  for (const statement of statements) {
-    try {
-      await db.execute(sql.raw(statement));
-    } catch (error: any) {
-      // MySQL ER_DUP_FIELDNAME = 1060. Alguns drivers expõem code, outros errno.
-      if (error?.code === "ER_DUP_FIELDNAME" || error?.errno === 1060 || error?.cause?.code === "ER_DUP_FIELDNAME") {
-        continue;
-      }
-      throw error;
-    }
-  }
-  contactColumnsEnsured = true;
-}
-
 function supplierSelection() {
   return {
     id: suppliers.id,
@@ -66,7 +38,6 @@ function supplierSelection() {
 export async function listSuppliers(activeOnly = false) {
   const db = await getDb();
   if (!db) return [];
-  await ensureSupplierContactColumns();
   const select = supplierSelection();
   if (activeOnly) {
     return db
@@ -81,7 +52,6 @@ export async function listSuppliers(activeOnly = false) {
 export async function getSupplierById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-  await ensureSupplierContactColumns();
   const result = await db
     .select(supplierSelection())
     .from(suppliers)
@@ -93,7 +63,6 @@ export async function getSupplierById(id: number) {
 export async function createSupplier(data: SupplierWrite) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await ensureSupplierContactColumns();
 
   const { code, contact, email, phone, notes, ...base } = data;
   const [result] = await db.insert(suppliers).values(base);
@@ -115,7 +84,6 @@ export async function createSupplier(data: SupplierWrite) {
 export async function updateSupplier(id: number, data: Partial<SupplierWrite>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await ensureSupplierContactColumns();
 
   const { code, contact, email, phone, notes, ...base } = data;
   if (Object.keys(base).length > 0) {
