@@ -29,14 +29,15 @@ const WITH_DEADLINE_HTML = `
 </table></body></html>`;
 
 describe("Funarbe Provider Portal", () => {
-  it("mantém somente rotas de descoberta de novas oportunidades", () => {
+  it("inclui rotas de descoberta (novas cotações abertas)", () => {
     expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
       "https://fornecedor.funarbe.org.br/compra-produtos-diversos",
     );
     expect(FUNARBE_PROVIDER_LIST_URLS).toContain(
       "https://fornecedor.funarbe.org.br/pedidos-compra",
     );
-    expect(FUNARBE_PROVIDER_LIST_URLS.some((url) => url.includes("aguardando-confirmacao"))).toBe(false);
+    // cotacao-aguardando-confirmacao é apenas rastreio de status, não descoberta
+    expect(FUNARBE_PROVIDER_LIST_URLS).toHaveLength(2);
   });
 
   it("extrai pedido e link sem inventar prazo a partir de previsão de entrega", () => {
@@ -61,6 +62,9 @@ describe("Funarbe Provider Portal", () => {
     expect(op.prazoResposta?.getFullYear()).toBe(2026);
     expect(op.prazoResposta?.getMonth()).toBe(7);
     expect(op.prazoResposta?.getDate()).toBe(20);
+    // Preserva a hora: "20/08/2026 18:00" → 18:00, não 23:59:59
+    expect(op.prazoResposta?.getHours()).toBe(18);
+    expect(op.prazoResposta?.getMinutes()).toBe(0);
   });
 
   it("deduplica o mesmo pedido quando aparece em mais de uma listagem", () => {

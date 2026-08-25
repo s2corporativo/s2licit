@@ -345,6 +345,8 @@ async function fetchInstitutionalOpportunities(
     errors.push(`${definition.label} (navegador): ${(error as Error).message}`);
   }
 
+  // Terceira tentativa: área autenticada com credencial do cofre (portais que
+  // só listam cotações ao fornecedor logado). CAPTCHA interrompe com aviso.
   const authenticated = await fetchAuthenticatedOpportunities(source, errors);
   if (authenticated.length > 0) return authenticated;
 
@@ -355,6 +357,12 @@ async function fetchInstitutionalOpportunities(
   return [];
 }
 
+/**
+ * Descoberta autenticada: entra no portal com a credencial do cofre e passa o
+ * HTML da área logada pelos mesmos parsers do radar público. Sem credencial ou
+ * com a chave desligada, devolve lista vazia em silêncio (o radar público já
+ * cobriu o que era possível).
+ */
 async function fetchAuthenticatedOpportunities(
   source: S2TargetPortal,
   errors: string[],
@@ -364,11 +372,16 @@ async function fetchAuthenticatedOpportunities(
   try {
     const html = await fetchAuthenticatedPortalHtml(source);
     if (!html) return [];
+    // Funarbe: o HTML autenticado vem do portal do fornecedor (Agrega/Yii2),
+    // que não é uma listagem institucional comum — usa o parser dedicado das
+    // GridView do Agrega, que preserva prazos, quantidades e valores.
     if (isFunarbeProviderPortal(source)) {
+      // As oportunidades do Agrega são devolvidas no formato estrutural do
+      // radar (source externo fica fixo em "funarbe" para o fallback autenticado).
       return parseAgregaCombinedHtml(html).map((opportunity) => ({
         ...opportunity,
         source,
-      }));
+      })) as S2PortalOpportunity[];
     }
     return parseInstitutionalPortalHtml(source, html, getS2PortalUrl(source));
   } catch (error) {
@@ -465,6 +478,10 @@ function emptyStats(source: S2TargetPortal): S2PortalSourceStats {
   };
 }
 
+/**
+ * Radar único do S2 Licit. O escopo é propositalmente fechado em COPASA,
+ * CEMIG, Fundep, Funarbe, Compras MG e FIEMG/SESI/SENAI.
+ */
 export async function syncS2PortalOpportunities(options?: {
   sources?: S2TargetPortal[];
   maxFundepGroups?: number;
@@ -485,6 +502,8 @@ export async function syncS2PortalOpportunities(options?: {
       (INSTITUTIONAL_SOURCES as readonly string[]).includes(source),
   );
 
+  // Carregado uma única vez para todo o sync (era carregado de novo a cada
+  // fallback autenticado da fundação E de novo para os institucionais).
   const tambasaCatalog =
     foundationSources.length > 0 || institutionalSources.length > 0 ? await loadTambasaCatalog() : [];
 
@@ -494,6 +513,11 @@ export async function syncS2PortalOpportunities(options?: {
       maxFundepGroups: options?.maxFundepGroups,
       tambasaCatalog,
     });
+    // Contagem POR FONTE (não o agregado de Fundep+Funarbe combinados) —
+    // senão Funarbe herda o resultado de Fundep (e vice-versa) e o fallback
+    // autenticado abaixo nunca roda quando só uma das duas tem resultado.
+    // Erros também são só os da própria fonte — senão um erro do Fundep
+    // apareceria (duplicado) no relatório da Funarbe, e vice-versa.
     for (const source of foundationSources) {
       const target = stats.get(source)!;
       const perSource = result.sourceStats.find((s) => s.source === source);
@@ -505,6 +529,8 @@ export async function syncS2PortalOpportunities(options?: {
       target.errors.push(...(perSource?.errors ?? []));
     }
 
+    // Fallback autenticado das fundações: se o mural público não trouxe nada e
+    // há credencial no cofre, tenta a área logada do fornecedor.
     for (const source of foundationSources) {
       const target = stats.get(source)!;
       if (target.found > 0) continue;
