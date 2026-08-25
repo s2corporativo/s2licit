@@ -306,6 +306,9 @@ export async function fetchAuthenticatedPortalHtml(
           const html = await agente.coletarHtml(targetUrl);
           return { url: targetUrl, html };
         } catch (error) {
+          // CAPTCHA precisa subir até o catch externo (que pede intervenção
+          // humana) — só falhas operacionais comuns caem para página vazia.
+          if (error instanceof CaptchaRequerIntervencaoError) throw error;
           logger.warn(
             `[PortalAuthDiscovery] ${source}: falha ao coletar ${targetUrl} — ${(error as Error).message}`,
           );

@@ -34,6 +34,10 @@ function normalizeText(value: string | null | undefined): string {
   return (value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
+function stripAccents(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 function parsePtBrNumber(value: string | null | undefined): number | null {
   const raw = normalizeText(value).replace(/[^\d,.-]/g, "");
   if (!raw) return null;
@@ -115,11 +119,10 @@ export function parseAgregaListHtml(
       : [];
     if (headerCells.length === 0) continue;
 
-    const bodyRows = Array.from(grid.querySelectorAll("tbody tr")).filter(
-      (row) =>
-        normalizeText(row.textContent) !== "" &&
-        !/nenhum resultado/i.test(normalizeText(row.textContent) ?? ""),
-    );
+    const bodyRows = Array.from(grid.querySelectorAll("tbody tr")).filter((row) => {
+      const text = normalizeText(row.textContent);
+      return text !== "" && !/nenhum resultado/i.test(text) && !/sem resultado/i.test(text);
+    });
     for (const row of bodyRows) {
       const cells = Array.from(row.querySelectorAll("th, td")).map((cell) =>
         normalizeText(cell.textContent),
@@ -152,7 +155,7 @@ export function parseAgregaListHtml(
         .join(" · ");
 
       const situacao =
-        column("situação") || column("situacao") || column("situaçao") || "";
+        column("situação") || column("situacao") || column("situaçao") || column("status") || "";
       const quantidade = parsePtBrNumber(
         column("quantidade") || column("qtd"),
       );
@@ -163,7 +166,7 @@ export function parseAgregaListHtml(
         column("previsão de entrega") || column("previsao de entrega") || "";
 
       const hasExplicitDeadlineColumn = headerCells.some((header) => {
-        const normalized = header.toLowerCase();
+        const normalized = stripAccents(header.toLowerCase());
         return (
           normalized.includes("prazo") ||
           normalized.includes("data limite") ||
@@ -211,7 +214,7 @@ export function parseAgregaListHtml(
         ]
           .filter(Boolean)
           .join("\n"),
-        items: descricao.length >= 12
+        items: descricao.length >= 8
           ? [{ numeroItem: 1, descricao, quantidade, unidade, codigoExterno: null }]
           : [],
       });
