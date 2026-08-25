@@ -1,5 +1,10 @@
 # Checklist de homologação S2 Licit
 
+> Enquanto o GitHub Actions estiver indisponível no nível da conta, os dois primeiros itens
+> são satisfeitos pela evidência local no corpo do PR (`pnpm check && pnpm test && pnpm build`,
+> portão a portão, commit e branch), conforme o CLAUDE.md. Quando a esteira voltar, valem
+> literalmente.
+
 - [ ] CI verde (lint, typecheck, testes, build, audit)
 - [ ] Security workflow verde
 - [ ] migration drift = zero
