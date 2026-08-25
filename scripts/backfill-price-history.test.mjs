@@ -4,22 +4,26 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(new URL("./backfill-price-history.mjs", import.meta.url), "utf8");
 
 describe("backfill de histórico de preços", () => {
-  it("usa somente colunas reais de timestamp do price_history", () => {
-    expect(source).toContain("data, recordedAt");
-    expect(source).not.toMatch(/price_history[\s\S]{0,300}createdAt/);
+  it("usa somente colunas reais de timestamp na lista de destino", () => {
+    expect(source).toContain("(productId, supplierId, price, origem, data, recordedAt)");
+    expect(source).not.toContain("(productId, supplierId, price, origem, createdAt)");
   });
 
-  it("preserva o timestamp observado da oferta", () => {
-    expect(source).toContain("COALESCE(o.updatedAt, o.createdAt) AS observedAt");
-    expect(source.match(/COALESCE\(o\.updatedAt, o\.createdAt\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  it("não rejuvenesce preço por updatedAt genérico da oferta", () => {
+    expect(source).toContain("o.createdAt AS observedAt");
+    expect(source).toContain("o.createdAt,\n        o.createdAt");
+    expect(source).not.toContain("o.updatedAt");
     expect(source).not.toContain("NOW())");
   });
 
-  it("revalida ausência de histórico no mesmo INSERT", () => {
+  it("serializa execuções e revalida ausência no mesmo INSERT", () => {
+    expect(source).toContain("SELECT GET_LOCK(?, 30) AS acquired");
+    expect(source).toContain("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
     expect(source).toContain("INSERT INTO price_history");
     expect(source).toContain("AND NOT EXISTS (");
     expect(source).toContain("WHERE h.productId = o.productId");
     expect(source).toContain("AND h.supplierId = o.supplierId");
+    expect(source).toContain("SELECT RELEASE_LOCK(?)");
   });
 
   it("continua dry-run por padrão e exige flag explícita para escrita", () => {
