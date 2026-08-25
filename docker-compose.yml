@@ -1,6 +1,5 @@
 # Deploy do Sistema S2 (app + MySQL) para VPS.
-# Os segredos vêm de um arquivo .env ao lado deste (veja .env.production.example).
-# Suba com:  docker compose up -d --build
+# Segredos vêm de .env. O proxy reverso (Caddy) é o único ponto público.
 
 services:
   db:
@@ -12,26 +11,19 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-sistema_s2}
       MYSQL_USER: ${MYSQL_USER:-s2user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    # Porta exposta só localmente (127.0.0.1); o app acessa via rede interna.
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      # MYSQL_PWD evita a senha na linha de comando (visível em docker inspect/ps)
       test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping -h localhost -u root"]
       interval: 10s
       timeout: 5s
       retries: 10
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    # Teto de memória: um scrape pesado no app não pode levar o MySQL junto
-    # num OOM da VPS inteira.
     mem_limit: ${MYSQL_MEM_LIMIT:-1g}
 
   app:
-    # Em produção o deploy fixa S2_IMAGE na imagem publicada por SHA (ghcr) —
-    # rollback = apontar S2_IMAGE para a tag anterior e `docker compose up -d`.
-    # Sem S2_IMAGE (dev/local), o build local continua funcionando.
     image: ${S2_IMAGE:-sistema-s2-app:local}
     build:
       context: .
@@ -43,23 +35,30 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      # O domínio de produção é servido por HTTPS; cookies de sessão devem
-      # permanecer Secure mesmo se o proxy não repassar x-forwarded-proto.
       FORCE_SECURE_COOKIES: "true"
       DATABASE_URL: mysql://${MYSQL_USER:-s2user}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-sistema_s2}
-      # Backups automáticos gravados em volume persistente — sobrevivem a rebuilds.
       BACKUP_DIR: /app/backups
+      # Relatórios automáticos por e-mail foram removidos da operação normal.
+      DAILY_REPORT_ENABLED: "false"
+      QUOTATION_AUTO_SEND_ENABLED: "false"
+      # Scrapers amplos permanecem disponíveis para execução manual/revisada,
+      # mas o agendamento automático fica desligado até a guarda de plausibilidade
+      # estar integrada em todos os caminhos de atualização de custo.
+      SCRAPER_SCHEDULE_ENABLED: "false"
+      # Segurança de equivalência: nome sozinho não auto-confirma.
+      QUOTATION_AUTO_CONFIRM_THRESHOLD: ${QUOTATION_AUTO_CONFIRM_THRESHOLD:-1}
+      # Custos padrão entram na fórmula se o fluxo não fornecer valores específicos.
+      PRICING_DEFAULT_TAX_PERCENT: ${PRICING_DEFAULT_TAX_PERCENT:-0}
+      PRICING_DEFAULT_FREIGHT_UNIT: ${PRICING_DEFAULT_FREIGHT_UNIT:-0}
+      MIGRATION_STRICT: ${MIGRATION_STRICT:-true}
+      SCHEMA_BOOT_DDL_ENABLED: ${SCHEMA_BOOT_DDL_ENABLED:-false}
     ports:
-      # Porta pública (padrão 80; o vps-bootstrap.sh escolhe outra livre se
-      # estiver ocupada e grava APP_HTTP_PORT no .env).
-      - "${APP_HTTP_PORT:-80}:3000"
-      # Porta local para readiness e proxy reverso (só 127.0.0.1).
+      # Somente loopback: Caddy/healthcheck local acessam o app; Internet não.
       - "127.0.0.1:${APP_LOCAL_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      # /readyz exige aplicação + MySQL. /healthz valida apenas o processo.
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
@@ -68,7 +67,6 @@ services:
     volumes:
       - uploads_data:/app/uploads
       - backups_data:/app/backups
-    # Node + Chromium (scraper) com teto — protege o MySQL vizinho.
     mem_limit: ${APP_MEM_LIMIT:-2g}
 
 volumes:

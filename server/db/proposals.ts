@@ -1,6 +1,25 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
-import { proposalItems, proposalStatusHistory, proposals, type InsertProposal, type InsertProposalItem } from "../../drizzle/schema";
+import { proposalItems, proposalStatusHistory, proposals, suppliers, type InsertProposal, type InsertProposalItem } from "../../drizzle/schema";
 import { getDb } from "./_client";
+
+/**
+ * Resolve o fornecedor pelo nome (texto livre histórico em `supplierName`)
+ * para preencher a FK `supplierId` (Ressalva 4, Módulo 06) sem exigir que os
+ * ~49 pontos de criação de item de proposta sejam reescritos. Casamento
+ * exato por nome (case-insensitive); nomes divergentes ficam NULL — o
+ * vínculo é oportunista, não obrigatório.
+ */
+async function resolveSupplierIdByName(name: string | null | undefined): Promise<number | null> {
+  if (!name?.trim()) return null;
+  const db = await getDb();
+  if (!db) return null;
+  const [match] = await db
+    .select({ id: suppliers.id })
+    .from(suppliers)
+    .where(sql`LOWER(${suppliers.name}) = LOWER(${name.trim()})`)
+    .limit(1);
+  return match?.id ?? null;
+}
 
 export async function listProposals() {
   const db = await getDb();
@@ -84,8 +103,10 @@ export async function addProposalItem(data: InsertProposalItem) {
   const total = data.unitPrice && data.quantity
     ? (parseFloat(String(data.unitPrice)) * data.quantity).toFixed(2)
     : null;
+  const supplierId = data.supplierId ?? (await resolveSupplierIdByName(data.supplierName));
   const [result] = await db.insert(proposalItems).values({
     ...data,
+    supplierId,
     itemNumber: nextNum,
     totalPrice: total as any,
     sortOrder: nextNum,
@@ -108,6 +129,9 @@ export async function updateProposalItem(id: number, data: Partial<InsertProposa
       const qty = data.quantity !== undefined ? data.quantity : existing.quantity;
       data.totalPrice = (price * qty).toFixed(2) as any;
     }
+  }
+  if (data.supplierName !== undefined && data.supplierId === undefined) {
+    data.supplierId = await resolveSupplierIdByName(data.supplierName);
   }
   await db.update(proposalItems).set(data).where(eq(proposalItems.id, id));
   const [it] = await db.select({ proposalId: proposalItems.proposalId }).from(proposalItems).where(eq(proposalItems.id, id)).limit(1);
@@ -234,6 +258,7 @@ export async function duplicateProposal(id: number) {
           presentation: item.presentation,
           unit: item.unit,
           supplierName: item.supplierName,
+          supplierId: item.supplierId,
           unitPrice: item.unitPrice,
           quantity: item.quantity,
           totalPrice: item.totalPrice,

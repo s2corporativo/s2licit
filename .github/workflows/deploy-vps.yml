@@ -18,7 +18,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate integral antes de publicar imagem. Sem isto o deploy construía e
+  # publicava em produção sem executar teste nenhum — a imagem só era validada
+  # por readiness DEPOIS de já estar no ar. Falhar aqui impede o build.
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Gate estático da auditoria
+        run: node scripts/validate-audit-fixes.mjs
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm check
+
+      - name: Testes
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
   build-image:
+    needs: validar
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:

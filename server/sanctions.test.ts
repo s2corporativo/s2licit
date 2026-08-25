@@ -103,6 +103,26 @@ describe("sanctions — ciclo de vida (create → update → revoke) com mock de
     expect(mockDb.insert).toHaveBeenCalled();
   });
 
+  it("createSanction propaga abrangência e documento comprobatório quando informados", async () => {
+    const { getDb } = await import("./db/_client");
+    vi.mocked(getDb).mockResolvedValueOnce(mockDb as never);
+
+    const { createSanction } = await import("./db/sanctions");
+    await createSanction({
+      supplierId: 10,
+      orgao: "Prefeitura Municipal de Betim",
+      penalidade: "impedimento",
+      dataInicio: new Date("2026-01-01"),
+      status: "ativa",
+      abrangencia: "municipal",
+      arquivoUrl: "https://exemplo.com/decisao.pdf",
+    } as never);
+
+    expect(mockDb.values).toHaveBeenCalledWith(
+      expect.objectContaining({ abrangencia: "municipal", arquivoUrl: "https://exemplo.com/decisao.pdf" }),
+    );
+  });
+
   it("revoga mantém o registro (status revogada) com observação de revogação", async () => {
     const { getDb } = await import("./db/_client");
     vi.mocked(getDb).mockResolvedValueOnce(mockDb as never);
@@ -169,5 +189,32 @@ describe("sanctions — schema e validação", () => {
       "utf-8",
     );
     expect(sql).toContain("ON DELETE RESTRICT");
+  });
+
+  it("abrangência e documento comprobatório existem no schema, aditivos e nullable (migration 0026)", async () => {
+    const fs = await import("node:fs/promises");
+    const schemaSrc = await fs.readFile(new URL("../drizzle/schema.ts", import.meta.url), "utf-8");
+    const bloco = schemaSrc.slice(
+      schemaSrc.indexOf("supplierSanctions = mysqlTable("),
+      schemaSrc.indexOf("export type InsertSupplierSanction"),
+    );
+    expect(bloco).toMatch(/abrangencia:\s*varchar\("abrangencia",\s*\{\s*length:\s*16\s*\}\)/);
+    expect(bloco).not.toMatch(/abrangencia:[^,]*\.notNull\(\)/);
+    expect(bloco).toMatch(/arquivoUrl:\s*text\("arquivoUrl"\)/);
+
+    const sql = await fs.readFile(
+      new URL("../drizzle/0026_supplier_sanctions_abrangencia_arquivo.sql", import.meta.url),
+      "utf-8",
+    );
+    expect(sql).toContain("ADD COLUMN `abrangencia`");
+    expect(sql).toContain("ADD COLUMN `arquivoUrl`");
+    expect(sql).not.toContain("NOT NULL");
+  });
+
+  it("a validação de abrangência no router aceita só os âmbitos federativos previstos", async () => {
+    const routerSrc = await import("node:fs/promises").then(fs =>
+      fs.readFile(new URL("../server/routers/sanctions.ts", import.meta.url), "utf-8"),
+    );
+    expect(routerSrc).toContain('z.enum(["municipal", "estadual", "federal", "nacional"])');
   });
 });
