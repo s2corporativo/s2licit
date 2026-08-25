@@ -6,7 +6,11 @@ import { eq, or, and } from "drizzle-orm";
 import { jaroWinklerSimilarity as canonicalJaroWinklerSimilarity } from "../matching/productMatcher";
 import { recordAudit } from "../services/auditService";
 
-type ProductRow = typeof products.$inferSelect;
+// Só os campos usados pela detecção de duplicidade — nunca as colunas TEXT
+// (description, informacaoTecnica, fichaTecnica), que podem ser grandes e
+// tornariam a varredura direcionada (sem teto de linhas) sujeita à mesma
+// exaustão de memória que o teto de 20k existe para evitar na global.
+type ProductRow = Pick<typeof products.$inferSelect, "id" | "name" | "concentration" | "presentation" | "manufacturer">;
 
 /**
  * Teto de catálogo carregado em memória por varredura de duplicidade.
@@ -17,12 +21,27 @@ type ProductRow = typeof products.$inferSelect;
  */
 const MAX_CATALOGO_EM_MEMORIA = 20000;
 
-async function carregarCatalogoAtivo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
-  const linhas = await db
-    .select()
+/**
+ * `comTeto: false` é só para a varredura com `productId` (O(n), um produto
+ * contra o catálogo inteiro) — o teto existe para a varredura global O(n²)
+ * sem alvo, que é a que esgota memória. Aplicar o mesmo teto ao caminho com
+ * alvo quebraria a própria alternativa que a mensagem de erro recomenda.
+ */
+async function carregarCatalogoAtivo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, comTeto = true) {
+  const query = db
+    .select({
+      id: products.id,
+      name: products.name,
+      concentration: products.concentration,
+      presentation: products.presentation,
+      manufacturer: products.manufacturer,
+    })
     .from(products)
-    .where(eq(products.isActive, "yes"))
-    .limit(MAX_CATALOGO_EM_MEMORIA + 1);
+    .where(eq(products.isActive, "yes"));
+
+  if (!comTeto) return query;
+
+  const linhas = await query.limit(MAX_CATALOGO_EM_MEMORIA + 1);
 
   if (linhas.length > MAX_CATALOGO_EM_MEMORIA) {
     throw new Error(
@@ -235,7 +254,7 @@ export const duplicatesRouter = router({
       const db = await getDb();
       if (!db) throw new Error("DB indisponível");
 
-      const allProducts = await carregarCatalogoAtivo(db);
+      const allProducts = await carregarCatalogoAtivo(db, !input.productId);
       const exceptions = await loadExceptionPairs(db);
 
       if (input.productId) {
