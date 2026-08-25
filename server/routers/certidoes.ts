@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { certidoes } from "../../drizzle/schema";
@@ -30,23 +30,59 @@ const CertidaoInput = z.object({
   dataValidade: z.string(),                         // ISO date (obrigatória)
   arquivoUrl: z.string().optional().nullable(),
   observacoes: z.string().optional().nullable(),
+  // Nullable: ausente = certidão institucional; presente = certidão do fornecedor.
+  supplierId: z.number().int().positive().optional().nullable(),
 });
 
 export const certidoesRouter = router({
-  list: protectedProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) return [];
-    return db.select().from(certidoes).where(eq(certidoes.ativa, true)).orderBy(asc(certidoes.dataValidade));
-  }),
+  /**
+   * Lista certidões ativas. supplierId filtra por um fornecedor específico;
+   * sem filtro, retorna só as institucionais (supplierId NULL) — é o que a
+   * tela de habilitação da empresa (Certidoes.tsx) lista, e ela não espera
+   * ver documento de fornecedor misturado. Para o painel por fornecedor, use
+   * `bySupplier`.
+   */
+  list: protectedProcedure
+    .input(z.object({ supplierId: z.number().int().positive().optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const supplierFilter = input?.supplierId != null
+        ? eq(certidoes.supplierId, input.supplierId)
+        : isNull(certidoes.supplierId);
+      return db
+        .select()
+        .from(certidoes)
+        .where(and(eq(certidoes.ativa, true), supplierFilter))
+        .orderBy(asc(certidoes.dataValidade));
+    }),
 
-  /** Alertas: certidões vencidas ou vencendo em até N dias. */
+  /** Certidões (regularidade fiscal) de um fornecedor específico. */
+  bySupplier: protectedProcedure
+    .input(z.object({ supplierId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db
+        .select()
+        .from(certidoes)
+        .where(and(eq(certidoes.ativa, true), eq(certidoes.supplierId, input.supplierId)))
+        .orderBy(asc(certidoes.dataValidade));
+    }),
+
+  /**
+   * Alertas: certidões institucionais vencidas ou vencendo em até N dias.
+   * Só institucionais (supplierId NULL) — os consumidores (Certidoes.tsx,
+   * CentralPendencias.tsx) tratam isto como a habilitação da própria empresa;
+   * o painel por fornecedor calcula seu próprio status a partir de `bySupplier`.
+   */
   alertas: protectedProcedure
     .input(z.object({ diasAlerta: z.number().int().min(1).max(180).default(30) }).optional())
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return { vencidas: [], vencendo: [] };
       const diasAlerta = input?.diasAlerta ?? 30;
-      const rows = await db.select().from(certidoes).where(eq(certidoes.ativa, true));
+      const rows = await db.select().from(certidoes).where(and(eq(certidoes.ativa, true), isNull(certidoes.supplierId)));
       const hoje = new Date();
       const vencidas: typeof rows = [];
       const vencendo: typeof rows = [];
@@ -70,6 +106,7 @@ export const certidoesRouter = router({
       dataValidade: new Date(input.dataValidade),
       arquivoUrl: input.arquivoUrl ?? null,
       observacoes: input.observacoes ?? null,
+      supplierId: input.supplierId ?? null,
     });
     return { id: (res as any).insertId as number };
   }),

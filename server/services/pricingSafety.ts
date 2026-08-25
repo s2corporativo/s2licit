@@ -5,7 +5,17 @@ export type MonetaryValue = string | number | null | undefined;
 export interface SalePriceInput {
   cost: MonetaryValue;
   marginPercent: number;
+  /**
+   * Percentual de despesas incidentes sobre a receita. Quando omitido, usa
+   * PRICING_DEFAULT_TAX_PERCENT. Isso faz o fluxo Cotação → Proposta deixar de
+   * ignorar silenciosamente a carga tributária configurada para a operação.
+   */
   revenueCostPercent?: number;
+  /**
+   * Custos fixos unitários (frete/despesas). Quando omitido, usa
+   * PRICING_DEFAULT_FREIGHT_UNIT. Para operações com cálculo específico, o
+   * chamador deve informar explicitamente o valor unitário.
+   */
   fixedUnitCost?: MonetaryValue;
 }
 
@@ -34,6 +44,23 @@ function toFiniteNumber(value: MonetaryValue): number {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === "") return fallback;
+  const parsed = Number(raw.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function defaultRevenueCostPercent(): number {
+  const value = envNumber("PRICING_DEFAULT_TAX_PERCENT", 0);
+  return value >= 0 && value < 100 ? value : 0;
+}
+
+export function defaultFixedUnitCost(): number {
+  const value = envNumber("PRICING_DEFAULT_FREIGHT_UNIT", 0);
+  return value >= 0 ? value : 0;
+}
+
 function assertPercent(name: string, value: number): void {
   if (!Number.isFinite(value) || value < 0 || value >= 100) {
     throw new Error(`${name} deve estar entre 0% e menos de 100%.`);
@@ -44,16 +71,18 @@ function assertPercent(name: string, value: number): void {
  * Calcula preço de venda quando margem e despesas percentuais incidem sobre
  * a receita: preço = (custo + custo fixo unitário) / (1 - despesas - margem).
  *
+ * Quando o chamador não fornece explicitamente tributos/frete, os valores de
+ * produção PRICING_DEFAULT_TAX_PERCENT e PRICING_DEFAULT_FREIGHT_UNIT são
+ * aplicados. Assim nenhuma proposta automática ignora esses componentes por
+ * simples omissão de parâmetro.
+ *
  * Não use revenueCostPercent para tributos com bases diferentes. Nesses casos,
  * o cálculo deve ser modelado separadamente antes de chegar a esta função.
  */
-export function calculateSalePrice({
-  cost,
-  marginPercent,
-  revenueCostPercent = 0,
-  fixedUnitCost = 0,
-}: SalePriceInput): number {
-  const costValue = toFiniteNumber(cost);
+export function calculateSalePrice(input: SalePriceInput): number {
+  const costValue = toFiniteNumber(input.cost);
+  const revenueCostPercent = input.revenueCostPercent ?? defaultRevenueCostPercent();
+  const fixedUnitCost = input.fixedUnitCost ?? defaultFixedUnitCost();
   const fixedCostValue = toFiniteNumber(fixedUnitCost);
 
   if (!Number.isFinite(costValue) || costValue <= 0) {
@@ -63,12 +92,12 @@ export function calculateSalePrice({
     throw new Error("Custo fixo unitário não pode ser negativo.");
   }
 
-  assertPercent("Margem", marginPercent);
+  assertPercent("Margem", input.marginPercent);
   assertPercent("Despesas percentuais", revenueCostPercent);
 
   const preco = calcularPrecoDivisor({
     custo: costValue,
-    margemPct: marginPercent,
+    margemPct: input.marginPercent,
     impostosPct: revenueCostPercent,
     freteUnit: fixedCostValue,
   });

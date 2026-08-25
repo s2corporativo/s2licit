@@ -122,6 +122,11 @@ async function insertProposalFromPriced(
         quantity: item.quantity,
         totalPrice: String(item.totalPrice.toFixed(2)),
         sortOrder: index + 1,
+        // supplierId/supplierName (Ressalva 4, Módulo 06): este insert direto
+        // não passava por addProposalItem, então ficava sem rastreabilidade
+        // de fornecedor — cada produto casado já tem fornecedor conhecido.
+        supplierId: item.supplierId,
+        supplierName: item.supplierName,
       })),
     );
     return id;
