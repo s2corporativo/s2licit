@@ -14,6 +14,9 @@ const SanctionInput = z.object({
   dataFim: z.string().optional().nullable(), // ISO date — nula = sem prazo (Lei 14.133 art. 156)
   referenciaLegal: z.string().max(512).optional().nullable(),
   observacoes: z.string().optional().nullable(),
+  // Âmbito federativo do efeito (Lei 14.133/21, art. 156 §5º).
+  abrangencia: z.enum(["municipal", "estadual", "federal", "nacional"]).optional().nullable(),
+  arquivoUrl: z.string().optional().nullable(),
 });
 
 async function assertSupplierExists(supplierId: number) {
@@ -80,6 +83,8 @@ export const sanctionsRouter = router({
         dataFim: input.dataFim ? new Date(input.dataFim) : null,
         referenciaLegal: input.referenciaLegal,
         observacoes: input.observacoes,
+        abrangencia: input.abrangencia,
+        arquivoUrl: input.arquivoUrl,
         criadoPor: existing.criadoPor ?? ctx.user.email ?? "admin",
       });
       await recordAudit({
