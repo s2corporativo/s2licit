@@ -114,12 +114,19 @@ export const usersRouter = router({
     .input(z.object({ id: z.number().int().positive(), password: z.string().min(8).max(200) }))
     .mutation(async ({ ctx, input }) => {
       const { db } = await carregarUsuarios();
+      // Redefinir a senha também LIBERA a conta: sem zerar o bloqueio por
+      // tentativas inválidas, o usuário continuava recebendo 429 com a senha
+      // nova em mãos e o admin não tinha como saber que faltava desbloquear.
       await db.update(users)
-        .set({ passwordHash: credentialEncryptionService.hashPassword(input.password) })
+        .set({
+          passwordHash: credentialEncryptionService.hashPassword(input.password),
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        })
         .where(eq(users.id, input.id));
       await recordAudit({
         userId: ctx.user.id, action: "usuario_senha_redefinida", entity: "user", entityId: input.id,
-        origin: "admin", summary: "Senha redefinida pelo admin", ...requestOrigin(ctx.req),
+        origin: "admin", summary: "Senha redefinida pelo admin (conta desbloqueada)", ...requestOrigin(ctx.req),
       });
       return { success: true };
     }),

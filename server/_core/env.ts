@@ -88,6 +88,10 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
   adminEmail: process.env.ADMIN_EMAIL ?? "",
   adminPassword: process.env.ADMIN_PASSWORD ?? "",
+  // Só com este interruptor o boot sobrescreve a senha de um admin que já tem
+  // senha definida. Sem ele, uma troca feita na tela de usuários sobrevive ao
+  // restart (antes era desfeita silenciosamente a cada boot).
+  adminPasswordForceReset: process.env.ADMIN_PASSWORD_FORCE_RESET === "true",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
