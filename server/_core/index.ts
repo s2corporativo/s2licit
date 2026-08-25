@@ -121,7 +121,8 @@ async function startServer() {
     }
   });
 
-  app.use("/uploads", express.static(localUploadDir(), { maxAge: "1d" }));
+  // Uploads privados são montados abaixo de requireAuth; somente logos têm
+  // leitura pública, pois aparecem em documentos comerciais gerados.
   registerOAuthRoutes(app);
   registerLocalAuthRoutes(app);
 
@@ -148,6 +149,11 @@ async function startServer() {
   const requireAuth = requireRole("user");
   const requireEditor = requireRole("editor");
   const requireAdmin = requireRole("admin");
+
+  // Logos são ativos públicos de apresentação. Propostas automáticas,
+  // evidências de scraping e demais artefatos permanecem protegidos por sessão.
+  app.use("/uploads/logos", express.static(path.join(localUploadDir(), "logos"), { maxAge: "1d" }));
+  app.use("/uploads", requireAuth, express.static(localUploadDir(), { maxAge: "1d" }));
 
   const logoUpload = multer({
     storage: multer.memoryStorage(),
