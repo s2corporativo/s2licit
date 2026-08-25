@@ -11,7 +11,6 @@ import { getSessionCookieOptions } from "./cookies";
 import { ENV } from "./env";
 import { sdk } from "./sdk";
 import { logger } from "./logger";
-import { schemaBootDdlEnabled } from "../services/schemaBootPolicy";
 
 /**
  * Política de bloqueio de conta (§16): após MAX_FAILED_LOGINS tentativas
@@ -41,7 +40,7 @@ const LOCAL_OPEN_ID_PREFIX = "local:";
 /**
  * Valida a existência de users.passwordHash. Em produção, coluna ausente é
  * erro fatal de migration; não alteramos mais schema silenciosamente no boot.
- * Desenvolvimento pode manter o fallback quando SCHEMA_BOOT_DDL_ENABLED=true.
+ * Não há fallback de DDL; qualquer ausência exige migration versionada.
  */
 export async function ensurePasswordColumn(): Promise<void> {
   const db = await getDb();
@@ -52,11 +51,7 @@ export async function ensurePasswordColumn(): Promise<void> {
   );
   const total = Number((rows as any)[0]?.total ?? 0);
   if (total > 0) return;
-  if (!schemaBootDdlEnabled()) {
-    throw new Error("[LocalAuth] users.passwordHash ausente. Aplique uma migration versionada antes de iniciar a produção.");
-  }
-  await db.execute(sql`ALTER TABLE users ADD COLUMN passwordHash VARCHAR(255) NULL`);
-  logger.info("[LocalAuth] Coluna users.passwordHash criada em desenvolvimento.");
+  throw new Error("[LocalAuth] users.passwordHash ausente. Aplique uma migration versionada antes de iniciar a aplicação.");
 }
 
 /** Cria/atualiza o administrador inicial a partir do ambiente. */
