@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS `rag_config` (
 
 -- ─── Configuração padrão ────────────────────────────────────────────────────
 INSERT IGNORE INTO `rag_config` (`key`, `value`, `description`) VALUES
-	('rag.enabled', 'true', 'Habilita/desabilita o Motor de Equivalências RAG'),
+	('rag.enabled', 'false', 'Habilita/desabilita o Motor de Equivalências RAG — liga só por ativação explícita no painel (ragConfig.ts DEFAULTS.enabled)'),
 	('rag.embeddingProvider', 'local', 'local = Ollama na mesma VPS; remote = Ollama remoto (URL via RAG_OLLAMA_URL); groq = Groq'),
 	('rag.ollamaUrl', 'http://localhost:11434', 'URL base do Ollama (http://host:11434)'),
 	('rag.embeddingModel', 'nomic-embed-text', 'Modelo de embedding (768 dim)'),
