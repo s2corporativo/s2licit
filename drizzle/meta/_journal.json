@@ -29,6 +29,7 @@
     { "idx": 24, "version": "5", "when": 1787200100000, "tag": "0025_proposal_items_supplier_id", "breakpoints": true },
     { "idx": 25, "version": "5", "when": 1787200200000, "tag": "0026_supplier_sanctions_abrangencia_arquivo", "breakpoints": true },
     { "idx": 26, "version": "5", "when": 1787200300000, "tag": "0027_rag_motor_equivalencias", "breakpoints": true },
-    { "idx": 27, "version": "5", "when": 1787625600000, "tag": "0028_proposal_items_supplier_backfill", "breakpoints": true }
+    { "idx": 27, "version": "5", "when": 1787625600000, "tag": "0028_proposal_items_supplier_backfill", "breakpoints": true },
+    { "idx": 28, "version": "5", "when": 1787628000000, "tag": "0029_supplier_contact_columns", "breakpoints": true }
   ]
 }
