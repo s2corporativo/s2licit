@@ -76,14 +76,28 @@ export async function ensureAdminUser(): Promise<void> {
     logger.info(`[LocalAuth] Usuário administrador criado: ${email}`);
   } else if (!existing[0].passwordHash) {
     await db.update(users)
-      .set({ passwordHash, role: "admin", loginMethod: "local" })
+      .set({ passwordHash, role: "admin", loginMethod: "local", failedLoginAttempts: 0, lockedUntil: null })
       .where(eq(users.id, existing[0].id));
     logger.info(`[LocalAuth] Senha definida para o administrador existente: ${email}`);
-  } else if (!credentialEncryptionService.verifyPassword(ENV.adminPassword, existing[0].passwordHash)) {
+  } else if (ENV.adminPasswordForceReset) {
+    // Reset deliberado: só acontece com ADMIN_PASSWORD_FORCE_RESET=true.
     await db.update(users)
-      .set({ passwordHash })
+      .set({ passwordHash, failedLoginAttempts: 0, lockedUntil: null })
       .where(eq(users.id, existing[0].id));
-    logger.info(`[LocalAuth] Senha do administrador sincronizada com ADMIN_PASSWORD: ${email}`);
+    logger.warn(
+      `[LocalAuth] ADMIN_PASSWORD_FORCE_RESET=true — senha de ${email} redefinida pelo .env e conta desbloqueada. ` +
+      "Volte a variável para false para que trocas feitas na interface não sejam desfeitas no próximo boot.",
+    );
+  } else if (!credentialEncryptionService.verifyPassword(ENV.adminPassword, existing[0].passwordHash)) {
+    // NÃO sobrescrever: a senha em uso diverge do .env porque o administrador
+    // a trocou pela tela de usuários. O comportamento anterior reescrevia o
+    // hash a cada boot, desfazendo a troca em silêncio — o admin voltava a ser
+    // barrado com a senha nova depois de qualquer restart/deploy e, ao insistir,
+    // caía no bloqueio por tentativas inválidas.
+    logger.info(
+      `[LocalAuth] Senha de ${email} difere de ADMIN_PASSWORD e foi PRESERVADA (troca feita na interface). ` +
+      "Para forçar a senha do .env, suba uma vez com ADMIN_PASSWORD_FORCE_RESET=true.",
+    );
   }
 }
 
@@ -125,7 +139,15 @@ export function registerLocalAuthRoutes(app: Express) {
           origin: "login", summary: `Login negado — conta bloqueada até ${new Date(user.lockedUntil!).toISOString()}`,
           ...origin,
         });
-        res.status(429).json({ error: "Conta temporariamente bloqueada por tentativas inválidas. Tente novamente mais tarde." });
+        // Dizer quanto falta evita o ciclo "tento de novo → renovo a espera"
+        // e distingue bloqueio de senha errada para quem está na tela.
+        const minutos = Math.max(1, Math.ceil(retryAfter / 60));
+        res.status(429).json({
+          error:
+            `Conta temporariamente bloqueada após ${MAX_FAILED_LOGINS} tentativas inválidas. ` +
+            `Tente novamente em ${minutos} min, ou peça a um administrador para desbloquear.`,
+          lockedForMinutes: minutos,
+        });
         return;
       }
 
