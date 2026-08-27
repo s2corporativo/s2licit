@@ -26,9 +26,11 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 echo "[1/7] Atualizando a branch main..."
+PREV_SHA="$(git rev-parse HEAD)"
 git fetch origin main
 git checkout main
 git pull --ff-only origin main
+NOVO_SHA="$(git rev-parse HEAD)"
 
 echo "[2/7] Validando configuração do Docker Compose..."
 docker compose config >/dev/null
@@ -46,20 +48,36 @@ bash scripts/validate-free.sh
 echo "[5/7] Construindo e iniciando os serviços..."
 docker compose up -d --build
 
+espera_saudavel() {
+  local attempt status
+  for attempt in $(seq 1 36); do
+    status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' sistema-s2-app 2>/dev/null || true)"
+    if [ "$status" = "healthy" ]; then return 0; fi
+    if [ "$status" = "unhealthy" ] || [ "$attempt" -eq 36 ]; then return 1; fi
+    sleep 5
+  done
+  return 1
+}
+
 echo "[6/7] Aguardando o healthcheck da aplicação..."
-for attempt in $(seq 1 36); do
-  status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' sistema-s2-app 2>/dev/null || true)"
-  if [ "$status" = "healthy" ]; then
-    break
+if ! espera_saudavel; then
+  echo "[deploy] A aplicação não ficou saudável no commit ${NOVO_SHA:0:7}." >&2
+  docker compose ps >&2 || true
+  docker compose logs --tail=200 app >&2 || true
+  echo "[deploy] ROLLBACK automático para o commit anterior ${PREV_SHA:0:7}..." >&2
+  git checkout -f "$PREV_SHA"
+  docker compose up -d --build
+  if espera_saudavel; then
+    echo "[deploy] 🟡 Rollback OK — produção voltou a ${PREV_SHA:0:7}." >&2
+    echo "[deploy]    Se o deploy aplicou migration nova, o schema segue adiantado;" >&2
+    echo "[deploy]    se o app antigo reclamar do banco, restaure o backup pré-deploy" >&2
+    echo "[deploy]    (docs/BACKUP-RESTORE.md) e investigue o commit ${NOVO_SHA:0:7}." >&2
+  else
+    echo "[deploy] ❌ CRÍTICO: rollback também não ficou saudável. Restaure o backup" >&2
+    echo "[deploy]    pré-deploy conforme docs/BACKUP-RESTORE.md e verifique os logs." >&2
   fi
-  if [ "$status" = "unhealthy" ] || [ "$attempt" -eq 36 ]; then
-    echo "[deploy] A aplicação não ficou saudável. Status: ${status:-desconhecido}" >&2
-    docker compose ps >&2 || true
-    docker compose logs --tail=200 app >&2 || true
-    exit 1
-  fi
-  sleep 5
-done
+  exit 1
+fi
 
 echo "[7/7] Estado final dos serviços:"
 docker compose ps
