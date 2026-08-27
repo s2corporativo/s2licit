@@ -125,11 +125,47 @@ const fileWritten = new Promise((resolve, reject) => {
   out.on("error", reject);
 });
 
+/**
+ * Cópia offsite (regra 3-2-1) — mesma convenção do backupService interno e do
+ * docs/BACKUP-RESTORE.md: BACKUP_OFFSITE_COMMAND é um comando shell que recebe
+ * o caminho em $BACKUP_FILE (ex.: rclone copy "$BACKUP_FILE" gdrive:s2-backups/).
+ * Sem a variável é no-op; falha do envio não invalida o backup local, mas
+ * encerra com erro para ficar visível no log do cron.
+ */
+function offsiteCopy(file) {
+  const command = process.env.BACKUP_OFFSITE_COMMAND?.trim();
+  if (!command) {
+    console.log("[backup] Offsite desativado (defina BACKUP_OFFSITE_COMMAND para ativar).");
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const rc = spawn("sh", ["-c", command], {
+      stdio: "inherit",
+      env: { ...process.env, BACKUP_FILE: file },
+    });
+    rc.on("error", (err) => {
+      console.error(`[backup] Falha ao executar o comando offsite: ${err.message}`);
+      resolve(false);
+    });
+    rc.on("close", (code) => {
+      if (code === 0) {
+        console.log("[backup] Cópia offsite concluída.");
+        resolve(true);
+      } else {
+        console.error(`[backup] Envio offsite falhou (código ${code}).`);
+        resolve(false);
+      }
+    });
+  });
+}
+
 try {
   await Promise.all([dumpClosed, fileWritten]);
   await verifyGzip(outFile);
   rotateOldBackups();
   console.log(`[backup] Concluído e verificado: ${outFile}`);
+  const offsiteOk = await offsiteCopy(outFile);
+  if (!offsiteOk) process.exit(1);
 } catch (err) {
   console.error(`[backup] FALHOU: ${err.message}`);
   try { unlinkSync(outFile); } catch { /* arquivo parcial pode nem existir */ }
