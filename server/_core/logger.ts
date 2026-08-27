@@ -13,6 +13,8 @@
  *      const log = logger.child("Scheduler"); log.warn("tick atrasado");
  */
 
+import { reportError } from "./sentry";
+
 type Level = "debug" | "info" | "warn" | "error";
 
 const LEVEL_RANK: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -44,6 +46,11 @@ function emit(level: Level, scope: string | null, args: unknown[]) {
     if (s.fields) fields = { ...fields, ...s.fields };
   }
   const msg = parts.join(" ");
+  if (level === "error") {
+    // Ponto único de telemetria: todo logger.error() vai ao Sentry quando
+    // SENTRY_DSN está configurado (no-op caso contrário).
+    reportError(msg, args.find(a => a instanceof Error));
+  }
   if (isProd) {
     const line = JSON.stringify({
       ts: new Date().toISOString(),

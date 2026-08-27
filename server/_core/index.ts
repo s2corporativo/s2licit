@@ -27,6 +27,7 @@ import { storagePut, localUploadDir } from "../storage";
 import multer from "multer";
 import { apiRateLimiter, authRateLimiter } from "./rateLimit";
 import { logger, installProcessErrorHandlers } from "./logger";
+import { initSentry } from "./sentry";
 import { safeHealthFailure } from "../services/safeHealthPayload";
 
 const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
@@ -49,6 +50,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  initSentry();
   installProcessErrorHandlers();
 
   // Em produção as funções ensure* são validadores; migrations são a fonte
