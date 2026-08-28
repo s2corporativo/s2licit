@@ -10,14 +10,21 @@
  *   node scripts/backfill-price-history.mjs           # dry-run (padrão)
  *   node scripts/backfill-price-history.mjs --aplicar # grava
  *
- * Segurança: dry-run por padrão; somente preço positivo; nunca sobrescreve
- * pares que já tenham histórico; grava em transação e faz rollback em falha.
+ * Segurança:
+ * - dry-run por padrão;
+ * - somente preço positivo;
+ * - usa `createdAt` da oferta como timestamp CONSERVADOR da linha de base;
+ *   `updatedAt` não é usado porque também muda por link/imagem/código/estoque;
+ * - escrita em um único INSERT ... SELECT com NOT EXISTS;
+ * - execuções do backfill são serializadas por lock nomeado do MySQL;
+ * - transação SERIALIZABLE e rollback em falha.
  */
 
 import { createPool } from "mysql2/promise";
 
 const APLICAR = process.argv.includes("--aplicar");
 const URL = process.env.DATABASE_URL;
+const BACKFILL_LOCK = "s2licit_price_history_backfill";
 
 if (!URL) {
   console.error("DATABASE_URL não definida no ambiente. Abortando sem tocar no banco.");
@@ -28,7 +35,11 @@ const pool = createPool(URL);
 
 try {
   const [candidatos] = await pool.query(`
-    SELECT o.productId, o.supplierId, o.price
+    SELECT
+      o.productId,
+      o.supplierId,
+      o.price,
+      o.createdAt AS observedAt
     FROM product_supplier_offers o
     LEFT JOIN price_history h
       ON h.productId = o.productId AND h.supplierId = o.supplierId
@@ -47,31 +58,63 @@ try {
   if (!APLICAR) {
     console.log("\nDRY-RUN — nada foi gravado. Amostra dos 5 primeiros:");
     for (const c of candidatos.slice(0, 5)) {
-      console.log(`  produto=${c.productId} fornecedor=${c.supplierId} preço=${c.price}`);
+      console.log(
+        `  produto=${c.productId} fornecedor=${c.supplierId} preço=${c.price} observadoAté=${c.observedAt ?? "n/d"}`,
+      );
     }
     console.log("\nPara gravar: node scripts/backfill-price-history.mjs --aplicar");
     process.exit(0);
   }
 
   const conn = await pool.getConnection();
+  let lockAdquirido = false;
   try {
-    await conn.beginTransaction();
-    let gravados = 0;
-    for (const c of candidatos) {
-      const [res] = await conn.query(
-        `INSERT INTO price_history (productId, supplierId, price, origem, createdAt)
-         VALUES (?, ?, ?, 'backfill_linha_base', NOW())`,
-        [c.productId, c.supplierId, c.price],
-      );
-      if (res.affectedRows === 1) gravados++;
+    const [lockRows] = await conn.query("SELECT GET_LOCK(?, 30) AS acquired", [BACKFILL_LOCK]);
+    lockAdquirido = Number(lockRows?.[0]?.acquired ?? 0) === 1;
+    if (!lockAdquirido) {
+      throw new Error("Não foi possível obter o lock exclusivo do backfill em 30 segundos.");
     }
+
+    await conn.query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    await conn.beginTransaction();
+
+    const [res] = await conn.query(`
+      INSERT INTO price_history
+        (productId, supplierId, price, origem, data, recordedAt)
+      SELECT
+        o.productId,
+        o.supplierId,
+        o.price,
+        'backfill_linha_base',
+        o.createdAt,
+        o.createdAt
+      FROM product_supplier_offers o
+      WHERE o.price IS NOT NULL
+        AND CAST(o.price AS DECIMAL(15,4)) > 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM price_history h
+          WHERE h.productId = o.productId
+            AND h.supplierId = o.supplierId
+        )
+    `);
+
     await conn.commit();
+    const gravados = Number(res.affectedRows ?? 0);
     console.log(`\n${gravados} registro(s) de linha de base gravados.`);
+    if (gravados < candidatos.length) {
+      console.log(
+        `${candidatos.length - gravados} candidato(s) do dry-scan já não precisavam de backfill no momento da escrita.`,
+      );
+    }
   } catch (err) {
-    await conn.rollback();
+    await conn.rollback().catch(() => undefined);
     console.error("Falha no backfill — transação revertida, nada foi gravado.");
     throw err;
   } finally {
+    if (lockAdquirido) {
+      await conn.query("SELECT RELEASE_LOCK(?)", [BACKFILL_LOCK]).catch(() => undefined);
+    }
     conn.release();
   }
 } finally {
