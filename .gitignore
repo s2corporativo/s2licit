@@ -45,6 +45,7 @@ pids
 *.seed
 *.pid.lock
 *.bak
+.deploy-state/
 
 # Coverage directory used by tools like istanbul
 coverage/
@@ -88,7 +89,7 @@ jspm_packages/
 .next
 
 # Nuxt.js build / generate output
-.nuxt
+.nuxt/
 
 # Gatsby files
 .cache/
