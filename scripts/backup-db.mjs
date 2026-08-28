@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * Backup do banco de dados MySQL a partir de DATABASE_URL.
+ * Backup local do banco MySQL a partir de DATABASE_URL.
  *
- * Uso:
+ * Uso interno:
  *   node scripts/backup-db.mjs [diretorio-destino]
  *
- * Requer o cliente `mysqldump` instalado (pacote mysql-client).
- * Gera um arquivo comprimido `s2-backup-AAAA-MM-DD-HHMMSS.sql.gz`.
+ * Em produção use `scripts/backup-db-cron.sh`: ele executa este dump dentro
+ * do container (onde DATABASE_URL e o hostname `db` são válidos), copia a
+ * evidência verificada para o host e só então executa a etapa offsite.
  *
- * Agendamento sugerido (cron diário às 2h):
- *   0 2 * * * cd /caminho/do/projeto && node scripts/backup-db.mjs /backups >> /var/log/s2-backup.log 2>&1
+ * Requer `mysqldump`. Gera `s2-backup-AAAA-MM-DD-HHMMSS.sql.gz`.
  */
 
 import "dotenv/config";
@@ -41,7 +41,6 @@ if (!database) {
 const destDir = process.argv[2] || "backups";
 mkdirSync(destDir, { recursive: true });
 
-// Timestamp AAAA-MM-DD-HHMMSS
 const now = new Date();
 const pad = (n) => String(n).padStart(2, "0");
 const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -77,7 +76,6 @@ dump.on("error", (err) => {
   process.exit(1);
 });
 
-/** Confere se o .gz gerado descomprime do início ao fim (integridade). */
 function verifyGzip(file) {
   return new Promise((resolve, reject) => {
     const gunzip = createGunzip();
@@ -90,7 +88,6 @@ function verifyGzip(file) {
   });
 }
 
-/** Remove backups mais antigos que BACKUP_KEEP_DAYS (padrão 14). */
 function rotateOldBackups() {
   const keepDays = Number(process.env.BACKUP_KEEP_DAYS) || 14;
   const cutoff = Date.now() - keepDays * 24 * 60 * 60 * 1000;
@@ -104,7 +101,7 @@ function rotateOldBackups() {
         removed++;
       }
     } catch {
-      // arquivo pode ter sido removido em paralelo — ignorar
+      // arquivo pode ter sido removido em paralelo
     }
   }
   if (removed > 0) console.log(`[backup] Retenção: ${removed} backup(s) com mais de ${keepDays} dias removido(s).`);
@@ -112,11 +109,8 @@ function rotateOldBackups() {
 
 const dumpClosed = new Promise((resolve, reject) => {
   dump.on("close", (code) => {
-    if (code !== 0) {
-      reject(new Error(`mysqldump saiu com código ${code}. ${stderr.trim()}`));
-    } else {
-      resolve();
-    }
+    if (code !== 0) reject(new Error(`mysqldump saiu com código ${code}. ${stderr.trim()}`));
+    else resolve();
   });
 });
 
@@ -125,47 +119,11 @@ const fileWritten = new Promise((resolve, reject) => {
   out.on("error", reject);
 });
 
-/**
- * Cópia offsite (regra 3-2-1) — mesma convenção do backupService interno e do
- * docs/BACKUP-RESTORE.md: BACKUP_OFFSITE_COMMAND é um comando shell que recebe
- * o caminho em $BACKUP_FILE (ex.: rclone copy "$BACKUP_FILE" gdrive:s2-backups/).
- * Sem a variável é no-op; falha do envio não invalida o backup local, mas
- * encerra com erro para ficar visível no log do cron.
- */
-function offsiteCopy(file) {
-  const command = process.env.BACKUP_OFFSITE_COMMAND?.trim();
-  if (!command) {
-    console.log("[backup] Offsite desativado (defina BACKUP_OFFSITE_COMMAND para ativar).");
-    return Promise.resolve(true);
-  }
-  return new Promise((resolve) => {
-    const rc = spawn("sh", ["-c", command], {
-      stdio: "inherit",
-      env: { ...process.env, BACKUP_FILE: file },
-    });
-    rc.on("error", (err) => {
-      console.error(`[backup] Falha ao executar o comando offsite: ${err.message}`);
-      resolve(false);
-    });
-    rc.on("close", (code) => {
-      if (code === 0) {
-        console.log("[backup] Cópia offsite concluída.");
-        resolve(true);
-      } else {
-        console.error(`[backup] Envio offsite falhou (código ${code}).`);
-        resolve(false);
-      }
-    });
-  });
-}
-
 try {
   await Promise.all([dumpClosed, fileWritten]);
   await verifyGzip(outFile);
   rotateOldBackups();
   console.log(`[backup] Concluído e verificado: ${outFile}`);
-  const offsiteOk = await offsiteCopy(outFile);
-  if (!offsiteOk) process.exit(1);
 } catch (err) {
   console.error(`[backup] FALHOU: ${err.message}`);
   try { unlinkSync(outFile); } catch { /* arquivo parcial pode nem existir */ }
