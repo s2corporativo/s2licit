@@ -38,6 +38,10 @@ function stripAccents(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+function normalizeHeader(value: string | null | undefined): string {
+  return stripAccents(normalizeText(value).toLowerCase());
+}
+
 function parsePtBrNumber(value: string | null | undefined): number | null {
   const raw = normalizeText(value).replace(/[^\d,.-]/g, "");
   if (!raw) return null;
@@ -79,7 +83,7 @@ function parsePtBrDate(value: string | null | undefined): Date | null {
 function rowActionUrl(
   row: Element,
   listUrl: string,
-  doc: Document,
+  _doc: Document,
 ): string {
   const candidates = [
     ...Array.from(row.querySelectorAll<HTMLAnchorElement>('a[href*="view"], a[href*="compra"], a[href]')),
@@ -111,7 +115,12 @@ export function parseAgregaListHtml(
   const opportunities: S2PortalOpportunityLike[] = [];
 
   for (const grid of Array.from(document.querySelectorAll("table"))) {
-    const headerRow = grid.querySelector("thead tr");
+    // Algumas GridViews válidas não usam <thead>; nesse caso, usar a primeira
+    // linha que contenha células <th>, sempre no nível da linha (não do <th>).
+    const headerRow =
+      grid.querySelector("thead tr") ??
+      Array.from(grid.querySelectorAll("tr")).find((row) => row.querySelector("th")) ??
+      null;
     const headerCells = headerRow
       ? Array.from(headerRow.querySelectorAll("th")).map((th) =>
           normalizeText(th.textContent ?? th.getAttribute("data-label") ?? ""),
@@ -123,22 +132,25 @@ export function parseAgregaListHtml(
       const text = normalizeText(row.textContent);
       return text !== "" && !/nenhum resultado/i.test(text) && !/sem resultado/i.test(text);
     });
-    for (const row of bodyRows) {
+    // Sem <tbody>, aceita linhas de dados posteriores ao cabeçalho.
+    const rows = bodyRows.length > 0
+      ? bodyRows
+      : Array.from(grid.querySelectorAll("tr")).filter((row) => row !== headerRow && row.querySelector("td"));
+
+    for (const row of rows) {
       const cells = Array.from(row.querySelectorAll("th, td")).map((cell) =>
         normalizeText(cell.textContent),
       );
       if (cells.length === 0) continue;
 
-      const column = <T extends string>(name: string): string => {
+      const column = (name: string): string => {
+        const normalizedName = normalizeHeader(name);
         const index = headerCells.findIndex((header) =>
-          header.toLowerCase().includes(name.toLowerCase()),
+          normalizeHeader(header).includes(normalizedName),
         );
         return index >= 0 && index < cells.length ? cells[index] : "";
       };
 
-      // Pedido de Compra (/compra-produtos-diversos e /pedidos-compra) ou
-      // Código, conforme a listagem; para a tela de confirmação, o identificador
-      // vem de "Pedido de Compra" também.
       const processo =
         column("pedido de compra") || column("código") || column("processo de compra");
       if (!processo) continue;
@@ -155,7 +167,7 @@ export function parseAgregaListHtml(
         .join(" · ");
 
       const situacao =
-        column("situação") || column("situacao") || column("situaçao") || column("status") || "";
+        column("situação") || column("situacao") || column("status") || "";
       const quantidade = parsePtBrNumber(
         column("quantidade") || column("qtd"),
       );
@@ -166,7 +178,7 @@ export function parseAgregaListHtml(
         column("previsão de entrega") || column("previsao de entrega") || "";
 
       const hasExplicitDeadlineColumn = headerCells.some((header) => {
-        const normalized = stripAccents(header.toLowerCase());
+        const normalized = normalizeHeader(header);
         return (
           normalized.includes("prazo") ||
           normalized.includes("data limite") ||
@@ -241,6 +253,23 @@ export function combineAgregaListHtmls(
     .join("\n");
 }
 
+function opportunityCompleteness(opportunity: S2PortalOpportunityLike): number {
+  let score = opportunity.items.length * 1000 + opportunity.bodyText.length;
+  if (opportunity.prazoResposta) score += 200;
+  for (const item of opportunity.items) {
+    score += item.descricao.length;
+    if (item.quantidade != null) score += 25;
+    if (item.unidade && item.unidade !== "UN") score += 20;
+  }
+  try {
+    const url = new URL(opportunity.portalUrl);
+    if (url.search || /\/(?:view|detalhe|compra)\b/i.test(url.pathname)) score += 75;
+  } catch {
+    // URL inválida não ganha bônus de completude.
+  }
+  return score;
+}
+
 /**
  * Varre o documento combinado e devolve as oportunidades de cada listagem,
  * deduplicando por externalId — a mesma cotação pode aparecer em
@@ -250,23 +279,27 @@ export function parseAgregaCombinedHtml(
   combinedHtml: string,
   defaultUrl = FUNARBE_PROVIDER_BASE_URL,
 ): S2PortalOpportunityLike[] {
-  const sourceMarkers = Array.from(
-    combinedHtml.matchAll(/<!-- FUNARBE_PROVIDER_LIST:(https?:\/\/[^>]+) -->/g),
-  ).map((match) => ({ index: match.index ?? 0, url: match[1] }));
-  const sources = sourceMarkers.length > 0 ? sourceMarkers : [{ index: 0, url: defaultUrl }];
+  const markerRegex = /<!-- FUNARBE_PROVIDER_LIST:(https?:\/\/[^>]+) -->/g;
+  const sourceMarkers = Array.from(combinedHtml.matchAll(markerRegex)).map((match) => ({
+    index: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+    url: match[1],
+  }));
+
+  // O parser também é usado isoladamente em testes/fallbacks. Se não houver
+  // marcador, o documento começa no byte zero — não aplicar offset fictício.
+  if (sourceMarkers.length === 0) {
+    return parseAgregaListHtml(combinedHtml, defaultUrl);
+  }
 
   const all = new Map<string, S2PortalOpportunityLike>();
-  for (let markerIndex = 0; markerIndex < sources.length; markerIndex++) {
-    const marker = sources[markerIndex];
-    const nextMarker = sources[markerIndex + 1];
-    // Offset: "<!-- FUNARBE_PROVIDER_LIST:" (24) + URL length + " -->" (4)
-    const slice = combinedHtml.slice(
-      marker.index + 24 + marker.url.length + 4,
-      nextMarker ? nextMarker.index : undefined,
-    );
+  for (let markerIndex = 0; markerIndex < sourceMarkers.length; markerIndex++) {
+    const marker = sourceMarkers[markerIndex];
+    const nextMarker = sourceMarkers[markerIndex + 1];
+    const slice = combinedHtml.slice(marker.end, nextMarker ? nextMarker.index : undefined);
     for (const opportunity of parseAgregaListHtml(slice, marker.url)) {
       const existing = all.get(opportunity.externalId);
-      if (!existing || opportunity.items.length > existing.items.length) {
+      if (!existing || opportunityCompleteness(opportunity) > opportunityCompleteness(existing)) {
         all.set(opportunity.externalId, opportunity);
       }
     }
