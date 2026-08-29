@@ -2,6 +2,7 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
 import { ENV } from "./env";
+import { getAuthDisabledUser } from "./authDisabled";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -14,18 +15,14 @@ export async function createContext(
 ): Promise<TrpcContext> {
   let user: User | null = null;
 
-  // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos como admin
+  // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos como
+  // admin. O usuário devolvido é uma linha REAL de `users` (ver authDisabled.ts):
+  // as colunas de auditoria têm FK para users.id e rejeitariam um id sintético.
   if (ENV.authDisabled) {
-    user = {
-      id: -1,
-      email: "[AUTH_DISABLED]",
-      role: "admin",
-      disabled: false,  // Nota: disabled é ignorado quando AUTH_DISABLED=true
-    } as User;
     return {
       req: opts.req,
       res: opts.res,
-      user,
+      user: await getAuthDisabledUser(),
     };
   }
 

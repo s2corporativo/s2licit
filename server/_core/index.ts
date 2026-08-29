@@ -29,6 +29,7 @@ import { apiRateLimiter, authRateLimiter } from "./rateLimit";
 import { logger, installProcessErrorHandlers } from "./logger";
 import { safeHealthFailure } from "../services/safeHealthPayload";
 import { ENV } from "./env";
+import { getAuthDisabledUser } from "./authDisabled";
 
 const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
 
@@ -73,6 +74,9 @@ async function startServer() {
   await ensurePortalSessionColumns();
   await ensureEmailQuotationImageSourceType();
   await ensureAdminUser();
+  // Cria/carrega no boot o usuário real do modo AUTH_DISABLED, para que a
+  // primeira requisição não pague a criação nem corra risco de corrida.
+  if (ENV.authDisabled) await getAuthDisabledUser();
   await ensureFornecedoresIniciais();
 
   const app = express();
@@ -121,14 +125,15 @@ async function startServer() {
   const requireRole = (minimumRole: "user" | "viewer" | "editor" | "admin") =>
     async (req: Request, res: Response, next: NextFunction) => {
       try {
-        // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos como admin
+        // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos
+        // como admin, com o usuário real do modo (ver authDisabled.ts).
         if (ENV.authDisabled) {
-          (req as Request & { authUser?: any }).authUser = {
-            id: -1,
-            email: "[AUTH_DISABLED]",
-            role: "admin",
-            disabled: false,
-          };
+          const bypassUser = await getAuthDisabledUser();
+          if (!bypassUser) {
+            res.status(503).json({ error: "Modo AUTH_DISABLED indisponível: banco de dados fora do ar" });
+            return;
+          }
+          (req as Request & { authUser?: typeof bypassUser }).authUser = bypassUser;
           next();
           return;
         }

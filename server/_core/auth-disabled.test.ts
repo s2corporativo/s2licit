@@ -1,32 +1,43 @@
 import { describe, it, expect } from "vitest";
+import {
+  AUTH_DISABLED_EMAIL,
+  AUTH_DISABLED_NAME,
+  AUTH_DISABLED_OPEN_ID,
+} from "./authDisabled";
 
-describe("AUTH_DISABLED bypass configuration", () => {
-  it("ENV exports authDisabled flag", async () => {
+describe("AUTH_DISABLED", () => {
+  it("expõe a flag authDisabled como boolean", async () => {
     const { ENV } = await import("./env");
-    // Flag should be defined (regardless of value)
     expect(typeof ENV.authDisabled).toBe("boolean");
   });
 
-  it("bypassuser configuration is correct when enabled", () => {
-    // This test validates the bypass user's ID and email format
-    // When AUTH_DISABLED=true, these values are used in the fake user
-    const bypassUserId = -1;  // Reserved ID
-    const bypassUserEmail = "[AUTH_DISABLED]";  // Clearly marked
-
-    // Verify ID is reserved (negative = never a real user ID)
-    expect(bypassUserId).toBeLessThan(0);
-    expect(bypassUserId).not.toBe(0);  // Not the system ID
-
-    // Verify email is clearly marked (not ambiguous like "anonymous@...")
-    expect(bypassUserEmail).toContain("[AUTH_DISABLED]");
-    expect(bypassUserEmail.length).toBeGreaterThan(0);
+  it("a identidade do bypass é marcada de forma inequívoca na auditoria", () => {
+    // O rastro precisa deixar claro que a ação veio do modo sem autenticação,
+    // em vez de se passar por uma pessoa real.
+    expect(AUTH_DISABLED_NAME).toBe("[AUTH_DISABLED]");
+    expect(AUTH_DISABLED_OPEN_ID).toBe("auth-disabled-local");
+    // .invalid é reservado por RFC 2606: nunca colide com um e-mail real nem é
+    // roteável, então o usuário do bypass não pode receber mensagem do sistema.
+    expect(AUTH_DISABLED_EMAIL.endsWith(".invalid")).toBe(true);
   });
 
-  it("production guard exists when AUTH_DISABLED=true", async () => {
-    // When AUTH_DISABLED=true in production, env.ts should throw
-    // This test documents the security guard without requiring NODE_ENV mutation
-    const expectedErrorMessage = "AUTH_DISABLED=true não é permitido em produção";
-    expect(expectedErrorMessage).toContain("AUTH_DISABLED");
-    expect(expectedErrorMessage).toContain("produção");
+  it("não usa id sintético: o bypass precisa de uma linha real de users", async () => {
+    // Regressão: com id -1 todo INSERT em coluna com FK para users.id falhava
+    // com errno 1452 (audit_logs, capture_batches, agenticseek_buscas...), e
+    // como o fluxo grava em duas tabelas sem transação a linha de negócio ficava
+    // gravada enquanto a auditoria falhava — HTTP 500 e nenhum rastro.
+    const src = await import("node:fs").then(fs =>
+      fs.readFileSync(new URL("./authDisabled.ts", import.meta.url), "utf8")
+    );
+    expect(src).toContain("users.openId");
+    expect(src).not.toMatch(/id:\s*-1/);
+  });
+
+  it("a guarda de produção existe e cita AUTH_DISABLED", async () => {
+    const src = await import("node:fs").then(fs =>
+      fs.readFileSync(new URL("./env.ts", import.meta.url), "utf8")
+    );
+    expect(src).toContain("AUTH_DISABLED=true não é permitido em produção");
+    expect(src).toContain("ENV.authDisabled && ENV.isProduction");
   });
 });

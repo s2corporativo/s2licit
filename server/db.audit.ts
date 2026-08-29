@@ -37,7 +37,7 @@ export async function checkTableExists(tableName: string): Promise<TableCheckRes
   try {
     const db = await getDb();
     if (!db) return { name: tableName, exists: false, error: 'Database connection unavailable' };
-    const rows = await db.execute(sql`
+    const [rows] = await db.execute(sql`
       SELECT COLUMN_NAME AS column_name
         FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${tableName}
@@ -73,7 +73,7 @@ export async function checkDatabaseIntegrity(): Promise<DatabaseIntegrityReport>
   try {
     const db = await getDb();
     if (!db) throw new Error('Database connection unavailable');
-    const rows = await db.execute(sql`
+    const [rows] = await db.execute(sql`
       SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name
         FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE()
@@ -126,9 +126,21 @@ export async function checkDatabaseIntegrity(): Promise<DatabaseIntegrityReport>
   if (missingTables.length > 0 || tablesWithColumnDrift > 0) status = 'critical';
   else if (tableResults.some((t) => (t.unexpectedColumns?.length ?? 0) > 0)) status = 'warning';
 
-  const summary = status === 'healthy'
-    ? `Banco íntegro: ${tableResults.length} tabelas e colunas Drizzle verificadas`
-    : `Schema divergente: ${missingTables.length} tabela(s) ausente(s), ${tablesWithColumnDrift} tabela(s) com coluna(s) esperada(s) ausente(s).`;
+  const tablesWithUnexpected = tableResults.filter(
+    (t) => (t.unexpectedColumns?.length ?? 0) > 0
+  ).length;
+
+  // O texto precisa refletir o motivo real do status: um banco sem tabela
+  // ausente e sem coluna faltando, mas com coluna que o schema.ts desconhece,
+  // era descrito como "Schema divergente: 0 tabela(s) ausente(s), 0 ...".
+  let summary: string;
+  if (status === 'healthy') {
+    summary = `Banco íntegro: ${tableResults.length} tabelas e colunas Drizzle verificadas`;
+  } else if (missingTables.length > 0 || tablesWithColumnDrift > 0) {
+    summary = `Schema divergente: ${missingTables.length} tabela(s) ausente(s), ${tablesWithColumnDrift} tabela(s) com coluna(s) esperada(s) ausente(s).`;
+  } else {
+    summary = `Banco à frente do schema.ts: ${tablesWithUnexpected} tabela(s) com coluna(s) não declarada(s) no Drizzle.`;
+  }
 
   return { timestamp, status, totalTables: EXPECTED_TABLES.length, missingTables, tables: tableResults, summary };
 }
@@ -137,12 +149,13 @@ export async function checkForeignKeyIntegrity(): Promise<Record<string, any>> {
   try {
     const db = await getDb();
     if (!db) return { status: 'error', error: 'Database connection unavailable' };
-    const result = await db.execute(sql`
+    const [rows] = await db.execute(sql`
       SELECT CONSTRAINT_NAME, TABLE_NAME, REFERENCED_TABLE_NAME
         FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
        WHERE CONSTRAINT_SCHEMA = DATABASE()
     `);
-    return { status: 'ok', foreignKeys: result, count: (result as any[]).length };
+    const foreignKeys = rows as unknown as any[];
+    return { status: 'ok', foreignKeys, count: foreignKeys.length };
   } catch (error) {
     return { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' };
   }
@@ -152,20 +165,20 @@ export async function getDatabaseStats(): Promise<Record<string, any>> {
   try {
     const db = await getDb();
     if (!db) return { status: 'error', error: 'Database connection unavailable' };
-    const result = await db.execute(sql`
+    const [tableRows] = await db.execute(sql`
       SELECT TABLE_NAME, TABLE_ROWS,
              ROUND(((data_length + index_length) / 1024 / 1024), 2) AS size_mb
         FROM information_schema.TABLES
        WHERE TABLE_SCHEMA = DATABASE()
        ORDER BY TABLE_ROWS DESC
     `);
-    const indexes = await db.execute(sql`
+    const [indexRows] = await db.execute(sql`
       SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
         FROM information_schema.STATISTICS
        WHERE TABLE_SCHEMA = DATABASE()
        ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
     `);
-    return { status: 'ok', tables: result, indexes };
+    return { status: 'ok', tables: tableRows, indexes: indexRows };
   } catch (error) {
     return { status: 'error', error: error instanceof Error ? error.message : 'Unknown error' };
   }
