@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { proposalItems, proposals } from "../../drizzle/schema";
 import { priceQuotationItems } from "./emailQuotationResponseService";
+import { preserveProposalQuantity } from "./quotationQuantityService";
 
 /**
  * Fecha o ciclo entre a fila de cotações e o Agente de Propostas: transforma
@@ -80,13 +81,11 @@ async function insertProposalFromPriced(
   const db = await getDb();
   if (!db) throw new Error("Banco de dados indisponível.");
 
-  // proposal_items.quantity é inteiro (o portal preenche unidades inteiras);
-  // a quantidade é normalizada AQUI, uma única vez, e usada consistentemente
-  // no total do item e no total da proposta — nunca a fracionária de um lado
-  // e a arredondada do outro (o robô de portal e o PDF de proposta usam
-  // suggestedPrice × quantity, então os dois precisam bater).
+  // Quantidade é dado material da cotação. Este handoff preserva exatamente o
+  // solicitado e nunca aplica round/ceil silencioso. Conversão para embalagem
+  // comercial deve ocorrer em etapa explícita e auditável do portal.
   const normalizedItems = priced.items.map((item) => {
-    const quantity = Math.max(1, Math.round(item.quantidade));
+    const quantity = preserveProposalQuantity(item.quantidade);
     const totalPrice = Number((item.unitPrice * quantity).toFixed(2));
     return { ...item, quantity, totalPrice };
   });
@@ -122,9 +121,6 @@ async function insertProposalFromPriced(
         quantity: item.quantity,
         totalPrice: String(item.totalPrice.toFixed(2)),
         sortOrder: index + 1,
-        // supplierId/supplierName (Ressalva 4, Módulo 06): este insert direto
-        // não passava por addProposalItem, então ficava sem rastreabilidade
-        // de fornecedor — cada produto casado já tem fornecedor conhecido.
         supplierId: item.supplierId,
         supplierName: item.supplierName,
       })),
