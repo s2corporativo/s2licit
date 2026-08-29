@@ -26,7 +26,6 @@ const PropostaEditor = lazy(() => import("./pages/PropostaEditor"));
 const Propostas = lazy(() => import("./pages/Propostas"));
 const ControleFinanceiro = lazy(() => import("./pages/ControleFinanceiro"));
 const Produtos = lazy(() => import("./pages/ProdutosModern"));
-const ProdutosLegado = lazy(() => import("./pages/Produtos"));
 const GestaoImagens = lazy(() => import("./pages/GestaoImagens"));
 const EnriquecimentoCatalogo = lazy(() => import("./pages/EnriquecimentoCatalogo"));
 const ReclassificacaoIA = lazy(() => import("./pages/ReclassificacaoIA"));
@@ -102,7 +101,6 @@ function Router() {
                 <Route path="/comparacao" component={Comparacao} />
                 <Route path="/categorias" component={Categorias} />
                 <Route path="/produtos" component={Produtos} />
-                <Route path="/produtos-legado" component={ProdutosLegado} />
                 <Route path="/equivalencias" component={Equivalencias} />
                 <Route path="/qualidade"><RequireAuth message="Acesse o Dashboard de Qualidade após fazer login." minRole="editor"><DataQualityDashboard /></RequireAuth></Route>
                 <Route path="/fornecedores"><RequireAuth message="Gerencie fornecedores após fazer login." minRole="editor"><Fornecedores /></RequireAuth></Route>
