@@ -92,6 +92,10 @@ export const ENV = {
   // senha definida. Sem ele, uma troca feita na tela de usuários sobrevive ao
   // restart (antes era desfeita silenciosamente a cada boot).
   adminPasswordForceReset: process.env.ADMIN_PASSWORD_FORCE_RESET === "true",
+  // DESATIVA autenticação completamente. Com AUTH_DISABLED=true, qualquer
+  // requisição é aceita como admin. Usar SOMENTE em desenvolvimento sem dados
+  // sensíveis.
+  authDisabled: process.env.AUTH_DISABLED === "true",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   groqApiKey: process.env.GROQ_API_KEY ?? "",

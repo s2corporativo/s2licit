@@ -113,6 +113,18 @@ async function startServer() {
   const requireRole = (minimumRole: "user" | "viewer" | "editor" | "admin") =>
     async (req: Request, res: Response, next: NextFunction) => {
       try {
+        // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos como admin
+        if (process.env.AUTH_DISABLED === "true") {
+          (req as Request & { authUser?: any }).authUser = {
+            id: 0,
+            email: "anonymous@auth-disabled",
+            role: "admin",
+            disabled: false,
+          };
+          next();
+          return;
+        }
+
         const user = await sdk.authenticateRequest(req);
         if ((user as { disabled?: boolean }).disabled) {
           res.status(403).json({ error: "Conta desativada" });

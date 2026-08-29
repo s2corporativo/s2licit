@@ -13,6 +13,21 @@ export async function createContext(
 ): Promise<TrpcContext> {
   let user: User | null = null;
 
+  // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos como admin
+  if (process.env.AUTH_DISABLED === "true") {
+    user = {
+      id: 0,
+      email: "anonymous@auth-disabled",
+      role: "admin",
+      disabled: false,
+    } as User;
+    return {
+      req: opts.req,
+      res: opts.res,
+      user,
+    };
+  }
+
   try {
     user = await sdk.authenticateRequest(opts.req);
     // Conta desativada/revogada: trata como não autenticada (bloqueia acesso
