@@ -1,5 +1,5 @@
 # CI oficial fora do GitHub Actions (Woodpecker self-hosted — ver
-# infra/woodpecker/ no repositório ejc). Portões do CLAUDE.md: check+test+build.
+# infra/woodpecker/ no repositório ejc). Portões obrigatórios de qualidade.
 when:
   - event: push
     branch: main
@@ -12,5 +12,6 @@ steps:
       - corepack enable
       - pnpm install --frozen-lockfile
       - pnpm check
+      - pnpm lint
       - pnpm test
       - pnpm build
