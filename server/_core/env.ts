@@ -3,6 +3,12 @@ import fs from "fs";
 import { logger } from "./logger";
 
 const isProduction = process.env.NODE_ENV === "production";
+// O bypass de autenticação é liberado por lista de permissão, não por bloqueio:
+// só vale com NODE_ENV EXPLICITAMENTE "development". Ver authDisabledRequested.
+const isDevelopment = process.env.NODE_ENV === "development";
+
+// Pedido do operador — ainda não é a decisão. A decisão é ENV.authDisabled.
+const authDisabledRequested = process.env.AUTH_DISABLED === "true";
 
 /**
  * Lê um segredo do ambiente com suporte a Docker/Compose secrets: se
@@ -92,10 +98,13 @@ export const ENV = {
   // senha definida. Sem ele, uma troca feita na tela de usuários sobrevive ao
   // restart (antes era desfeita silenciosamente a cada boot).
   adminPasswordForceReset: process.env.ADMIN_PASSWORD_FORCE_RESET === "true",
-  // DESATIVA autenticação completamente. Com AUTH_DISABLED=true, qualquer
-  // requisição é aceita como admin. Usar SOMENTE em desenvolvimento sem dados
-  // sensíveis. NUNCA use em produção.
-  authDisabled: process.env.AUTH_DISABLED === "true",
+  // DESATIVA autenticação completamente: qualquer requisição é aceita como
+  // admin. Exige AUTH_DISABLED=true E NODE_ENV=development — a conjunção é
+  // deliberada e falha fechada. Bloquear apenas NODE_ENV==="production" deixava
+  // o bypass ativo em staging, num typo ("prod") e, o caso mais provável, com
+  // NODE_ENV não definido — `node dist/index.js` chamado direto, sem o
+  // `pnpm start` que define a variável, subia o sistema aberto e em silêncio.
+  authDisabled: authDisabledRequested && isDevelopment,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
@@ -104,10 +113,21 @@ export const ENV = {
   aiProvider: (process.env.AI_PROVIDER ?? "auto").toLowerCase(),
 };
 
-// Guarda: AUTH_DISABLED=true não é permitido em produção
-if (ENV.authDisabled && ENV.isProduction) {
+// Em produção o pedido é erro fatal: falha barulhenta, nunca boot silencioso.
+if (authDisabledRequested && isProduction) {
   throw new Error(
     "[ENV] AUTH_DISABLED=true não é permitido em produção. " +
-    "Remova a flag do .env ou defina NODE_ENV=development."
+    "Remova a flag do ambiente ou use NODE_ENV=development."
+  );
+}
+
+// Fora de produção e fora de desenvolvimento (staging, typo, NODE_ENV ausente)
+// a flag é IGNORADA e a autenticação continua ativa. Avisa alto: sem isso o
+// operador acreditaria que o login está desligado e o sistema aberto — a
+// confusão inversa, e mais segura, do que deixar passar.
+if (authDisabledRequested && !isDevelopment && !isProduction) {
+  logger.warn(
+    `[SECURITY] AUTH_DISABLED=true IGNORADO: exige NODE_ENV=development ` +
+    `(atual: ${process.env.NODE_ENV ?? "não definido"}). A autenticação segue ATIVA.`
   );
 }
