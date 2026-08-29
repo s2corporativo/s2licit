@@ -1,5 +1,6 @@
 # CI oficial fora do GitHub Actions (Woodpecker self-hosted — ver
-# infra/woodpecker/ no repositório ejc). Portões obrigatórios de qualidade.
+# infra/woodpecker/ no repositório ejc). Portões obrigatórios de qualidade e
+# sintaxe dos scripts operacionais que não passam pelo TypeScript.
 when:
   - event: push
     branch: main
@@ -11,6 +12,8 @@ steps:
     commands:
       - corepack enable
       - pnpm install --frozen-lockfile
+      - bash -n scripts/deploy-free.sh scripts/backup-uploads.sh
+      - node --check scripts/backup-db.mjs
       - pnpm check
       - pnpm lint
       - pnpm test
