@@ -28,6 +28,7 @@ import multer from "multer";
 import { apiRateLimiter, authRateLimiter } from "./rateLimit";
 import { logger, installProcessErrorHandlers } from "./logger";
 import { safeHealthFailure } from "../services/safeHealthPayload";
+import { ENV } from "./env";
 
 const ROLE_RANK: Record<string, number> = { user: 0, viewer: 1, editor: 2, admin: 3 };
 
@@ -50,6 +51,13 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   installProcessErrorHandlers();
+
+  if (ENV.authDisabled) {
+    logger.warn(
+      "[SECURITY] AUTH_DISABLED=true — autenticação completamente desativada. " +
+      "Qualquer requisição é aceita como admin. Use SOMENTE em desenvolvimento."
+    );
+  }
 
   // Em produção as funções ensure* são validadores; migrations são a fonte
   // única de DDL. Em desenvolvimento o fallback idempotente pode ser habilitado.
@@ -114,10 +122,10 @@ async function startServer() {
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         // AUTH_DISABLED=true desativa autenticação: todos os requests são aceitos como admin
-        if (process.env.AUTH_DISABLED === "true") {
+        if (ENV.authDisabled) {
           (req as Request & { authUser?: any }).authUser = {
-            id: 0,
-            email: "anonymous@auth-disabled",
+            id: -1,
+            email: "[AUTH_DISABLED]",
             role: "admin",
             disabled: false,
           };

@@ -94,7 +94,7 @@ export const ENV = {
   adminPasswordForceReset: process.env.ADMIN_PASSWORD_FORCE_RESET === "true",
   // DESATIVA autenticação completamente. Com AUTH_DISABLED=true, qualquer
   // requisição é aceita como admin. Usar SOMENTE em desenvolvimento sem dados
-  // sensíveis.
+  // sensíveis. NUNCA use em produção.
   authDisabled: process.env.AUTH_DISABLED === "true",
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
@@ -103,3 +103,11 @@ export const ENV = {
   // Provedor de IA preferido: "anthropic" | "groq" | "auto" (padrão)
   aiProvider: (process.env.AI_PROVIDER ?? "auto").toLowerCase(),
 };
+
+// Guarda: AUTH_DISABLED=true não é permitido em produção
+if (ENV.authDisabled && ENV.isProduction) {
+  throw new Error(
+    "[ENV] AUTH_DISABLED=true não é permitido em produção. " +
+    "Remova a flag do .env ou defina NODE_ENV=development."
+  );
+}
