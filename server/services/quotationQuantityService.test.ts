@@ -10,15 +10,17 @@ describe("preserveProposalQuantity", () => {
     expect(preserveProposalQuantity(1.4)).toBe(1.4);
     expect(preserveProposalQuantity(2.75)).toBe(2.75);
     expect(preserveProposalQuantity(0.125)).toBe(0.125);
+    expect(preserveProposalQuantity(0.0001)).toBe(0.0001);
   });
 
-  it("normaliza somente a precisão técnica do banco", () => {
-    expect(preserveProposalQuantity(1.23456)).toBe(1.2346);
+  it("rejeita precisão acima do contrato do banco em vez de arredondar", () => {
+    expect(() => preserveProposalQuantity(1.23456)).toThrow(/4 casas decimais/);
   });
 
   it("rejeita quantidade inválida em vez de inventar valor", () => {
     expect(() => preserveProposalQuantity(0)).toThrow(/Quantidade/);
     expect(() => preserveProposalQuantity(-2)).toThrow(/Quantidade/);
     expect(() => preserveProposalQuantity(Number.NaN)).toThrow(/Quantidade/);
+    expect(() => preserveProposalQuantity(Number.POSITIVE_INFINITY)).toThrow(/Quantidade/);
   });
 });
