@@ -50,7 +50,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  initSentry();
+  await initSentry();
   installProcessErrorHandlers();
 
   // Em produção as funções ensure* são validadores; migrations são a fonte
