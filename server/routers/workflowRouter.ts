@@ -50,22 +50,31 @@ export const workflowRouter = router({
         resposta: input.resposta ?? null,
       };
 
+      // Workflow e log de auditoria na mesma transação — ver a justificativa
+      // em documentGovernanceRouter.upsert: alteração sem rastro é o defeito
+      // que a auditoria deveria impedir.
       if (input.id) {
-        await db.update(diligenciaWorkflows).set({ ...payload, updatedAt: new Date() }).where(eq(diligenciaWorkflows.id, input.id));
-        await db.insert(auditLogs).values({ userId: ctx.user.id, action: "update", entity: "diligencia_workflows", entityId: input.id, origin: "workflowRouter", summary: input.titulo, changes: input as any });
+        await db.transaction(async (tx) => {
+          await tx.update(diligenciaWorkflows).set({ ...payload, updatedAt: new Date() }).where(eq(diligenciaWorkflows.id, input.id!));
+          await tx.insert(auditLogs).values({ userId: ctx.user.id, action: "update", entity: "diligencia_workflows", entityId: input.id, origin: "workflowRouter", summary: input.titulo, changes: input as any });
+        });
         return { success: true, mode: "update" };
       }
 
-      await db.insert(diligenciaWorkflows).values(payload);
-      await db.insert(auditLogs).values({ userId: ctx.user.id, action: "create", entity: "diligencia_workflows", origin: "workflowRouter", summary: input.titulo, changes: input as any });
+      await db.transaction(async (tx) => {
+        await tx.insert(diligenciaWorkflows).values(payload);
+        await tx.insert(auditLogs).values({ userId: ctx.user.id, action: "create", entity: "diligencia_workflows", origin: "workflowRouter", summary: input.titulo, changes: input as any });
+      });
       return { success: true, mode: "create" };
     }),
 
   remove: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input, ctx }) => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
-    await db.delete(diligenciaWorkflows).where(eq(diligenciaWorkflows.id, input.id));
-    await db.insert(auditLogs).values({ userId: ctx.user.id, action: "delete", entity: "diligencia_workflows", entityId: input.id, origin: "workflowRouter", summary: `Workflow ${input.id} removido` });
+    await db.transaction(async (tx) => {
+      await tx.delete(diligenciaWorkflows).where(eq(diligenciaWorkflows.id, input.id));
+      await tx.insert(auditLogs).values({ userId: ctx.user.id, action: "delete", entity: "diligencia_workflows", entityId: input.id, origin: "workflowRouter", summary: `Workflow ${input.id} removido` });
+    });
     return { success: true };
   }),
 });

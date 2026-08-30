@@ -64,6 +64,15 @@ export type InsertCategory = typeof categories.$inferInsert;
 export const suppliers = mysqlTable("suppliers", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 256 }).notNull().unique(),
+  // Contato do fornecedor. Formalizados na migration 0029 (antes eram criados
+  // sob demanda por server/db/suppliers.ts). Precisam ser declarados aqui: sem
+  // isso o schema.ts diverge do banco e `drizzle-kit generate` emitiria um
+  // DROP COLUMN destrutivo para os cinco campos.
+  code: varchar("code", { length: 128 }),
+  contact: varchar("contact", { length: 256 }),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 64 }),
+  notes: text("notes"),
   isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

@@ -28,7 +28,10 @@ export async function getDatabaseSchemaFingerprint(): Promise<{
 }> {
   const db = await getDb();
   if (!db) throw new Error("Banco indisponível");
-  const columnRows = await db.execute(sql`
+  // db.execute() do mysql2/drizzle devolve a tupla [rows, fields], não a
+  // lista de linhas — mesmo defeito corrigido em server/db.audit.ts. Sem o
+  // desestruturar, .map() abaixo rodava sobre a tupla de 2 elementos.
+  const [columnRows] = await db.execute(sql`
     SELECT TABLE_NAME AS tableName,
            COLUMN_NAME AS columnName,
            COLUMN_TYPE AS columnType,
@@ -39,7 +42,7 @@ export async function getDatabaseSchemaFingerprint(): Promise<{
      WHERE TABLE_SCHEMA = DATABASE()
      ORDER BY TABLE_NAME, ORDINAL_POSITION
   `);
-  const indexRows = await db.execute(sql`
+  const [indexRows] = await db.execute(sql`
     SELECT TABLE_NAME AS tableName,
            INDEX_NAME AS indexName,
            NON_UNIQUE AS nonUnique,
