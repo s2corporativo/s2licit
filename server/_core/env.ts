@@ -2,6 +2,52 @@ import crypto from "crypto";
 import fs from "fs";
 import { logger } from "./logger";
 
+/**
+ * dotenv trunca silenciosamente qualquer valor não citado a partir do
+ * primeiro `#` — `ADMIN_PASSWORD=Senha#2026` vira `ADMIN_PASSWORD=Senha`, sem
+ * erro nem aviso. Uma senha forte com `#` é comum, e o efeito era login
+ * "recusado" para uma senha correta: o hash gravado no boot correspondia ao
+ * valor truncado, nunca ao que a pessoa de fato digitava. O mesmo corta
+ * `JWT_SECRET`, `ENCRYPTION_KEY` e qualquer segredo com `#`.
+ *
+ * A checagem lê o arquivo bruto (não `process.env`, que já reflete o valor
+ * truncado) e avisa alto no boot — sem isso a causa fica invisível: tanto o
+ * `.env` quanto o hash no banco "batem" entre si, só não com o que a pessoa
+ * digita.
+ */
+export function findUnquotedHashInDotenv(raw: string): string[] {
+  const offenders: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    const value = rawValue.trim();
+    const isQuoted = /^"[^"]*"$/.test(value) || /^'[^']*'$/.test(value);
+    if (!isQuoted && value.includes("#")) offenders.push(key);
+  }
+  return offenders;
+}
+
+function warnIfDotenvTruncatedByHash(): void {
+  const path = process.env.DOTENV_CONFIG_PATH || ".env";
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path, "utf-8");
+  } catch {
+    return; // sem .env (produção via orquestrador) é normal — nada a avisar.
+  }
+  const offenders = findUnquotedHashInDotenv(raw);
+  if (offenders.length === 0) return;
+  logger.warn(
+    `[ENV] ${offenders.join(", ")} contém "#" sem aspas em ${path} — dotenv corta o valor a partir do "#" ` +
+    `em silêncio (ex.: "Senha#2026" vira "Senha"). Se não é intencional, o valor real gravado/usado é ` +
+    "menor que o esperado. Corrija envolvendo o valor em aspas: " + `${offenders[0]}="valor#comHash".`
+  );
+}
+warnIfDotenvTruncatedByHash();
+
 const isProduction = process.env.NODE_ENV === "production";
 // O bypass de autenticação é liberado por lista de permissão, não por bloqueio:
 // só vale com NODE_ENV EXPLICITAMENTE "development". Ver authDisabledRequested.
