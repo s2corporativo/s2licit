@@ -133,26 +133,32 @@ export const funilRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Banco indisponível");
 
-      const [result] = await db.insert(funilOportunidades).values({
-        titulo: input.titulo,
-        orgao: input.orgao,
-        modalidade: input.modalidade,
-        numeroProcesso: input.numeroProcesso,
-        objeto: input.objeto,
-        origemTipo: "manual",
-        valorEstimado: input.valorEstimado != null ? String(input.valorEstimado) : undefined,
-        prazoEnvio: input.prazoEnvio ? new Date(`${input.prazoEnvio}T12:00:00`) : undefined,
-        risco: input.risco ?? "medio",
-        responsavel: input.responsavel ?? ctx.user.name ?? undefined,
-        observacoes: input.observacoes,
-      });
-      const id = Number((result as { insertId?: number }).insertId);
-      await db.insert(funilEventos).values({
-        oportunidadeId: id,
-        deEtapa: null,
-        paraEtapa: "nova",
-        justificativa: "Criada manualmente",
-        usuario: ctx.user.name ?? ctx.user.email ?? "sistema",
+      // Oportunidade e o evento de abertura numa transação: o histórico do
+      // funil é reconstruído a partir de funil_eventos, então uma oportunidade
+      // sem o evento inicial nasce com a linha do tempo furada.
+      const id = await db.transaction(async (tx) => {
+        const [result] = await tx.insert(funilOportunidades).values({
+          titulo: input.titulo,
+          orgao: input.orgao,
+          modalidade: input.modalidade,
+          numeroProcesso: input.numeroProcesso,
+          objeto: input.objeto,
+          origemTipo: "manual",
+          valorEstimado: input.valorEstimado != null ? String(input.valorEstimado) : undefined,
+          prazoEnvio: input.prazoEnvio ? new Date(`${input.prazoEnvio}T12:00:00`) : undefined,
+          risco: input.risco ?? "medio",
+          responsavel: input.responsavel ?? ctx.user.name ?? undefined,
+          observacoes: input.observacoes,
+        });
+        const novoId = Number((result as { insertId?: number }).insertId);
+        await tx.insert(funilEventos).values({
+          oportunidadeId: novoId,
+          deEtapa: null,
+          paraEtapa: "nova",
+          justificativa: "Criada manualmente",
+          usuario: ctx.user.name ?? ctx.user.email ?? "sistema",
+        });
+        return novoId;
       });
       return { id };
     }),

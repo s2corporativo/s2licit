@@ -15,6 +15,7 @@
     "db:push": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
     "db:backup": "node scripts/backup-db.mjs",
+    "smoke": "tsx scripts/db-smoke.mjs",
     "patch:pdfkit": "node scripts/patch-pdfkit-esm.mjs"
   },
   "dependencies": {

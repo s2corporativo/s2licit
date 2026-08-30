@@ -5,6 +5,7 @@ import { getDb } from "../db";
 import { auditLogs } from "../../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
 import { checkDatabaseIntegrity, checkForeignKeyIntegrity, getDatabaseStats } from "../db.audit";
+import { getDatabaseSchemaFingerprint } from "../services/databaseSchemaFingerprint";
 import { requestOrigin } from "../services/auditService";
 import { isSensitiveAuditAction } from "../services/auditTrustPolicy";
 
@@ -68,4 +69,8 @@ export const auditRouter = router({
   checkDatabaseIntegrity: adminProcedure.query(async () => checkDatabaseIntegrity()),
   checkForeignKeys: adminProcedure.query(async () => checkForeignKeyIntegrity()),
   getDatabaseStats: adminProcedure.query(async () => getDatabaseStats()),
+  // Snapshot estrutural bruto (tipo/nullable/default/index por coluna) —
+  // mais granular que checkDatabaseIntegrity, que só compara contra o que
+  // schema.ts espera. Útil para comparar dois ambientes lado a lado.
+  schemaFingerprint: adminProcedure.query(async () => getDatabaseSchemaFingerprint()),
 });

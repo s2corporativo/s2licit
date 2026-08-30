@@ -231,10 +231,17 @@ export const captureReviewRouter = router({
         if (item.barcode) update.barcode = item.barcode;
         if (item.price != null) update.price = item.price;
         if (item.unit) update.unit = item.unit;
-        if (Object.keys(update).length > 0) {
-          await db.update(products).set(update as any).where(eq(products.id, item.matchedProductId));
-        }
-        await db.update(capturedProducts).set({ status: "applied" }).where(eq(capturedProducts.id, item.id));
+        // Transação POR ITEM (não do lote): alterar o produto e marcá-lo como
+        // aplicado precisa ser atômico, senão uma falha na marcação deixava o
+        // produto já alterado e o item ainda "approved" — pronto para ser
+        // aplicado de novo. Por item, e não pelo lote inteiro, porque a
+        // aplicação parcial é legítima aqui (o retorno reporta applied/skipped).
+        await db.transaction(async (tx) => {
+          if (Object.keys(update).length > 0) {
+            await tx.update(products).set(update as any).where(eq(products.id, item.matchedProductId!));
+          }
+          await tx.update(capturedProducts).set({ status: "applied" }).where(eq(capturedProducts.id, item.id));
+        });
         applied++;
       }
       await syncBatchCounters(batchIds);
