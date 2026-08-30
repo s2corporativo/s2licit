@@ -90,7 +90,7 @@ export const proposalsRouter = router({
           unit: z.string().max(64).optional().nullable(),
           supplierName: z.string().max(256).optional().nullable(),
           unitPrice: z.string().optional().nullable(),
-          quantity: z.number().min(1).default(1),
+          quantity: z.number().finite().positive().default(1),
           notes: z.string().optional().nullable(),
           imageUrl: z.string().optional().nullable(),
           productUrl: z.string().optional().nullable(),
@@ -115,7 +115,7 @@ export const proposalsRouter = router({
           costPrice: z.string().optional().nullable(),
           editalRefPrice: z.string().optional().nullable(),
           suggestedPrice: z.string().optional().nullable(),
-          quantity: z.number().min(1).optional(),
+          quantity: z.number().finite().positive().optional(),
           notes: z.string().optional().nullable(),
           sortOrder: z.number().optional(),
           registroMapa: z.string().max(128).optional().nullable(),
@@ -210,11 +210,8 @@ export const proposalsRouter = router({
         id: z.number(),
         newStatus: z.enum(["draft", "sent", "order", "in_transit", "delivered", "cancelled"]),
         notes: z.string().optional(),
-        // Parcelamento: apenas quando newStatus === 'delivered'
         installments: z.number().int().min(1).max(60).optional(),
-        firstDueDate: z.date().optional(), // data de vencimento da 1ª parcela
-        // Perda para concorrente: apenas quando newStatus === 'cancelled'.
-        // Ausentes = cancelamento interno (não conta como perda no win rate).
+        firstDueDate: z.date().optional(),
         lossReason: z.string().max(2000).optional(),
         competitorValue: z.number().nonnegative().optional(),
       }))
@@ -232,7 +229,6 @@ export const proposalsRouter = router({
               .where(eq(proposals.id, input.id));
           }
         }
-        // Gerar entradas financeiras parceladas ao marcar como entregue
         if (input.newStatus === "delivered" && input.installments && input.installments > 1) {
           const db = await getDb();
           if (!db) return { success: true };
@@ -260,7 +256,6 @@ export const proposalsRouter = router({
             }
           }
         } else if (input.newStatus === "delivered") {
-          // Parcela única — criar uma entrada financeira
           const db = await getDb();
           if (!db) return { success: true };
           const [proposal] = await db
@@ -312,25 +307,22 @@ export const proposalsRouter = router({
         return newId;
       }),
 
-    // Sugestão automática de produtos a partir de lista de texto/planilha
     suggestFromList: protectedProcedure
       .input(z.object({
         productNames: z.array(z.string().min(1)).min(1).max(200),
       }))
       .mutation(({ input }) => suggestProductsFromList(input.productNames)),
 
-    // Busca similares mais baratos para um produto recém-adicionado à proposta
     findCheaperSimilar: protectedProcedure
       .input(z.object({
-        productId: z.number(),          // produto recém-adicionado
-        unitPrice: z.string(),          // preço unitário do produto adicionado
-        excludeProductId: z.number().optional().nullable(), // evitar retornar o próprio produto
+        productId: z.number(),
+        unitPrice: z.string(),
+        excludeProductId: z.number().optional().nullable(),
       }))
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return { similars: [] };
 
-        // Buscar o produto para obter o princípio ativo
         const [prod] = await db
           .select({ activeIngredient: products.activeIngredient, name: products.name })
           .from(products)
@@ -344,7 +336,6 @@ export const proposalsRouter = router({
         const currentPrice = parseFloat(input.unitPrice);
         if (isNaN(currentPrice) || currentPrice <= 0) return { similars: [] };
 
-        // Buscar produtos com mesmo princípio ativo e preço menor
         const similars = await db
           .select({
             id: products.id,
@@ -384,8 +375,6 @@ export const proposalsRouter = router({
           activeIngredient: prod.activeIngredient,
         };
       }),
-
-    // ─── Validação de Equivalência para Itens de Pregão ──────────────────────────
 
     validateEquivalenceForItems: protectedProcedure
       .input(
