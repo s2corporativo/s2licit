@@ -1,0 +1,16 @@
+[Unit]
+Description=S2 Licit deploy aprovado pelo Woodpecker
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/s2licit
+ExecStart=/opt/s2licit/scripts/vps-deploy-approved.sh
+TimeoutStartSec=90min
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
