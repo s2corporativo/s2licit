@@ -124,3 +124,6 @@ data/
 
 # Porta real do servidor (gerado em runtime pelo boot; lido pelo INICIAR.bat)
 .port
+
+# Config de máquina local do Claude Code (proxy) — nunca versionar
+.claude/settings.local.json
