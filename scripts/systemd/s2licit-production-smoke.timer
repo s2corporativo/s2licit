@@ -1,0 +1,11 @@
+[Unit]
+Description=Agenda diária do smoke autenticado S2 Licit
+
+[Timer]
+OnCalendar=*-*-* 09:17:00 UTC
+RandomizedDelaySec=5m
+Persistent=true
+Unit=s2licit-production-smoke.service
+
+[Install]
+WantedBy=timers.target
