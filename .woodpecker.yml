@@ -20,10 +20,10 @@ steps:
   ops-contracts:
     image: bash:5.2
     commands:
-      - bash -n scripts/vps-deploy-approved.sh scripts/vps-rollback.sh scripts/install-approved-service.sh
+      - bash -n scripts/vps-deploy-approved.sh scripts/vps-rollback.sh scripts/install-approved-service.sh scripts/production-smoke-host.sh
 
   security-sast:
-    image: semgrep/semgrep
+    image: semgrep/semgrep:1.172.0
     commands:
       - semgrep scan --config=auto --error .
 
