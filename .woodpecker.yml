@@ -1,16 +1,33 @@
-# CI oficial fora do GitHub Actions (Woodpecker self-hosted — ver
-# infra/woodpecker/ no repositório ejc). Portões do CLAUDE.md: check+test+build.
+# CI oficial self-hosted (Woodpecker). Não depende de GitHub Actions.
 when:
   - event: push
     branch: main
   - event: pull_request
+  - event: manual
 
 steps:
   gates:
-    image: node:22
+    image: node:22-bookworm
     commands:
       - corepack enable
       - pnpm install --frozen-lockfile
+      - node scripts/validate-audit-fixes.mjs
+      - pnpm lint
       - pnpm check
       - pnpm test
       - pnpm build
+
+  security-sast:
+    image: semgrep/semgrep
+    commands:
+      - semgrep scan --config=auto --error .
+
+  security-vulnerabilities:
+    image: aquasec/trivy:0.74.0
+    commands:
+      - trivy fs --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+
+  security-secrets:
+    image: ghcr.io/gitleaks/gitleaks:v8.30.1
+    commands:
+      - gitleaks git . --redact --verbose --exit-code 1
