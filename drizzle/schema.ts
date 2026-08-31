@@ -905,6 +905,84 @@ export const syncRuns = mysqlTable(
 export type SyncRun = typeof syncRuns.$inferSelect;
 export type InsertSyncRun = typeof syncRuns.$inferInsert;
 
+// ─── Coletor browser-use — portais de licitação sem API (PROMPT 2) ───────────
+// Fallback: só entra quando PNCP/Compras.gov/FIEMG (dados abertos) não
+// cobrem o portal. Cada portal precisa de registro de conformidade
+// explícito (termos verificados, por quem, quando) antes de poder coletar —
+// portal sem esse registro fica desabilitado por padrão (enabled=false).
+export const portalCollectionTargets = mysqlTable(
+  "portalCollectionTargets",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    slug: varchar("slug", { length: 64 }).notNull().unique(),
+    name: varchar("name", { length: 256 }).notNull(),
+    url: text("url").notNull(),
+    // Instrução em linguagem natural para o agente browser-use — o que
+    // procurar, quais campos extrair (mapeados para NormalizedLicitacao).
+    agentTask: text("agentTask").notNull(),
+    // Desabilitado por padrão — só liga depois do registro de conformidade
+    // abaixo estar preenchido (guarda de legalidade, não presume permissão).
+    enabled: boolean("enabled").default(false).notNull(),
+    termsVerifiedAt: timestamp("termsVerifiedAt"),
+    termsVerifiedBy: varchar("termsVerifiedBy", { length: 256 }),
+    termsUrl: text("termsUrl"),
+    // Guarda de custo: teto de gasto estimado (USD) por execução deste alvo.
+    maxUsdPerExecution: decimal("maxUsdPerExecution", { precision: 8, scale: 4 })
+      .default("1.0000")
+      .notNull(),
+    // Guarda de educação: intervalo mínimo entre execuções deste alvo.
+    minIntervalSeconds: int("minIntervalSeconds").default(3600).notNull(),
+    // Guarda de fragilidade: campos de NormalizedLicitacao que um resultado
+    // precisa ter preenchidos para contar como válido, e limiar de taxa de
+    // sucesso abaixo do qual o alvo dispara alerta (não se autodesabilita —
+    // decisão de manter ligado é humana).
+    requiredFields: json("requiredFields").notNull(),
+    minSuccessRate: decimal("minSuccessRate", { precision: 4, scale: 3 }).default("0.500").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => [
+    index("idx_pct_enabled").on(table.enabled),
+  ]
+);
+export type PortalCollectionTarget = typeof portalCollectionTargets.$inferSelect;
+export type InsertPortalCollectionTarget = typeof portalCollectionTargets.$inferInsert;
+
+// ─── Execuções do coletor browser-use (custo + resultado, por alvo) ──────────
+export const browserUseExecutions = mysqlTable(
+  "browserUseExecutions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    targetId: int("targetId")
+      .notNull()
+      .references(() => portalCollectionTargets.id, { onDelete: "cascade" }),
+    startedAt: timestamp("startedAt").defaultNow().notNull(),
+    finishedAt: timestamp("finishedAt"),
+    status: mysqlEnum("status", [
+      "running",
+      "success",
+      "error",
+      "timeout",
+      "cost_capped",
+      "compliance_blocked",
+    ])
+      .default("running")
+      .notNull(),
+    pagesVisited: int("pagesVisited").default(0).notNull(),
+    estimatedCostUsd: decimal("estimatedCostUsd", { precision: 8, scale: 4 }).default("0.0000").notNull(),
+    resultsFound: int("resultsFound").default(0).notNull(),
+    resultsValid: int("resultsValid").default(0).notNull(),
+    errorMessage: text("errorMessage"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    index("idx_bue_target").on(table.targetId),
+    index("idx_bue_status").on(table.status),
+    index("idx_bue_started").on(table.startedAt),
+  ]
+);
+export type BrowserUseExecution = typeof browserUseExecutions.$inferSelect;
+export type InsertBrowserUseExecution = typeof browserUseExecutions.$inferInsert;
 
 // ─── Ofertas de Produtos por Fornecedor ──────────────────────────────────────
 export const productSupplierOffers = mysqlTable(

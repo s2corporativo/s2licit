@@ -1,0 +1,6 @@
+# Coletor browser-use (server/connectors/browserUseConnector.ts invoca este
+# script via subprocess — ver scripts/browser-use/collector.py).
+# Versões não fixadas por hash: instalar num venv isolado, nunca no Python
+# do sistema (mesmo padrão de isolamento de dependências do resto do repo).
+browser-use>=0.4,<0.5
+pydantic>=2,<3
