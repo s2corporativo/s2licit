@@ -17,6 +17,11 @@ steps:
       - pnpm test
       - pnpm build
 
+  ops-contracts:
+    image: bash:5.2
+    commands:
+      - bash -n scripts/vps-deploy-approved.sh scripts/vps-rollback.sh scripts/install-approved-service.sh
+
   security-sast:
     image: semgrep/semgrep
     commands:
