@@ -1,23 +1,9 @@
 import { readFile } from "node:fs/promises";
 
 // Gate estático das correções da auditoria.
-//
-// Duas listas: o que PRECISA estar presente e o que NÃO PODE aparecer. A
-// segunda foi acrescentada em 24/08/2026 — sem ela o gate só sabia cobrar
-// presença, e uma regressão que REINTRODUZISSE um controle removido (senha em
-// linha de comando, verificação de host desligada) passava despercebida.
 const obrigatorios = [
-  // O deploy publica a imagem fixada pelo SHA do commit, não por tag móvel:
-  // `:latest` poderia apontar para outro build entre o push e o pull.
   [".github/workflows/deploy-vps.yml", "${GITHUB_SHA}"],
-  // Gate integral antes de publicar. Até 24/08/2026 esta asserção falhava: o
-  // deploy construía e subia em produção sem rodar teste nenhum, e a única
-  // validação era o readiness — depois de já estar no ar.
   [".github/workflows/deploy-vps.yml", "pnpm test"],
-  // SAST versionado. A asserção original cobrava `codeql-action`, substituído
-  // deliberadamente em `a7a56f2` porque CodeQL exige GitHub Advanced Security,
-  // indisponível neste repositório privado. Cobrar a ferramenta que não pode
-  // rodar deixava o gate vermelho por um motivo que ninguém podia resolver.
   [".github/workflows/security.yml", "semgrep"],
   [".github/workflows/production-smoke.yml", "schedule:"],
   ["docker-compose.yml", "127.0.0.1:${APP_LOCAL_PORT:-3000}:3000"],
@@ -26,19 +12,23 @@ const obrigatorios = [
   ["server/services/pricingSafety.ts", "PRICING_DEFAULT_TAX_PERCENT"],
   ["server/_core/trpc.ts", "system.fixCatalogIntegrity"],
   ["server/routers/auditRouter.ts", "Eventos operacionais sensíveis"],
+  // Quantidade comercial: contrato decimal e fonte única de validação.
+  ["drizzle/schema.ts", 'quantity: decimal("quantity", { precision: 15, scale: 4 })'],
+  ["shared/proposalQuantity.ts", "tryParseProposalQuantity"],
+  ["drizzle/0032_proposal_quantity_decimal.sql", "DECIMAL(15,4)"],
+  ["drizzle/0031_email_settings_filters.sql", "senderFilter"],
+  ["server/services/quotationPortalHandoffService.ts", "preserveProposalQuantity"],
 ];
 
-// Regressões que o gate precisa reprovar de forma explícita.
 const proibidos = [
-  // Senha em linha de comando: fica no histórico de shell e na lista de
-  // processos. Foi a origem da credencial exposta tratada na PR #154.
   [".github/workflows/deploy-vps.yml", "sshpass"],
   [".github/workflows/rollback-vps.yml", "sshpass -p"],
-  // Aceitar qualquer host key anula a proteção contra MITM.
   [".github/workflows/deploy-vps.yml", "StrictHostKeyChecking=no"],
-  // A porta da aplicação não pode voltar a ser publicada em todas as
-  // interfaces; ela fica em loopback atrás do proxy.
   ["docker-compose.yml", '"3000:3000"'],
+  // Regra específica: quantidade não pode voltar a ser truncada/arredondada.
+  ["client/src/pages/PropostaEditor.tsx", "parseInt(qty)"],
+  ["client/src/pages/PropostaEditor.tsx", "parseInt(manualForm.quantity)"],
+  ["server/services/quotationPortalHandoffService.ts", "Math.round(item.quantidade)"],
 ];
 
 let falhou = false;

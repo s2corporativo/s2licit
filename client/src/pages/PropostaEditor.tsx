@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "wouter";
 import { toast } from "sonner";
 import { formatBRL } from "@/lib/format";
+import { parseProposalQuantity, tryParseProposalQuantity } from "@shared/proposalQuantity";
 
 // ─── Item Row ─────────────────────────────────────────────────────────────────
 function ItemRow({
@@ -73,7 +74,8 @@ function ItemRow({
     : (similaresFallback as any[]).some((s: any) => s.id !== item.productId);
   // A peça comercial usa somente o preço de venda explicitamente informado.
   const effectivePrice = suggestedPrice;
-  const total = effectivePrice && qty ? (parseFloat(effectivePrice) * parseInt(qty)).toFixed(2) : null;
+  const parsedQty = qty ? tryParseProposalQuantity(qty) : null;
+  const total = effectivePrice && parsedQty !== null ? (parseFloat(effectivePrice) * parsedQty).toFixed(2) : null;
   const costPrice = item.costPrice ? parseFloat(String(item.costPrice)) : null;
   // Preço mínimo de venda = custo ÷ (1 - margem%) × (1 + imposto%)
   const minSalePrice = costPrice != null && costPrice > 0
@@ -92,8 +94,15 @@ function ItemRow({
     : null;
 
   const handleSave = () => {
+    let quantity: number;
+    try {
+      quantity = parseProposalQuantity(qty);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Quantidade inválida.");
+      return;
+    }
     onUpdate(item.id, {
-      quantity: parseInt(qty) || 1,
+      quantity,
       unitPrice: price || null,
       suggestedPrice: suggestedPrice || null,
       editalRefPrice: editalRefPrice || null,
@@ -173,11 +182,12 @@ function ItemRow({
       <td className="px-3 py-2 w-24">
         {editing ? (
           <input
-            type="number"
+            type="text"
+            inputMode="decimal"
             value={qty}
             onChange={(e) => setQty(e.target.value)}
+            placeholder="Ex.: 1,4"
             className="w-full border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:border-gray-900"
-            min={1}
           />
         ) : (
           <span className="text-sm font-semibold text-gray-900">{item.quantity}</span>
@@ -784,6 +794,13 @@ export default function PropostaEditor() {
       toast.error("O nome do produto é obrigatório.");
       return;
     }
+    let quantity: number;
+    try {
+      quantity = parseProposalQuantity(manualForm.quantity);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Quantidade inválida.");
+      return;
+    }
     addManualItem.mutate({
       proposalId: id,
       productId: null,
@@ -796,7 +813,7 @@ export default function PropostaEditor() {
       supplierName: manualForm.supplierName || null,
       registroMapa: manualForm.registroMapa || null,
       unitPrice: manualForm.unitPrice || null,
-      quantity: parseInt(manualForm.quantity) || 1,
+      quantity,
       notes: manualForm.notes || null,
     });
   };
@@ -822,7 +839,7 @@ export default function PropostaEditor() {
   }, [(company as any)?.minMarginPercent]);
   const custoTotal = (proposal?.items ?? []).reduce((sum, item) => {
     const price = item.unitPrice ? parseFloat(String(item.unitPrice)) : 0;
-    const qty = item.quantity ?? 1;
+    const qty = Number(item.quantity ?? 1);
     return sum + price * qty;
   }, 0);
   // Total comercial: preço de venda explícito; custo nunca é fallback.
@@ -981,7 +998,14 @@ export default function PropostaEditor() {
               const orgao = (proposal as any)?.orgao ?? "";
               setEmailTo("");
               setEmailSubject(`Proposta Comercial - ${title}${orgao ? ` - ${orgao}` : ""}`);
-              setEmailBody(`Prezados,\n\nSegue em anexo nossa proposta comercial referente a ${title}${orgao ? ` para ${orgao}` : ""}.\n\nEstamos à disposição para quaisquer esclarecimentos.\n\nAtenciosamente,\n${(company as any)?.name ?? ""}`)
+              setEmailBody(`Prezados,\
+\
+Segue em anexo nossa proposta comercial referente a ${title}${orgao ? ` para ${orgao}` : ""}.\
+\
+Estamos à disposição para quaisquer esclarecimentos.\
+\
+Atenciosamente,\
+${(company as any)?.name ?? ""}`)
               setShowEmailModal(true);
             }}
             className="flex items-center gap-2 border border-gray-300 text-gray-700 px-3 py-2 text-xs font-semibold hover:border-gray-900 transition-colors"
@@ -1731,10 +1755,11 @@ export default function PropostaEditor() {
                 <div>
                   <label className="text-[10px] font-bold tracking-widest uppercase text-gray-400 block mb-1">Quantidade</label>
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="decimal"
                     value={manualForm.quantity}
                     onChange={(e) => setManualForm((f) => ({ ...f, quantity: e.target.value }))}
+                    placeholder="Ex.: 1,4"
                     className="w-full border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900"
                   />
                 </div>
@@ -1751,11 +1776,11 @@ export default function PropostaEditor() {
                 />
               </div>
               {/* Preview do total */}
-              {manualForm.unitPrice && manualForm.quantity && (
+              {manualForm.unitPrice && tryParseProposalQuantity(manualForm.quantity) !== null && (
                 <div className="bg-gray-50 border border-gray-200 px-4 py-3 flex items-center justify-between">
                   <span className="text-xs text-gray-500 font-bold uppercase tracking-widest">Total do Item</span>
                   <span className="text-base font-black text-blue-800">
-                    R$ {(parseFloat(manualForm.unitPrice || "0") * (parseInt(manualForm.quantity) || 1)).toFixed(2).replace(".", ",")}
+                    R$ {(parseFloat(manualForm.unitPrice || "0") * (tryParseProposalQuantity(manualForm.quantity) ?? 0)).toFixed(2).replace(".", ",")}
                   </span>
                 </div>
               )}

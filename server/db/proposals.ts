@@ -1,5 +1,6 @@
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { proposalItems, proposalStatusHistory, proposals, suppliers, type InsertProposal, type InsertProposalItem } from "../../drizzle/schema";
+import { parseProposalQuantity } from "../services/proposalQuantity";
 import { getDb } from "./_client";
 
 /**
@@ -94,18 +95,19 @@ export async function recalcProposalTotal(proposalId: number) {
 export async function addProposalItem(data: InsertProposalItem) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  // Auto-assign item number
   const existing = await db
     .select({ max: sql<number>`MAX(${proposalItems.itemNumber})` })
     .from(proposalItems)
     .where(eq(proposalItems.proposalId, data.proposalId));
   const nextNum = (existing[0]?.max ?? 0) + 1;
-  const total = data.unitPrice && data.quantity
-    ? (parseFloat(String(data.unitPrice)) * data.quantity).toFixed(2)
+  const quantity = parseProposalQuantity(data.quantity ?? 1);
+  const total = data.unitPrice
+    ? (parseFloat(String(data.unitPrice)) * quantity).toFixed(2)
     : null;
   const supplierId = data.supplierId ?? (await resolveSupplierIdByName(data.supplierName));
   const [result] = await db.insert(proposalItems).values({
     ...data,
+    quantity: quantity as any,
     supplierId,
     itemNumber: nextNum,
     totalPrice: total as any,
@@ -118,15 +120,14 @@ export async function addProposalItem(data: InsertProposalItem) {
 export async function updateProposalItem(id: number, data: Partial<InsertProposalItem>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  // Recalculate total if price or quantity changed
-  // Priority: suggestedPrice > unitPrice for totalPrice calculation
   if (data.suggestedPrice !== undefined || data.unitPrice !== undefined || data.quantity !== undefined) {
     const [existing] = await db.select().from(proposalItems).where(eq(proposalItems.id, id)).limit(1);
     if (existing) {
       const suggestedP = data.suggestedPrice !== undefined ? parseFloat(String(data.suggestedPrice)) : (existing.suggestedPrice ? parseFloat(String(existing.suggestedPrice)) : null);
       const unitP = data.unitPrice !== undefined ? parseFloat(String(data.unitPrice)) : parseFloat(String(existing.unitPrice ?? 0));
       const price = suggestedP !== null ? suggestedP : unitP;
-      const qty = data.quantity !== undefined ? data.quantity : existing.quantity;
+      const qty = parseProposalQuantity(data.quantity !== undefined ? data.quantity : existing.quantity);
+      if (data.quantity !== undefined) data.quantity = qty as any;
       data.totalPrice = (price * qty).toFixed(2) as any;
     }
   }
@@ -189,7 +190,6 @@ export async function advanceProposalStatus(
 
   await db.update(proposals).set({ status: newStatus as any, ...dateFields }).where(eq(proposals.id, id));
 
-  // Record history
   await db.insert(proposalStatusHistory).values({
     proposalId: id,
     fromStatus: current.status,
@@ -230,8 +230,6 @@ export async function duplicateProposal(id: number) {
   const original = await getProposalWithItems(id);
   if (!original) throw new Error("Proposal not found");
   const { items, ...proposalData } = original;
-  // Proposta + itens na MESMA transação: falha no meio não deixa uma cópia
-  // pela metade no banco.
   return db.transaction(async (tx) => {
     const [newResult] = await tx.insert(proposals).values({
       title: `Cópia de ${proposalData.title}`,
@@ -295,7 +293,6 @@ export async function getExpiringProposals(daysAhead = 7) {
 
   return rows
     .map((r) => {
-      // Expiry = sentAt (or createdAt) + validityDays
       const base = r.sentAt ? new Date(r.sentAt) : new Date(r.createdAt);
       const expiresAt = new Date(base.getTime() + (r.validityDays ?? 30) * 24 * 60 * 60 * 1000);
       const daysLeft = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));

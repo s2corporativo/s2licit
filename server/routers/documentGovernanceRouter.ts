@@ -75,22 +75,32 @@ export const documentGovernanceRouter = router({
         updatedAt: new Date(),
       } as const;
 
+      // Documento e log de auditoria na mesma transação: uma alteração que o
+      // log não registrou é exatamente o que a auditoria existe para impedir.
+      // Sem isso, a falha do log deixava o documento gravado e devolvia 500 —
+      // o operador repetia e duplicava o registro, sem rastro de nada.
       if (input.id) {
-        await db.update(documentosHabilitacao).set(payload).where(eq(documentosHabilitacao.id, input.id));
-        await db.insert(auditLogs).values({ userId: ctx.user.id, action: "update", entity: "documentos_habilitacao", entityId: input.id, origin: "documentGovernanceRouter", summary: input.nome, changes: input as any });
+        await db.transaction(async (tx) => {
+          await tx.update(documentosHabilitacao).set(payload).where(eq(documentosHabilitacao.id, input.id!));
+          await tx.insert(auditLogs).values({ userId: ctx.user.id, action: "update", entity: "documentos_habilitacao", entityId: input.id, origin: "documentGovernanceRouter", summary: input.nome, changes: input as any });
+        });
         return { success: true, mode: "update" };
       }
 
-      await db.insert(documentosHabilitacao).values({ ...payload, createdAt: new Date() });
-      await db.insert(auditLogs).values({ userId: ctx.user.id, action: "create", entity: "documentos_habilitacao", origin: "documentGovernanceRouter", summary: input.nome, changes: input as any });
+      await db.transaction(async (tx) => {
+        await tx.insert(documentosHabilitacao).values({ ...payload, createdAt: new Date() });
+        await tx.insert(auditLogs).values({ userId: ctx.user.id, action: "create", entity: "documentos_habilitacao", origin: "documentGovernanceRouter", summary: input.nome, changes: input as any });
+      });
       return { success: true, mode: "create" };
     }),
 
   remove: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input, ctx }) => {
     const db = await getDb();
     if (!db) throw new Error("Banco de dados indisponível");
-    await db.delete(documentosHabilitacao).where(eq(documentosHabilitacao.id, input.id));
-    await db.insert(auditLogs).values({ userId: ctx.user.id, action: "delete", entity: "documentos_habilitacao", entityId: input.id, origin: "documentGovernanceRouter", summary: `Documento ${input.id} removido` });
+    await db.transaction(async (tx) => {
+      await tx.delete(documentosHabilitacao).where(eq(documentosHabilitacao.id, input.id));
+      await tx.insert(auditLogs).values({ userId: ctx.user.id, action: "delete", entity: "documentos_habilitacao", entityId: input.id, origin: "documentGovernanceRouter", summary: `Documento ${input.id} removido` });
+    });
     return { success: true };
   }),
 

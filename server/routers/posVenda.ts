@@ -73,27 +73,33 @@ export const posVendaRouter = router({
         observacoes: input.observacoes,
         criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
       };
-      let orderId: number;
-      if (input.id) {
-        await db.update(purchaseOrders).set(valores).where(eq(purchaseOrders.id, input.id));
-        orderId = input.id;
-        if (input.itens) {
-          await db.delete(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, orderId));
+      // Cabeçalho e itens numa transação só: na edição os itens antigos são
+      // apagados antes de gravar os novos, então uma falha no meio deixava o
+      // pedido SEM item nenhum — perda de dado, não só inconsistência.
+      const orderId = await db.transaction(async (tx) => {
+        let id: number;
+        if (input.id) {
+          await tx.update(purchaseOrders).set(valores).where(eq(purchaseOrders.id, input.id));
+          id = input.id;
+          if (input.itens) {
+            await tx.delete(purchaseOrderItems).where(eq(purchaseOrderItems.orderId, id));
+          }
+        } else {
+          const [res] = await tx.insert(purchaseOrders).values(valores);
+          id = Number((res as any).insertId);
         }
-      } else {
-        const [res] = await db.insert(purchaseOrders).values(valores);
-        orderId = Number((res as any).insertId);
-      }
-      if (input.itens && input.itens.length > 0) {
-        await db.insert(purchaseOrderItems).values(
-          input.itens.map((i) => ({
-            orderId,
-            descricao: i.descricao,
-            quantidade: String(i.quantidade),
-            precoUnit: String(i.precoUnit),
-          })),
-        );
-      }
+        if (input.itens && input.itens.length > 0) {
+          await tx.insert(purchaseOrderItems).values(
+            input.itens.map((i) => ({
+              orderId: id,
+              descricao: i.descricao,
+              quantidade: String(i.quantidade),
+              precoUnit: String(i.precoUnit),
+            })),
+          );
+        }
+        return id;
+      });
       return { id: orderId };
     }),
 
@@ -153,25 +159,32 @@ export const posVendaRouter = router({
         return sum + (Number.isFinite(custo) && Number.isFinite(qtd) ? custo * qtd : 0);
       }, 0);
 
-      const [res] = await db.insert(purchaseOrders).values({
-        proposalId: input.proposalId,
-        fornecedorNome,
-        descricao: `Compra p/ atender proposta: ${proposal.title}${proposal.orgName ? ` (${proposal.orgName})` : ""}`,
-        valorTotal: String(custoTotal.toFixed(2)),
-        vinculo: proposal.processNumber ?? undefined,
-        observacoes: `Gerado automaticamente a partir da proposta #${proposal.id}.`,
-        criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
-      });
-      const orderId = Number((res as any).insertId);
+      // Cabeçalho e itens numa transação só. Sem ela, uma falha no segundo
+      // INSERT deixava um pedido com valorTotal cheio e ZERO itens — e como
+      // existe guarda de unicidade por proposalId (acima), a retentativa batia
+      // em CONFLICT: o operador ficava travado, sem conseguir recriar.
+      const orderId = await db.transaction(async (tx) => {
+        const [res] = await tx.insert(purchaseOrders).values({
+          proposalId: input.proposalId,
+          fornecedorNome,
+          descricao: `Compra p/ atender proposta: ${proposal.title}${proposal.orgName ? ` (${proposal.orgName})` : ""}`,
+          valorTotal: String(custoTotal.toFixed(2)),
+          vinculo: proposal.processNumber ?? undefined,
+          observacoes: `Gerado automaticamente a partir da proposta #${proposal.id}.`,
+          criadoPor: ctx.user?.name ?? ctx.user?.email ?? "sistema",
+        });
+        const id = Number((res as any).insertId);
 
-      await db.insert(purchaseOrderItems).values(
-        proposal.items.map((i) => ({
-          orderId,
-          descricao: i.productName,
-          quantidade: String(i.quantity ?? 1),
-          precoUnit: String(Number(i.costPrice ?? i.unitPrice ?? 0).toFixed(4)),
-        })),
-      );
+        await tx.insert(purchaseOrderItems).values(
+          proposal.items.map((i) => ({
+            orderId: id,
+            descricao: i.productName,
+            quantidade: String(i.quantity ?? 1),
+            precoUnit: String(Number(i.costPrice ?? i.unitPrice ?? 0).toFixed(4)),
+          })),
+        );
+        return id;
+      });
 
       return { id: orderId };
     }),
