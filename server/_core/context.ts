@@ -1,5 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
+import { getAutoLoginUser } from "./autoLogin";
+import { ENV } from "./env";
 import { sdk } from "./sdk";
 
 export type TrpcContext = {
@@ -21,6 +23,13 @@ export async function createContext(
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;
+  }
+
+  // Modo sem login (padrão): requisição sem sessão entra como o usuário
+  // "Acesso Livre" (admin). REQUIRE_LOGIN=true restaura a tela de login e
+  // as sessões por cookie.
+  if (!user && !ENV.requireLogin) {
+    user = await getAutoLoginUser();
   }
 
   return {
