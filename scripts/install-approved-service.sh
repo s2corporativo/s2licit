@@ -19,10 +19,19 @@ grep -q '^WOODPECKER_TOKEN=TROCAR$' "$ENV_FILE" && {
   exit 2
 }
 
+TIMER_SRC="$APP_DIR/scripts/systemd/s2licit-deploy-approved.timer"
+[ -f "$TIMER_SRC" ] || { echo "Timer file ausente: $TIMER_SRC" >&2; exit 2; }
+
 chmod 755 "$APP_DIR/scripts/vps-deploy-approved.sh"
 install -m 644 "$SERVICE_SRC" /etc/systemd/system/s2licit-deploy-approved.service
+install -m 644 "$TIMER_SRC" /etc/systemd/system/s2licit-deploy-approved.timer
 systemctl daemon-reload
+systemctl enable --now s2licit-deploy-approved.timer
 
-echo "Servico instalado sem timer automatico. Para um deploy aprovado:"
+echo "Servico e timer instalados: merge aprovado na main entra no ar em ate ~5 min."
+echo "Deploy imediato (sem esperar o timer):"
 echo "  systemctl start s2licit-deploy-approved.service"
+echo "Acompanhar:"
 echo "  journalctl -u s2licit-deploy-approved.service -n 200 --no-pager"
+echo "Desativar o deploy automatico:"
+echo "  systemctl disable --now s2licit-deploy-approved.timer"
