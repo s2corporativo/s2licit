@@ -23,11 +23,14 @@ export function parseProposalQuantity(value: number | string): number {
   return normalized;
 }
 
-export function isValidProposalQuantity(value: number | string): boolean {
+export function tryParseProposalQuantity(value: number | string): number | null {
   try {
-    parseProposalQuantity(value);
-    return true;
+    return parseProposalQuantity(value);
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isValidProposalQuantity(value: number | string): boolean {
+  return tryParseProposalQuantity(value) !== null;
 }
