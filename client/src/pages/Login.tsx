@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
+import { Redirect, useLocation } from "wouter";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Landmark, LogIn, Loader2 } from "lucide-react";
 
@@ -12,6 +13,7 @@ import { Landmark, LogIn, Loader2 } from "lucide-react";
 export default function Login() {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
+  const auth = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState("");
@@ -48,6 +50,12 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  // Com o login desativado (padrão), o servidor autentica qualquer visitante
+  // automaticamente — esta tela só é alcançável com REQUIRE_LOGIN=true.
+  if (!auth.loading && auth.isAuthenticated) {
+    return <Redirect to="/" />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: "#f3f4f6" }}>

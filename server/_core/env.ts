@@ -86,6 +86,10 @@ export const ENV = {
   isProduction,
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  // Login desativado por padrão: qualquer visitante entra como o usuário
+  // "Acesso Livre" (admin). Defina REQUIRE_LOGIN=true para voltar a exigir
+  // a tela de login e sessões por cookie.
+  requireLogin: process.env.REQUIRE_LOGIN === "true",
   adminEmail: process.env.ADMIN_EMAIL ?? "",
   adminPassword: process.env.ADMIN_PASSWORD ?? "",
   // Só com este interruptor o boot sobrescreve a senha de um admin que já tem
