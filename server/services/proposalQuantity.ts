@@ -3,4 +3,5 @@ export {
   PROPOSAL_QUANTITY_SCALE,
   isValidProposalQuantity,
   parseProposalQuantity,
+  tryParseProposalQuantity,
 } from "@shared/proposalQuantity";
