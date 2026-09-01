@@ -2,6 +2,43 @@ import crypto from "crypto";
 import fs from "fs";
 import { logger } from "./logger";
 
+/**
+ * dotenv trata `#` em valor não citado como início de comentário e pode
+ * truncar silenciosamente senhas/segredos. A checagem precisa ler o arquivo
+ * bruto porque process.env já contém o valor truncado.
+ */
+export function findUnquotedHashInDotenv(raw: string): string[] {
+  const offenders: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    const value = rawValue.trim();
+    const isQuoted = /^"[^"]*"$/.test(value) || /^'[^']*'$/.test(value);
+    if (!isQuoted && value.includes("#")) offenders.push(key);
+  }
+  return offenders;
+}
+
+function warnIfDotenvTruncatedByHash(): void {
+  const path = process.env.DOTENV_CONFIG_PATH || ".env";
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path, "utf-8");
+  } catch {
+    return;
+  }
+  const offenders = findUnquotedHashInDotenv(raw);
+  if (offenders.length === 0) return;
+  logger.warn(
+    `[ENV] ${offenders.join(", ")} contém "#" sem aspas em ${path} — dotenv pode truncar o valor silenciosamente. ` +
+      `Use aspas, por exemplo: ${offenders[0]}="valor#comHash".`
+  );
+}
+warnIfDotenvTruncatedByHash();
+
 const isProduction = process.env.NODE_ENV === "production";
 
 /**
