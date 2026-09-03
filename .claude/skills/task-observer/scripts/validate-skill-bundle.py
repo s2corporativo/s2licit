@@ -60,16 +60,25 @@ def check_dir(skill_dir, fails):
     if fm is None:
         fails.append("frontmatter: no leading --- block"); return
     try:
-        import yaml  # optional; fall back to regex checks if absent
-        data = yaml.safe_load(fm)
-        if not isinstance(data, dict):
-            fails.append("frontmatter: does not parse to a mapping")
-            data = {}
+        import yaml
     except ImportError:
+        # Fails the gate rather than degrading to regex: a regex read cannot
+        # tell valid YAML from an unterminated quote, so passing here would
+        # report OK for frontmatter the installer rejects — the exact
+        # unasserted metric this script exists to refuse. The regex read is
+        # kept only to spare the checks below a cascade of derived failures.
+        fails.append("frontmatter: PyYAML missing — cannot assert the block parses "
+                     "as YAML (pip install pyyaml)")
         data = {"name": (re.search(r"(?m)^name:\s*(.+)$", fm) or [None, ""])[1].strip(),
                 "description": folded_description(fm)}
-    except Exception as e:  # yaml error
-        fails.append(f"frontmatter: YAML parse error: {e}"); data = {}
+    else:
+        try:
+            data = yaml.safe_load(fm)
+            if not isinstance(data, dict):
+                fails.append("frontmatter: does not parse to a mapping")
+                data = {}
+        except Exception as e:  # yaml error
+            fails.append(f"frontmatter: YAML parse error: {e}"); data = {}
     name = str(data.get("name") or "").strip()
     if not name:
         fails.append("frontmatter: `name` missing")
