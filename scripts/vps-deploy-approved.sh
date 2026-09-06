@@ -54,7 +54,7 @@ rollback_app() {
   exit "$rc"
 }
 
-for cmd in git docker curl rsync flock gzip; do
+for cmd in git docker curl rsync flock gzip install; do
   command -v "$cmd" >/dev/null 2>&1 || fail "$cmd ausente"
 done
 docker compose version >/dev/null 2>&1 || fail "Docker Compose ausente"
@@ -139,6 +139,16 @@ rsync -a --delete \
 git -C "$SOURCE_DIR" fetch --prune origin main
 LATEST_SHA="$(git -C "$SOURCE_DIR" rev-parse origin/main)"
 [ "$LATEST_SHA" = "$TARGET_SHA" ] || fail "main mudou antes da troca de imagem; deploy abortado"
+
+# Política operacional do titular: o monitor de disponibilidade permanece
+# registrando falhas em log, mas não pode enviar e-mails. O deploy aplica a
+# configuração também em .envs existentes e sincroniza a versão atual do
+# monitor para os dois caminhos usados pelo systemd na VPS.
+log "desativando e-mails do monitor de disponibilidade"
+set_env_value MONITOR_ALERTS_ENABLED false
+install -D -m 0755 "$APP_DIR/scripts/s2-uptime-monitor.sh" /usr/local/bin/s2-uptime-monitor.sh
+install -D -m 0755 "$APP_DIR/scripts/s2-uptime-monitor.sh" /opt/s2licit-monitor/s2-uptime-monitor.sh
+chmod 600 "$APP_DIR/.env"
 
 if [ -n "$CURRENT_IMAGE" ] && [ "$CURRENT_IMAGE" != "$NEW_IMAGE" ]; then
   set_env_value S2_IMAGE_PREVIOUS "$CURRENT_IMAGE"
